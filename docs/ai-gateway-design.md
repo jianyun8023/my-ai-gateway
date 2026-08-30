@@ -323,14 +323,12 @@ Kimi Adapter：
 
 ### 7.4 统计接口和页面
 
-已完成基础 `/admin/usage/summary`、`/admin/usage/events` 查询 API，并 vendor Keeper React 前端、构建静态资源。仍待完成：
+已完成基础 `/admin/usage/summary`、`/admin/usage/events` 查询 API，Provider/Account/Route 管理查询 API，并 vendor Keeper React 前端、构建静态资源（访问 `/admin/`）。仍待完成：
 
 - Usage Overview API；
 - Analysis API；
-- Events 查询 API；
 - 时间、模型、Provider、账号、Key 筛选；
 - CSV/JSON 导出；
-- Keeper React UI vendor；
 - Keeper UI 字段改为网关原生字段；
 - Admin Session 登录。
 
