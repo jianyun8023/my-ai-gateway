@@ -12,7 +12,13 @@
         "openai_responses": "/v1/responses",
         "anthropic_messages": "/v1/messages"
       },
-      "capabilities": {"streaming": true, "tools": true, "thinking": true, "web_search": true, "usage": true}
+      "capabilities": {"streaming": "native", "tools": "native", "thinking": "native", "web_search": "native", "usage": "native"},
+      "protocol_capabilities": {
+        "openai_chat_completions": {"mode": "native"},
+        "openai_responses": {"mode": "native"},
+        "anthropic_messages": {"mode": "native"}
+      },
+      "model_overrides": {}
     },
     {
       "id": "deepseek",
@@ -25,7 +31,13 @@
         "openai_responses": "/v1/responses",
         "anthropic_messages": "/v1/messages"
       },
-      "capabilities": {"streaming": true, "tools": true, "thinking": true, "web_search": true, "usage": true}
+      "capabilities": {"streaming": "native", "tools": "native", "thinking": "native", "web_search": "native", "usage": "native"},
+      "protocol_capabilities": {
+        "openai_chat_completions": {"mode": "native"},
+        "openai_responses": {"mode": "native"},
+        "anthropic_messages": {"mode": "native"}
+      },
+      "model_overrides": {}
     },
     {
       "id": "kimi_code",
@@ -37,14 +49,21 @@
         "openai_chat_completions": "/v1/chat/completions",
         "anthropic_messages": "/v1/messages"
       },
-      "capabilities": {"streaming": true, "tools": true, "thinking": true, "web_search": true, "usage": true}
+      "capabilities": {"streaming": "native", "tools": "native", "thinking": "native", "web_search": "native", "usage": "native"},
+      "protocol_capabilities": {
+        "openai_chat_completions": {"mode": "native"},
+        "openai_responses": {"mode": "adapter", "source_protocol": "anthropic_messages", "adapter": "kimi_responses_adapter"},
+        "anthropic_messages": {"mode": "native"}
+      },
+      "model_overrides": {}
     }
   ],
   "accounts": [
     {"id": "minimax-main", "provider_id": "minimax", "display_name": "MiniMax 主账号", "credential_env": "MINIMAX_API_KEY", "enabled": true, "weight": 100},
     {"id": "minimax-backup", "provider_id": "minimax", "display_name": "MiniMax 备用账号", "credential_env": "MINIMAX_API_KEY_2", "enabled": true, "weight": 50},
     {"id": "deepseek-main", "provider_id": "deepseek", "display_name": "DeepSeek 主账号", "credential_env": "DEEPSEEK_API_KEY", "enabled": true, "weight": 100},
-    {"id": "kimi-main", "provider_id": "kimi_code", "display_name": "Kimi Code", "credential_env": "KIMI_API_KEY", "enabled": true, "weight": 100}
+    {"id": "kimi-main", "provider_id": "kimi_code", "display_name": "Kimi Code", "credential_env": "KIMI_API_KEY", "enabled": true, "weight": 100,
+      "model_overrides": {"kimi-for-coding-highspeed": {"capabilities": {"web_search": "native", "thinking": "native"}}}}
   ],
   "routes": [
     {

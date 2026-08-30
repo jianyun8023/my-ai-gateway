@@ -43,6 +43,12 @@ struct AppState {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
     let config = Arc::new(GatewayConfig::from_env());
+    if let Err(errors) = config.validate() {
+        for error in errors {
+            tracing::error!(%error, "invalid gateway configuration");
+        }
+        return Err("invalid gateway configuration".into());
+    }
     let addr: SocketAddr = config.listen_addr.parse()?;
     let db = db::Database::connect_from_env().await?;
     if let Some(database) = &db {
@@ -846,13 +852,15 @@ mod kimi_adapter_e2e_tests {
                 ],
                 endpoints: HashMap::new(),
                 capabilities: config::Capabilities {
-                    streaming: true,
-                    tools: true,
-                    thinking: true,
-                    web_search: true,
-                    usage: true,
+                    streaming: config::CapabilityMode::Native,
+                    tools: config::CapabilityMode::Native,
+                    thinking: config::CapabilityMode::Native,
+                    web_search: config::CapabilityMode::Native,
+                    usage: config::CapabilityMode::Native,
                     ..Default::default()
                 },
+                protocol_capabilities: HashMap::new(),
+                model_overrides: HashMap::new(),
             }],
             accounts: vec![config::AccountConfig {
                 id: "kimi-account".into(),
@@ -862,6 +870,9 @@ mod kimi_adapter_e2e_tests {
                 credential: Some("upstream-test-key".into()),
                 enabled: true,
                 weight: 100,
+                protocol_capabilities: HashMap::new(),
+                capabilities: None,
+                model_overrides: HashMap::new(),
             }],
             routes: vec![config::RouteConfig {
                 id: "kimi-responses-adapter".into(),

@@ -71,6 +71,8 @@ mod tests {
                 native_protocols: vec![Protocol::OpenAiChatCompletions],
                 endpoints: HashMap::new(),
                 capabilities: Capabilities::default(),
+                protocol_capabilities: HashMap::new(),
+                model_overrides: HashMap::new(),
             }],
             accounts: vec![AccountConfig {
                 id: "a".into(),
@@ -80,6 +82,9 @@ mod tests {
                 credential: None,
                 enabled: true,
                 weight: 100,
+                protocol_capabilities: HashMap::new(),
+                capabilities: None,
+                model_overrides: HashMap::new(),
             }],
             routes: vec![RouteConfig {
                 id: "r".into(),

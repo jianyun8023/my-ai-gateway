@@ -15,7 +15,6 @@
 | OpenAI Chat Completions | `POST /v1/chat/completions` | `messages`、tool calls、流式 delta |
 | OpenAI Responses | `POST /v1/responses` | `input`、typed output items、Responses SSE events |
 | Anthropic Messages | `POST /v1/messages` | Claude/Claude Code 使用的 Messages 与 SSE |
-| Claude/Coze 客户端兼容面 | `POST /v1/messages` | 统一按 Anthropic Messages 兼容协议处理，不额外实现 Coze Bot/Workflow API |
 
 OpenAI Chat 与 Responses 的输入/输出模型并不等价，因此转换层使用指定路径的 provider adapter，不能靠简单字段重命名。
 

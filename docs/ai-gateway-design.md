@@ -39,8 +39,6 @@
 | OpenAI Responses | `POST /v1/responses` | 原生透传或通过 Adapter 转换 |
 | Anthropic Messages | `POST /v1/messages` | Claude/Coze 客户端兼容面 |
 
-本项目不单独实现 Coze Bot/Workflow API，也不把它作为第四种协议。
-
 ## 3. Provider 处理策略
 
 ### 3.1 上游能力矩阵
@@ -80,6 +78,29 @@ Provider/Account 来源配置必须显式描述每种北向协议的处理能力
 - `source_protocol` 必须是该来源已声明为原生或可继续解析的协议；
 - 不支持且没有合法 Adapter 的协议，在路由解析阶段返回结构化错误；
 - Tools、Web Search、Thinking、Usage 等能力也应按协议/来源分别声明，转换可能造成的能力损失必须显式标记。
+
+配置模型使用 `protocol_capabilities` 矩阵和 `capabilities` 功能矩阵。协议模式为 `native`、`adapter` 或 `unsupported`；`adapter` 必须同时提供 `source_protocol` 与 `adapter`，且来源协议必须可解析。功能模式为 `native`、`translated` 或 `unsupported`。旧的 `native_protocols`/endpoint 仍可作为未填写协议矩阵时的默认推导。
+
+Provider 是来源级默认值，账号和模型可以逐级覆盖。解析优先级为：`Account + Model` → `Provider + Model` → `Account` → `Provider` → legacy 默认值。示例：
+
+```json
+{
+  "protocol_capabilities": {
+    "openai_chat_completions": {"mode": "native"},
+    "openai_responses": {"mode": "adapter", "source_protocol": "openai_chat_completions", "adapter": "chat_to_responses"},
+    "anthropic_messages": {"mode": "unsupported"}
+  },
+  "capabilities": {"tools": "native", "thinking": "translated", "web_search": "unsupported"},
+  "model_overrides": {
+    "model-a": {
+      "protocol_capabilities": {"anthropic_messages": {"mode": "native"}},
+      "capabilities": {"thinking": "native"}
+    }
+  }
+}
+```
+
+非法组合（例如 `native` 携带 adapter、`unsupported` 携带 source_protocol、adapter 缺少任一字段、adapter 来源不可用或形成循环）会在 `GatewayConfig::validate()` 中返回结构化错误；不会静默降级。
 
 ### 3.2 三协议原生 Provider
 
@@ -182,12 +203,18 @@ GATEWAY_API_KEY 鉴权
     "anthropic_messages": "/v1/messages"
   },
   "capabilities": {
-    "streaming": true,
-    "tools": true,
-    "thinking": true,
-    "web_search": true,
-    "usage": true
-  }
+    "streaming": "native",
+    "tools": "native",
+    "thinking": "native",
+    "web_search": "native",
+    "usage": "native"
+  },
+  "protocol_capabilities": {
+    "openai_chat_completions": {"mode": "native"},
+    "openai_responses": {"mode": "native"},
+    "anthropic_messages": {"mode": "native"}
+  },
+  "model_overrides": {}
 }
 ```
 
@@ -200,7 +227,12 @@ GATEWAY_API_KEY 鉴权
   "display_name": "MiniMax 主账号",
   "credential_env": "MINIMAX_API_KEY",
   "enabled": true,
-  "weight": 100
+  "weight": 100,
+  "capabilities": {"tools": "native", "thinking": "translated"},
+  "protocol_capabilities": {},
+  "model_overrides": {
+    "model-a": {"protocol_capabilities": {"openai_responses": {"mode": "unsupported"}}}
+  }
 }
 ```
 
