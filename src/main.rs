@@ -435,13 +435,6 @@ async fn proxy(
             "route references an unknown provider",
         );
     };
-    if route.mode == "native" && !provider.native_protocols.contains(&protocol) {
-        return error_response(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "unsupported_protocol",
-            "provider does not natively support this protocol and route has no adapter",
-        );
-    }
     let Some(account) = state.config.account(&route.primary_account_id) else {
         return error_response(
             StatusCode::BAD_GATEWAY,
@@ -546,7 +539,7 @@ async fn proxy(
             upstream_model_id: None,
             source,
             protocol_in: protocol.to_string(),
-            protocol_upstream: protocol.to_string(),
+            protocol_upstream: route.protocol_upstream.to_string(),
             mode: route.mode.clone(),
             status_code: response.status().as_u16() as i32,
             success: response.status().is_success(),
@@ -943,12 +936,16 @@ async fn resolve_route(
             Json(json!({"error":"unknown protocol"})),
         );
     };
-    match state.resolver.resolve(protocol, &model) {
-        Some(route) => (StatusCode::OK, Json(json!(route))),
-        None => (
-            StatusCode::NOT_FOUND,
-            Json(json!({"error":"route not found"})),
-        ),
+    match state.resolver.resolve_detailed(protocol, &model) {
+        Ok(route) => (StatusCode::OK, Json(json!(route))),
+        Err(error) => {
+            let status = if error.code == "route_not_found" {
+                StatusCode::NOT_FOUND
+            } else {
+                StatusCode::UNPROCESSABLE_ENTITY
+            };
+            (status, Json(json!({"error": error})))
+        }
     }
 }
 

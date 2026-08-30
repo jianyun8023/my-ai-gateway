@@ -105,6 +105,8 @@ Provider 是来源级默认值，账号和模型可以逐级覆盖。解析优�
 
 非法组合（例如 `native` 携带 adapter、`unsupported` 携带 source_protocol、adapter 缺少任一字段、未知 Adapter、方向不匹配、adapter 来源不可用或形成多段链/循环）会在 `GatewayConfig::validate()` 中返回带配置路径的结构化错误；不会静默降级。Adapter 注册表同时声明每个 feature 的 `native`、`translated` 或 `unsupported` 结果，未知能力保持 `unsupported`，不会被推断为支持。
 
+路由解析接口 `GET /admin/routes/:protocol/:model` 返回完整的 `ResolvedRoute`：包括 `protocol_in`、`protocol_upstream`、实际 `upstream_endpoint`、Provider/首选与 fallback 账号、`mode`/`adapter`、能力交集 `effective_capabilities`、允许丢失时的 `degraded_features` 以及 `allow_lossy_conversion`。解析失败返回 `{error:{code,message,route_id}}`；native 优先于同等匹配的 adapter，精确模型优先于通配模型。
+
 ### 3.2 三协议原生 Provider
 
 MiniMax、DeepSeek 等 Provider 如果同时提供三种协议接口，则为每个协议配置对应 endpoint：
