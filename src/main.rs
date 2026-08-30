@@ -3,6 +3,7 @@ mod db;
 mod protocol;
 mod routing;
 mod transport;
+mod usage;
 
 use std::{
     net::SocketAddr,
@@ -305,6 +306,7 @@ async fn proxy(
             try_fallback_error(&state, &route, provider, protocol, &headers, body, error).await
         }
     };
+    let usage = transport::usage_from_response(&response);
     if let Some(database) = &state.db {
         let event = db::UsageEvent {
             request_id,
@@ -319,12 +321,15 @@ async fn proxy(
             retry_count: 0,
             latency_ms: started.elapsed().as_millis() as i64,
             ttft_ms: None,
-            input_tokens: 0,
-            output_tokens: 0,
-            reasoning_tokens: 0,
-            cached_tokens: 0,
-            total_tokens: 0,
-            usage_source: "missing".into(),
+            input_tokens: usage.as_ref().map(|u| u.input_tokens).unwrap_or(0),
+            output_tokens: usage.as_ref().map(|u| u.output_tokens).unwrap_or(0),
+            reasoning_tokens: usage.as_ref().map(|u| u.reasoning_tokens).unwrap_or(0),
+            cached_tokens: usage.as_ref().map(|u| u.cached_tokens).unwrap_or(0),
+            total_tokens: usage.as_ref().map(|u| u.total_tokens).unwrap_or(0),
+            usage_source: usage
+                .as_ref()
+                .map(|u| u.source.clone())
+                .unwrap_or_else(|| "missing".into()),
             degraded: route.allow_lossy_conversion,
         };
         if let Err(error) = database.insert_usage(&event).await {
@@ -579,5 +584,206 @@ async fn resolve_route(
             StatusCode::NOT_FOUND,
             Json(json!({"error":"route not found"})),
         ),
+    }
+}
+
+#[cfg(test)]
+mod kimi_adapter_e2e_tests {
+    use super::*;
+    use axum::{
+        body::to_bytes,
+        extract::Request,
+        http::{header, HeaderMap},
+        Router,
+    };
+    use std::{
+        collections::HashMap,
+        sync::{Arc, Mutex},
+    };
+
+    const ANTHROPIC_STREAM: &str = concat!(
+        "event: message_start\n",
+        "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_e2e\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"usage\":{\"input_tokens\":5,\"output_tokens\":1}}}\n\n",
+        "event: content_block_start\n",
+        "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+        "event: content_block_delta\n",
+        "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hello from kimi\"}}\n\n",
+        "event: content_block_stop\n",
+        "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
+        "event: message_delta\n",
+        "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":3}}\n\n",
+        "event: message_stop\n",
+        "data: {\"type\":\"message_stop\"}\n\n",
+    );
+
+    type RecordedBody = Arc<Mutex<String>>;
+
+    async fn spawn_mock_upstream<F>(handler: F) -> (String, RecordedBody)
+    where
+        F: Fn(&str, &HeaderMap) -> Response<Body> + Send + Sync + 'static,
+    {
+        let recorded = Arc::new(Mutex::new(String::new()));
+        let handler = Arc::new(handler);
+        let app = Router::new().fallback({
+            let recorded = recorded.clone();
+            move |request: Request| {
+                let recorded = recorded.clone();
+                let handler = handler.clone();
+                async move {
+                    let (parts, body) = request.into_parts();
+                    let bytes = to_bytes(body, 16 * 1024 * 1024).await.unwrap_or_default();
+                    let body = String::from_utf8_lossy(&bytes).to_string();
+                    *recorded.lock().expect("recorded body mutex") = body.clone();
+                    handler(&body, &parts.headers)
+                }
+            }
+        });
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind mock upstream");
+        let addr = listener.local_addr().expect("mock upstream address");
+        tokio::spawn(async move {
+            axum::serve(listener, app)
+                .await
+                .expect("mock upstream server")
+        });
+        (format!("http://{addr}"), recorded)
+    }
+
+    fn test_state(base_url: String) -> AppState {
+        let config = GatewayConfig {
+            listen_addr: "127.0.0.1:0".into(),
+            providers: vec![config::ProviderConfig {
+                id: "kimi".into(),
+                name: "Kimi Code".into(),
+                base_url,
+                models: vec!["k3".into()],
+                native_protocols: vec![
+                    Protocol::AnthropicMessages,
+                    Protocol::OpenAiChatCompletions,
+                ],
+                endpoints: HashMap::new(),
+                capabilities: config::Capabilities {
+                    streaming: true,
+                    tools: true,
+                    thinking: true,
+                    web_search: true,
+                    usage: true,
+                    ..Default::default()
+                },
+            }],
+            accounts: vec![config::AccountConfig {
+                id: "kimi-account".into(),
+                provider_id: "kimi".into(),
+                display_name: "Kimi test account".into(),
+                credential_env: None,
+                credential: Some("upstream-test-key".into()),
+                enabled: true,
+                weight: 100,
+            }],
+            routes: vec![config::RouteConfig {
+                id: "kimi-responses-adapter".into(),
+                model: "k3".into(),
+                provider_id: "kimi".into(),
+                protocols: vec![Protocol::OpenAiResponses],
+                primary_account_id: "kimi-account".into(),
+                fallback_accounts: vec![],
+                strategy: "primary_then_weighted_fallback".into(),
+                mode: "adapter".into(),
+                adapter: Some("kimi_responses_adapter".into()),
+                allow_lossy_conversion: false,
+            }],
+        };
+        let config = Arc::new(config);
+        AppState {
+            resolver: RouteResolver::new(config.clone()),
+            config,
+            http: transport::client().expect("http client"),
+            db: None,
+        }
+    }
+
+    async fn invoke_responses(state: AppState, body: &str) -> (StatusCode, String) {
+        let response =
+            responses(State(state), HeaderMap::new(), Bytes::from(body.to_owned())).await;
+        let status = response.status();
+        let bytes = to_bytes(response.into_body(), 16 * 1024 * 1024)
+            .await
+            .expect("response body");
+        (status, String::from_utf8_lossy(&bytes).into_owned())
+    }
+
+    #[tokio::test]
+    async fn embedded_kimi_adapter_non_stream_preserves_thinking_and_web_search() {
+        let (base, recorded) = spawn_mock_upstream(|_, headers| {
+            assert_eq!(
+                headers.get("authorization").and_then(|v| v.to_str().ok()),
+                Some("Bearer upstream-test-key")
+            );
+            Response::builder()
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    r#"{"id":"msg_e2e","type":"message","role":"assistant","model":"k3","content":[{"type":"thinking","thinking":"reasoning","signature":"sig-e2e"},{"type":"text","text":"Search results for query: x"},{"type":"server_tool_use","name":"web_search"},{"type":"web_search_tool_result","content":[]},{"type":"text","text":"answer"}],"stop_reason":"end_turn","usage":{"input_tokens":10,"cache_read_input_tokens":2,"output_tokens":4,"output_tokens_details":{"thinking_tokens":1}}}"#,
+                ))
+                .unwrap()
+        })
+        .await;
+        let (status, body) = invoke_responses(
+            test_state(base),
+            r#"{"model":"k3","stream":false,"input":"hello"}"#,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "body: {body}");
+        let response: Value = serde_json::from_str(&body).expect("responses JSON");
+        assert_eq!(response["status"], "completed");
+        let output = response["output"].as_array().expect("output array");
+        assert!(output.iter().any(|item| item["type"] == "reasoning"));
+        assert!(output.iter().any(|item| item["type"] == "web_search_call"));
+        assert_eq!(response["usage"]["input_tokens"], 12);
+        assert!(recorded
+            .lock()
+            .expect("recorded body mutex")
+            .contains("messages"));
+    }
+
+    #[tokio::test]
+    async fn embedded_kimi_adapter_stream_translates_sse_events() {
+        let (base, recorded) = spawn_mock_upstream(|body, headers| {
+            assert!(
+                body.contains("messages"),
+                "adapter must send Anthropic request: {body}"
+            );
+            assert_eq!(
+                headers.get("authorization").and_then(|v| v.to_str().ok()),
+                Some("Bearer upstream-test-key")
+            );
+            Response::builder()
+                .header(header::CONTENT_TYPE, "text/event-stream")
+                .body(Body::from(ANTHROPIC_STREAM))
+                .unwrap()
+        })
+        .await;
+        let (status, body) = invoke_responses(
+            test_state(base),
+            r#"{"model":"k3","stream":true,"input":"hello"}"#,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "body: {body}");
+        assert!(
+            body.contains("event: response.output_text.delta"),
+            "missing text delta: {body}"
+        );
+        assert!(
+            body.contains("hello from kimi"),
+            "missing translated text: {body}"
+        );
+        assert!(
+            body.contains("event: response.completed"),
+            "missing completion event: {body}"
+        );
+        assert!(recorded
+            .lock()
+            .expect("recorded body mutex")
+            .contains("messages"));
     }
 }

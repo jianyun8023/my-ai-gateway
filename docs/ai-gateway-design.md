@@ -266,15 +266,12 @@ Kimi Adapter：
 
 ### 7.3 Token 统计
 
-当前请求事件可以落库，但 Token 字段还未完整提取，待完成：
+已完成非流式 JSON usage 提取和统一归一化，支持 OpenAI Chat/Responses、Anthropic Messages 字段，并增加 SSE 末事件解析函数。仍待完成：
 
-- 非流式 JSON usage 解析；
 - Chat Completions 流末 usage 解析；
 - Responses 流末 usage 解析；
 - Anthropic usage 解析；
-- reasoning/cache Token 归一化；
 - tokenizer 估算；
-- `usage_source` 标记；
 - TTFT 和真实流式完成时间记录。
 
 ### 7.4 统计接口和页面
@@ -303,6 +300,13 @@ CPA Usage Keeper 只复用 React 页面和交互，不复用其 Go 后端、SQLi
 - 凭据加密存储；
 - 审计日志；
 - SSRF 防护和 Provider URL allowlist。
+
+### 7.6 测试
+
+- 已增加 Kimi 内置 Adapter 的 mock 上游端到端测试；
+- 已覆盖非流式 thinking/web search 转换；
+- 已覆盖流式 Anthropic SSE → Responses SSE；
+- 已增加 OpenAI/Anthropic usage JSON 和 SSE 提取单测。
 
 ## 8. 验收标准
 
@@ -336,8 +340,8 @@ CPA Usage Keeper 只复用 React 页面和交互，不复用其 Go 后端、SQLi
 
 1. 完成 Virtual Key 和 Admin API；
 2. 扩展 PostgreSQL providers/accounts/routes 表；
-3. 完成真实 usage 提取和异步落库；
+3. 完成流式 usage 提取、tokenizer 估算和异步落库；
 4. 接入 Keeper React UI；
-5. 增加 Kimi Adapter 端到端 mock 测试；
+5. 扩展 Kimi Adapter 端到端测试矩阵；
 6. 增加账号健康、冷却和完整 fallback；
 7. 增加生产环境安全、监控和备份。
