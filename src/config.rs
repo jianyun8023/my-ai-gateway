@@ -1,25 +1,234 @@
 use crate::protocol::Protocol;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, env};
+use std::{
+    collections::{HashMap, HashSet},
+    env,
+};
+
+/// Protocol handling mode for an upstream source.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProtocolMode {
+    Native,
+    Adapter,
+    Unsupported,
+}
+
+/// A protocol capability declaration. Adapter declarations must include both
+/// the protocol sent upstream and the adapter implementation name.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct ProtocolCapability {
+    pub mode: ProtocolMode,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_protocol: Option<Protocol>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adapter: Option<String>,
+}
+
+impl<'de> Deserialize<'de> for ProtocolCapability {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Repr {
+            Mode(ProtocolMode),
+            Fields {
+                mode: ProtocolMode,
+                #[serde(default)]
+                source_protocol: Option<Protocol>,
+                #[serde(default)]
+                adapter: Option<String>,
+            },
+        }
+        match Repr::deserialize(deserializer)? {
+            Repr::Mode(mode) => Ok(Self {
+                mode,
+                source_protocol: None,
+                adapter: None,
+            }),
+            Repr::Fields {
+                mode,
+                source_protocol,
+                adapter,
+            } => Ok(Self {
+                mode,
+                source_protocol,
+                adapter,
+            }),
+        }
+    }
+}
+
+impl ProtocolCapability {
+    #[allow(dead_code)]
+    pub fn native() -> Self {
+        Self {
+            mode: ProtocolMode::Native,
+            source_protocol: None,
+            adapter: None,
+        }
+    }
+    #[allow(dead_code)]
+    pub fn unsupported() -> Self {
+        Self {
+            mode: ProtocolMode::Unsupported,
+            source_protocol: None,
+            adapter: None,
+        }
+    }
+    #[allow(dead_code)]
+    pub fn adapter(source_protocol: Protocol, adapter: impl Into<String>) -> Self {
+        Self {
+            mode: ProtocolMode::Adapter,
+            source_protocol: Some(source_protocol),
+            adapter: Some(adapter.into()),
+        }
+    }
+
+    /// Validate local invariants. Source resolution is checked by
+    /// `ProtocolCapabilityMatrix::validate`.
+    #[allow(dead_code)]
+    pub fn validate(&self, target: Protocol) -> Result<(), String> {
+        match self.mode {
+            ProtocolMode::Native => {
+                if self.source_protocol.is_some() || self.adapter.is_some() {
+                    return Err(format!(
+                        "{target}: native mode cannot set source_protocol or adapter"
+                    ));
+                }
+            }
+            ProtocolMode::Adapter => {
+                let source = self
+                    .source_protocol
+                    .ok_or_else(|| format!("{target}: adapter mode requires source_protocol"))?;
+                if source == target {
+                    return Err(format!(
+                        "{target}: adapter source_protocol must differ from target"
+                    ));
+                }
+                match self.adapter.as_deref() {
+                    Some(name) if !name.trim().is_empty() => {}
+                    _ => return Err(format!("{target}: adapter mode requires adapter")),
+                }
+            }
+            ProtocolMode::Unsupported => {
+                if self.source_protocol.is_some() || self.adapter.is_some() {
+                    return Err(format!(
+                        "{target}: unsupported mode cannot set source_protocol or adapter"
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+pub type ProtocolCapabilityMatrix = HashMap<Protocol, ProtocolCapability>;
+#[allow(dead_code)]
+pub type ProtocolCapabilities = ProtocolCapabilityMatrix;
+
+/// Feature support mode. `true`/`false` are accepted while reading legacy
+/// configurations and map to native/unsupported respectively.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CapabilityMode {
+    Native,
+    Translated,
+    #[default]
+    Unsupported,
+}
+
+#[allow(dead_code)]
+pub type FeatureCapability = CapabilityMode;
+#[allow(dead_code)]
+pub type FeatureCapabilities = Capabilities;
+#[allow(dead_code)]
+pub type CapabilityMatrix = Capabilities;
+#[allow(dead_code)]
+pub type CapabilitySupport = CapabilityMode;
+#[allow(dead_code)]
+pub type ProtocolCapabilityMode = ProtocolMode;
+#[allow(dead_code)]
+pub type ProtocolSupportMode = ProtocolMode;
+#[allow(dead_code)]
+pub type ModelConfig = ModelCapabilityOverride;
+#[allow(dead_code)]
+pub type SourceConfig = ProviderConfig;
+
+impl<'de> Deserialize<'de> for CapabilityMode {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Repr {
+            Bool(bool),
+            String(String),
+            Object { mode: String },
+        }
+        let value = Repr::deserialize(deserializer)?;
+        let name = match value {
+            Repr::Bool(true) => return Ok(Self::Native),
+            Repr::Bool(false) => return Ok(Self::Unsupported),
+            Repr::String(name) => name,
+            Repr::Object { mode } => mode,
+        };
+        match name.as_str() {
+            "native" => Ok(Self::Native),
+            "translated" => Ok(Self::Translated),
+            "unsupported" => Ok(Self::Unsupported),
+            _ => Err(serde::de::Error::custom(format!(
+                "unknown capability mode: {name}"
+            ))),
+        }
+    }
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize, Default)]
 pub struct Capabilities {
     #[serde(default)]
-    pub streaming: bool,
+    pub streaming: CapabilityMode,
     #[serde(default)]
-    pub tools: bool,
+    pub tools: CapabilityMode,
     #[serde(default)]
-    pub tool_streaming: bool,
+    pub tool_streaming: CapabilityMode,
     #[serde(default)]
-    pub thinking: bool,
+    pub thinking: CapabilityMode,
     #[serde(default)]
-    pub web_search: bool,
+    pub web_search: CapabilityMode,
     #[serde(default)]
-    pub file_search: bool,
+    pub file_search: CapabilityMode,
     #[serde(default)]
-    pub vision: bool,
+    pub vision: CapabilityMode,
     #[serde(default)]
-    pub usage: bool,
+    pub usage: CapabilityMode,
+}
+
+impl Capabilities {
+    #[allow(dead_code)]
+    pub fn native() -> Self {
+        Self {
+            streaming: CapabilityMode::Native,
+            tools: CapabilityMode::Native,
+            tool_streaming: CapabilityMode::Native,
+            thinking: CapabilityMode::Native,
+            web_search: CapabilityMode::Native,
+            file_search: CapabilityMode::Native,
+            vision: CapabilityMode::Native,
+            usage: CapabilityMode::Native,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, Default)]
+pub struct ModelCapabilityOverride {
+    #[serde(default)]
+    pub protocol_capabilities: ProtocolCapabilityMatrix,
+    #[serde(default)]
+    pub capabilities: Option<Capabilities>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -35,6 +244,13 @@ pub struct ProviderConfig {
     pub endpoints: HashMap<Protocol, String>,
     #[serde(default)]
     pub capabilities: Capabilities,
+    /// Explicit protocol matrix. Entries absent here fall back to the legacy
+    /// `native_protocols`/`endpoints` fields.
+    #[serde(default)]
+    pub protocol_capabilities: ProtocolCapabilityMatrix,
+    /// Per-model overrides of provider defaults.
+    #[serde(default)]
+    pub model_overrides: HashMap<String, ModelCapabilityOverride>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -50,6 +266,12 @@ pub struct AccountConfig {
     pub enabled: bool,
     #[serde(default = "default_weight")]
     pub weight: u32,
+    #[serde(default)]
+    pub protocol_capabilities: ProtocolCapabilityMatrix,
+    #[serde(default)]
+    pub capabilities: Option<Capabilities>,
+    #[serde(default)]
+    pub model_overrides: HashMap<String, ModelCapabilityOverride>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -84,6 +306,157 @@ pub struct GatewayConfig {
 }
 
 impl GatewayConfig {
+    pub fn validate(&self) -> Result<(), Vec<String>> {
+        let mut errors = Vec::new();
+        for provider in &self.providers {
+            if let Err(error) = validate_matrix(
+                &provider.protocol_capabilities,
+                &provider.endpoints,
+                &provider.native_protocols,
+                &provider.id,
+            ) {
+                errors.push(error);
+            }
+            for (model, override_config) in &provider.model_overrides {
+                if let Err(error) = validate_override_matrix(
+                    &override_config.protocol_capabilities,
+                    &provider.protocol_capabilities,
+                    &provider.endpoints,
+                    &provider.native_protocols,
+                    &format!("{} model {model}", provider.id),
+                ) {
+                    errors.push(error);
+                }
+            }
+        }
+        for account in &self.accounts {
+            let provider = self.provider(&account.provider_id);
+            let endpoints = provider.map(|p| &p.endpoints).cloned().unwrap_or_default();
+            let native = provider
+                .map(|p| p.native_protocols.as_slice())
+                .unwrap_or(&[]);
+            let base_matrix = provider
+                .map(|p| &p.protocol_capabilities)
+                .cloned()
+                .unwrap_or_default();
+            if let Err(error) = validate_override_matrix(
+                &account.protocol_capabilities,
+                &base_matrix,
+                &endpoints,
+                native,
+                &format!("account {}", account.id),
+            ) {
+                errors.push(error);
+            }
+            for (model, override_config) in &account.model_overrides {
+                if let Err(error) = validate_override_matrix(
+                    &override_config.protocol_capabilities,
+                    &account.protocol_capabilities,
+                    &endpoints,
+                    native,
+                    &format!("account {} model {model}", account.id),
+                ) {
+                    errors.push(error);
+                }
+            }
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+
+    /// Resolve the effective protocol declaration with precedence:
+    /// account+model, provider+model, account, provider, legacy defaults.
+    #[allow(dead_code)]
+    pub fn protocol_capability(
+        &self,
+        provider_id: &str,
+        account_id: Option<&str>,
+        model: &str,
+        protocol: Protocol,
+    ) -> ProtocolCapability {
+        let provider = self.provider(provider_id);
+        if let Some(account) = account_id.and_then(|id| self.account(id)) {
+            if let Some(value) = find_model_override(&account.model_overrides, model)
+                .and_then(|m| m.protocol_capabilities.get(&protocol))
+            {
+                return value.clone();
+            }
+            if let Some(value) = account.protocol_capabilities.get(&protocol) {
+                return value.clone();
+            }
+        }
+        if let Some(provider) = provider {
+            if let Some(value) = find_model_override(&provider.model_overrides, model)
+                .and_then(|m| m.protocol_capabilities.get(&protocol))
+            {
+                return value.clone();
+            }
+            if let Some(value) = provider.protocol_capabilities.get(&protocol) {
+                return value.clone();
+            }
+            if provider.native_protocols.contains(&protocol)
+                && provider.endpoints.contains_key(&protocol)
+            {
+                return ProtocolCapability::native();
+            }
+        }
+        ProtocolCapability::unsupported()
+    }
+
+    #[allow(dead_code)]
+    pub fn effective_protocol_capabilities(
+        &self,
+        provider_id: &str,
+        account_id: Option<&str>,
+        model: &str,
+    ) -> ProtocolCapabilityMatrix {
+        [
+            Protocol::OpenAiChatCompletions,
+            Protocol::OpenAiResponses,
+            Protocol::AnthropicMessages,
+        ]
+        .into_iter()
+        .map(|protocol| {
+            (
+                protocol,
+                self.protocol_capability(provider_id, account_id, model, protocol),
+            )
+        })
+        .collect()
+    }
+
+    #[allow(dead_code)]
+    pub fn capabilities(
+        &self,
+        provider_id: &str,
+        account_id: Option<&str>,
+        model: &str,
+    ) -> Capabilities {
+        let provider = self.provider(provider_id);
+        if let Some(account) = account_id.and_then(|id| self.account(id)) {
+            if let Some(value) = find_model_override(&account.model_overrides, model)
+                .and_then(|m| m.capabilities.as_ref())
+            {
+                return value.clone();
+            }
+            if let Some(value) = &account.capabilities {
+                return value.clone();
+            }
+        }
+        if let Some(provider) = provider {
+            if let Some(value) = find_model_override(&provider.model_overrides, model)
+                .and_then(|m| m.capabilities.as_ref())
+            {
+                return value.clone();
+            }
+            return provider.capabilities.clone();
+        }
+        Capabilities::default()
+    }
+
     pub fn from_env() -> Self {
         if let Ok(raw) = env::var("GATEWAY_CONFIG_JSON") {
             match serde_json::from_str::<Self>(&raw) {
@@ -106,13 +479,15 @@ impl GatewayConfig {
             native_protocols: vec![Protocol::AnthropicMessages, Protocol::OpenAiChatCompletions],
             endpoints,
             capabilities: Capabilities {
-                streaming: true,
-                tools: true,
-                thinking: true,
-                web_search: true,
-                usage: true,
+                streaming: CapabilityMode::Native,
+                tools: CapabilityMode::Native,
+                thinking: CapabilityMode::Native,
+                web_search: CapabilityMode::Native,
+                usage: CapabilityMode::Native,
                 ..Default::default()
             },
+            protocol_capabilities: HashMap::new(),
+            model_overrides: HashMap::new(),
         }];
         let accounts = vec![AccountConfig {
             id: "kimi-01".into(),
@@ -122,6 +497,9 @@ impl GatewayConfig {
             credential: None,
             enabled: true,
             weight: 100,
+            protocol_capabilities: HashMap::new(),
+            capabilities: None,
+            model_overrides: HashMap::new(),
         }];
         let routes = vec![RouteConfig {
             id: "kimi-responses-adapter".into(),
@@ -183,4 +561,263 @@ fn default_strategy() -> String {
 }
 fn default_mode() -> String {
     "native".into()
+}
+
+fn validate_matrix(
+    matrix: &ProtocolCapabilityMatrix,
+    endpoints: &HashMap<Protocol, String>,
+    legacy_native: &[Protocol],
+    scope: &str,
+) -> Result<(), String> {
+    for protocol in legacy_native {
+        if !endpoints.contains_key(protocol) {
+            return Err(format!("{scope}: native {protocol} requires an endpoint"));
+        }
+    }
+    for (protocol, capability) in matrix {
+        capability
+            .validate(*protocol)
+            .map_err(|error| format!("{scope}: {error}"))?;
+        if capability.mode == ProtocolMode::Native && !endpoints.contains_key(protocol) {
+            return Err(format!("{scope}: native {protocol} requires an endpoint"));
+        }
+    }
+    // Adapter source protocols must be available natively or as another
+    // resolvable matrix entry. This also catches adapter cycles.
+    for (protocol, capability) in matrix {
+        if capability.mode != ProtocolMode::Adapter {
+            continue;
+        }
+        let source = capability
+            .source_protocol
+            .expect("validated adapter source");
+        let mut seen = HashSet::new();
+        let mut current = source;
+        loop {
+            if !seen.insert(current) {
+                return Err(format!(
+                    "{scope}: cyclic adapter source involving {current}"
+                ));
+            }
+            let Some(source_capability) = matrix.get(&current) else {
+                if endpoints.contains_key(&current) || legacy_native.contains(&current) {
+                    break;
+                }
+                return Err(format!("{scope}: adapter for {protocol} references unavailable source_protocol {source}"));
+            };
+            match source_capability.mode {
+                ProtocolMode::Native => break,
+                ProtocolMode::Adapter => current = source_capability.source_protocol.expect("validated adapter source"),
+                ProtocolMode::Unsupported => return Err(format!("{scope}: adapter for {protocol} references unsupported source_protocol {source}")),
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_override_matrix(
+    matrix: &ProtocolCapabilityMatrix,
+    base: &ProtocolCapabilityMatrix,
+    endpoints: &HashMap<Protocol, String>,
+    legacy_native: &[Protocol],
+    scope: &str,
+) -> Result<(), String> {
+    validate_matrix(matrix, endpoints, legacy_native, scope)?;
+    for (target, capability) in matrix {
+        if capability.mode != ProtocolMode::Adapter {
+            continue;
+        }
+        let source = capability
+            .source_protocol
+            .expect("validated adapter source");
+        if let Some(base_capability) = base.get(&source) {
+            if base_capability.mode == ProtocolMode::Unsupported {
+                return Err(format!("{scope}: adapter for {target} references unsupported base source_protocol {source}"));
+            }
+        }
+    }
+    Ok(())
+}
+
+#[allow(dead_code)]
+fn find_model_override<'a>(
+    overrides: &'a HashMap<String, ModelCapabilityOverride>,
+    model: &str,
+) -> Option<&'a ModelCapabilityOverride> {
+    overrides.get(model).or_else(|| {
+        overrides
+            .iter()
+            .find(|(pattern, _)| {
+                pattern.as_str() == "*"
+                    || (pattern.ends_with('*') && model.starts_with(&pattern[..pattern.len() - 1]))
+            })
+            .map(|(_, value)| value)
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn protocol_capability_modes_round_trip() {
+        let json = r#"{
+          "openai_chat_completions": {"mode":"native"},
+          "openai_responses": {"mode":"adapter","source_protocol":"openai_chat_completions","adapter":"chat_to_responses"},
+          "anthropic_messages": {"mode":"unsupported"}
+        }"#;
+        let matrix: ProtocolCapabilityMatrix = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            matrix[&Protocol::OpenAiResponses].mode,
+            ProtocolMode::Adapter
+        );
+        assert_eq!(
+            serde_json::to_value(&matrix).unwrap()["openai_responses"]["adapter"],
+            "chat_to_responses"
+        );
+        let shorthand: ProtocolCapability = serde_json::from_str("\"unsupported\"").unwrap();
+        assert_eq!(shorthand.mode, ProtocolMode::Unsupported);
+    }
+
+    #[test]
+    fn legacy_boolean_capabilities_are_accepted_and_new_modes_round_trip() {
+        let capabilities: Capabilities =
+            serde_json::from_str(r#"{"streaming":true,"tools":"translated","thinking":false}"#)
+                .unwrap();
+        assert_eq!(capabilities.streaming, CapabilityMode::Native);
+        assert_eq!(capabilities.tools, CapabilityMode::Translated);
+        assert_eq!(capabilities.thinking, CapabilityMode::Unsupported);
+        let output = serde_json::to_value(&capabilities).unwrap();
+        assert_eq!(output["tools"], "translated");
+    }
+
+    #[test]
+    fn invalid_protocol_combinations_are_rejected() {
+        let missing_adapter = ProtocolCapability {
+            mode: ProtocolMode::Adapter,
+            source_protocol: Some(Protocol::OpenAiChatCompletions),
+            adapter: None,
+        };
+        assert!(missing_adapter.validate(Protocol::OpenAiResponses).is_err());
+        let native_with_adapter = ProtocolCapability {
+            mode: ProtocolMode::Native,
+            source_protocol: None,
+            adapter: Some("x".into()),
+        };
+        assert!(native_with_adapter
+            .validate(Protocol::OpenAiChatCompletions)
+            .is_err());
+        let mut matrix = ProtocolCapabilityMatrix::new();
+        matrix.insert(
+            Protocol::OpenAiResponses,
+            ProtocolCapability::adapter(Protocol::AnthropicMessages, "a"),
+        );
+        matrix.insert(
+            Protocol::AnthropicMessages,
+            ProtocolCapability::unsupported(),
+        );
+        assert!(validate_matrix(&matrix, &HashMap::new(), &[], "test").is_err());
+    }
+
+    #[test]
+    fn account_and_model_overrides_take_precedence() {
+        let mut provider_matrix = ProtocolCapabilityMatrix::new();
+        provider_matrix.insert(
+            Protocol::OpenAiChatCompletions,
+            ProtocolCapability::native(),
+        );
+        let mut provider_models = HashMap::new();
+        let mut provider_model_matrix = ProtocolCapabilityMatrix::new();
+        provider_model_matrix.insert(
+            Protocol::OpenAiChatCompletions,
+            ProtocolCapability::unsupported(),
+        );
+        provider_models.insert(
+            "model-a".into(),
+            ModelCapabilityOverride {
+                protocol_capabilities: provider_model_matrix,
+                capabilities: None,
+            },
+        );
+        let mut account_matrix = ProtocolCapabilityMatrix::new();
+        account_matrix.insert(
+            Protocol::OpenAiChatCompletions,
+            ProtocolCapability::adapter(Protocol::AnthropicMessages, "account-adapter"),
+        );
+        let config = GatewayConfig {
+            listen_addr: "127.0.0.1:1".into(),
+            providers: vec![ProviderConfig {
+                id: "p".into(),
+                name: "p".into(),
+                base_url: "http://localhost".into(),
+                models: vec!["model-a".into()],
+                native_protocols: vec![
+                    Protocol::OpenAiChatCompletions,
+                    Protocol::AnthropicMessages,
+                ],
+                endpoints: HashMap::from([
+                    (Protocol::OpenAiChatCompletions, "/chat".into()),
+                    (Protocol::AnthropicMessages, "/messages".into()),
+                ]),
+                capabilities: Capabilities::default(),
+                protocol_capabilities: provider_matrix,
+                model_overrides: provider_models,
+            }],
+            accounts: vec![AccountConfig {
+                id: "a".into(),
+                provider_id: "p".into(),
+                display_name: "a".into(),
+                credential_env: None,
+                credential: None,
+                enabled: true,
+                weight: 100,
+                protocol_capabilities: account_matrix,
+                capabilities: None,
+                model_overrides: HashMap::new(),
+            }],
+            routes: vec![],
+        };
+        assert_eq!(
+            config
+                .protocol_capability("p", Some("a"), "model-a", Protocol::OpenAiChatCompletions)
+                .adapter
+                .as_deref(),
+            Some("account-adapter")
+        );
+        assert_eq!(
+            config
+                .protocol_capability("p", None, "model-a", Protocol::OpenAiChatCompletions)
+                .mode,
+            ProtocolMode::Unsupported
+        );
+        assert_eq!(
+            config
+                .protocol_capability("p", None, "other", Protocol::OpenAiChatCompletions)
+                .mode,
+            ProtocolMode::Native
+        );
+    }
+
+    #[test]
+    fn shipped_example_is_valid() {
+        let config: GatewayConfig =
+            serde_json::from_str(include_str!("../config.example.json")).unwrap();
+        assert!(
+            config.validate().is_ok(),
+            "example config errors: {:?}",
+            config.validate()
+        );
+        assert_eq!(
+            config
+                .protocol_capability(
+                    "kimi_code",
+                    Some("kimi-main"),
+                    "kimi-for-coding-highspeed",
+                    Protocol::OpenAiResponses
+                )
+                .adapter
+                .as_deref(),
+            Some("kimi_responses_adapter")
+        );
+    }
 }
