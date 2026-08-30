@@ -62,6 +62,7 @@ pub async fn forward_url(
     request_headers: &HeaderMap,
     body: Bytes,
 ) -> Result<Response<Body>, TransportError> {
+    let request_size = body.len();
     let is_streaming = serde_json::from_slice::<serde_json::Value>(&body)
         .ok()
         .and_then(|v| v.get("stream").and_then(serde_json::Value::as_bool))
@@ -97,7 +98,8 @@ pub async fn forward_url(
             .bytes()
             .await
             .map_err(|error| TransportError::Request(error.to_string()))?;
-        let report = extract_json_bytes(&bytes);
+        let report = extract_json_bytes(&bytes)
+            .or_else(|| Some(crate::usage::estimate(request_size, bytes.len())));
         let body = Body::from(bytes);
         let mut response = Response::new(body);
         *response.status_mut() = status;

@@ -2,6 +2,8 @@
 
 本文档是项目当前唯一的总体设计与进度基线，记录产品需求、架构决策、已经完成的实现、当前限制和后续工作。
 
+当前详细 TODO 见 [todo.md](todo.md)。
+
 ## 1. 项目目标
 
 构建一个 Rust AI 网关，将多个上游 Provider 和多个上游账号统一代理为一个服务入口，并为内部服务提供多个下游访问 Key。
@@ -104,6 +106,7 @@ GATEWAY_API_KEY 鉴权
 - fallback 账号必须启用且属于同一 Provider；
 - 响应已经开始流式输出后不能切换账号；
 - 当前实现对 HTTP 响应 fallback 使用权重选择，对网络错误暂按 fallback 列表第一项重试，后续需要统一为完整权重策略。
+- 账号失败会进入 30 秒内存冷却窗口，服务重启后状态会丢失。
 
 ## 5. 当前配置模型
 
@@ -235,6 +238,7 @@ Kimi Adapter：
 - 支持 `allowed_models` 模型白名单；
 - 成功鉴权后更新 `last_used_at`；
 - `GET /admin/usage/summary` 返回基础请求数、成功数和 Token 汇总。
+- `GET /admin/usage/events?limit=100` 返回最近请求事件。
 
 ### 部署
 
@@ -298,6 +302,8 @@ CPA Usage Keeper 只复用 React 页面和交互，不复用其 Go 后端、SQLi
 - 凭据加密存储；
 - 审计日志；
 - SSRF 防护和 Provider URL allowlist。
+
+已完成账号健康的内存冷却和基础 usage events 查询；仍待持久化健康状态、完整筛选和生产监控。
 
 ### 7.6 测试
 

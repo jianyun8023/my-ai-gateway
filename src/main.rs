@@ -1,5 +1,6 @@
 mod config;
 mod db;
+mod health;
 mod protocol;
 mod routing;
 mod transport;
@@ -34,6 +35,7 @@ struct AppState {
     resolver: RouteResolver,
     http: reqwest::Client,
     db: Option<db::Database>,
+    health: health::HealthRegistry,
 }
 
 #[tokio::main]
@@ -47,6 +49,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config,
         http: transport::client()?,
         db,
+        health: health::HealthRegistry::new(std::time::Duration::from_secs(30)),
     };
     let app = Router::new()
         .route("/healthz", get(healthz))
@@ -57,6 +60,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/admin/keys", get(list_keys).post(create_key))
         .route("/admin/keys/:id/revoke", post(revoke_key))
         .route("/admin/usage/summary", get(usage_summary))
+        .route("/admin/usage/events", get(usage_events))
         .route("/admin/routes/:protocol/:model", get(resolve_route))
         .with_state(state)
         .layer(TraceLayer::new_for_http());
@@ -216,6 +220,43 @@ async fn usage_summary(State(state): State<AppState>, headers: HeaderMap) -> Res
     }
 }
 
+async fn usage_events(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    query: axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Response<Body> {
+    if !admin_authorized(&headers) {
+        return error_response(
+            StatusCode::UNAUTHORIZED,
+            "unauthorized",
+            "admin key required",
+        );
+    }
+    let Some(database) = &state.db else {
+        return error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "database_unavailable",
+            "DATABASE_URL is not configured",
+        );
+    };
+    let limit = query
+        .get("limit")
+        .and_then(|value| value.parse::<i64>().ok())
+        .unwrap_or(100);
+    match database.list_usage_events(limit).await {
+        Ok(events) => (
+            StatusCode::OK,
+            Json(json!({"data":events,"limit":limit.clamp(1,500)})),
+        )
+            .into_response(),
+        Err(error) => error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "usage_events_failed",
+            &error.to_string(),
+        ),
+    }
+}
+
 async fn proxy(
     state: AppState,
     headers: HeaderMap,
@@ -287,6 +328,13 @@ async fn proxy(
             "primary account is disabled",
         );
     }
+    if !state.health.is_available(&account.id).await {
+        return error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "account_cooling_down",
+            "primary account is cooling down",
+        );
+    }
     let result = forward_account(
         &state,
         &route,
@@ -299,10 +347,15 @@ async fn proxy(
     .await;
     let response = match result {
         Ok(response) if is_retryable(response.status()) => {
+            state.health.mark_failure(&account.id).await;
             try_fallback(&state, &route, provider, protocol, &headers, body, response).await
         }
-        Ok(response) => response,
+        Ok(response) => {
+            state.health.mark_success(&account.id).await;
+            response
+        }
         Err(error) => {
+            state.health.mark_failure(&account.id).await;
             try_fallback_error(&state, &route, provider, protocol, &headers, body, error).await
         }
     };
@@ -437,12 +490,19 @@ async fn try_fallback(
     if route.fallback_accounts.is_empty() {
         return first;
     }
-    let mut candidates: Vec<&config::AccountConfig> = route
+    let candidates: Vec<&config::AccountConfig> = route
         .fallback_accounts
         .iter()
         .filter_map(|id| state.config.account(id))
         .filter(|a| a.enabled && a.provider_id == provider.id)
         .collect();
+    let mut available = Vec::new();
+    for candidate in candidates {
+        if state.health.is_available(&candidate.id).await {
+            available.push(candidate);
+        }
+    }
+    let mut candidates = available;
     if candidates.is_empty() {
         return first;
     }
@@ -462,8 +522,18 @@ async fn try_fallback(
         }
     }
     match forward_account(state, route, provider, selected, protocol, headers, body).await {
-        Ok(response) => response,
-        Err(_) => first,
+        Ok(response) => {
+            if is_retryable(response.status()) {
+                state.health.mark_failure(&selected.id).await;
+            } else {
+                state.health.mark_success(&selected.id).await;
+            }
+            response
+        }
+        Err(_) => {
+            state.health.mark_failure(&selected.id).await;
+            first
+        }
     }
 }
 
@@ -700,6 +770,7 @@ mod kimi_adapter_e2e_tests {
             config,
             http: transport::client().expect("http client"),
             db: None,
+            health: health::HealthRegistry::new(std::time::Duration::from_secs(1)),
         }
     }
 

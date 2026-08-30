@@ -43,6 +43,27 @@ pub struct VirtualKeyRecord {
     pub revoked_at: Option<DateTime<Utc>>,
 }
 
+#[derive(Debug, serde::Serialize, sqlx::FromRow)]
+pub struct UsageEventRecord {
+    pub request_id: String,
+    pub provider_id: String,
+    pub account_id: String,
+    pub model: String,
+    pub protocol_in: String,
+    pub mode: String,
+    pub status_code: i32,
+    pub success: bool,
+    pub retry_count: i32,
+    pub latency_ms: i64,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub reasoning_tokens: i64,
+    pub cached_tokens: i64,
+    pub total_tokens: i64,
+    pub usage_source: String,
+    pub created_at: DateTime<Utc>,
+}
+
 impl Database {
     pub async fn connect_from_env() -> Result<Option<Self>, sqlx::Error> {
         let Ok(url) = std::env::var("DATABASE_URL") else {
@@ -59,6 +80,9 @@ impl Database {
 
     async fn migrate(&self) -> Result<(), sqlx::Error> {
         sqlx::query(include_str!("../migrations/0001_init.sql"))
+            .execute(&self.pool)
+            .await?;
+        sqlx::query(include_str!("../migrations/0002_control_plane.sql"))
             .execute(&self.pool)
             .await?;
         Ok(())
@@ -134,6 +158,14 @@ impl Database {
     pub async fn usage_summary(&self) -> Result<(i64, i64, i64, i64), sqlx::Error> {
         sqlx::query_as::<_, (i64, i64, i64, i64)>("SELECT COUNT(*), COUNT(*) FILTER (WHERE success), COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0) FROM usage_events")
             .fetch_one(&self.pool).await
+    }
+
+    pub async fn list_usage_events(
+        &self,
+        limit: i64,
+    ) -> Result<Vec<UsageEventRecord>, sqlx::Error> {
+        sqlx::query_as::<_, UsageEventRecord>("SELECT request_id,provider_id,account_id,model,protocol_in,mode,status_code,success,retry_count,latency_ms,input_tokens,output_tokens,reasoning_tokens,cached_tokens,total_tokens,usage_source,created_at FROM usage_events ORDER BY created_at DESC LIMIT $1")
+            .bind(limit.clamp(1, 500)).fetch_all(&self.pool).await
     }
 }
 

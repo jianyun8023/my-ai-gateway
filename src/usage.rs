@@ -16,6 +16,20 @@ pub struct UsageReport {
     pub source: String,
 }
 
+/// Conservative fallback estimate used when an upstream omits usage.
+/// This is intentionally marked as estimated; it is not a billing value.
+pub fn estimate(input_bytes: usize, output_bytes: usize) -> UsageReport {
+    let input_tokens = ((input_bytes as i64) + 3) / 4;
+    let output_tokens = ((output_bytes as i64) + 3) / 4;
+    UsageReport {
+        input_tokens,
+        output_tokens,
+        total_tokens: input_tokens + output_tokens,
+        source: "estimated".into(),
+        ..Default::default()
+    }
+}
+
 impl UsageReport {
     pub fn is_present(&self) -> bool {
         self.input_tokens > 0
