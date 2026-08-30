@@ -21,7 +21,7 @@ Rust AI 网关 MVP，目标是将多个上游账号统一为一个入口，并�
 - Kimi Responses 适配器已作为 workspace crate 内置，路由使用 `kimi_responses_adapter` 时直接在进程内转换。
 - 设置 `DATABASE_URL` 后自动初始化 PostgreSQL 的 `usage_events` 表。
 - PostgreSQL-backed Virtual Key：创建、列表、撤销、模型白名单鉴权。
-- 管理接口：`/admin/keys`、`/admin/keys/:id/revoke`、`/admin/usage/summary`。
+- 管理接口：`/admin/keys`、`/admin/keys/:id/revoke`、`/admin/usage/summary`、`/admin/usage/events`、`/admin/usage/aggregate`。
 
 运行：
 

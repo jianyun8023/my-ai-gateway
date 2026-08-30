@@ -359,6 +359,8 @@ Kimi Adapter：
 - 成功鉴权后更新 `last_used_at`；
 - `GET /admin/usage/summary` 返回基础请求数、成功数和 Token 汇总。
 - `GET /admin/usage/events?limit=100` 返回最近请求事件。
+- `GET /admin/usage/aggregate` 提供 UTC 时间范围聚合：`from`/`to`（RFC3339）、`granularity=hour|day`，以及 `breakdown=model|provider|account|protocol|source` 和组合筛选参数（`model`、`provider`、`account`、`protocol`、`source`）。
+  `source` 来自可选的下游 `X-Client-Source` 请求头，缺省为 `unknown`；该字段仅用于统计维度，不改变路由或认证。
 
 ### 部署
 
@@ -379,7 +381,7 @@ Kimi Adapter：
 
 ### 7.2 PostgreSQL 领域表
 
-当前已经创建 `usage_events`、`virtual_keys`、`providers`、`accounts` 和 `routes` 表，并在启动时同步配置；仍待增加：
+当前已经创建 `usage_events`、`usage_event_attempts`、`virtual_keys`、`providers`、`accounts` 和 `routes` 表，并在启动时同步配置。`request_id` 表示一次北向逻辑请求并保持唯一；重试尝试写入 `usage_event_attempts(request_id, attempt_no)`，同一尝试幂等。`usage_events.logical_model` 保存客户端模型，`upstream_model_id` 在路由能明确提供时填充，否则为空；时间统一按 PostgreSQL `TIMESTAMPTZ` 以 UTC 存储，展示层负责本地时区转换。
 
 - `health_snapshots`；
 - `audit_logs`。
@@ -392,7 +394,7 @@ Kimi Adapter：
 
 ### 7.4 统计接口和页面
 
-已完成基础 `/admin/usage/summary`、`/admin/usage/events` 查询 API，Provider/Account/Route 管理查询 API，并 vendor Keeper React 前端、构建静态资源（访问 `/admin/`）。仍待完成：
+已完成基础 `/admin/usage/summary`、`/admin/usage/events`、`/admin/usage/aggregate` 查询 API，Provider/Account/Route 管理查询 API，并 vendor Keeper React 前端、构建静态资源（访问 `/admin/`）。仍待完成：
 
 - Usage Overview API；
 - Analysis API；
