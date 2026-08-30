@@ -15,6 +15,9 @@ pub struct UsageEvent {
     pub provider_id: String,
     pub account_id: String,
     pub model: String,
+    pub logical_model: String,
+    pub upstream_model_id: Option<String>,
+    pub source: String,
     pub protocol_in: String,
     pub protocol_upstream: String,
     pub mode: String,
@@ -50,6 +53,9 @@ pub struct UsageEventRecord {
     pub provider_id: String,
     pub account_id: String,
     pub model: String,
+    pub logical_model: String,
+    pub upstream_model_id: Option<String>,
+    pub source: String,
     pub protocol_in: String,
     pub mode: String,
     pub status_code: i32,
@@ -63,6 +69,63 @@ pub struct UsageEventRecord {
     pub total_tokens: i64,
     pub usage_source: String,
     pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone)]
+pub struct UsageAttempt {
+    pub attempt_no: i32,
+    pub provider_id: String,
+    pub account_id: String,
+    pub upstream_model_id: Option<String>,
+    pub status_code: i32,
+    pub success: bool,
+    pub latency_ms: i64,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct UsageFilter {
+    pub from: Option<DateTime<Utc>>,
+    pub to: Option<DateTime<Utc>>,
+    pub model: Option<String>,
+    pub provider_id: Option<String>,
+    pub account_id: Option<String>,
+    pub protocol: Option<String>,
+    pub source: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, sqlx::FromRow)]
+pub struct UsageAggregate {
+    pub requests: i64,
+    pub successes: i64,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub reasoning_tokens: i64,
+    pub cached_tokens: i64,
+    pub total_tokens: i64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, sqlx::FromRow)]
+pub struct UsageTimeBucket {
+    pub bucket: DateTime<Utc>,
+    pub requests: i64,
+    pub successes: i64,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub reasoning_tokens: i64,
+    pub cached_tokens: i64,
+    pub total_tokens: i64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, sqlx::FromRow)]
+pub struct UsageBreakdown {
+    pub dimension: String,
+    pub requests: i64,
+    pub successes: i64,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub reasoning_tokens: i64,
+    pub cached_tokens: i64,
+    pub total_tokens: i64,
 }
 
 impl Database {
@@ -89,16 +152,33 @@ impl Database {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub async fn insert_usage(&self, event: &UsageEvent) -> Result<(), sqlx::Error> {
+        self.insert_usage_with_attempts(event, &[]).await
+    }
+
+    pub async fn insert_usage_with_attempts(
+        &self,
+        event: &UsageEvent,
+        attempts: &[UsageAttempt],
+    ) -> Result<(), sqlx::Error> {
         let now: DateTime<Utc> = Utc::now();
-        sqlx::query("INSERT INTO usage_events (request_id, provider_id, account_id, model, protocol_in, protocol_upstream, mode, status_code, success, retry_count, latency_ms, ttft_ms, input_tokens, output_tokens, reasoning_tokens, cached_tokens, total_tokens, usage_source, degraded, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) ON CONFLICT (request_id) DO NOTHING")
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("INSERT INTO usage_events (request_id, provider_id, account_id, model, logical_model, upstream_model_id, source, protocol_in, protocol_upstream, mode, status_code, success, retry_count, latency_ms, ttft_ms, input_tokens, output_tokens, reasoning_tokens, cached_tokens, total_tokens, usage_source, degraded, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23) ON CONFLICT (request_id) DO NOTHING")
             .bind(&event.request_id).bind(&event.provider_id).bind(&event.account_id).bind(&event.model)
+            .bind(&event.logical_model).bind(&event.upstream_model_id).bind(&event.source)
             .bind(&event.protocol_in).bind(&event.protocol_upstream).bind(&event.mode).bind(event.status_code)
             .bind(event.success).bind(event.retry_count).bind(event.latency_ms).bind(event.ttft_ms)
             .bind(event.input_tokens).bind(event.output_tokens).bind(event.reasoning_tokens)
             .bind(event.cached_tokens).bind(event.total_tokens).bind(&event.usage_source).bind(event.degraded).bind(now)
-            .execute(&self.pool).await?;
-        Ok(())
+            .execute(&mut *tx).await?;
+        for attempt in attempts {
+            sqlx::query("INSERT INTO usage_event_attempts (request_id,attempt_no,provider_id,account_id,upstream_model_id,status_code,success,latency_ms) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (request_id,attempt_no) DO NOTHING")
+                .bind(&event.request_id).bind(attempt.attempt_no).bind(&attempt.provider_id)
+                .bind(&attempt.account_id).bind(&attempt.upstream_model_id).bind(attempt.status_code)
+                .bind(attempt.success).bind(attempt.latency_ms).execute(&mut *tx).await?;
+        }
+        tx.commit().await
     }
 
     pub async fn sync_control_plane(&self, config: &GatewayConfig) -> Result<(), sqlx::Error> {
@@ -191,11 +271,140 @@ impl Database {
         &self,
         limit: i64,
     ) -> Result<Vec<UsageEventRecord>, sqlx::Error> {
-        sqlx::query_as::<_, UsageEventRecord>("SELECT request_id,provider_id,account_id,model,protocol_in,mode,status_code,success,retry_count,latency_ms,input_tokens,output_tokens,reasoning_tokens,cached_tokens,total_tokens,usage_source,created_at FROM usage_events ORDER BY created_at DESC LIMIT $1")
+        sqlx::query_as::<_, UsageEventRecord>("SELECT request_id,provider_id,account_id,model,logical_model,upstream_model_id,source,protocol_in,mode,status_code,success,retry_count,latency_ms,input_tokens,output_tokens,reasoning_tokens,cached_tokens,total_tokens,usage_source,created_at FROM usage_events ORDER BY created_at DESC LIMIT $1")
             .bind(limit.clamp(1, 500)).fetch_all(&self.pool).await
     }
+
+    pub async fn usage_aggregate(
+        &self,
+        filter: &UsageFilter,
+    ) -> Result<UsageAggregate, sqlx::Error> {
+        let (where_sql, binds) = filter_sql(filter);
+        let query = format!("SELECT COUNT(*)::BIGINT AS requests, COUNT(*) FILTER (WHERE success)::BIGINT AS successes, COALESCE(SUM(input_tokens),0)::BIGINT AS input_tokens, COALESCE(SUM(output_tokens),0)::BIGINT AS output_tokens, COALESCE(SUM(reasoning_tokens),0)::BIGINT AS reasoning_tokens, COALESCE(SUM(cached_tokens),0)::BIGINT AS cached_tokens, COALESCE(SUM(total_tokens),0)::BIGINT AS total_tokens FROM usage_events {where_sql}");
+        let mut q = sqlx::query_as::<_, UsageAggregate>(&query);
+        q = bind_filter(q, binds);
+        q.fetch_one(&self.pool).await
+    }
+
+    pub async fn usage_timeseries(
+        &self,
+        filter: &UsageFilter,
+        granularity: &str,
+    ) -> Result<Vec<UsageTimeBucket>, sqlx::Error> {
+        let trunc = match granularity {
+            "day" => "day",
+            _ => "hour",
+        };
+        let (where_sql, binds) = filter_sql(filter);
+        let query = format!("SELECT date_trunc('{trunc}', created_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AS bucket, COUNT(*)::BIGINT AS requests, COUNT(*) FILTER (WHERE success)::BIGINT AS successes, COALESCE(SUM(input_tokens),0)::BIGINT AS input_tokens, COALESCE(SUM(output_tokens),0)::BIGINT AS output_tokens, COALESCE(SUM(reasoning_tokens),0)::BIGINT AS reasoning_tokens, COALESCE(SUM(cached_tokens),0)::BIGINT AS cached_tokens, COALESCE(SUM(total_tokens),0)::BIGINT AS total_tokens FROM usage_events {where_sql} GROUP BY 1 ORDER BY 1");
+        let mut q = sqlx::query_as::<_, UsageTimeBucket>(&query);
+        q = bind_filter(q, binds);
+        q.fetch_all(&self.pool).await
+    }
+
+    pub async fn usage_breakdown(
+        &self,
+        filter: &UsageFilter,
+        dimension: &str,
+    ) -> Result<Vec<UsageBreakdown>, sqlx::Error> {
+        let column = match dimension {
+            "model" => "logical_model",
+            "provider" => "provider_id",
+            "account" => "account_id",
+            "protocol" => "protocol_in",
+            "source" => "source",
+            _ => "logical_model",
+        };
+        let (where_sql, binds) = filter_sql(filter);
+        let query = format!("SELECT {column} AS dimension, COUNT(*)::BIGINT AS requests, COUNT(*) FILTER (WHERE success)::BIGINT AS successes, COALESCE(SUM(input_tokens),0)::BIGINT AS input_tokens, COALESCE(SUM(output_tokens),0)::BIGINT AS output_tokens, COALESCE(SUM(reasoning_tokens),0)::BIGINT AS reasoning_tokens, COALESCE(SUM(cached_tokens),0)::BIGINT AS cached_tokens, COALESCE(SUM(total_tokens),0)::BIGINT AS total_tokens FROM usage_events {where_sql} GROUP BY {column} ORDER BY requests DESC");
+        let mut q = sqlx::query_as::<_, UsageBreakdown>(&query);
+        q = bind_filter(q, binds);
+        q.fetch_all(&self.pool).await
+    }
+}
+
+fn filter_sql(filter: &UsageFilter) -> (String, Vec<FilterBind>) {
+    let mut clauses = Vec::new();
+    let mut binds = Vec::new();
+    if let Some(value) = filter.from {
+        clauses.push(format!("created_at >= ${}", binds.len() + 1));
+        binds.push(FilterBind::Time(value));
+    }
+    if let Some(value) = filter.to {
+        clauses.push(format!("created_at < ${}", binds.len() + 1));
+        binds.push(FilterBind::Time(value));
+    }
+    for (column, value) in [
+        ("logical_model", &filter.model),
+        ("provider_id", &filter.provider_id),
+        ("account_id", &filter.account_id),
+        ("protocol_in", &filter.protocol),
+        ("source", &filter.source),
+    ] {
+        if let Some(value) = value {
+            clauses.push(format!("{column} = ${}", binds.len() + 1));
+            binds.push(FilterBind::Text(value.clone()));
+        }
+    }
+    let sql = if clauses.is_empty() {
+        String::new()
+    } else {
+        format!("WHERE {}", clauses.join(" AND "))
+    };
+    (sql, binds)
+}
+
+enum FilterBind {
+    Time(DateTime<Utc>),
+    Text(String),
+}
+fn bind_filter<'q, O>(
+    mut query: sqlx::query::QueryAs<'q, sqlx::Postgres, O, sqlx::postgres::PgArguments>,
+    binds: Vec<FilterBind>,
+) -> sqlx::query::QueryAs<'q, sqlx::Postgres, O, sqlx::postgres::PgArguments>
+where
+    O: for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow>,
+{
+    for bind in binds {
+        query = match bind {
+            FilterBind::Time(value) => query.bind(value),
+            FilterBind::Text(value) => query.bind(value),
+        };
+    }
+    query
 }
 
 fn hash_key(raw: &str) -> String {
     format!("{:x}", Sha256::digest(raw.as_bytes()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn filters_support_combined_dimensions_and_utc_bounds() {
+        let filter = UsageFilter {
+            from: Some("2026-01-01T00:00:00Z".parse().unwrap()),
+            to: Some("2026-01-02T00:00:00Z".parse().unwrap()),
+            model: Some("m".into()),
+            provider_id: Some("p".into()),
+            account_id: Some("a".into()),
+            protocol: Some("openai_chat_completions".into()),
+            source: None,
+        };
+        let (sql, binds) = filter_sql(&filter);
+        assert!(sql.contains("created_at >= $1"));
+        assert!(sql.contains("logical_model = $3"));
+        assert!(sql.contains("protocol_in = $6"));
+        assert_eq!(binds.len(), 6);
+    }
+
+    #[test]
+    fn initial_schema_keeps_logical_request_and_attempt_idempotency() {
+        let schema = include_str!("../migrations/0001_init.sql");
+        assert!(schema.contains("logical_model TEXT NOT NULL"));
+        assert!(schema.contains("UNIQUE (request_id, attempt_no)"));
+        assert!(schema.contains("request_id TEXT NOT NULL UNIQUE"));
+    }
 }
