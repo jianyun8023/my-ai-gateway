@@ -255,22 +255,20 @@ Kimi Adapter：
 
 ### 7.2 PostgreSQL 领域表
 
-当前只有基础 `usage_events` 表，待增加：
+当前已经创建 `usage_events` 和 `virtual_keys` 表，仍待增加：
 
 - `providers`；
 - `accounts`；
 - `routes`；
-- `virtual_keys`；
 - `health_snapshots`；
 - `audit_logs`。
 
 ### 7.3 Token 统计
 
-已完成非流式 JSON usage 提取和统一归一化，支持 OpenAI Chat/Responses、Anthropic Messages 字段，并增加 SSE 末事件解析函数。仍待完成：
+已完成非流式 JSON usage 提取和统一归一化，支持 OpenAI Chat/Responses、Anthropic Messages 字段，并增加 SSE 末事件解析函数。当前非流式请求已将 usage 写入 `usage_events`；仍待完成：
 
 - Chat Completions 流末 usage 解析；
 - Responses 流末 usage 解析；
-- Anthropic usage 解析；
 - tokenizer 估算；
 - TTFT 和真实流式完成时间记录。
 
@@ -338,7 +336,7 @@ CPA Usage Keeper 只复用 React 页面和交互，不复用其 Go 后端、SQLi
 
 ## 9. 开发顺序
 
-1. 完成 Virtual Key 和 Admin API；
+1. 完成 Virtual Key 轮换、分组和更完整的 Admin API；
 2. 扩展 PostgreSQL providers/accounts/routes 表；
 3. 完成流式 usage 提取、tokenizer 估算和异步落库；
 4. 接入 Keeper React UI；
