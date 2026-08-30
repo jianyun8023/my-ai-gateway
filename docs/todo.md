@@ -10,9 +10,11 @@
 - [x] Usage summary/events 管理 API
 - [x] 流式 SSE 末事件 usage 自动落库
 - [x] usage 缺失时使用 tiktoken-rs 估算
+- [x] Provider/Account/Route 配置同步到 PostgreSQL
 - [ ] Provider/Account/Route CRUD 与数据库加载
 - [ ] Virtual Key 轮换与分组权限
-- [ ] Keeper React UI 集成（Usage/Analysis/Events）
+- [x] Keeper React UI vendor 与静态资源构建
+- [ ] Keeper UI 对接完整 Usage/Analysis/Events API
 - [ ] Usage Analysis 聚合 API（时间、模型、Provider、账号、Key）
 - [x] 账号健康冷却的内存实现
 - [ ] 健康状态持久化、重试次数统计和完整加权 fallback

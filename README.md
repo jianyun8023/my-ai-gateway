@@ -1,5 +1,13 @@
 # my-ai-gateway
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="./assets/keeper-logo-dark.svg" />
+    <source media="(prefers-color-scheme: light)" srcset="./assets/keeper-logo-light.svg" />
+    <img src="./assets/keeper-logo-light.svg" alt="Keeper" width="560" />
+  </picture>
+</p>
+
 Rust AI 网关 MVP，目标是将多个上游账号统一为一个入口，并提供 OpenAI Chat Completions、OpenAI Responses、Anthropic Messages（Claude/Coze 客户端兼容面）入口。
 
 当前版本完成：

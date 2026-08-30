@@ -27,7 +27,7 @@ use routing::{ResolvedRoute, RouteResolver};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tower::ServiceExt;
-use tower_http::trace::TraceLayer;
+use tower_http::{services::ServeDir, trace::TraceLayer};
 use uuid::Uuid;
 
 #[derive(Clone)]
@@ -45,6 +45,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = Arc::new(GatewayConfig::from_env());
     let addr: SocketAddr = config.listen_addr.parse()?;
     let db = db::Database::connect_from_env().await?;
+    if let Some(database) = &db {
+        database.sync_control_plane(&config).await?;
+    }
     let state = AppState {
         resolver: RouteResolver::new(config.clone()),
         config,
@@ -62,7 +65,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/admin/keys/:id/revoke", post(revoke_key))
         .route("/admin/usage/summary", get(usage_summary))
         .route("/admin/usage/events", get(usage_events))
+        .route("/admin/providers", get(admin_providers))
+        .route("/admin/accounts", get(admin_accounts))
+        .route("/admin/routes", get(admin_routes))
         .route("/admin/routes/:protocol/:model", get(resolve_route))
+        .nest_service("/admin", ServeDir::new("web/dist"))
         .with_state(state)
         .layer(TraceLayer::new_for_http());
     let listener = tokio::net::TcpListener::bind(addr).await?;
@@ -256,6 +263,44 @@ async fn usage_events(
             &error.to_string(),
         ),
     }
+}
+
+async fn admin_providers(State(state): State<AppState>, headers: HeaderMap) -> Response<Body> {
+    if !admin_authorized(&headers) {
+        return error_response(
+            StatusCode::UNAUTHORIZED,
+            "unauthorized",
+            "admin key required",
+        );
+    }
+    (
+        StatusCode::OK,
+        Json(json!({"data": state.config.providers})),
+    )
+        .into_response()
+}
+
+async fn admin_accounts(State(state): State<AppState>, headers: HeaderMap) -> Response<Body> {
+    if !admin_authorized(&headers) {
+        return error_response(
+            StatusCode::UNAUTHORIZED,
+            "unauthorized",
+            "admin key required",
+        );
+    }
+    let accounts: Vec<Value> = state.config.accounts.iter().map(|account| json!({"id":account.id,"provider_id":account.provider_id,"display_name":account.display_name,"enabled":account.enabled,"weight":account.weight})).collect();
+    (StatusCode::OK, Json(json!({"data": accounts}))).into_response()
+}
+
+async fn admin_routes(State(state): State<AppState>, headers: HeaderMap) -> Response<Body> {
+    if !admin_authorized(&headers) {
+        return error_response(
+            StatusCode::UNAUTHORIZED,
+            "unauthorized",
+            "admin key required",
+        );
+    }
+    (StatusCode::OK, Json(json!({"data": state.config.routes}))).into_response()
 }
 
 async fn proxy(

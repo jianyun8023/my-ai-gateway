@@ -1,3 +1,4 @@
+use crate::config::GatewayConfig;
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -98,6 +99,32 @@ impl Database {
             .bind(event.cached_tokens).bind(event.total_tokens).bind(&event.usage_source).bind(event.degraded).bind(now)
             .execute(&self.pool).await?;
         Ok(())
+    }
+
+    pub async fn sync_control_plane(&self, config: &GatewayConfig) -> Result<(), sqlx::Error> {
+        let mut tx = self.pool.begin().await?;
+        for provider in &config.providers {
+            sqlx::query("INSERT INTO providers (id,name,base_url,capabilities,endpoints) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name,base_url=EXCLUDED.base_url,capabilities=EXCLUDED.capabilities,endpoints=EXCLUDED.endpoints,updated_at=NOW()")
+                .bind(&provider.id).bind(&provider.name).bind(&provider.base_url)
+                .bind(serde_json::to_value(&provider.capabilities).unwrap_or(Value::Object(Default::default())))
+                .bind(serde_json::to_value(&provider.endpoints).unwrap_or(Value::Object(Default::default())))
+                .execute(&mut *tx).await?;
+        }
+        for account in &config.accounts {
+            sqlx::query("INSERT INTO accounts (id,provider_id,display_name,enabled,weight) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (id) DO UPDATE SET provider_id=EXCLUDED.provider_id,display_name=EXCLUDED.display_name,enabled=EXCLUDED.enabled,weight=EXCLUDED.weight,updated_at=NOW()")
+                .bind(&account.id).bind(&account.provider_id).bind(&account.display_name).bind(account.enabled).bind(account.weight as i32)
+                .execute(&mut *tx).await?;
+        }
+        for route in &config.routes {
+            sqlx::query("INSERT INTO routes (id,model_pattern,provider_id,protocols,primary_account_id,fallback_accounts,strategy,mode,adapter,allow_lossy_conversion) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (id) DO UPDATE SET model_pattern=EXCLUDED.model_pattern,provider_id=EXCLUDED.provider_id,protocols=EXCLUDED.protocols,primary_account_id=EXCLUDED.primary_account_id,fallback_accounts=EXCLUDED.fallback_accounts,strategy=EXCLUDED.strategy,mode=EXCLUDED.mode,adapter=EXCLUDED.adapter,allow_lossy_conversion=EXCLUDED.allow_lossy_conversion,updated_at=NOW()")
+                .bind(&route.id).bind(&route.model).bind(&route.provider_id)
+                .bind(serde_json::to_value(&route.protocols).unwrap_or(Value::Array(vec![])))
+                .bind(&route.primary_account_id)
+                .bind(serde_json::to_value(&route.fallback_accounts).unwrap_or(Value::Array(vec![])))
+                .bind(&route.strategy).bind(&route.mode).bind(&route.adapter).bind(route.allow_lossy_conversion)
+                .execute(&mut *tx).await?;
+        }
+        tx.commit().await
     }
 
     pub async fn create_virtual_key(

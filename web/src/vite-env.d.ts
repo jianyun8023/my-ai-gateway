@@ -1,0 +1,31 @@
+/// <reference types="vite/client" />
+
+interface ImportMetaEnv {
+  readonly VITE_RANKING_PREVIEW_MOCK?: string;
+}
+
+interface ImportMeta {
+  readonly env: ImportMetaEnv;
+}
+
+declare module '*.module.scss' {
+  const classes: Record<string, string>;
+  export default classes;
+}
+
+declare module '*.module.css' {
+  const classes: Record<string, string>;
+  export default classes;
+}
+
+declare module '*.scss';
+declare module '*.css';
+declare module '*.png' {
+  const src: string;
+  export default src;
+}
+
+declare module '*.svg' {
+  const src: string;
+  export default src;
+}

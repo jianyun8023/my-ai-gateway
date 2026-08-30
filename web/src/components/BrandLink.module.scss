@@ -1,0 +1,34 @@
+@use '../styles/variables' as *;
+
+.brandLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6em;
+  line-height: 1;
+  text-decoration: none;
+  transition: border-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
+
+  &:hover {
+    border-color: rgba($primary-color, 0.42);
+    color: var(--primary-color);
+    transform: translateY(-1px);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 3px;
+  }
+}
+
+.brandMark {
+  display: block;
+  width: 2.05em;
+  height: 1.45em;
+  flex: 0 0 auto;
+  object-fit: contain;
+}
+
+.brandWord {
+  display: block;
+  line-height: 1;
+}

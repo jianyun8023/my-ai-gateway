@@ -310,11 +310,8 @@ Kimi Adapter：
 
 ### 7.2 PostgreSQL 领域表
 
-当前已经创建 `usage_events` 和 `virtual_keys` 表，仍待增加：
+当前已经创建 `usage_events`、`virtual_keys`、`providers`、`accounts` 和 `routes` 表，并在启动时同步配置；仍待增加：
 
-- `providers`；
-- `accounts`；
-- `routes`；
 - `health_snapshots`；
 - `audit_logs`。
 
@@ -326,7 +323,7 @@ Kimi Adapter：
 
 ### 7.4 统计接口和页面
 
-待完成：
+已完成基础 `/admin/usage/summary`、`/admin/usage/events` 查询 API，并 vendor Keeper React 前端、构建静态资源。仍待完成：
 
 - Usage Overview API；
 - Analysis API；
