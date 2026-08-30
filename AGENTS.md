@@ -10,8 +10,6 @@
 - OpenAI Responses；
 - Anthropic Messages（Claude/Coze 客户端兼容面）。
 
-不要新增 Coze Bot/Workflow 独立协议，除非产品需求再次明确改变。
-
 ## 核心架构约束
 
 1. Provider 原生支持某协议时，必须优先原生透传。

@@ -39,8 +39,6 @@
 | OpenAI Responses | `POST /v1/responses` | 原生透传或通过 Adapter 转换 |
 | Anthropic Messages | `POST /v1/messages` | Claude/Coze 客户端兼容面 |
 
-本项目不单独实现 Coze Bot/Workflow API，也不把它作为第四种协议。
-
 ## 3. Provider 处理策略
 
 ### 3.1 上游能力矩阵
