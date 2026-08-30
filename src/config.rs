@@ -1,9 +1,84 @@
 use crate::protocol::Protocol;
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::{HashMap, HashSet},
-    env,
-};
+use std::{collections::HashMap, env};
+
+/// Features whose preservation can be declared by an adapter.
+#[allow(dead_code)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum AdapterFeature {
+    Streaming,
+    Tools,
+    ToolStreaming,
+    Thinking,
+    WebSearch,
+    FileSearch,
+    Vision,
+    Usage,
+}
+
+/// A strongly typed declaration for a protocol adapter.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdapterDefinition {
+    pub name: &'static str,
+    pub from_protocol: Protocol,
+    pub to_protocol: Protocol,
+    pub features: Capabilities,
+}
+
+#[allow(dead_code)]
+pub type AdapterSpec = AdapterDefinition;
+#[allow(dead_code)]
+pub type AdapterRegistry = HashMap<&'static str, AdapterDefinition>;
+
+impl AdapterDefinition {
+    #[allow(dead_code)]
+    pub fn feature(&self, feature: AdapterFeature) -> CapabilityMode {
+        match feature {
+            AdapterFeature::Streaming => self.features.streaming,
+            AdapterFeature::Tools => self.features.tools,
+            AdapterFeature::ToolStreaming => self.features.tool_streaming,
+            AdapterFeature::Thinking => self.features.thinking,
+            AdapterFeature::WebSearch => self.features.web_search,
+            AdapterFeature::FileSearch => self.features.file_search,
+            AdapterFeature::Vision => self.features.vision,
+            AdapterFeature::Usage => self.features.usage,
+        }
+    }
+}
+
+/// Return the built-in adapter registry. A fresh map keeps the registry
+/// immutable to callers while retaining a simple, strongly typed declaration.
+pub fn adapter_registry() -> AdapterRegistry {
+    HashMap::from([(
+        "kimi_responses_adapter",
+        AdapterDefinition {
+            name: "kimi_responses_adapter",
+            from_protocol: Protocol::AnthropicMessages,
+            to_protocol: Protocol::OpenAiResponses,
+            // Kimi's adapter translates these fields/events; file search is
+            // intentionally unsupported rather than silently treated as kept.
+            features: Capabilities {
+                streaming: CapabilityMode::Translated,
+                tools: CapabilityMode::Translated,
+                tool_streaming: CapabilityMode::Translated,
+                thinking: CapabilityMode::Translated,
+                web_search: CapabilityMode::Translated,
+                file_search: CapabilityMode::Unsupported,
+                vision: CapabilityMode::Translated,
+                usage: CapabilityMode::Translated,
+            },
+        },
+    )])
+}
+
+#[allow(dead_code)]
+pub fn registered_adapters() -> AdapterRegistry {
+    adapter_registry()
+}
+
+pub fn adapter_definition(name: &str) -> Option<AdapterDefinition> {
+    adapter_registry().remove(name)
+}
 
 /// Protocol handling mode for an upstream source.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -187,7 +262,7 @@ impl<'de> Deserialize<'de> for CapabilityMode {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, Default)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, Default)]
 pub struct Capabilities {
     #[serde(default)]
     pub streaming: CapabilityMode,
@@ -308,12 +383,13 @@ pub struct GatewayConfig {
 impl GatewayConfig {
     pub fn validate(&self) -> Result<(), Vec<String>> {
         let mut errors = Vec::new();
-        for provider in &self.providers {
+        for (provider_index, provider) in self.providers.iter().enumerate() {
+            let provider_scope = format!("providers[{provider_index}] ({})", provider.id);
             if let Err(error) = validate_matrix(
                 &provider.protocol_capabilities,
                 &provider.endpoints,
                 &provider.native_protocols,
-                &provider.id,
+                &provider_scope,
             ) {
                 errors.push(error);
             }
@@ -323,13 +399,14 @@ impl GatewayConfig {
                     &provider.protocol_capabilities,
                     &provider.endpoints,
                     &provider.native_protocols,
-                    &format!("{} model {model}", provider.id),
+                    &format!("{provider_scope}.model_overrides.{model}"),
                 ) {
                     errors.push(error);
                 }
             }
         }
-        for account in &self.accounts {
+        for (account_index, account) in self.accounts.iter().enumerate() {
+            let account_scope = format!("accounts[{account_index}] ({})", account.id);
             let provider = self.provider(&account.provider_id);
             let endpoints = provider.map(|p| &p.endpoints).cloned().unwrap_or_default();
             let native = provider
@@ -344,19 +421,87 @@ impl GatewayConfig {
                 &base_matrix,
                 &endpoints,
                 native,
-                &format!("account {}", account.id),
+                &account_scope,
             ) {
                 errors.push(error);
             }
+            let mut account_base_matrix = base_matrix.clone();
+            account_base_matrix.extend(
+                account
+                    .protocol_capabilities
+                    .iter()
+                    .map(|(protocol, capability)| (*protocol, capability.clone())),
+            );
             for (model, override_config) in &account.model_overrides {
                 if let Err(error) = validate_override_matrix(
                     &override_config.protocol_capabilities,
-                    &account.protocol_capabilities,
+                    &account_base_matrix,
                     &endpoints,
                     native,
-                    &format!("account {} model {model}", account.id),
+                    &format!("{account_scope}.model_overrides.{model}"),
                 ) {
                     errors.push(error);
+                }
+            }
+        }
+        for (index, route) in self.routes.iter().enumerate() {
+            let scope = format!("routes[{index}] ({})", route.id);
+            let Some(provider) = self.provider(&route.provider_id) else {
+                errors.push(format!(
+                    "{scope}.provider_id: unknown provider {}",
+                    route.provider_id
+                ));
+                continue;
+            };
+            if route.protocols.is_empty() {
+                errors.push(format!(
+                    "{scope}.protocols: must contain at least one protocol"
+                ));
+            }
+            for (protocol_index, protocol) in route.protocols.iter().enumerate() {
+                let protocol_scope = format!("{scope}.protocols[{protocol_index}] ({protocol})");
+                match route.mode.as_str() {
+                    "native" => {
+                        let capability = self.protocol_capability(
+                            &provider.id,
+                            Some(&route.primary_account_id),
+                            &route.model,
+                            *protocol,
+                        );
+                        if capability.mode != ProtocolMode::Native {
+                            errors.push(format!(
+                                "{protocol_scope}: native route requires a native protocol capability"
+                            ));
+                        }
+                    }
+                    "adapter" => {
+                        let Some(name) = route.adapter.as_deref() else {
+                            errors.push(format!("{protocol_scope}.adapter: adapter route requires adapter"));
+                            continue;
+                        };
+                        let Some(definition) = adapter_definition(name) else {
+                            errors.push(format!(
+                                "{protocol_scope}.adapter: unknown adapter '{name}'"
+                            ));
+                            continue;
+                        };
+                        if definition.to_protocol != *protocol {
+                            errors.push(format!(
+                                "{protocol_scope}.adapter: adapter '{name}' targets {}, not {protocol}",
+                                definition.to_protocol
+                            ));
+                        }
+                    }
+                    "unsupported" => {
+                        if route.adapter.is_some() {
+                            errors.push(format!(
+                                "{protocol_scope}.adapter: unsupported route cannot set adapter"
+                            ));
+                        }
+                    }
+                    mode => errors.push(format!(
+                        "{scope}.mode: unknown route mode '{mode}' (expected native, adapter, or unsupported)"
+                    )),
                 }
             }
         }
@@ -570,20 +715,47 @@ fn validate_matrix(
     scope: &str,
 ) -> Result<(), String> {
     for protocol in legacy_native {
-        if !endpoints.contains_key(protocol) {
-            return Err(format!("{scope}: native {protocol} requires an endpoint"));
+        if !has_endpoint(endpoints, protocol) {
+            return Err(format!(
+                "{scope}.native_protocols.{protocol}: native protocol requires an endpoint"
+            ));
         }
     }
     for (protocol, capability) in matrix {
         capability
             .validate(*protocol)
-            .map_err(|error| format!("{scope}: {error}"))?;
-        if capability.mode == ProtocolMode::Native && !endpoints.contains_key(protocol) {
-            return Err(format!("{scope}: native {protocol} requires an endpoint"));
+            .map_err(|error| format!("{scope}.protocol_capabilities.{protocol}: {error}"))?;
+        if capability.mode == ProtocolMode::Native && !has_endpoint(endpoints, protocol) {
+            return Err(format!(
+                "{scope}.protocol_capabilities.{protocol}: native protocol requires an endpoint"
+            ));
+        }
+        if capability.mode == ProtocolMode::Adapter {
+            let source = capability
+                .source_protocol
+                .expect("validated adapter source");
+            let name = capability
+                .adapter
+                .as_deref()
+                .expect("validated adapter name");
+            let Some(definition) = adapter_definition(name) else {
+                return Err(format!(
+                    "{scope}.protocol_capabilities.{protocol}.adapter: unknown adapter '{name}'"
+                ));
+            };
+            if definition.from_protocol != source || definition.to_protocol != *protocol {
+                return Err(format!(
+                    "{scope}.protocol_capabilities.{protocol}: adapter '{name}' direction is {} -> {}, configured {} -> {}",
+                    definition.from_protocol,
+                    definition.to_protocol,
+                    source,
+                    protocol
+                ));
+            }
         }
     }
-    // Adapter source protocols must be available natively or as another
-    // resolvable matrix entry. This also catches adapter cycles.
+    // Adapter sources must be directly available. Chaining adapters would
+    // create multi-segment conversion and is rejected (as are cycles).
     for (protocol, capability) in matrix {
         if capability.mode != ProtocolMode::Adapter {
             continue;
@@ -591,28 +763,39 @@ fn validate_matrix(
         let source = capability
             .source_protocol
             .expect("validated adapter source");
-        let mut seen = HashSet::new();
-        let mut current = source;
-        loop {
-            if !seen.insert(current) {
-                return Err(format!(
-                    "{scope}: cyclic adapter source involving {current}"
-                ));
-            }
-            let Some(source_capability) = matrix.get(&current) else {
-                if endpoints.contains_key(&current) || legacy_native.contains(&current) {
-                    break;
-                }
-                return Err(format!("{scope}: adapter for {protocol} references unavailable source_protocol {source}"));
-            };
+        if let Some(source_capability) = matrix.get(&source) {
             match source_capability.mode {
-                ProtocolMode::Native => break,
-                ProtocolMode::Adapter => current = source_capability.source_protocol.expect("validated adapter source"),
-                ProtocolMode::Unsupported => return Err(format!("{scope}: adapter for {protocol} references unsupported source_protocol {source}")),
+                ProtocolMode::Native => {
+                    if !has_endpoint(endpoints, &source) {
+                        return Err(format!(
+                            "{scope}.protocol_capabilities.{protocol}.source_protocol: native source {source} requires an endpoint"
+                        ));
+                    }
+                }
+                ProtocolMode::Adapter => {
+                    return Err(format!(
+                        "{scope}.protocol_capabilities.{protocol}.source_protocol: multi-segment adapter chain via {source} is not allowed"
+                    ));
+                }
+                ProtocolMode::Unsupported => {
+                    return Err(format!(
+                        "{scope}.protocol_capabilities.{protocol}.source_protocol: source protocol {source} is unsupported"
+                    ));
+                }
             }
+        } else if !has_endpoint(endpoints, &source) && !legacy_native.contains(&source) {
+            return Err(format!(
+                "{scope}.protocol_capabilities.{protocol}.source_protocol: source protocol {source} is unavailable"
+            ));
         }
     }
     Ok(())
+}
+
+fn has_endpoint(endpoints: &HashMap<Protocol, String>, protocol: &Protocol) -> bool {
+    endpoints
+        .get(protocol)
+        .is_some_and(|endpoint| !endpoint.trim().is_empty())
 }
 
 fn validate_override_matrix(
@@ -631,8 +814,23 @@ fn validate_override_matrix(
             .source_protocol
             .expect("validated adapter source");
         if let Some(base_capability) = base.get(&source) {
-            if base_capability.mode == ProtocolMode::Unsupported {
-                return Err(format!("{scope}: adapter for {target} references unsupported base source_protocol {source}"));
+            match base_capability.mode {
+                ProtocolMode::Unsupported => {
+                    return Err(format!(
+                        "{scope}.protocol_capabilities.{target}.source_protocol: source protocol {source} is unsupported in the base matrix"
+                    ));
+                }
+                ProtocolMode::Adapter => {
+                    return Err(format!(
+                        "{scope}.protocol_capabilities.{target}.source_protocol: multi-segment adapter chain via {source} is not allowed"
+                    ));
+                }
+                ProtocolMode::Native if !has_endpoint(endpoints, &source) => {
+                    return Err(format!(
+                        "{scope}.protocol_capabilities.{target}.source_protocol: native source {source} requires an endpoint"
+                    ));
+                }
+                ProtocolMode::Native => {}
             }
         }
     }
@@ -658,6 +856,129 @@ fn find_model_override<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn kimi_adapter_registry_declares_direction_and_feature_modes() {
+        let adapter = adapter_definition("kimi_responses_adapter").unwrap();
+        assert_eq!(adapter.from_protocol, Protocol::AnthropicMessages);
+        assert_eq!(adapter.to_protocol, Protocol::OpenAiResponses);
+        assert_eq!(
+            adapter.feature(AdapterFeature::Thinking),
+            CapabilityMode::Translated
+        );
+        assert_eq!(
+            adapter.feature(AdapterFeature::FileSearch),
+            CapabilityMode::Unsupported
+        );
+    }
+
+    #[test]
+    fn unknown_adapter_is_rejected_with_configuration_path() {
+        let mut matrix = ProtocolCapabilityMatrix::new();
+        matrix.insert(
+            Protocol::OpenAiResponses,
+            ProtocolCapability::adapter(Protocol::AnthropicMessages, "does_not_exist"),
+        );
+        let error = validate_matrix(
+            &matrix,
+            &HashMap::from([(Protocol::AnthropicMessages, "/v1/messages".into())]),
+            &[],
+            "providers[0]",
+        )
+        .unwrap_err();
+        assert!(error.contains("protocol_capabilities.openai_responses.adapter"));
+        assert!(error.contains("unknown adapter"));
+    }
+
+    #[test]
+    fn adapter_direction_mismatch_is_rejected() {
+        let mut matrix = ProtocolCapabilityMatrix::new();
+        matrix.insert(
+            Protocol::OpenAiResponses,
+            ProtocolCapability::adapter(Protocol::OpenAiChatCompletions, "kimi_responses_adapter"),
+        );
+        let error = validate_matrix(
+            &matrix,
+            &HashMap::from([(
+                Protocol::OpenAiChatCompletions,
+                "/v1/chat/completions".into(),
+            )]),
+            &[],
+            "providers[0]",
+        )
+        .unwrap_err();
+        assert!(error.contains("direction"));
+    }
+
+    #[test]
+    fn adapter_source_unavailable_is_rejected() {
+        let mut matrix = ProtocolCapabilityMatrix::new();
+        matrix.insert(
+            Protocol::OpenAiResponses,
+            ProtocolCapability::adapter(Protocol::AnthropicMessages, "kimi_responses_adapter"),
+        );
+        let error = validate_matrix(&matrix, &HashMap::new(), &[], "providers[0]").unwrap_err();
+        assert!(error.contains("source_protocol"));
+        assert!(error.contains("unavailable"));
+    }
+
+    #[test]
+    fn kimi_adapter_configuration_is_valid() {
+        let mut matrix = ProtocolCapabilityMatrix::new();
+        matrix.insert(
+            Protocol::OpenAiResponses,
+            ProtocolCapability::adapter(Protocol::AnthropicMessages, "kimi_responses_adapter"),
+        );
+        matrix.insert(Protocol::AnthropicMessages, ProtocolCapability::native());
+        assert!(validate_matrix(
+            &matrix,
+            &HashMap::from([(Protocol::AnthropicMessages, "/v1/messages".into())]),
+            &[],
+            "providers[0]",
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn adapter_chain_is_rejected_as_multi_segment_conversion() {
+        let mut matrix = ProtocolCapabilityMatrix::new();
+        matrix.insert(
+            Protocol::OpenAiResponses,
+            ProtocolCapability::adapter(Protocol::AnthropicMessages, "kimi_responses_adapter"),
+        );
+        matrix.insert(
+            Protocol::AnthropicMessages,
+            ProtocolCapability::adapter(Protocol::OpenAiChatCompletions, "kimi_responses_adapter"),
+        );
+        let error = validate_matrix(
+            &matrix,
+            &HashMap::from([(
+                Protocol::OpenAiChatCompletions,
+                "/v1/chat/completions".into(),
+            )]),
+            &[],
+            "providers[0]",
+        )
+        .unwrap_err();
+        assert!(error.contains("direction") || error.contains("multi-segment"));
+    }
+
+    #[test]
+    fn native_protocol_requires_non_empty_endpoint() {
+        let mut matrix = ProtocolCapabilityMatrix::new();
+        matrix.insert(
+            Protocol::OpenAiChatCompletions,
+            ProtocolCapability::native(),
+        );
+        let error = validate_matrix(
+            &matrix,
+            &HashMap::from([(Protocol::OpenAiChatCompletions, " ".into())]),
+            &[],
+            "providers[0]",
+        )
+        .unwrap_err();
+        assert!(error.contains("requires an endpoint"));
+    }
 
     #[test]
     fn protocol_capability_modes_round_trip() {
