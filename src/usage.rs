@@ -18,9 +18,12 @@ pub struct UsageReport {
 
 /// Conservative fallback estimate used when an upstream omits usage.
 /// This is intentionally marked as estimated; it is not a billing value.
-pub fn estimate(input_bytes: usize, output_bytes: usize) -> UsageReport {
-    let input_tokens = ((input_bytes as i64) + 3) / 4;
-    let output_tokens = ((output_bytes as i64) + 3) / 4;
+pub fn estimate(input: &[u8], output: &[u8]) -> UsageReport {
+    let tokenizer = tiktoken_rs::cl100k_base().expect("cl100k tokenizer initialization");
+    let input_text = String::from_utf8_lossy(input);
+    let output_text = String::from_utf8_lossy(output);
+    let input_tokens = tokenizer.encode_with_special_tokens(&input_text).len() as i64;
+    let output_tokens = tokenizer.encode_with_special_tokens(&output_text).len() as i64;
     UsageReport {
         input_tokens,
         output_tokens,
@@ -50,7 +53,9 @@ pub fn extract_json(value: &Value) -> Option<UsageReport> {
     // the actual response under `response`, so inspect that as a fallback.
     let usage = value
         .get("usage")
-        .or_else(|| value.get("response").and_then(|v| v.get("usage")))?;
+        .or_else(|| value.get("response").and_then(|v| v.get("usage")))
+        .or_else(|| value.get("message").and_then(|v| v.get("usage")))
+        .or_else(|| value.get("delta").and_then(|v| v.get("usage")))?;
 
     let input = if usage.get("input_tokens").is_some() {
         i64_at(usage, "input_tokens")
@@ -109,7 +114,7 @@ pub fn extract_json_bytes(bytes: &[u8]) -> Option<UsageReport> {
 /// `data: {...}` and ignores comments/keep-alives and `[DONE]`.
 #[allow(dead_code)]
 pub fn extract_sse(text: &str) -> Option<UsageReport> {
-    let mut latest = None;
+    let mut latest: Option<UsageReport> = None;
     for line in text.lines() {
         let Some(data) = line.strip_prefix("data:").map(str::trim) else {
             continue;
@@ -119,7 +124,25 @@ pub fn extract_sse(text: &str) -> Option<UsageReport> {
         }
         if let Ok(value) = serde_json::from_str::<Value>(data) {
             if let Some(report) = extract_json(&value) {
-                latest = Some(report);
+                if let Some(current) = &mut latest {
+                    if report.input_tokens > 0 {
+                        current.input_tokens = report.input_tokens;
+                    }
+                    if report.output_tokens > 0 {
+                        current.output_tokens = report.output_tokens;
+                    }
+                    if report.reasoning_tokens > 0 {
+                        current.reasoning_tokens = report.reasoning_tokens;
+                    }
+                    if report.cached_tokens > 0 {
+                        current.cached_tokens = report.cached_tokens;
+                    }
+                    if report.total_tokens > 0 {
+                        current.total_tokens = report.total_tokens;
+                    }
+                } else {
+                    latest = Some(report);
+                }
             }
         }
     }
@@ -183,5 +206,20 @@ mod tests {
         assert_eq!(report.reasoning_tokens, 1);
         assert_eq!(report.cached_tokens, 2);
         assert_eq!(report.total_tokens, 11);
+    }
+
+    #[test]
+    fn extracts_anthropic_stream_nested_usage() {
+        let report = extract_sse("event: message_start\ndata: {\"message\":{\"usage\":{\"input_tokens\":9}}}\n\nevent: message_delta\ndata: {\"delta\":{\"usage\":{\"output_tokens\":4}}}\n").unwrap();
+        assert_eq!(report.input_tokens, 9);
+        assert_eq!(report.output_tokens, 4);
+    }
+
+    #[test]
+    fn estimates_with_tiktoken() {
+        let report = estimate(br#"{\"input\":\"hello\"}"#, b"hello world");
+        assert!(report.input_tokens > 0);
+        assert!(report.output_tokens > 0);
+        assert_eq!(report.source, "estimated");
     }
 }

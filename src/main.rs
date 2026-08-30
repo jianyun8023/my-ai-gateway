@@ -21,6 +21,7 @@ use axum::{
     Json, Router,
 };
 use config::GatewayConfig;
+use futures_util::{stream, StreamExt};
 use protocol::Protocol;
 use routing::{ResolvedRoute, RouteResolver};
 use serde::Deserialize;
@@ -335,6 +336,7 @@ async fn proxy(
             "primary account is cooling down",
         );
     }
+    let usage_request_body = body.clone();
     let result = forward_account(
         &state,
         &route,
@@ -385,11 +387,76 @@ async fn proxy(
                 .unwrap_or_else(|| "missing".into()),
             degraded: route.allow_lossy_conversion,
         };
+        if is_event_stream(&response) {
+            return wrap_stream_usage(response, database.clone(), event, usage_request_body);
+        }
         if let Err(error) = database.insert_usage(&event).await {
             tracing::warn!(%error, "failed to persist usage event");
         }
     }
     response
+}
+
+fn is_event_stream(response: &Response<Body>) -> bool {
+    response
+        .headers()
+        .get("content-type")
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.to_ascii_lowercase().contains("text/event-stream"))
+}
+
+fn wrap_stream_usage(
+    response: Response<Body>,
+    database: db::Database,
+    event: db::UsageEvent,
+    request_body: Bytes,
+) -> Response<Body> {
+    let (parts, body) = response.into_parts();
+    let upstream = body.into_data_stream();
+    let captured = Vec::new();
+    let stream = stream::unfold(
+        (upstream, captured, database, event, request_body),
+        |(mut upstream, mut captured, database, mut event, request_body)| async move {
+            match upstream.next().await {
+                Some(Ok(chunk)) => {
+                    captured.extend_from_slice(&chunk);
+                    Some((
+                        Ok::<Bytes, std::io::Error>(chunk),
+                        (upstream, captured, database, event, request_body),
+                    ))
+                }
+                Some(Err(error)) => Some((
+                    Err(std::io::Error::other(error.to_string())),
+                    (upstream, captured, database, event, request_body),
+                )),
+                None => {
+                    if let Some(usage) =
+                        crate::usage::extract_sse(&String::from_utf8_lossy(&captured))
+                    {
+                        event.input_tokens = usage.input_tokens;
+                        event.output_tokens = usage.output_tokens;
+                        event.reasoning_tokens = usage.reasoning_tokens;
+                        event.cached_tokens = usage.cached_tokens;
+                        event.total_tokens = usage.total_tokens;
+                        event.usage_source = usage.source;
+                    } else {
+                        let usage = crate::usage::estimate(&request_body, &captured);
+                        event.input_tokens = usage.input_tokens;
+                        event.output_tokens = usage.output_tokens;
+                        event.total_tokens = usage.total_tokens;
+                        event.usage_source = usage.source;
+                    }
+                    tokio::spawn(async move {
+                        if let Err(error) = database.insert_usage(&event).await {
+                            tracing::warn!(%error, "failed to persist streaming usage event");
+                        }
+                    });
+                    None
+                }
+            }
+        },
+    );
+    Response::from_parts(parts, Body::from_stream(stream))
 }
 
 async fn forward_account(

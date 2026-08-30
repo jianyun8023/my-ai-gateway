@@ -6,15 +6,28 @@
 
 ## 1. 项目目标
 
-构建一个 Rust AI 网关，将多个上游 Provider 和多个上游账号统一代理为一个服务入口，并为内部服务提供多个下游访问 Key。
+构建一个面向个人自用的 Rust AI Provider 聚合端，将多个上游 Provider、模型来源和少量上游账号统一管理为一个服务入口，并为本地工具和应用提供统一调用方式。
+
+产品形态是单用户、自托管、界面优先的聚合管理端，而不是多租户 API SaaS 或终端聊天应用。用户通常只有一个或两个上游账号，但会接入多个 Provider、多个模型来源和不同协议 endpoint。
 
 核心原则：
 
 1. 上游原生支持某协议时，优先原样透传。
 2. 上游不支持某协议时，使用明确的协议 Adapter 转换。
 3. 协议转换不能静默丢失工具、搜索、思考过程或其他扩展字段。
-4. 主账号优先，失败后才进入 fallback 账号池。
+4. 同一逻辑模型可以绑定多个上游来源；默认来源优先，失败后才进入明确配置的 fallback 来源。
 5. 统计重点是请求和 Token 使用，不实现余额、充值和额度扣减。
+
+## 1.1 产品功能面
+
+产品由四个相互关联的功能面组成：
+
+1. **Provider/来源配置**：通过 UI 配置 Provider、base URL、凭据、模型、协议 endpoint 和能力。
+2. **模型与路由管理**：维护逻辑模型到多个实际来源的绑定、优先级、fallback 和协议转换。
+3. **统一调用入口**：对外提供 OpenAI Chat Completions、OpenAI Responses、Anthropic Messages。
+4. **用量分析**：统计请求、Token、延迟、错误、来源和协议分布；第一版 UI 直接复用 Usage Keeper 的交互和页面结构，后续再按网关字段调整。
+
+第一版主要通过 Web UI 操作，API 用于客户端调用、自动化和后续扩展。数据库固定以 PostgreSQL 为主，MySQL 仅作为未来可能的兼容方向，不考虑 SQLite。
 
 ## 2. 协议范围
 
@@ -30,7 +43,45 @@
 
 ## 3. Provider 处理策略
 
-### 3.1 三协议原生 Provider
+### 3.1 上游能力矩阵
+
+Provider/Account 来源配置必须显式描述每种北向协议的处理能力，而不能只配置一个总的 `native_protocols` 列表。
+
+对每个来源，需要分别记录：
+
+- `openai_chat_completions`：原生、转换或不支持；
+- `openai_responses`：原生、转换或不支持；
+- `anthropic_messages`：原生、转换或不支持。
+
+当某协议不是原生能力时，必须同时配置转换来源协议和具体 Adapter。例如：
+
+```json
+{
+  "protocol_capabilities": {
+    "openai_chat_completions": {"mode": "native"},
+    "openai_responses": {
+      "mode": "adapter",
+      "source_protocol": "openai_chat_completions",
+      "adapter": "chat_to_responses"
+    },
+    "anthropic_messages": {
+      "mode": "adapter",
+      "source_protocol": "openai_chat_completions",
+      "adapter": "chat_to_anthropic_messages"
+    }
+  }
+}
+```
+
+约束如下：
+
+- `native` 必须对应实际存在的上游 endpoint；
+- `adapter` 必须声明 `source_protocol` 和 Adapter 名称；
+- `source_protocol` 必须是该来源已声明为原生或可继续解析的协议；
+- 不支持且没有合法 Adapter 的协议，在路由解析阶段返回结构化错误；
+- Tools、Web Search、Thinking、Usage 等能力也应按协议/来源分别声明，转换可能造成的能力损失必须显式标记。
+
+### 3.2 三协议原生 Provider
 
 MiniMax、DeepSeek 等 Provider 如果同时提供三种协议接口，则为每个协议配置对应 endpoint：
 
@@ -52,7 +103,7 @@ MiniMax、DeepSeek 等 Provider 如果同时提供三种协议接口，则为每
 
 Web Search、Tools、Thinking、Vision、Provider 扩展字段在原生透传路径中保持原始 JSON 和 SSE 语义。
 
-### 3.2 Kimi Code
+### 3.3 Kimi Code
 
 Kimi Code 当前按以下方式处理：
 
@@ -269,11 +320,8 @@ Kimi Adapter：
 
 ### 7.3 Token 统计
 
-已完成非流式 JSON usage 提取和统一归一化，支持 OpenAI Chat/Responses、Anthropic Messages 字段，并增加 SSE 末事件解析函数。当前非流式请求已将 usage 写入 `usage_events`；仍待完成：
+已完成非流式 JSON usage 提取、SSE 末事件解析和异步落库，支持 OpenAI Chat/Responses、Anthropic Messages 字段；usage 缺失时使用 `tiktoken-rs` 的 `cl100k_base` 估算并标记为 `estimated`。仍待完成：
 
-- Chat Completions 流末 usage 解析；
-- Responses 流末 usage 解析；
-- tokenizer 估算；
 - TTFT 和真实流式完成时间记录。
 
 ### 7.4 统计接口和页面

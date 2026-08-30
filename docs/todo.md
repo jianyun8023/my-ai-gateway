@@ -8,8 +8,8 @@
 - [x] PostgreSQL 控制面表 migration（providers/accounts/routes）
 - [x] 账号健康冷却的内存实现
 - [x] Usage summary/events 管理 API
-- [ ] 流式 SSE 末事件 usage 自动落库
-- [x] 非流式 usage 缺失时的基础字节估算
+- [x] 流式 SSE 末事件 usage 自动落库
+- [x] usage 缺失时使用 tiktoken-rs 估算
 - [ ] Provider/Account/Route CRUD 与数据库加载
 - [ ] Virtual Key 轮换与分组权限
 - [ ] Keeper React UI 集成（Usage/Analysis/Events）
