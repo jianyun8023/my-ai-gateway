@@ -35,6 +35,8 @@
 - PostgreSQL 是控制面事实来源；开发阶段的 `GATEWAY_CONFIG_JSON` 仅用于初始化、导入和测试。`UsageEvent` 区分逻辑请求与上游尝试，持久化时间统一使用 UTC。
 - 路由结果保留 `protocol_in → protocol_upstream → endpoint/Adapter` 完整链路及能力状态；原生能力优先，Adapter 只允许一次直接转换。未知或 `unsupported` 能力不得猜测为支持，允许的损失必须显式标记为 `degraded`。
 - 模型拆分为 `ProviderPreset`、`SourceModel`、`LogicalModel`、`ModelPreset` 和 `PricingProfile`；模型发现必须经过预设补齐和用户确认，刷新不得静默覆盖已确认字段。
+- 模型展示列表与实际可路由 Binding 分离；`/v1/models` 只公开已确认且至少有可用 Binding 的逻辑模型。`SourceModelCapability` 按 `(source_id, upstream_model_id, protocol)` 记录，待确认、不可用和未知能力不能被隐式公开或路由。
+- 第一版管理端主导航为 Overview、Analysis、Request Events；Token 时序、模型/Provider/Source 分布和请求归因优先，价格/成本只是可选次级视图。CPA 专属的 Auth Files、Ranking、配额和充值功能不属于本项目产品面。
 - 可参考 New API 的接入向导、模型发现差异预览、模型广场、参数覆盖、健康路由和用量交互，但只借鉴产品思路与字段语义，不直接复制其代码或页面；协议感知路由和本项目的能力矩阵优先。
 
 详细架构、字段定义和流程说明以 [`docs/ai-gateway-design.md`](docs/ai-gateway-design.md) 为准；本文件只保留执行任务时必须遵守的约束，避免与设计文档长期重复。
@@ -65,7 +67,7 @@ config.example.json          Provider/Account/Route 示例
 - SQLx + PostgreSQL：持久化；
 - Tracing：日志；
 - Prometheus/OpenTelemetry：后续可观测性；
-- React + TypeScript：后续复用 Keeper 统计 UI。
+- React + TypeScript：复用并适配 CPA Usage Keeper 的 Overview、Analysis、Request Events 页面交互。
 
 ## 配置和凭据
 
@@ -99,6 +101,7 @@ python3 -m json.tool config.example.json >/dev/null
 
 - 所有 schema 变化必须新增 migration；
 - `request_id` 用于 usage 事件幂等；
+- Usage 事件必须同时保留 logical/requested model 与实际 upstream model，并区分逻辑请求和上游尝试；fallback 重试不得重复统计最终请求或 Token；
 - Token 统计必须记录 `usage_source`；
 - 不将正文日志作为统计系统的默认数据源；
 - 统计查询必须支持按时间、模型、Provider、账号、协议和 Virtual Key 过滤。
@@ -116,5 +119,6 @@ python3 -m json.tool config.example.json >/dev/null
 
 - API、SDK 或框架文档查询必须优先使用 Context7；Context7 不可用时，使用相关项目的官方文档或仓库内已有资料，并在结果中说明替代来源；
 - 架构、接口和实现基线维护在 `docs/ai-gateway-design.md`；问题、需求、任务状态、修复和评审记录维护在 GitHub Issues/PR；
+- CPA Usage Keeper 只复用页面结构、React 组件和交互；不得复用其 Go 后端、SQLite、Redis queue、CPA Management API 或凭据/配额逻辑。复用代码时保留其 MIT License 和来源说明；New API 只借鉴思路，不复制其 AGPL 代码或 UI；
 - 新增环境变量、接口或数据库字段时，必须同步更新文档；
 - Python 辅助项目优先使用 `uv` 管理环境，除非用户明确要求其他工具。
