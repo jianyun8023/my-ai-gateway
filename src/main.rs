@@ -1,6 +1,7 @@
 mod config;
 mod db;
 mod health;
+mod model_catalog;
 mod protocol;
 mod routing;
 mod transport;
@@ -1024,7 +1025,13 @@ mod kimi_adapter_e2e_tests {
                     Protocol::AnthropicMessages,
                     Protocol::OpenAiChatCompletions,
                 ],
-                endpoints: HashMap::new(),
+                endpoints: HashMap::from([
+                    (
+                        Protocol::OpenAiChatCompletions,
+                        "/v1/chat/completions".into(),
+                    ),
+                    (Protocol::AnthropicMessages, "/v1/messages".into()),
+                ]),
                 capabilities: config::Capabilities {
                     streaming: config::CapabilityMode::Native,
                     tools: config::CapabilityMode::Native,
@@ -1033,7 +1040,13 @@ mod kimi_adapter_e2e_tests {
                     usage: config::CapabilityMode::Native,
                     ..Default::default()
                 },
-                protocol_capabilities: HashMap::new(),
+                protocol_capabilities: HashMap::from([(
+                    Protocol::OpenAiResponses,
+                    config::ProtocolCapability::adapter(
+                        Protocol::AnthropicMessages,
+                        "kimi_responses_adapter",
+                    ),
+                )]),
                 model_overrides: HashMap::new(),
             }],
             accounts: vec![config::AccountConfig {
@@ -1117,6 +1130,12 @@ mod kimi_adapter_e2e_tests {
     #[tokio::test]
     async fn embedded_kimi_adapter_stream_translates_sse_events() {
         let (base, recorded) = spawn_mock_upstream(|body, headers| {
+            if body.is_empty() {
+                return Response::builder()
+                    .status(StatusCode::BAD_REQUEST)
+                    .body(Body::empty())
+                    .unwrap();
+            }
             assert!(
                 body.contains("messages"),
                 "adapter must send Anthropic request: {body}"

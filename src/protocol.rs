@@ -1,14 +1,18 @@
 use serde::{Deserialize, Serialize};
 use std::{fmt, str::FromStr};
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize, sqlx::Type)]
 #[serde(rename_all = "snake_case")]
+#[sqlx(type_name = "gateway_protocol")]
 pub enum Protocol {
     #[serde(rename = "openai_chat_completions")]
+    #[sqlx(rename = "openai_chat_completions")]
     OpenAiChatCompletions,
     #[serde(rename = "openai_responses")]
+    #[sqlx(rename = "openai_responses")]
     OpenAiResponses,
     #[serde(rename = "anthropic_messages")]
+    #[sqlx(rename = "anthropic_messages")]
     AnthropicMessages,
 }
 

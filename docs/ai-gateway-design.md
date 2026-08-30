@@ -186,6 +186,41 @@ UI 流程为：
 
 字段优先级为：用户覆盖 > 模型预设 > 上游发现 > unknown。刷新模型时不得覆盖用户已经确认的字段；新发现的模型先进入待确认列表，不自动改变现有路由。
 
+### 3.5 模型目录持久化基线
+
+模型目录使用独立领域表，和当前 `ProviderConfig.models`、`routes` 运行时配置分离：
+
+```text
+ProviderPreset(version) ──创建时复制──> Source snapshot ──> Account
+                                              │
+                                              └──> SourceModel
+                                                    │
+ModelPreset(version) ──补齐元数据───────────────────┤
+                                                    ↓
+LogicalModel <──────────────────────────── ModelBinding
+                                                    │
+                                                    └──> SourceModelCapability(protocol)
+```
+
+- `provider_presets` 以 `(id, version)` 唯一，版本内容不可原地覆盖；`sources` 保存创建时的预设 ID、版本和完整 JSON 快照，后续预设升级不修改已有 Source。
+- `model_presets` 以 `(id, version)` 唯一，保存 canonical model ID、别名、元数据和值来源；它只提供默认元数据，不能替代 Source 的实际协议能力。
+- `source_models` 以 `(source_id, upstream_model_id)` 唯一，分别保存确认状态 `pending/confirmed`、可用状态 `unknown/available/unavailable`、原始发现快照、解析后元数据和每个字段的来源。
+- `logical_models` 保存对外公开名及 `pending/confirmed/unavailable` 状态；上游模型 ID 与逻辑模型名不要求相同。
+- `source_model_capabilities` 以 `(source_id, upstream_model_id, protocol)` 唯一，协议模式为 `unknown/native/adapter/unsupported`。`unknown` 和 `unsupported` 都不是可路由能力；Adapter 仍只允许一次直接转换，并要求其来源协议已确认原生可用。
+- `model_bindings` 显式关联 LogicalModel、Source、Account、upstream model 和入口协议。Binding 初始为 `pending`；只有逻辑模型、Source、Account、SourceModel 和对应协议能力都已确认且可用时，数据库才允许转为 `confirmed`。
+
+模型元数据字段第一版包括逻辑名、显示名、上下文窗口、最大输入/输出 Token、输入/输出模态、Tools、Thinking、Web Search、Structured Output、Streaming 和 Usage。每个字段来源只能是 `user/preset/upstream/unknown`，合并优先级固定为：
+
+```text
+user > preset > upstream > unknown
+```
+
+重复刷新同一 `(source_id, upstream_model_id)` 只更新原始发现快照、最近发现时间和可用状态，不创建重复记录。待确认记录会重新应用预设和上游元数据，但保留用户覆盖；已确认记录的元数据和匹配预设均保持不变。发现中消失的模型只标记 `unavailable`，不删除 LogicalModel、Binding 或 Route。
+
+本阶段只提供 migration、领域类型和仓储查询，不改变现有 Route，也不把发现结果自动写入 `logical_models`、`model_bindings` 或 `routes`。`/v1/models` 和运行时路由切换到 PostgreSQL 模型目录属于后续 PostgreSQL-backed 控制面任务。
+
+开发期 `GATEWAY_CONFIG_JSON` 导入会为尚不存在的 Provider ID 创建一次 `custom@1` Source 快照，并让 Account 显式引用该 Source；后续启动同步不会覆盖已经存在的 Source 快照或用户编辑，PostgreSQL 仍是模型目录事实来源。
+
 ## 4. 请求处理流程
 
 ```text
@@ -383,7 +418,9 @@ Kimi Adapter：
 
 ### 7.2 PostgreSQL 领域表
 
-当前已经创建 `usage_events`、`usage_event_attempts`、`virtual_keys`、`providers`、`accounts` 和 `routes` 表，并在启动时同步配置。`request_id` 表示一次北向逻辑请求并保持唯一；重试尝试写入 `usage_event_attempts(request_id, attempt_no)`，同一尝试幂等。`usage_events.logical_model` 保存客户端模型，`upstream_model_id` 在路由能明确提供时填充，否则为空；时间统一按 PostgreSQL `TIMESTAMPTZ` 以 UTC 存储，展示层负责本地时区转换。
+当前已经创建 `usage_events`、`usage_event_attempts`、`virtual_keys`、`providers`、`accounts`、`routes`，以及 Provider/Model preset、Source、SourceModel、LogicalModel、ModelBinding、SourceModelCapability 模型目录表。现有配置会前进回填为 `custom` ProviderPreset 的独立 Source 快照，但运行时仍继续使用当前配置路径，直到 PostgreSQL-backed 控制面任务完成。`request_id` 表示一次北向逻辑请求并保持唯一；重试尝试写入 `usage_event_attempts(request_id, attempt_no)`，同一尝试幂等。`usage_events.logical_model` 保存客户端模型，`upstream_model_id` 在路由能明确提供时填充，否则为空；时间统一按 PostgreSQL `TIMESTAMPTZ` 以 UTC 存储，展示层负责本地时区转换。
+
+模型目录数据库回归测试只连接显式的 `TEST_DATABASE_URL`，不会复用运行时 `DATABASE_URL`；未设置时普通单元测试跳过 PostgreSQL 集成部分。
 
 - `health_snapshots`；
 - `audit_logs`。
