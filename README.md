@@ -19,7 +19,7 @@ Rust AI 网关 MVP，目标是将多个上游账号统一为一个入口，并�
 - Provider、Account、Route 配置抽象。
 - 精确路由优先：为协议+模型绑定的账号优先于默认启用账号。
 - Kimi Responses 适配器已作为 workspace crate 内置，路由使用 `kimi_responses_adapter` 时直接在进程内转换。
-- 设置 `DATABASE_URL` 后自动初始化 PostgreSQL 的 `usage_events` 表。
+- 设置 `DATABASE_URL` 后自动初始化 PostgreSQL 的用量、控制面和模型目录表；模型目录目前是仓储基线，尚未替换现有运行时 Route。
 - PostgreSQL-backed Virtual Key：创建、列表、撤销、模型白名单鉴权。
 - 管理接口：`/admin/keys`、`/admin/keys/:id/revoke`、`/admin/usage/summary`、`/admin/usage/events`、`/admin/usage/aggregate`。
 
@@ -52,6 +52,8 @@ export GATEWAY_CONFIG_JSON='{
 }'
 cargo run
 ```
+
+需要执行模型目录 PostgreSQL 集成测试时，显式设置专用的 `TEST_DATABASE_URL`；测试不会复用运行时 `DATABASE_URL`。
 
 设置 `GATEWAY_API_KEY` 后，三类协议入口会要求 `Authorization: Bearer ...` 或 `x-api-key`。Kimi Responses 路由只需配置 `"adapter":"kimi_responses_adapter"`，不需要启动额外服务；账号凭据通过 `credential_env` 注入。之后客户端仍然只需要调用网关：
 

@@ -11,6 +11,9 @@
 - [x] 流式 SSE 末事件 usage 自动落库
 - [x] usage 缺失时使用 tiktoken-rs 估算
 - [x] Provider/Account/Route 配置同步到 PostgreSQL
+- [x] 模型目录领域表与可路由 Binding 仓储基线
+- [ ] ProviderPreset、模型发现差异和用户确认 API
+- [ ] PostgreSQL-backed 模型目录加载与 `/v1/models`/路由切换
 - [ ] Provider/Account/Route CRUD 与数据库加载
 - [ ] Virtual Key 轮换与分组权限
 - [x] Keeper React UI vendor 与静态资源构建
