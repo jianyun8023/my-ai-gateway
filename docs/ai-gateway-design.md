@@ -360,6 +360,7 @@ Kimi Adapter：
 - `GET /admin/usage/summary` 返回基础请求数、成功数和 Token 汇总。
 - `GET /admin/usage/events?limit=100` 返回最近请求事件。
 - `GET /admin/usage/aggregate` 提供 UTC 时间范围聚合：`from`/`to`（RFC3339）、`granularity=hour|day`，以及 `breakdown=model|provider|account|protocol|source` 和组合筛选参数（`model`、`provider`、`account`、`protocol`、`source`）。
+  `source` 来自可选的下游 `X-Client-Source` 请求头，缺省为 `unknown`；该字段仅用于统计维度，不改变路由或认证。
 
 ### 部署
 

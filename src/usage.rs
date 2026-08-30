@@ -222,4 +222,12 @@ mod tests {
         assert!(report.output_tokens > 0);
         assert_eq!(report.source, "estimated");
     }
+
+    #[test]
+    fn usage_without_upstream_fields_is_missing_until_estimated() {
+        assert!(extract_json(&json!({"usage": {}})).is_none());
+        let report = estimate(b"input", b"output");
+        assert_eq!(report.source, "estimated");
+        assert!(report.total_tokens >= report.input_tokens + report.output_tokens);
+    }
 }

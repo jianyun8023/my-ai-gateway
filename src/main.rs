@@ -525,6 +525,12 @@ async fn proxy(
     };
     let usage = transport::usage_from_response(&response);
     if let Some(database) = &state.db {
+        let source = headers
+            .get("x-client-source")
+            .and_then(|value| value.to_str().ok())
+            .filter(|value| !value.is_empty())
+            .unwrap_or("unknown")
+            .to_string();
         let final_account_id = attempts
             .iter()
             .rev()
@@ -538,7 +544,7 @@ async fn proxy(
             model: model.to_string(),
             logical_model: model.to_string(),
             upstream_model_id: None,
-            source: "unknown".into(),
+            source,
             protocol_in: protocol.to_string(),
             protocol_upstream: protocol.to_string(),
             mode: route.mode.clone(),

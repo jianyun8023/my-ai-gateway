@@ -394,6 +394,7 @@ mod tests {
             provider_id: Some("p".into()),
             account_id: Some("a".into()),
             protocol: Some("openai_chat_completions".into()),
+            source: None,
         };
         let (sql, binds) = filter_sql(&filter);
         assert!(sql.contains("created_at >= $1"));
