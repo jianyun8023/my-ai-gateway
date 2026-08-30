@@ -14,7 +14,7 @@
 
 - OpenAI Chat Completions；
 - OpenAI Responses；
-- Anthropic Messages（Claude/Coze 客户端兼容面）。
+- Anthropic Messages。
 
 ## 核心架构约束
 
