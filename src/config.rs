@@ -53,8 +53,11 @@ pub fn adapter_registry() -> AdapterRegistry {
         "kimi_responses_adapter",
         AdapterDefinition {
             name: "kimi_responses_adapter",
-            from_protocol: Protocol::AnthropicMessages,
-            to_protocol: Protocol::OpenAiResponses,
+            // Direction is client/route ingress -> provider/upstream protocol.
+            // Kimi Responses accepts OpenAI Responses and emits Anthropic
+            // Messages upstream.
+            from_protocol: Protocol::OpenAiResponses,
+            to_protocol: Protocol::AnthropicMessages,
             // Kimi's adapter translates these fields/events; file search is
             // intentionally unsupported rather than silently treated as kept.
             features: Capabilities {
@@ -485,10 +488,10 @@ impl GatewayConfig {
                             ));
                             continue;
                         };
-                        if definition.to_protocol != *protocol {
+                        if definition.from_protocol != *protocol {
                             errors.push(format!(
-                                "{protocol_scope}.adapter: adapter '{name}' targets {}, not {protocol}",
-                                definition.to_protocol
+                                "{protocol_scope}.adapter: adapter '{name}' accepts {}, not {protocol}",
+                                definition.from_protocol
                             ));
                         }
                     }
@@ -743,13 +746,13 @@ fn validate_matrix(
                     "{scope}.protocol_capabilities.{protocol}.adapter: unknown adapter '{name}'"
                 ));
             };
-            if definition.from_protocol != source || definition.to_protocol != *protocol {
+            if definition.from_protocol != *protocol || definition.to_protocol != source {
                 return Err(format!(
                     "{scope}.protocol_capabilities.{protocol}: adapter '{name}' direction is {} -> {}, configured {} -> {}",
                     definition.from_protocol,
                     definition.to_protocol,
-                    source,
-                    protocol
+                    protocol,
+                    source
                 ));
             }
         }
@@ -860,8 +863,8 @@ mod tests {
     #[test]
     fn kimi_adapter_registry_declares_direction_and_feature_modes() {
         let adapter = adapter_definition("kimi_responses_adapter").unwrap();
-        assert_eq!(adapter.from_protocol, Protocol::AnthropicMessages);
-        assert_eq!(adapter.to_protocol, Protocol::OpenAiResponses);
+        assert_eq!(adapter.from_protocol, Protocol::OpenAiResponses);
+        assert_eq!(adapter.to_protocol, Protocol::AnthropicMessages);
         assert_eq!(
             adapter.feature(AdapterFeature::Thinking),
             CapabilityMode::Translated
