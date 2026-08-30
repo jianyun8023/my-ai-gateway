@@ -226,6 +226,16 @@ Kimi Adapter：
 - 请求结束后写入基础请求事件；
 - `request_id` 唯一防重复。
 
+### Virtual Key 与统计 API
+
+- `POST /admin/keys` 创建 Virtual Key；
+- `GET /admin/keys` 查询 Key；
+- `POST /admin/keys/:id/revoke` 撤销 Key；
+- Key 使用 SHA-256 哈希存储，原始值只在创建时返回；
+- 支持 `allowed_models` 模型白名单；
+- 成功鉴权后更新 `last_used_at`；
+- `GET /admin/usage/summary` 返回基础请求数、成功数和 Token 汇总。
+
 ### 部署
 
 - [Dockerfile](../Dockerfile)；
@@ -237,15 +247,11 @@ Kimi Adapter：
 
 ### 7.1 Virtual Key 正式系统
 
-当前只有单个静态 `GATEWAY_API_KEY`，还未完成：
+已完成数据库-backed Key 创建、列表、撤销和模型白名单鉴权。仍待完成：
 
-- Virtual Key 创建；
-- Key 哈希存储；
-- Key 撤销；
 - Key 轮换；
-- 模型白名单；
-- Key 最近使用时间；
-- Admin API。
+- Key 分组和路由白名单；
+- 更完整的 Admin Session 与审计。
 
 ### 7.2 PostgreSQL 领域表
 

@@ -12,12 +12,23 @@ Rust AI 网关 MVP，目标是将多个上游账号统一为一个入口，并�
 - 精确路由优先：为协议+模型绑定的账号优先于默认启用账号。
 - Kimi Responses 适配器已作为 workspace crate 内置，路由使用 `kimi_responses_adapter` 时直接在进程内转换。
 - 设置 `DATABASE_URL` 后自动初始化 PostgreSQL 的 `usage_events` 表。
+- PostgreSQL-backed Virtual Key：创建、列表、撤销、模型白名单鉴权。
+- 管理接口：`/admin/keys`、`/admin/keys/:id/revoke`、`/admin/usage/summary`。
 
 运行：
 
 ```bash
 cargo run
 curl http://127.0.0.1:8787/healthz
+```
+
+设置 `GATEWAY_ADMIN_KEY` 后可创建下游 Virtual Key，原始 Key 只在创建响应中返回：
+
+```bash
+curl -X POST http://127.0.0.1:8787/admin/keys \
+  -H "Authorization: Bearer $GATEWAY_ADMIN_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"service-a","allowed_models":["MiniMax-M2.7"]}'
 ```
 
 可通过 `GATEWAY_CONFIG_JSON` 配置多个 provider、账号和固定路由（示例）：
