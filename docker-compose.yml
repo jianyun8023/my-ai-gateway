@@ -1,0 +1,30 @@
+services:
+  gateway:
+    build: .
+    ports:
+      - "8787:8787"
+    environment:
+      GATEWAY_LISTEN_ADDR: 0.0.0.0:8787
+      DATABASE_URL: postgres://gateway:gateway@postgres:5432/gateway
+      GATEWAY_CONFIG_JSON: ${GATEWAY_CONFIG_JSON:?set GATEWAY_CONFIG_JSON}
+      GATEWAY_API_KEY: ${GATEWAY_API_KEY:?set GATEWAY_API_KEY}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: gateway
+      POSTGRES_PASSWORD: gateway
+      POSTGRES_DB: gateway
+    volumes:
+      - gateway_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gateway -d gateway"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  gateway_pgdata:

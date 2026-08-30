@@ -1,0 +1,86 @@
+{
+  "listen_addr": "0.0.0.0:8787",
+  "providers": [
+    {
+      "id": "minimax",
+      "name": "MiniMax",
+      "base_url": "https://your-minimax-endpoint",
+      "models": ["MiniMax-M2.7"],
+      "native_protocols": ["openai_chat_completions", "openai_responses", "anthropic_messages"],
+      "endpoints": {
+        "openai_chat_completions": "/v1/chat/completions",
+        "openai_responses": "/v1/responses",
+        "anthropic_messages": "/v1/messages"
+      },
+      "capabilities": {"streaming": true, "tools": true, "thinking": true, "web_search": true, "usage": true}
+    },
+    {
+      "id": "deepseek",
+      "name": "DeepSeek",
+      "base_url": "https://your-deepseek-endpoint",
+      "models": ["deepseek-chat", "deepseek-reasoner"],
+      "native_protocols": ["openai_chat_completions", "openai_responses", "anthropic_messages"],
+      "endpoints": {
+        "openai_chat_completions": "/v1/chat/completions",
+        "openai_responses": "/v1/responses",
+        "anthropic_messages": "/v1/messages"
+      },
+      "capabilities": {"streaming": true, "tools": true, "thinking": true, "web_search": true, "usage": true}
+    },
+    {
+      "id": "kimi_code",
+      "name": "Kimi Code",
+      "base_url": "https://api.kimi.com/coding",
+      "models": ["kimi-for-coding-highspeed"],
+      "native_protocols": ["openai_chat_completions", "anthropic_messages"],
+      "endpoints": {
+        "openai_chat_completions": "/v1/chat/completions",
+        "anthropic_messages": "/v1/messages"
+      },
+      "capabilities": {"streaming": true, "tools": true, "thinking": true, "web_search": true, "usage": true}
+    }
+  ],
+  "accounts": [
+    {"id": "minimax-main", "provider_id": "minimax", "display_name": "MiniMax 主账号", "credential_env": "MINIMAX_API_KEY", "enabled": true, "weight": 100},
+    {"id": "minimax-backup", "provider_id": "minimax", "display_name": "MiniMax 备用账号", "credential_env": "MINIMAX_API_KEY_2", "enabled": true, "weight": 50},
+    {"id": "deepseek-main", "provider_id": "deepseek", "display_name": "DeepSeek 主账号", "credential_env": "DEEPSEEK_API_KEY", "enabled": true, "weight": 100},
+    {"id": "kimi-main", "provider_id": "kimi_code", "display_name": "Kimi Code", "credential_env": "KIMI_API_KEY", "enabled": true, "weight": 100}
+  ],
+  "routes": [
+    {
+      "id": "minimax-all-native",
+      "model": "MiniMax-M2.7",
+      "provider_id": "minimax",
+      "protocols": ["openai_chat_completions", "openai_responses", "anthropic_messages"],
+      "primary_account_id": "minimax-main",
+      "fallback_accounts": ["minimax-backup"],
+      "mode": "native"
+    },
+    {
+      "id": "deepseek-all-native",
+      "model": "deepseek-*",
+      "provider_id": "deepseek",
+      "protocols": ["openai_chat_completions", "openai_responses", "anthropic_messages"],
+      "primary_account_id": "deepseek-main",
+      "mode": "native"
+    },
+    {
+      "id": "kimi-native",
+      "model": "kimi-for-coding-highspeed",
+      "provider_id": "kimi_code",
+      "protocols": ["openai_chat_completions", "anthropic_messages"],
+      "primary_account_id": "kimi-main",
+      "mode": "native"
+    },
+    {
+      "id": "kimi-responses-adapter",
+      "model": "kimi-for-coding-highspeed",
+      "provider_id": "kimi_code",
+      "protocols": ["openai_responses"],
+      "primary_account_id": "kimi-main",
+      "mode": "adapter",
+      "adapter": "kimi_responses_adapter",
+      "allow_lossy_conversion": false
+    }
+  ]
+}
