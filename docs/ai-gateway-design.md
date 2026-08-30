@@ -77,7 +77,8 @@ Provider/Account 来源配置必须显式描述每种北向协议的处理能力
 
 - `native` 必须对应实际存在的上游 endpoint；
 - `adapter` 必须声明 `source_protocol` 和 Adapter 名称；
-- `source_protocol` 必须是该来源已声明为原生或可继续解析的协议；
+- `source_protocol` 必须是该来源已声明为原生或配置了非空 endpoint 的协议；
+- Adapter 名称、输入/输出协议方向必须匹配内置 Adapter 注册表；不允许多段转换或循环；
 - 不支持且没有合法 Adapter 的协议，在路由解析阶段返回结构化错误；
 - Tools、Web Search、Thinking、Usage 等能力也应按协议/来源分别声明，转换可能造成的能力损失必须显式标记。
 
@@ -102,7 +103,7 @@ Provider 是来源级默认值，账号和模型可以逐级覆盖。解析优�
 }
 ```
 
-非法组合（例如 `native` 携带 adapter、`unsupported` 携带 source_protocol、adapter 缺少任一字段、adapter 来源不可用或形成循环）会在 `GatewayConfig::validate()` 中返回结构化错误；不会静默降级。
+非法组合（例如 `native` 携带 adapter、`unsupported` 携带 source_protocol、adapter 缺少任一字段、未知 Adapter、方向不匹配、adapter 来源不可用或形成多段链/循环）会在 `GatewayConfig::validate()` 中返回带配置路径的结构化错误；不会静默降级。Adapter 注册表同时声明每个 feature 的 `native`、`translated` 或 `unsupported` 结果，未知能力保持 `unsupported`，不会被推断为支持。
 
 ### 3.2 三协议原生 Provider
 
