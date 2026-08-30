@@ -149,9 +149,6 @@ impl Database {
         sqlx::query(include_str!("../migrations/0002_control_plane.sql"))
             .execute(&self.pool)
             .await?;
-        sqlx::query(include_str!("../migrations/0003_usage_semantics.sql"))
-            .execute(&self.pool)
-            .await?;
         Ok(())
     }
 
@@ -404,11 +401,10 @@ mod tests {
     }
 
     #[test]
-    fn migration_keeps_logical_request_and_attempt_idempotency() {
-        let migration = include_str!("../migrations/0003_usage_semantics.sql");
-        assert!(migration.contains("UNIQUE (request_id, attempt_no)"));
-        assert!(
-            include_str!("../migrations/0001_init.sql").contains("request_id TEXT NOT NULL UNIQUE")
-        );
+    fn initial_schema_keeps_logical_request_and_attempt_idempotency() {
+        let schema = include_str!("../migrations/0001_init.sql");
+        assert!(schema.contains("logical_model TEXT NOT NULL"));
+        assert!(schema.contains("UNIQUE (request_id, attempt_no)"));
+        assert!(schema.contains("request_id TEXT NOT NULL UNIQUE"));
     }
 }
