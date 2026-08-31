@@ -48,6 +48,7 @@ import {
   StatusPill,
   SuccessNotice,
   TableScroll,
+  TextAreaField,
   TextField,
   Toggle,
   formatDateTime,
@@ -117,6 +118,25 @@ const presetCapabilities = (preset?: ProviderPreset): Source['protocol_capabilit
   return capabilities;
 };
 
+const presetAuthConfig = (preset?: ProviderPreset): Source['auth_config'] => {
+  const header = preset?.definition.credential_header;
+  return header
+    ? { credential_header: header, default_headers: preset?.definition.default_headers ?? {} }
+    : {};
+};
+
+const authField = (authConfig: Source['auth_config'], field: 'header' | 'prefix'): string => {
+  const credentialHeader = authConfig.credential_header;
+  if (!credentialHeader || typeof credentialHeader !== 'object') return '';
+  const value = (credentialHeader as Record<string, unknown>)[field];
+  return typeof value === 'string' ? value : '';
+};
+
+const defaultHeadersJson = (authConfig: Source['auth_config']): string => {
+  const value = authConfig.default_headers;
+  return JSON.stringify(value && typeof value === 'object' ? value : {}, null, 2);
+};
+
 function SourceForm({
   record,
   presets,
@@ -151,6 +171,10 @@ function SourceForm({
     record?.protocol_capabilities
     ?? presetCapabilities(initialPreset)
   ));
+  const initialAuthConfig = record?.auth_config ?? presetAuthConfig(initialPreset);
+  const [authHeader, setAuthHeader] = useState(() => authField(initialAuthConfig, 'header'));
+  const [authPrefix, setAuthPrefix] = useState(() => authField(initialAuthConfig, 'prefix'));
+  const [defaultHeaders, setDefaultHeaders] = useState(() => defaultHeadersJson(initialAuthConfig));
   const [enabled, setEnabled] = useState(record?.enabled ?? true);
   const [validationError, setValidationError] = useState('');
 
@@ -163,6 +187,10 @@ function SourceForm({
     setBaseUrl(preset.definition.default_base_url ?? '');
     setEndpoints(presetEndpoints(preset));
     setCapabilities(presetCapabilities(preset));
+    const authConfig = presetAuthConfig(preset);
+    setAuthHeader(authField(authConfig, 'header'));
+    setAuthPrefix(authField(authConfig, 'prefix'));
+    setDefaultHeaders(defaultHeadersJson(authConfig));
   };
 
   const changeCapabilityMode = (protocol: GatewayProtocol, mode: SourceProtocolMode) => {
@@ -202,6 +230,29 @@ function SourceForm({
       setValidationError('Adapter 模式必须同时指定上游协议和 Adapter 名称。');
       return;
     }
+    let parsedHeaders: unknown;
+    try {
+      parsedHeaders = JSON.parse(defaultHeaders || '{}');
+    } catch {
+      setValidationError('默认 Header 必须是有效的 JSON 对象。');
+      return;
+    }
+    if (!parsedHeaders || typeof parsedHeaders !== 'object' || Array.isArray(parsedHeaders)) {
+      setValidationError('默认 Header 必须是 JSON 对象。');
+      return;
+    }
+    if (!authHeader.trim()) {
+      setValidationError('凭据 Header 不能为空。');
+      return;
+    }
+    if (!Object.values(parsedHeaders).every((value) => typeof value === 'string')) {
+      setValidationError('默认 Header 的值必须是字符串。');
+      return;
+    }
+    const authConfig = {
+      credential_header: { header: authHeader.trim(), prefix: authPrefix },
+      default_headers: parsedHeaders as Record<string, string>,
+    };
     setValidationError('');
     if (record) {
       onSubmit({
@@ -211,7 +262,7 @@ function SourceForm({
         provider_preset_version: record.provider_preset_version,
         base_url: baseUrl.trim(),
         endpoints,
-        auth_config: record.auth_config,
+        auth_config: authConfig,
         protocol_capabilities: capabilities,
         enabled,
       });
@@ -225,6 +276,7 @@ function SourceForm({
       base_url: baseUrl.trim(),
       endpoint_overrides: endpoints,
       protocol_capabilities: capabilities,
+      auth_config: authConfig,
       enabled,
     });
   };
@@ -295,6 +347,13 @@ function SourceForm({
             );
           })}
         </div>
+      </DrawerSection>
+      <DrawerSection title="认证模板">
+        <FormGrid>
+          <TextField label="凭据 Header" value={authHeader} disabled={busy} onChange={(event) => setAuthHeader(event.target.value)} autoComplete="off" spellCheck={false} />
+          <TextField label="Header Prefix" value={authPrefix} disabled={busy} onChange={(event) => setAuthPrefix(event.target.value)} autoComplete="off" spellCheck={false} />
+          <TextAreaField label="默认 Headers JSON" value={defaultHeaders} disabled={busy} onChange={(event) => setDefaultHeaders(event.target.value)} spellCheck={false} />
+        </FormGrid>
       </DrawerSection>
       <FormError message={validationError || error} />
     </form>
