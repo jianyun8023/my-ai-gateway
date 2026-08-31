@@ -525,11 +525,12 @@ function SourceDetailDrawer({
         <DetailList>
           {(['openai_chat_completions', 'openai_responses', 'anthropic_messages'] as const).map((protocol) => {
             const capability = source.protocol_capabilities[protocol];
+            const endpointProtocol = capability?.source_protocol ?? protocol;
             return (
               <DetailItem key={protocol} label={PROTOCOL_LABELS[protocol]}>
                 <span className={styles.inlineActions}>
                   <StatusPill tone={protocolModeTone(capability?.mode)}>{protocolModeLabel(capability?.mode)}</StatusPill>
-                  <span className={styles.mono}>{source.endpoints[protocol] ?? 'endpoint 未配置'}</span>
+                  <span className={styles.mono}>{source.endpoints[endpointProtocol] ?? 'endpoint 未配置'}{capability?.source_protocol && <small className={styles.blockMeta}>upstream endpoint</small>}</span>
                   {capability?.source_protocol && <span className={styles.secondaryText}>← {PROTOCOL_LABELS[capability.source_protocol]}</span>}
                 </span>
               </DetailItem>
