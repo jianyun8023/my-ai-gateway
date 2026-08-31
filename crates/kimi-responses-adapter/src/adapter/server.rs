@@ -33,10 +33,14 @@ pub struct AppState {
 }
 
 pub fn router(cfg: Config) -> Router {
+    router_with_client(cfg, reqwest::Client::new())
+}
+
+pub fn router_with_client(cfg: Config, client: reqwest::Client) -> Router {
     let state = Arc::new(AppState {
         cfg,
-        client: reqwest::Client::new(),
-        models: ModelRegistry::new(Duration::from_secs(600)),
+        client: client.clone(),
+        models: ModelRegistry::with_client(Duration::from_secs(600), client),
     });
     Router::new()
         .route("/v1/responses", any(responses_entry))
@@ -206,10 +210,10 @@ async fn responses_entry(State(state): State<Arc<AppState>>, req: Request) -> Re
         .await
     {
         Ok(r) => r,
-        Err(e) => {
+        Err(_) => {
             return json_error(
                 StatusCode::BAD_GATEWAY,
-                &format!("upstream request failed: {e}"),
+                "upstream request failed",
                 "api_error",
             );
         }
@@ -405,10 +409,10 @@ async fn passthrough(State(state): State<Arc<AppState>>, req: Request) -> Respon
         .await
     {
         Ok(r) => r,
-        Err(e) => {
+        Err(_) => {
             return json_error(
                 StatusCode::BAD_GATEWAY,
-                &format!("upstream request failed: {e}"),
+                "upstream request failed",
                 "api_error",
             );
         }

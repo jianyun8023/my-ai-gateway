@@ -8,6 +8,7 @@ use crate::{
     protocol::Protocol,
     provider_preset::ProviderPresetDefinition,
     routing::{intersect_capabilities, join_endpoint, RouteResolver, RuntimeBinding, RuntimeRoute},
+    source_url::{SourceUrlPolicy, SourceUrlPolicyError},
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -124,13 +125,24 @@ impl RuntimeSnapshot {
 pub struct ControlPlane {
     pool: PgPool,
     listen_addr: String,
+    source_url_policy: Arc<SourceUrlPolicy>,
 }
 
 impl ControlPlane {
+    #[cfg(test)]
     pub fn new(database: &Database, listen_addr: impl Into<String>) -> Self {
+        Self::with_url_policy(database, listen_addr, Arc::new(SourceUrlPolicy::default()))
+    }
+
+    pub fn with_url_policy(
+        database: &Database,
+        listen_addr: impl Into<String>,
+        source_url_policy: Arc<SourceUrlPolicy>,
+    ) -> Self {
         Self {
             pool: database.pool().clone(),
             listen_addr: listen_addr.into(),
+            source_url_policy,
         }
     }
 
@@ -146,6 +158,7 @@ impl ControlPlane {
         &self,
         mut tx: Transaction<'_, Postgres>,
     ) -> Result<RuntimeSnapshot, ControlPlaneError> {
+        validate_persisted_source_urls(&mut tx, &self.source_url_policy).await?;
         validate_capability_chains(&mut tx).await?;
         let (revision, generated_at): (i64, DateTime<Utc>) = sqlx::query_as(
             "UPDATE runtime_snapshot_state SET revision=revision+1,updated_at=clock_timestamp() WHERE singleton=TRUE RETURNING revision,updated_at",
@@ -162,6 +175,7 @@ impl ControlPlane {
         sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
             .execute(&mut *tx)
             .await?;
+        validate_persisted_source_urls(&mut tx, &self.source_url_policy).await?;
         validate_capability_chains(&mut tx).await?;
         let (revision, generated_at): (i64, DateTime<Utc>) = sqlx::query_as(
             "SELECT revision,updated_at FROM runtime_snapshot_state WHERE singleton=TRUE",
@@ -189,8 +203,17 @@ impl ControlPlane {
         config: &GatewayConfig,
         force: bool,
     ) -> Result<Option<RuntimeSnapshot>, ControlPlaneError> {
-        if let Err(errors) = config.validate() {
-            return Err(ControlPlaneError::Validation(errors));
+        let mut validation_errors = config.validate().err().unwrap_or_default();
+        for (index, provider) in config.providers.iter().enumerate() {
+            if let Err(error) = self.source_url_policy.validate_base_url(&provider.base_url) {
+                validation_errors.push(source_url_validation_message(
+                    &format!("providers[{index}].base_url"),
+                    error,
+                ));
+            }
+        }
+        if !validation_errors.is_empty() {
+            return Err(ControlPlaneError::Validation(validation_errors));
         }
         if config
             .accounts
@@ -363,7 +386,10 @@ fn normalize_object(value: Value, field: &str) -> Result<Value, ControlPlaneErro
     Ok(value)
 }
 
-fn validate_source_input(input: &SourceWrite) -> Result<(), ControlPlaneError> {
+fn validate_source_input(
+    input: &SourceWrite,
+    source_url_policy: &SourceUrlPolicy,
+) -> Result<(), ControlPlaneError> {
     let mut errors = Vec::new();
     validate_nonempty(&input.id, "source.id", &mut errors);
     validate_nonempty(&input.display_name, "source.display_name", &mut errors);
@@ -375,18 +401,8 @@ fn validate_source_input(input: &SourceWrite) -> Result<(), ControlPlaneError> {
     if input.provider_preset_version <= 0 {
         errors.push("source.provider_preset_version must be positive".to_owned());
     }
-    if !reqwest::Url::parse(&input.base_url).is_ok_and(|url| {
-        matches!(url.scheme(), "http" | "https")
-            && url.host_str().is_some()
-            && url.username().is_empty()
-            && url.password().is_none()
-            && url.query().is_none()
-            && url.fragment().is_none()
-    }) {
-        errors.push(
-            "source.base_url must be an http(s) URL without credentials, query, or fragment"
-                .to_owned(),
-        );
+    if let Err(error) = source_url_policy.validate_base_url(&input.base_url) {
+        errors.push(source_url_validation_message("source.base_url", error));
     }
     if !input.auth_config.is_null() && !input.auth_config.is_object() {
         errors.push("source.auth_config must be a JSON object".to_owned());
@@ -428,6 +444,40 @@ fn validate_source_input(input: &SourceWrite) -> Result<(), ControlPlaneError> {
     if let Err(mut validation_errors) = config.validate() {
         errors.append(&mut validation_errors);
     }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(ControlPlaneError::Validation(errors))
+    }
+}
+
+fn source_url_validation_message(field: &str, error: SourceUrlPolicyError) -> String {
+    if error == SourceUrlPolicyError::InvalidUrl {
+        format!("{field} must be an http(s) URL without credentials, query, or fragment")
+    } else {
+        format!("{field} is blocked by the server Source URL policy")
+    }
+}
+
+async fn validate_persisted_source_urls(
+    tx: &mut Transaction<'_, Postgres>,
+    source_url_policy: &SourceUrlPolicy,
+) -> Result<(), ControlPlaneError> {
+    let sources =
+        sqlx::query_as::<_, (String, String)>("SELECT id,base_url FROM sources ORDER BY id")
+            .fetch_all(&mut **tx)
+            .await?;
+    let errors = sources
+        .into_iter()
+        .filter_map(|(id, base_url)| {
+            source_url_policy
+                .validate_base_url(&base_url)
+                .err()
+                .map(|error| {
+                    source_url_validation_message(&format!("source '{id}' base_url"), error)
+                })
+        })
+        .collect::<Vec<_>>();
     if errors.is_empty() {
         Ok(())
     } else {
@@ -1635,7 +1685,7 @@ impl ControlPlane {
         &self,
         input: &SourceWrite,
     ) -> Result<Mutation<SourceView>, ControlPlaneError> {
-        validate_source_input(input)?;
+        validate_source_input(input, &self.source_url_policy)?;
         let mut tx = self.begin_write().await?;
         if row_exists(&mut tx, "sources", "id", &input.id).await? {
             return Err(ControlPlaneError::Conflict(format!(
@@ -1684,7 +1734,7 @@ impl ControlPlane {
         input: &SourceWrite,
     ) -> Result<Mutation<SourceView>, ControlPlaneError> {
         validate_resource_id(id, &input.id, "source")?;
-        validate_source_input(input)?;
+        validate_source_input(input, &self.source_url_policy)?;
         let mut tx = self.begin_write().await?;
         let preset: Option<(String, i32)> = sqlx::query_as(
             "SELECT provider_preset_id,provider_preset_version FROM sources WHERE id=$1 FOR UPDATE",
@@ -2261,6 +2311,29 @@ mod tests {
     use std::{str::FromStr, time::Duration};
     use tower::ServiceExt;
 
+    #[test]
+    fn source_validation_uses_server_policy_and_does_not_echo_blocked_targets() {
+        let input = SourceWrite {
+            id: "private-source".into(),
+            display_name: "Private Source".into(),
+            provider_preset_id: "custom".into(),
+            provider_preset_version: 1,
+            base_url: "http://10.20.30.40:8080".into(),
+            endpoints: HashMap::new(),
+            auth_config: json!({}),
+            protocol_capabilities: json!({}),
+            enabled: true,
+        };
+        let error = validate_source_input(&input, &SourceUrlPolicy::default()).unwrap_err();
+        let message = error.message();
+        assert!(message.contains("server Source URL policy"));
+        assert!(!message.contains("10.20.30.40"));
+
+        let allowlisted =
+            SourceUrlPolicy::from_allowlist("10.20.0.0/16").expect("private test CIDR");
+        assert!(validate_source_input(&input, &allowlisted).is_ok());
+    }
+
     async fn isolated_database() -> (Database, PgPool, String) {
         let url = std::env::var("TEST_DATABASE_URL")
             .expect("TEST_DATABASE_URL must be set for the PostgreSQL control-plane test");
@@ -2750,6 +2823,20 @@ mod tests {
             .execute(&pool)
             .await
             .expect("restore valid endpoint");
+        sqlx::query("UPDATE sources SET base_url='http://127.0.0.1:8787' WHERE id='source-b'")
+            .execute(&pool)
+            .await
+            .expect("corrupt Source URL for failed reload test");
+        let blocked = match control_plane.load_snapshot().await {
+            Ok(_) => panic!("unsafe persisted Source URL must block snapshot publication"),
+            Err(error) => error,
+        };
+        assert!(blocked.message().contains("server Source URL policy"));
+        assert!(!blocked.message().contains("127.0.0.1"));
+        sqlx::query("UPDATE sources SET base_url='https://source-b.example' WHERE id='source-b'")
+            .execute(&pool)
+            .await
+            .expect("restore valid Source URL");
         let active_snapshot = control_plane
             .load_snapshot()
             .await
@@ -2762,7 +2849,7 @@ mod tests {
             live: Arc::new(std::sync::RwLock::new(crate::LiveConfig::from_snapshot(
                 active_snapshot,
             ))),
-            http: crate::transport::client().expect("HTTP client"),
+            http: crate::transport::test_client().expect("HTTP client"),
             db: Some(database.clone()),
             control_plane: Some(control_plane.clone()),
             health: health.clone(),

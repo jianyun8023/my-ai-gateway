@@ -7,6 +7,8 @@ use crate::{
     model_discovery::{DiscoveryServiceError, ModelDiscoveryService},
     protocol::Protocol,
     provider_preset::{provider_preset_diff, ProviderPresetDefinition},
+    source_url::SourceUrlPolicyError,
+    transport::SourceHttpClient,
 };
 use axum::{
     body::{Body, Bytes},
@@ -25,24 +27,24 @@ const MAX_ADMIN_JSON_BYTES: usize = 1024 * 1024;
 #[derive(Clone)]
 struct DiscoveryApiState {
     database: Option<Database>,
-    http: reqwest::Client,
+    http: SourceHttpClient,
 }
 
 #[cfg(test)]
-pub fn router(database: Option<Database>, http: reqwest::Client) -> Router {
+pub fn router(database: Option<Database>, http: SourceHttpClient) -> Router {
     router_inner(database, http, true)
 }
 
 /// Discovery endpoints mounted by the gateway application. The Source
 /// collection itself is owned by the DB-first control plane so creation can
 /// publish a validated runtime snapshot in the same operation.
-pub fn auxiliary_router(database: Option<Database>, http: reqwest::Client) -> Router {
+pub fn auxiliary_router(database: Option<Database>, http: SourceHttpClient) -> Router {
     router_inner(database, http, false)
 }
 
 fn router_inner(
     database: Option<Database>,
-    http: reqwest::Client,
+    http: SourceHttpClient,
     include_source_collection: bool,
 ) -> Router {
     let state = DiscoveryApiState { database, http };
@@ -163,12 +165,8 @@ async fn create_source(
     let base_url = request
         .base_url
         .unwrap_or_else(|| definition.default_base_url.clone());
-    if !valid_source_base_url(&base_url) {
-        return api_error(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "invalid_source_url",
-            "source base_url must be an http(s) origin without credentials, query, or fragment",
-        );
+    if let Err(error) = state.http.validate_base_url(&base_url) {
+        return source_url_error_response(error);
     }
     let mut endpoints = definition
         .protocols
@@ -527,15 +525,20 @@ fn catalog_error_response(error: CatalogError) -> Response<Body> {
     }
 }
 
-fn valid_source_base_url(value: &str) -> bool {
-    reqwest::Url::parse(value).is_ok_and(|url| {
-        matches!(url.scheme(), "http" | "https")
-            && url.host_str().is_some()
-            && url.username().is_empty()
-            && url.password().is_none()
-            && url.query().is_none()
-            && url.fragment().is_none()
-    })
+fn source_url_error_response(error: SourceUrlPolicyError) -> Response<Body> {
+    if error == SourceUrlPolicyError::InvalidUrl {
+        api_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_source_url",
+            "source base_url must be an http(s) URL without credentials, query, or fragment",
+        )
+    } else {
+        api_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "source_url_blocked",
+            "source base_url is blocked by server policy",
+        )
+    }
 }
 
 fn default_actor() -> String {
@@ -568,9 +571,16 @@ mod tests {
 
     #[test]
     fn source_creation_rejects_credential_bearing_urls() {
-        assert!(valid_source_base_url("https://api.example.com/base"));
-        assert!(!valid_source_base_url("https://secret@api.example.com"));
-        assert!(!valid_source_base_url("https://api.example.com?key=secret"));
+        let client = transport::test_client().unwrap();
+        assert!(client
+            .validate_base_url("https://api.example.com/base")
+            .is_ok());
+        assert!(client
+            .validate_base_url("https://secret@api.example.com")
+            .is_err());
+        assert!(client
+            .validate_base_url("https://api.example.com?key=secret")
+            .is_err());
     }
 
     fn admin_request(method: &str, uri: &str, body: Value) -> Request<Body> {
@@ -598,6 +608,17 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn blocked_source_url_error_does_not_echo_the_target() {
+        let response = source_url_error_response(SourceUrlPolicyError::DisallowedTarget);
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let body = response_json(response).await;
+        assert_eq!(body["error"]["code"], "source_url_blocked");
+        let serialized = body.to_string();
+        assert!(!serialized.contains("169.254.169.254"));
+        assert!(!serialized.contains("metadata.google.internal"));
+    }
+
+    #[tokio::test]
     async fn postgres_source_pending_edit_and_bulk_confirm_api_contract() {
         let Ok(url) = std::env::var("TEST_DATABASE_URL") else {
             eprintln!("skipping discovery API test: TEST_DATABASE_URL is not set");
@@ -612,7 +633,7 @@ mod tests {
             .expect("install built-in presets");
         let app = router(
             Some(database.clone()),
-            transport::client().expect("API HTTP client"),
+            transport::test_client().expect("API HTTP client"),
         );
         let suffix = uuid::Uuid::new_v4().simple().to_string();
         let source_id = format!("discovery-api-source-{suffix}");

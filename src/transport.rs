@@ -1,6 +1,7 @@
 use crate::{
     config::{AccountConfig, ProviderConfig},
     protocol::Protocol,
+    source_url::{reqwest_error_is_policy_violation, SourceUrlPolicy, SourceUrlPolicyError},
     usage::{usage_for_json_response, UsageReport},
 };
 use axum::{
@@ -9,22 +10,66 @@ use axum::{
 };
 use bytes::Bytes;
 use futures_util::TryStreamExt;
-use reqwest::Client;
+use reqwest::{Client, Method, RequestBuilder, Url};
 use serde_json::Value;
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 #[derive(Debug)]
 pub enum TransportError {
     MissingEndpoint,
-    Request(String),
+    SourceUrlBlocked,
+    Request,
 }
 
 impl TransportError {
     pub fn message(&self) -> &str {
         match self {
             Self::MissingEndpoint => "provider endpoint is not configured",
-            Self::Request(message) => message,
+            Self::SourceUrlBlocked => "upstream source URL is blocked by server policy",
+            Self::Request => "upstream request failed",
         }
+    }
+}
+
+impl From<SourceUrlPolicyError> for TransportError {
+    fn from(_: SourceUrlPolicyError) -> Self {
+        Self::SourceUrlBlocked
+    }
+}
+
+#[derive(Clone)]
+pub struct SourceHttpClient {
+    inner: Client,
+    policy: Arc<SourceUrlPolicy>,
+}
+
+impl SourceHttpClient {
+    pub fn request(
+        &self,
+        method: Method,
+        url: Url,
+    ) -> Result<RequestBuilder, SourceUrlPolicyError> {
+        self.policy.validate_request_url(&url)?;
+        Ok(self.inner.request(method, url))
+    }
+
+    pub fn post(&self, url: &str) -> Result<RequestBuilder, SourceUrlPolicyError> {
+        let url = self.policy.parse_request_url(url)?;
+        Ok(self.inner.post(url))
+    }
+
+    #[cfg(test)]
+    pub fn get(&self, url: &str) -> Result<RequestBuilder, SourceUrlPolicyError> {
+        let url = self.policy.parse_request_url(url)?;
+        Ok(self.inner.get(url))
+    }
+
+    pub fn validate_base_url(&self, value: &str) -> Result<Url, SourceUrlPolicyError> {
+        self.policy.validate_base_url(value)
+    }
+
+    pub fn raw_client(&self) -> Client {
+        self.inner.clone()
     }
 }
 
@@ -77,7 +122,7 @@ pub fn prepare_model_request(
 }
 
 pub async fn forward(
-    client: &Client,
+    client: &SourceHttpClient,
     provider: &ProviderConfig,
     account: &AccountConfig,
     credential: Option<&str>,
@@ -103,7 +148,7 @@ pub async fn forward(
 }
 
 pub async fn forward_url(
-    client: &Client,
+    client: &SourceHttpClient,
     url: &str,
     account: &AccountConfig,
     credential: Option<&str>,
@@ -116,7 +161,7 @@ pub async fn forward_url(
         .ok()
         .and_then(|v| v.get("stream").and_then(serde_json::Value::as_bool))
         .unwrap_or(false);
-    let mut request = client.post(url).body(body);
+    let mut request = client.post(url).map_err(TransportError::from)?.body(body);
     for (name, value) in request_headers {
         if !matches!(
             name.as_str(),
@@ -132,10 +177,7 @@ pub async fn forward_url(
             request = request.header("authorization", format!("Bearer {credential}"));
         }
     }
-    let upstream = request
-        .send()
-        .await
-        .map_err(|error| TransportError::Request(error.to_string()))?;
+    let upstream = request.send().await.map_err(map_reqwest_error)?;
     let status =
         StatusCode::from_u16(upstream.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
     let upstream_headers = upstream.headers().clone();
@@ -143,10 +185,7 @@ pub async fn forward_url(
     // request lifecycle while preserving a normal response body. Streaming
     // responses stay a live byte stream to retain TTFT and backpressure.
     if !is_streaming {
-        let bytes = upstream
-            .bytes()
-            .await
-            .map_err(|error| TransportError::Request(error.to_string()))?;
+        let bytes = upstream.bytes().await.map_err(map_reqwest_error)?;
         let report = usage_for_json_response(status.is_success(), &request_payload, &bytes);
         let body = Body::from(bytes);
         let mut response = Response::new(body);
@@ -182,11 +221,31 @@ pub fn usage_from_response(response: &Response<Body>) -> Option<UsageReport> {
     response.extensions().get::<UsageReport>().cloned()
 }
 
-pub fn client() -> Result<Client, reqwest::Error> {
-    Client::builder()
+pub fn client(policy: Arc<SourceUrlPolicy>) -> Result<SourceHttpClient, reqwest::Error> {
+    let redirect = policy.redirect_policy();
+    let resolver = Arc::new(policy.dns_resolver());
+    let inner = Client::builder()
         .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(300))
-        .build()
+        .no_proxy()
+        .redirect(redirect)
+        .dns_resolver(resolver)
+        .build()?;
+    Ok(SourceHttpClient { inner, policy })
+}
+
+#[cfg(test)]
+pub fn test_client() -> Result<SourceHttpClient, reqwest::Error> {
+    client(crate::source_url::test_policy())
+}
+
+fn map_reqwest_error(error: reqwest::Error) -> TransportError {
+    if reqwest_error_is_policy_violation(&error) {
+        TransportError::SourceUrlBlocked
+    } else {
+        let _ = error;
+        TransportError::Request
+    }
 }
 
 #[cfg(test)]
@@ -196,6 +255,7 @@ mod tests {
         body::to_bytes,
         extract::Request,
         http::{header, HeaderValue},
+        routing::get,
         Router,
     };
     use std::{
@@ -243,6 +303,19 @@ mod tests {
                 .expect("serve native transport mock")
         });
         (format!("http://{address}/native"), recorded)
+    }
+
+    async fn spawn_router(app: Router) -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind redirect mock");
+        let address = listener.local_addr().expect("redirect mock address");
+        tokio::spawn(async move {
+            axum::serve(listener, app)
+                .await
+                .expect("serve redirect mock")
+        });
+        format!("http://{address}")
     }
 
     fn account() -> AccountConfig {
@@ -308,10 +381,108 @@ mod tests {
         assert_eq!(prepared.body, body);
     }
 
+    #[test]
+    fn default_client_rejects_an_initial_loopback_url_without_network_access() {
+        let client = client(Arc::new(SourceUrlPolicy::default())).unwrap();
+        let error = client
+            .get("http://127.0.0.1:8787/private")
+            .expect_err("loopback URL must be rejected before request construction");
+        assert_eq!(error, SourceUrlPolicyError::DisallowedTarget);
+        assert!(!error.to_string().contains("127.0.0.1"));
+    }
+
+    #[tokio::test]
+    async fn redirects_are_limited_to_the_validated_origin() {
+        let same_origin = Router::new()
+            .route(
+                "/start",
+                get(|| async {
+                    Response::builder()
+                        .status(StatusCode::TEMPORARY_REDIRECT)
+                        .header(header::LOCATION, "/final")
+                        .body(Body::empty())
+                        .unwrap()
+                }),
+            )
+            .route(
+                "/final",
+                get(|| async { Response::new(Body::from("same-origin")) }),
+            );
+        let same_origin = spawn_router(same_origin).await;
+        let client = test_client().unwrap();
+        let response = client
+            .get(&format!("{same_origin}/start"))
+            .unwrap()
+            .send()
+            .await
+            .expect("same-origin redirect");
+        assert_eq!(response.text().await.unwrap(), "same-origin");
+
+        let other_origin = spawn_router(Router::new().route(
+            "/final",
+            get(|| async { Response::new(Body::from("must-not-follow")) }),
+        ))
+        .await;
+        let location = format!("{other_origin}/final");
+        let cross_origin = spawn_router(Router::new().route(
+            "/start",
+            get(move || {
+                let location = location.clone();
+                async move {
+                    Response::builder()
+                        .status(StatusCode::TEMPORARY_REDIRECT)
+                        .header(header::LOCATION, location)
+                        .body(Body::empty())
+                        .unwrap()
+                }
+            }),
+        ))
+        .await;
+        let error = client
+            .get(&format!("{cross_origin}/start"))
+            .unwrap()
+            .send()
+            .await
+            .expect_err("cross-origin redirect must be rejected");
+        assert!(reqwest_error_is_policy_violation(&error));
+        assert_eq!(
+            map_reqwest_error(error).message(),
+            "upstream source URL is blocked by server policy"
+        );
+    }
+
+    #[tokio::test]
+    async fn redirect_to_metadata_is_rejected_without_exposing_the_target() {
+        let redirect = spawn_router(Router::new().route(
+            "/start",
+            get(|| async {
+                Response::builder()
+                    .status(StatusCode::TEMPORARY_REDIRECT)
+                    .header(header::LOCATION, "http://169.254.169.254/latest/meta-data")
+                    .body(Body::empty())
+                    .unwrap()
+            }),
+        ))
+        .await;
+        let error = test_client()
+            .unwrap()
+            .get(&format!("{redirect}/start"))
+            .unwrap()
+            .send()
+            .await
+            .expect_err("metadata redirect must be rejected");
+        let error = map_reqwest_error(error);
+        assert_eq!(
+            error.message(),
+            "upstream source URL is blocked by server policy"
+        );
+        assert!(!error.message().contains("169.254.169.254"));
+    }
+
     #[tokio::test]
     async fn native_forward_preserves_http_contract_and_replaces_sensitive_auth_headers() {
         let (url, recorded) = spawn_mock_upstream().await;
-        let client = client().expect("native transport client");
+        let client = test_client().expect("native transport client");
         let protocols = [
             Protocol::OpenAiChatCompletions,
             Protocol::OpenAiResponses,
