@@ -1,4 +1,5 @@
 {
+  "_comment": "仅用于空控制面初始化或 GATEWAY_CONFIG_IMPORT=true 显式导入；运行时配置以 PostgreSQL snapshot 为准",
   "listen_addr": "0.0.0.0:8787",
   "providers": [
     {

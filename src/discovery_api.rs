@@ -28,11 +28,26 @@ struct DiscoveryApiState {
     http: reqwest::Client,
 }
 
+#[cfg(test)]
 pub fn router(database: Option<Database>, http: reqwest::Client) -> Router {
+    router_inner(database, http, true)
+}
+
+/// Discovery endpoints mounted by the gateway application. The Source
+/// collection itself is owned by the DB-first control plane so creation can
+/// publish a validated runtime snapshot in the same operation.
+pub fn auxiliary_router(database: Option<Database>, http: reqwest::Client) -> Router {
+    router_inner(database, http, false)
+}
+
+fn router_inner(
+    database: Option<Database>,
+    http: reqwest::Client,
+    include_source_collection: bool,
+) -> Router {
     let state = DiscoveryApiState { database, http };
-    Router::new()
+    let router = Router::new()
         .route("/admin/provider-presets", get(list_provider_presets))
-        .route("/admin/sources", get(list_sources).post(create_source))
         .route(
             "/admin/sources/{source_id}/preset-diff",
             get(source_preset_diff),
@@ -56,8 +71,13 @@ pub fn router(database: Option<Database>, http: reqwest::Client) -> Router {
         .route(
             "/admin/sources/{source_id}/models/confirm",
             post(confirm_source_models),
-        )
-        .with_state(state)
+        );
+    let router = if include_source_collection {
+        router.route("/admin/sources", get(list_sources).post(create_source))
+    } else {
+        router
+    };
+    router.with_state(state)
 }
 
 async fn list_provider_presets(

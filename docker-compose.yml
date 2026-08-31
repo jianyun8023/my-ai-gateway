@@ -6,7 +6,8 @@ services:
     environment:
       GATEWAY_LISTEN_ADDR: 0.0.0.0:8787
       DATABASE_URL: postgres://gateway:gateway@postgres:5432/gateway
-      GATEWAY_CONFIG_JSON: ${GATEWAY_CONFIG_JSON:?set GATEWAY_CONFIG_JSON}
+      GATEWAY_CONFIG_JSON: ${GATEWAY_CONFIG_JSON:-}
+      GATEWAY_CONFIG_IMPORT: ${GATEWAY_CONFIG_IMPORT:-false}
       GATEWAY_API_KEY: ${GATEWAY_API_KEY:?set GATEWAY_API_KEY}
     depends_on:
       postgres:
