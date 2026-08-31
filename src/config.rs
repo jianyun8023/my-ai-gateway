@@ -563,13 +563,11 @@ impl GatewayConfig {
         protocol: Protocol,
     ) -> ProtocolCapability {
         let provider = self.provider(provider_id);
-        if let Some(account) = account_id.and_then(|id| self.account(id)) {
+        let account = account_id.and_then(|id| self.account(id));
+        if let Some(account) = account {
             if let Some(value) = find_model_override(&account.model_overrides, model)
                 .and_then(|m| m.protocol_capabilities.get(&protocol))
             {
-                return value.clone();
-            }
-            if let Some(value) = account.protocol_capabilities.get(&protocol) {
                 return value.clone();
             }
         }
@@ -579,6 +577,13 @@ impl GatewayConfig {
             {
                 return value.clone();
             }
+        }
+        if let Some(account) = account {
+            if let Some(value) = account.protocol_capabilities.get(&protocol) {
+                return value.clone();
+            }
+        }
+        if let Some(provider) = provider {
             if let Some(value) = provider.protocol_capabilities.get(&protocol) {
                 return value.clone();
             }
@@ -617,13 +622,11 @@ impl GatewayConfig {
         model: &str,
     ) -> Capabilities {
         let provider = self.provider(provider_id);
-        if let Some(account) = account_id.and_then(|id| self.account(id)) {
+        let account = account_id.and_then(|id| self.account(id));
+        if let Some(account) = account {
             if let Some(value) = find_model_override(&account.model_overrides, model)
                 .and_then(|m| m.capabilities.as_ref())
             {
-                return value.clone();
-            }
-            if let Some(value) = &account.capabilities {
                 return value.clone();
             }
         }
@@ -633,6 +636,13 @@ impl GatewayConfig {
             {
                 return value.clone();
             }
+        }
+        if let Some(account) = account {
+            if let Some(value) = &account.capabilities {
+                return value.clone();
+            }
+        }
+        if let Some(provider) = provider {
             return provider.capabilities.clone();
         }
         Capabilities::default()
@@ -1013,82 +1023,115 @@ mod tests {
     }
 
     #[test]
-    fn account_and_model_overrides_take_precedence() {
-        let mut provider_matrix = ProtocolCapabilityMatrix::new();
-        provider_matrix.insert(
-            Protocol::OpenAiChatCompletions,
-            ProtocolCapability::native(),
-        );
-        let mut provider_models = HashMap::new();
-        let mut provider_model_matrix = ProtocolCapabilityMatrix::new();
-        provider_model_matrix.insert(
-            Protocol::OpenAiChatCompletions,
-            ProtocolCapability::unsupported(),
-        );
-        provider_models.insert(
-            "model-a".into(),
-            ModelCapabilityOverride {
-                protocol_capabilities: provider_model_matrix,
-                capabilities: None,
-            },
-        );
-        let mut account_matrix = ProtocolCapabilityMatrix::new();
-        account_matrix.insert(
-            Protocol::OpenAiChatCompletions,
-            ProtocolCapability::adapter(Protocol::AnthropicMessages, "account-adapter"),
-        );
-        let config = GatewayConfig {
-            listen_addr: "127.0.0.1:1".into(),
-            providers: vec![ProviderConfig {
-                id: "p".into(),
-                name: "p".into(),
-                base_url: "http://localhost".into(),
-                models: vec!["model-a".into()],
-                native_protocols: vec![
-                    Protocol::OpenAiChatCompletions,
-                    Protocol::AnthropicMessages,
-                ],
-                endpoints: HashMap::from([
-                    (Protocol::OpenAiChatCompletions, "/chat".into()),
-                    (Protocol::AnthropicMessages, "/messages".into()),
-                ]),
-                capabilities: Capabilities::default(),
-                protocol_capabilities: provider_matrix,
-                model_overrides: provider_models,
+    fn protocol_and_feature_overrides_follow_documented_precedence() {
+        let config: GatewayConfig = serde_json::from_value(serde_json::json!({
+            "listen_addr": "127.0.0.1:1",
+            "providers": [{
+                "id": "p",
+                "name": "Provider",
+                "base_url": "https://provider.example",
+                "models": ["provider-model", "account-model", "plain-model"],
+                "endpoints": {
+                    "openai_responses": "/v1/responses",
+                    "anthropic_messages": "/v1/messages"
+                },
+                "protocol_capabilities": {
+                    "openai_responses": {
+                        "mode": "adapter",
+                        "source_protocol": "anthropic_messages",
+                        "adapter": "kimi_responses_adapter"
+                    },
+                    "anthropic_messages": {"mode": "native"}
+                },
+                "capabilities": {"tools": "native"},
+                "model_overrides": {
+                    "provider-model": {
+                        "protocol_capabilities": {
+                            "openai_responses": {"mode": "native"}
+                        },
+                        "capabilities": {"tools": "translated"}
+                    },
+                    "account-model": {
+                        "protocol_capabilities": {
+                            "openai_responses": {"mode": "unsupported"}
+                        },
+                        "capabilities": {"tools": "translated"}
+                    }
+                }
             }],
-            accounts: vec![AccountConfig {
-                id: "a".into(),
-                provider_id: "p".into(),
-                display_name: "a".into(),
-                credential_env: None,
-                credential: None,
-                enabled: true,
-                weight: 100,
-                protocol_capabilities: account_matrix,
-                capabilities: None,
-                model_overrides: HashMap::new(),
-                model_map: HashMap::new(),
+            "accounts": [{
+                "id": "a",
+                "provider_id": "p",
+                "display_name": "Account",
+                "protocol_capabilities": {
+                    "openai_responses": {"mode": "unsupported"}
+                },
+                "capabilities": {"tools": "unsupported"},
+                "model_overrides": {
+                    "account-model": {
+                        "protocol_capabilities": {
+                            "openai_responses": {"mode": "native"}
+                        },
+                        "capabilities": {"tools": "native"}
+                    }
+                }
             }],
-            routes: vec![],
-        };
+            "routes": []
+        }))
+        .expect("precedence fixture");
+        assert!(config.validate().is_ok());
+
+        // Provider+Model beats the Account default for both matrices.
         assert_eq!(
             config
-                .protocol_capability("p", Some("a"), "model-a", Protocol::OpenAiChatCompletions)
-                .adapter
-                .as_deref(),
-            Some("account-adapter")
+                .protocol_capability("p", Some("a"), "provider-model", Protocol::OpenAiResponses)
+                .mode,
+            ProtocolMode::Native
         );
         assert_eq!(
+            config.capabilities("p", Some("a"), "provider-model").tools,
+            CapabilityMode::Translated
+        );
+
+        // Account+Model remains the highest-priority declaration.
+        assert_eq!(
             config
-                .protocol_capability("p", None, "model-a", Protocol::OpenAiChatCompletions)
+                .protocol_capability("p", Some("a"), "account-model", Protocol::OpenAiResponses)
+                .mode,
+            ProtocolMode::Native
+        );
+        assert_eq!(
+            config.capabilities("p", Some("a"), "account-model").tools,
+            CapabilityMode::Native
+        );
+
+        // Without a model override, the Account default beats the Provider default.
+        assert_eq!(
+            config
+                .protocol_capability("p", Some("a"), "plain-model", Protocol::OpenAiResponses)
                 .mode,
             ProtocolMode::Unsupported
         );
         assert_eq!(
+            config.capabilities("p", Some("a"), "plain-model").tools,
+            CapabilityMode::Unsupported
+        );
+
+        // Missing lookups retain the existing safe defaults.
+        assert_eq!(
             config
-                .protocol_capability("p", None, "other", Protocol::OpenAiChatCompletions)
+                .protocol_capability(
+                    "missing-provider",
+                    Some("missing-account"),
+                    "plain-model",
+                    Protocol::OpenAiResponses,
+                )
                 .mode,
-            ProtocolMode::Native
+            ProtocolMode::Unsupported
+        );
+        assert_eq!(
+            config.capabilities("missing-provider", Some("missing-account"), "plain-model"),
+            Capabilities::default()
         );
     }
 

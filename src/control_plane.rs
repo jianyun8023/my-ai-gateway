@@ -2298,9 +2298,21 @@ mod tests {
                 "models": ["logical-a"],
                 "endpoints": {"openai_chat_completions": "/v1/chat/completions"},
                 "protocol_capabilities": {
-                    "openai_chat_completions": {"mode": "native"}
+                    "openai_chat_completions": {"mode": "unsupported"}
                 },
-                "capabilities": {"streaming":"native","tools":"native","usage":"native"}
+                "capabilities": {"streaming":"native","tools":"native","usage":"native"},
+                "model_overrides": {
+                    "logical-a": {
+                        "protocol_capabilities": {
+                            "openai_chat_completions": {"mode": "native"}
+                        },
+                        "capabilities": {
+                            "streaming": "translated",
+                            "tools": "translated",
+                            "usage": "translated"
+                        }
+                    }
+                }
             }],
             "accounts": [{
                 "id": "account-a",
@@ -2308,7 +2320,15 @@ mod tests {
                 "display_name": "Account A",
                 "credential_env": "SOURCE_A_API_KEY",
                 "enabled": true,
-                "weight": 100
+                "weight": 100,
+                "protocol_capabilities": {
+                    "openai_chat_completions": {"mode": "unsupported"}
+                },
+                "capabilities": {
+                    "streaming": "unsupported",
+                    "tools": "unsupported",
+                    "usage": "unsupported"
+                }
             }],
             "routes": [{
                 "id": "route-a",
@@ -2340,6 +2360,26 @@ mod tests {
             .expect("imported binding is routable");
         assert_eq!(resolved.upstream_model_id, "logical-a");
         assert_eq!(resolved.protocol_upstream, Protocol::OpenAiChatCompletions);
+        let (imported_mode, imported_features): (String, Value) = sqlx::query_as(
+            "SELECT mode::text,feature_capabilities FROM source_model_capabilities WHERE source_id='source-a' AND upstream_model_id='logical-a' AND protocol='openai_chat_completions'",
+        )
+        .fetch_one(database.pool())
+        .await
+        .expect("load imported model capability precedence fixture");
+        assert_eq!(imported_mode, "native");
+        assert_eq!(
+            imported_features,
+            json!({
+                "streaming": "translated",
+                "tools": "translated",
+                "tool_streaming": "unsupported",
+                "thinking": "unsupported",
+                "web_search": "unsupported",
+                "file_search": "unsupported",
+                "vision": "unsupported",
+                "usage": "translated"
+            })
+        );
 
         assert!(control_plane
             .initialize_from_config(
