@@ -502,7 +502,7 @@ ProviderPreset/模型发现回归使用真实 PostgreSQL 与 mock 上游，覆�
 
 已完成 OpenAI Chat/Responses、Anthropic Messages 的非流式 JSON usage 提取、SSE 末事件解析、reasoning/cached token 映射和异步落库。成功响应缺少已确认 usage 时可以使用 `tiktoken-rs` 的 `cl100k_base` 估算并标记为 `estimated`；失败 JSON/SSE 不再估算，固定记录 `missing` 和 0 Token。
 
-UsageEvent 已记录实际 `upstream_model_id`、`route_id`、`streamed`、脱敏 `error_summary`、最终 `source_id`、独立 `client_source` 和 `ttft_ms`。流式 TTFT 从逻辑请求开始计到首个非空上游 body chunk，不预取、不缓冲，也不改变 SSE 顺序或背压；空流和无法观察首块的失败保持 `NULL`。每个 fallback attempt 另存实际 Source、账号、上游模型、状态和耗时。
+UsageEvent 已记录实际 `upstream_model_id`、`route_id`、`streamed`、脱敏 `error_summary`、最终 `source_id`、独立 `client_source` 和 `ttft_ms`。流式 TTFT 从逻辑请求开始计到首个非空 Provider body chunk（网关心跳和纯 SSE comment 不计入），不预取、不缓冲，也不改变 SSE 顺序或背压；空流和无法观察首块的失败保持 `NULL`。每个 fallback attempt 另存实际 Source、账号、上游模型、状态和耗时。
 
 Provider 与 Source 已使用独立运行时身份：Provider 按 Source 固化的 ProviderPreset 聚合，Source 保留每次实际 Binding/attempt 的具体来源；组合筛选不会重复逻辑请求或 Token。
 
@@ -523,13 +523,33 @@ CPA Usage Keeper 只复用 React 页面和交互，不复用其 Go 后端、SQLi
 生产化剩余范围均有独立 Issue：
 
 - 健康状态持久化与主动探测（#52）；
-- SSE 心跳、取消和流式超时契约（#54）；
+- SSE 心跳、取消和流式超时契约（#54）已完成：三协议原生与 Kimi Adapter 共享可配置心跳、连接/首事件/空闲/总时限和取消清理；
 - Prometheus/OpenTelemetry（#50）；
 - Secret Resolver 与凭据信封加密（#47）；
 - Admin 写操作审计日志（#48）；
 - 数据保留、清理、备份和恢复（#53，第一版已完成；后续仅按运行反馈加固）。
 
 Provider URL allowlist、解析后 IP 校验、重定向限制和 SSRF 防护（#46）已经完成。Admin API 只接受独立的 `GATEWAY_ADMIN_KEY`，未配置时请求级 fail closed 返回 `401`，不会回退到数据面 Key。
+
+### 7.5.1 SSE 流式契约（#54）
+
+SSE 心跳和超时是进程级运行参数，不属于 PostgreSQL Source/Binding。网关使用
+`GATEWAY_SSE_HEARTBEAT_INTERVAL_MS`、`GATEWAY_SSE_CONNECTION_TIMEOUT_MS`、
+`GATEWAY_SSE_FIRST_EVENT_TIMEOUT_MS`、`GATEWAY_SSE_IDLE_TIMEOUT_MS` 和
+`GATEWAY_SSE_TOTAL_TIMEOUT_MS`；独立运行 `kimi-responses-adapter` 时使用对应的
+`KIMI_SSE_*_MS`。默认值分别为 `15000`、`10000`、`30000`、`60000` 和 `300000`，`0`
+禁用单项限制。也接受带单位的环境值（如 `2s`、`500ms`）。
+
+连接时限只覆盖等待上游响应头；首事件时限从响应头开始，空闲时限在每个完整 Provider
+SSE 事件后重置，总时限从逻辑请求开始计算。心跳固定为 `: gateway-heartbeat` SSE
+comment，单独作为下游 Body chunk 发送，不进入 Provider 事件、序列号、Usage 捕获或 TTFT。
+已发出响应头后不能 fallback：正常 EOF 保留原始顺序并结束，空流发送
+`gateway_empty_stream`，上游读取错误发送 `gateway_upstream_error`，首事件/空闲/总时限
+分别发送对应的 `gateway_*_timeout` 错误帧后关闭。下游 Body 被丢弃时立即 drop Reqwest
+上游流，Usage 以 `499` 和 `client disconnected` 记录；这些错误摘要只含稳定脱敏文本，
+不保存 prompt/response 正文。每次流结束还通过 tracing 输出低基数的终止原因、TTFT 和
+转发字节数，便于后续 Prometheus/OpenTelemetry（#50）接入；不使用 request id、模型全文
+或凭据作为指标标签。
 
 ### 7.6 测试
 

@@ -9,6 +9,8 @@ use futures_util::{stream, StreamExt};
 use serde_json::Value;
 use std::time::Instant;
 
+use crate::stream_contract::{is_gateway_heartbeat, SseEventTracker, StreamTermination};
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct UsageReport {
     pub input_tokens: i64,
@@ -24,6 +26,132 @@ pub struct StreamObservation {
     pub captured: Vec<u8>,
     pub ttft_ms: Option<i64>,
     pub failed: bool,
+    pub termination: StreamTermination,
+}
+
+struct ObservationGuard<F>
+where
+    F: FnOnce(StreamObservation) + Send + 'static,
+{
+    callback: Option<F>,
+    captured: Vec<u8>,
+    ttft_ms: Option<i64>,
+    termination: Option<StreamTermination>,
+    tracker: SseEventTracker,
+    request_started: Instant,
+}
+
+impl<F> ObservationGuard<F>
+where
+    F: FnOnce(StreamObservation) + Send + 'static,
+{
+    fn new(callback: F, request_started: Instant) -> Self {
+        Self {
+            callback: Some(callback),
+            captured: Vec::new(),
+            ttft_ms: None,
+            termination: None,
+            tracker: SseEventTracker::default(),
+            request_started,
+        }
+    }
+
+    fn observe(&mut self, chunk: &Bytes) {
+        let activity = self.tracker.feed(chunk);
+        let provider_bytes = without_gateway_heartbeats(chunk);
+        if !provider_bytes.is_empty() {
+            self.captured.extend_from_slice(&provider_bytes);
+        }
+        if self.ttft_ms.is_none()
+            && !(activity.error && !activity.provider_event)
+            && has_provider_bytes(&provider_bytes)
+        {
+            self.ttft_ms = Some(self.request_started.elapsed().as_millis() as i64);
+        }
+        if activity.error {
+            self.termination = Some(
+                activity
+                    .terminal
+                    .filter(|value| value.is_failure())
+                    .unwrap_or(StreamTermination::UpstreamError),
+            );
+        } else if let Some(terminal) = activity.terminal {
+            self.termination = Some(terminal);
+        }
+    }
+
+    fn complete(&mut self, termination: StreamTermination) {
+        if self.callback.is_none() {
+            return;
+        }
+        let termination = self.termination.unwrap_or(termination);
+        self.termination = Some(termination);
+        if let Some(callback) = self.callback.take() {
+            tracing::info!(
+                stream_termination = termination.code(),
+                streamed_bytes = self.captured.len(),
+                ttft_ms = ?self.ttft_ms,
+                "stream lifecycle"
+            );
+            callback(StreamObservation {
+                captured: std::mem::take(&mut self.captured),
+                ttft_ms: self.ttft_ms,
+                failed: termination.is_failure(),
+                termination,
+            });
+        }
+    }
+}
+
+fn has_provider_bytes(bytes: &[u8]) -> bool {
+    if bytes.is_empty() {
+        return false;
+    }
+    let text = String::from_utf8_lossy(bytes);
+    text.lines().any(|line| {
+        let line = line.trim();
+        !line.is_empty() && !line.starts_with(':')
+    }) || (!text.contains('\n') && !text.trim().is_empty())
+}
+
+fn without_gateway_heartbeats(chunk: &Bytes) -> Vec<u8> {
+    if is_gateway_heartbeat(chunk) {
+        return Vec::new();
+    }
+    if !String::from_utf8_lossy(chunk).contains(crate::stream_contract::HEARTBEAT_MARKER) {
+        return chunk.to_vec();
+    }
+    let text = String::from_utf8_lossy(chunk);
+    let mut filtered = String::with_capacity(text.len());
+    for line in text.split_inclusive('\n') {
+        let content = line.trim_end_matches(['\r', '\n']);
+        if content.trim() == crate::stream_contract::HEARTBEAT_MARKER {
+            continue;
+        }
+        filtered.push_str(line);
+    }
+    if !text.ends_with('\n')
+        && text
+            .rsplit_once('\n')
+            .is_some_and(|(_, tail)| tail.trim() == crate::stream_contract::HEARTBEAT_MARKER)
+    {
+        filtered = filtered
+            .trim_end_matches(crate::stream_contract::HEARTBEAT_MARKER)
+            .to_owned();
+    }
+    filtered.into_bytes()
+}
+
+impl<F> Drop for ObservationGuard<F>
+where
+    F: FnOnce(StreamObservation) + Send + 'static,
+{
+    fn drop(&mut self) {
+        // A response body can be dropped without ever being polled to EOF.
+        // That is the reliable signal that the downstream client went away;
+        // dropping the inner Reqwest body at the same time cancels the read.
+        self.complete(StreamTermination::ClientCancelled);
+    }
 }
 
 /// Tee a live response body for usage parsing while forwarding every chunk in
@@ -34,51 +162,41 @@ pub fn observe_stream_body<F>(body: Body, request_started: Instant, on_complete:
 where
     F: FnOnce(StreamObservation) + Send + 'static,
 {
-    type Completion = Box<dyn FnOnce(StreamObservation) + Send>;
-
     let upstream = body.into_data_stream();
-    let completion: Option<Completion> = Some(Box::new(on_complete));
-    let stream = stream::unfold(
-        (upstream, Vec::new(), None, completion, request_started),
-        |(mut upstream, mut captured, mut ttft_ms, mut completion, request_started)| async move {
-            completion.as_ref()?;
-            match upstream.next().await {
-                Some(Ok(chunk)) => {
-                    if ttft_ms.is_none() && !chunk.is_empty() {
-                        ttft_ms = Some(request_started.elapsed().as_millis() as i64);
-                    }
-                    captured.extend_from_slice(&chunk);
-                    Some((
-                        Ok::<Bytes, std::io::Error>(chunk),
-                        (upstream, captured, ttft_ms, completion, request_started),
-                    ))
-                }
-                Some(Err(error)) => {
-                    if let Some(complete) = completion.take() {
-                        complete(StreamObservation {
-                            captured: std::mem::take(&mut captured),
-                            ttft_ms,
-                            failed: true,
-                        });
-                    }
-                    Some((
-                        Err(std::io::Error::other(error.to_string())),
-                        (upstream, captured, ttft_ms, completion, request_started),
-                    ))
-                }
-                None => {
-                    if let Some(complete) = completion.take() {
-                        complete(StreamObservation {
-                            captured,
-                            ttft_ms,
-                            failed: false,
-                        });
-                    }
-                    None
-                }
+    let guard = ObservationGuard::new(on_complete, request_started);
+    let stream = stream::unfold((upstream, guard), |(mut upstream, mut guard)| async move {
+        match upstream.next().await {
+            Some(Ok(chunk)) => {
+                guard.observe(&chunk);
+                Some((Ok::<Bytes, std::io::Error>(chunk), (upstream, guard)))
             }
-        },
-    );
+            Some(Err(error)) => {
+                guard.complete(StreamTermination::UpstreamError);
+                Some((
+                    Err(std::io::Error::other(error.to_string())),
+                    (upstream, guard),
+                ))
+            }
+            None => {
+                let activity = guard.tracker.finish_eof();
+                if activity.error {
+                    guard.complete(StreamTermination::UpstreamError);
+                } else if guard.tracker.saw_provider_event() {
+                    let termination = guard.tracker.terminal().unwrap_or_else(|| {
+                        if guard.tracker.saw_sse_frame() {
+                            StreamTermination::UpstreamError
+                        } else {
+                            StreamTermination::Completed
+                        }
+                    });
+                    guard.complete(termination);
+                } else {
+                    guard.complete(StreamTermination::EmptyStream);
+                }
+                None
+            }
+        }
+    });
     Body::from_stream(stream)
 }
 
@@ -409,7 +527,8 @@ mod tests {
         let observation = rx.await.expect("empty stream observation");
         assert_eq!(observation.ttft_ms, None);
         assert!(observation.captured.is_empty());
-        assert!(!observation.failed);
+        assert!(observation.failed);
+        assert_eq!(observation.termination, StreamTermination::EmptyStream);
     }
 
     #[tokio::test]
@@ -443,5 +562,122 @@ mod tests {
         assert!(observation.captured.is_empty());
         assert_eq!(observation.ttft_ms, None);
         assert!(observation.failed);
+    }
+
+    #[tokio::test]
+    async fn gateway_heartbeat_is_excluded_from_capture_and_ttft() {
+        let source = stream::iter([
+            Ok::<Bytes, std::io::Error>(Bytes::from_static(b": gateway-heartbeat\n\n")),
+            Ok::<Bytes, std::io::Error>(Bytes::from_static(
+                b"data: {\"usage\":{\"input_tokens\":1}}\n\ndata: [DONE]\n\n",
+            )),
+        ]);
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let body = observe_stream_body(Body::from_stream(source), Instant::now(), move |result| {
+            tx.send(result).expect("heartbeat observation");
+        });
+        let forwarded = to_bytes(body, 1024).await.expect("heartbeat body");
+        let observation = rx.await.expect("heartbeat result");
+        assert!(String::from_utf8_lossy(&forwarded).contains(": gateway-heartbeat"));
+        assert!(!String::from_utf8_lossy(&observation.captured).contains("gateway-heartbeat"));
+        assert_eq!(observation.termination, StreamTermination::Completed);
+        assert!(observation.ttft_ms.is_some());
+    }
+
+    #[tokio::test]
+    async fn coalesced_heartbeat_and_provider_event_only_capture_provider_bytes() {
+        let source = stream::iter([Ok::<Bytes, std::io::Error>(Bytes::from_static(
+            b": gateway-heartbeat\n\ndata: {\"x\":1}\n\n",
+        ))]);
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let body = observe_stream_body(Body::from_stream(source), Instant::now(), move |result| {
+            tx.send(result).expect("coalesced heartbeat observation");
+        });
+        let _ = to_bytes(body, 1024)
+            .await
+            .expect("coalesced heartbeat body");
+        let observation = rx.await.expect("coalesced heartbeat result");
+        assert_eq!(observation.captured, b"\ndata: {\"x\":1}\n\n");
+        assert!(observation.ttft_ms.is_some());
+    }
+
+    #[tokio::test]
+    async fn gateway_timeout_frame_keeps_specific_termination_reason() {
+        let frame = crate::stream_contract::gateway_error_frame(
+            crate::protocol::Protocol::OpenAiResponses,
+            StreamTermination::IdleTimeout,
+        );
+        let source = stream::iter([Ok::<Bytes, std::io::Error>(frame)]);
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let body = observe_stream_body(Body::from_stream(source), Instant::now(), move |result| {
+            tx.send(result).expect("timeout observation");
+        });
+        let _ = to_bytes(body, 1024).await.expect("timeout body");
+        let observation = rx.await.expect("timeout result");
+        assert_eq!(observation.termination, StreamTermination::IdleTimeout);
+        assert!(observation.failed);
+        assert_eq!(observation.ttft_ms, None);
+    }
+
+    #[tokio::test]
+    async fn provider_stream_without_terminal_event_is_an_upstream_error() {
+        let source = stream::iter([Ok::<Bytes, std::io::Error>(Bytes::from_static(
+            b"data: {\"delta\":\"partial\"}\n\n",
+        ))]);
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let body = observe_stream_body(Body::from_stream(source), Instant::now(), move |result| {
+            tx.send(result).expect("unterminated stream observation");
+        });
+        let _ = to_bytes(body, 1024)
+            .await
+            .expect("unterminated stream body");
+        let observation = rx.await.expect("unterminated stream result");
+        assert_eq!(observation.termination, StreamTermination::UpstreamError);
+        assert!(observation.failed);
+    }
+
+    #[test]
+    fn adapter_response_failed_keeps_gateway_timeout_reason() {
+        let mut tracker = SseEventTracker::default();
+        let activity = tracker.feed(
+            br#"event: response.failed
+data: {"response":{"error":{"code":"gateway_first_event_timeout"}}}
+
+"#,
+        );
+        assert!(activity.error);
+        assert_eq!(
+            activity.terminal,
+            Some(StreamTermination::FirstEventTimeout)
+        );
+    }
+
+    #[test]
+    fn chat_gateway_error_followed_by_done_keeps_timeout_reason() {
+        let frame = crate::stream_contract::gateway_error_frame(
+            crate::protocol::Protocol::OpenAiChatCompletions,
+            StreamTermination::TotalTimeout,
+        );
+        let mut tracker = SseEventTracker::default();
+        let activity = tracker.feed(&frame);
+        assert!(activity.error);
+        assert_eq!(activity.terminal, Some(StreamTermination::TotalTimeout));
+    }
+
+    #[tokio::test]
+    async fn dropping_an_unconsumed_body_reports_client_cancellation() {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let body = observe_stream_body(
+            Body::from_stream(stream::pending::<Result<Bytes, std::io::Error>>()),
+            Instant::now(),
+            move |observation| {
+                tx.send(observation).expect("cancellation observation");
+            },
+        );
+        drop(body);
+        let observation = rx.await.expect("cancellation observation result");
+        assert_eq!(observation.termination, StreamTermination::ClientCancelled);
+        assert!(observation.failed);
+        assert_eq!(observation.ttft_ms, None);
     }
 }

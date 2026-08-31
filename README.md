@@ -59,6 +59,19 @@ Admin API 请求都会 fail closed 并返回 `401`。两个 Key 应使用不同�
 
 空控制面首次启动时，可通过 `GATEWAY_CONFIG_JSON` 一次性初始化。控制面已有任意管理数据后，后续启动不会解析或覆盖该 JSON；此时运行时直接加载数据库 snapshot。需要显式替换现有开发控制面时，同时设置 `GATEWAY_CONFIG_IMPORT=true`，该操作会在事务中清理并重新导入 Source/Account/模型/Binding/Route，因此只应在明确需要导入时使用。监听地址独立使用 `GATEWAY_LISTEN_ADDR`。
 
+流式请求使用进程级 `GATEWAY_SSE_*_MS` 参数（见 [`.env.example`](.env.example)）：默认心跳
+15 秒、连接 10 秒、首事件 30 秒、空闲 60 秒、总时长 300 秒；设为 `0` 可禁用单项限制。
+连接超时发生在上游响应头之前，其他超时发生在 SSE 已建立之后。网关心跳是
+`: gateway-heartbeat` SSE comment，不会改变 Provider 事件顺序、序列号、Usage 或 TTFT。
+已建立流发生超时会发送脱敏的 `gateway_*_timeout` 错误帧并关闭；客户端断开只取消上游
+读取并将 Usage 记为客户端取消，不会触发 fallback。独立运行 Kimi Adapter 时使用同名的
+`KIMI_SSE_*_MS` 参数。
+
+For reverse-proxy deployments, disable response buffering (for example,
+Nginx `proxy_buffering off`), preserve `text/event-stream`, and set the proxy
+read timeout above the gateway total timeout. The proxy stream-idle timeout
+should be longer than the heartbeat interval; do not rewrite SSE comment lines.
+
 常用任务：`mise run dev`（加载被 Git 忽略的 `.env`，启动网关 + Vite 开发环境）、`mise run build`、`mise run test`、`mise run test-db`（加载独立 `.env.test`，串行运行真实 PostgreSQL 回归）、`mise run lint`、`mise run verify`（完整门禁）。
 
 真实 Provider 的工具调用、服务端搜索、Kimi Adapter 与 fallback 使用显式 opt-in 的

@@ -2,6 +2,7 @@ use crate::{
     config::{AccountConfig, ProviderConfig},
     protocol::Protocol,
     source_url::{reqwest_error_is_policy_violation, SourceUrlPolicy, SourceUrlPolicyError},
+    stream_contract::{self, StreamConfig, StreamTermination},
     usage::{usage_for_json_response, UsageReport},
 };
 use axum::{
@@ -12,13 +13,14 @@ use bytes::Bytes;
 use futures_util::TryStreamExt;
 use reqwest::{Client, Method, RequestBuilder, Url};
 use serde_json::Value;
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 
 #[derive(Debug)]
 pub enum TransportError {
     MissingEndpoint,
     SourceUrlBlocked,
     Request,
+    Timeout(StreamTermination),
 }
 
 impl TransportError {
@@ -27,6 +29,14 @@ impl TransportError {
             Self::MissingEndpoint => "provider endpoint is not configured",
             Self::SourceUrlBlocked => "upstream source URL is blocked by server policy",
             Self::Request => "upstream request failed",
+            Self::Timeout(termination) => termination.message(),
+        }
+    }
+
+    pub fn status_code(&self) -> i32 {
+        match self {
+            Self::Timeout(termination) => termination.status_code(),
+            Self::MissingEndpoint | Self::SourceUrlBlocked | Self::Request => 599,
         }
     }
 }
@@ -121,6 +131,7 @@ pub fn prepare_model_request(
     }
 }
 
+#[allow(dead_code)]
 pub async fn forward(
     client: &SourceHttpClient,
     provider: &ProviderConfig,
@@ -130,12 +141,40 @@ pub async fn forward(
     request_headers: &HeaderMap,
     body: Bytes,
 ) -> Result<Response<Body>, TransportError> {
+    let config = StreamConfig::from_env();
+    let request_started = std::time::Instant::now();
+    forward_with_config(
+        client,
+        provider,
+        account,
+        credential,
+        protocol,
+        request_headers,
+        body,
+        &config,
+        request_started,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn forward_with_config(
+    client: &SourceHttpClient,
+    provider: &ProviderConfig,
+    account: &AccountConfig,
+    credential: Option<&str>,
+    protocol: Protocol,
+    request_headers: &HeaderMap,
+    body: Bytes,
+    stream_config: &StreamConfig,
+    request_started: std::time::Instant,
+) -> Result<Response<Body>, TransportError> {
     let endpoint = provider
         .endpoints
         .get(&protocol)
         .ok_or(TransportError::MissingEndpoint)?;
     let url = format!("{}{}", provider.base_url.trim_end_matches('/'), endpoint);
-    forward_url(
+    forward_url_with_config(
         client,
         &url,
         account,
@@ -143,10 +182,13 @@ pub async fn forward(
         protocol,
         request_headers,
         body,
+        stream_config,
+        request_started,
     )
     .await
 }
 
+#[allow(dead_code)]
 pub async fn forward_url(
     client: &SourceHttpClient,
     url: &str,
@@ -155,6 +197,34 @@ pub async fn forward_url(
     protocol: Protocol,
     request_headers: &HeaderMap,
     body: Bytes,
+) -> Result<Response<Body>, TransportError> {
+    let config = StreamConfig::from_env();
+    let request_started = std::time::Instant::now();
+    forward_url_with_config(
+        client,
+        url,
+        account,
+        credential,
+        protocol,
+        request_headers,
+        body,
+        &config,
+        request_started,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn forward_url_with_config(
+    client: &SourceHttpClient,
+    url: &str,
+    account: &AccountConfig,
+    credential: Option<&str>,
+    protocol: Protocol,
+    request_headers: &HeaderMap,
+    body: Bytes,
+    stream_config: &StreamConfig,
+    request_started: std::time::Instant,
 ) -> Result<Response<Body>, TransportError> {
     let request_payload = body.clone();
     let is_streaming = serde_json::from_slice::<serde_json::Value>(&body)
@@ -177,7 +247,18 @@ pub async fn forward_url(
             request = request.header("authorization", format!("Bearer {credential}"));
         }
     }
-    let upstream = request.send().await.map_err(map_reqwest_error)?;
+    let send_timeout = earliest_send_timeout(request_started, stream_config);
+    let upstream = match send_timeout {
+        None => request.send().await.map_err(map_reqwest_error)?,
+        Some((duration, termination)) if duration.is_zero() => {
+            return Err(TransportError::Timeout(termination));
+        }
+        Some((duration, termination)) => match tokio::time::timeout(duration, request.send()).await
+        {
+            Ok(result) => result.map_err(map_reqwest_error)?,
+            Err(_) => return Err(TransportError::Timeout(termination)),
+        },
+    };
     let status =
         StatusCode::from_u16(upstream.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
     let upstream_headers = upstream.headers().clone();
@@ -185,7 +266,17 @@ pub async fn forward_url(
     // request lifecycle while preserving a normal response body. Streaming
     // responses stay a live byte stream to retain TTFT and backpressure.
     if !is_streaming {
-        let bytes = upstream.bytes().await.map_err(map_reqwest_error)?;
+        let bytes = if let Some(deadline) = total_deadline(request_started, stream_config) {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            match tokio::time::timeout(remaining, upstream.bytes()).await {
+                Ok(result) => result.map_err(map_reqwest_error)?,
+                Err(_) => {
+                    return Err(TransportError::Timeout(StreamTermination::TotalTimeout));
+                }
+            }
+        } else {
+            upstream.bytes().await.map_err(map_reqwest_error)?
+        };
         let report = usage_for_json_response(status.is_success(), &request_payload, &bytes);
         let body = Body::from(bytes);
         let mut response = Response::new(body);
@@ -203,6 +294,8 @@ pub async fn forward_url(
     }
     let stream = upstream.bytes_stream();
     let body = Body::from_stream(stream.map_err(|error| std::io::Error::other(error.to_string())));
+    let body =
+        stream_contract::wrap_native_body(body, protocol, stream_config.clone(), request_started);
     let mut response = Response::new(body);
     *response.status_mut() = status;
     for (name, value) in &upstream_headers {
@@ -216,6 +309,51 @@ pub async fn forward_url(
     Ok(response)
 }
 
+fn total_deadline(
+    request_started: std::time::Instant,
+    config: &StreamConfig,
+) -> Option<std::time::Instant> {
+    (!config.total_timeout.is_zero())
+        .then(|| request_started.checked_add(config.total_timeout))
+        .flatten()
+}
+
+fn earliest_send_timeout(
+    request_started: std::time::Instant,
+    config: &StreamConfig,
+) -> Option<(std::time::Duration, StreamTermination)> {
+    let now = std::time::Instant::now();
+    let total = (!config.total_timeout.is_zero())
+        .then(|| {
+            request_started
+                .checked_add(config.total_timeout)
+                .map(|deadline| (deadline, StreamTermination::TotalTimeout))
+        })
+        .flatten();
+    let connection = (!config.connection_timeout.is_zero())
+        .then(|| {
+            now.checked_add(config.connection_timeout)
+                .map(|deadline| (deadline, StreamTermination::ConnectionTimeout))
+        })
+        .flatten();
+    match (total, connection) {
+        (None, None) => None,
+        (Some((deadline, termination)), None) | (None, Some((deadline, termination))) => {
+            Some((deadline.saturating_duration_since(now), termination))
+        }
+        (Some((total_deadline, total_term)), Some((connection_deadline, connection_term))) => {
+            if total_deadline <= connection_deadline {
+                Some((total_deadline.saturating_duration_since(now), total_term))
+            } else {
+                Some((
+                    connection_deadline.saturating_duration_since(now),
+                    connection_term,
+                ))
+            }
+        }
+    }
+}
+
 /// Retrieve usage metadata attached by [`forward_url`].
 pub fn usage_from_response(response: &Response<Body>) -> Option<UsageReport> {
     response.extensions().get::<UsageReport>().cloned()
@@ -225,8 +363,9 @@ pub fn client(policy: Arc<SourceUrlPolicy>) -> Result<SourceHttpClient, reqwest:
     let redirect = policy.redirect_policy();
     let resolver = Arc::new(policy.dns_resolver());
     let inner = Client::builder()
-        .connect_timeout(Duration::from_secs(10))
-        .timeout(Duration::from_secs(300))
+        // The stream contract owns connect/idle/total deadlines.  Reqwest's
+        // defaults are already unlimited, so no client-wide timeout is set;
+        // this keeps the phases distinguishable.
         .no_proxy()
         .redirect(redirect)
         .dns_resolver(resolver)
@@ -242,6 +381,8 @@ pub fn test_client() -> Result<SourceHttpClient, reqwest::Error> {
 fn map_reqwest_error(error: reqwest::Error) -> TransportError {
     if reqwest_error_is_policy_violation(&error) {
         TransportError::SourceUrlBlocked
+    } else if error.is_timeout() {
+        TransportError::Timeout(StreamTermination::ConnectionTimeout)
     } else {
         let _ = error;
         TransportError::Request
@@ -258,9 +399,11 @@ mod tests {
         routing::get,
         Router,
     };
+    use futures_util::stream;
     use std::{
         collections::HashMap,
         sync::{Arc, Mutex},
+        time::Duration,
     };
 
     #[derive(Clone, Debug)]
@@ -561,6 +704,93 @@ mod tests {
                 );
                 assert!(request.headers.get("x-api-key").is_none());
             }
+        }
+    }
+
+    #[tokio::test]
+    async fn connection_timeout_is_reported_before_a_stream_response_exists() {
+        let delayed = spawn_router(Router::new().fallback(|| async {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            Response::new(Body::from("late"))
+        }))
+        .await;
+        let config = StreamConfig {
+            heartbeat_interval: Duration::ZERO,
+            connection_timeout: Duration::from_millis(10),
+            first_event_timeout: Duration::from_secs(1),
+            idle_timeout: Duration::from_secs(1),
+            total_timeout: Duration::from_secs(1),
+        };
+        let result = forward_url_with_config(
+            &test_client().unwrap(),
+            &format!("{delayed}/stream"),
+            &account(),
+            None,
+            Protocol::OpenAiResponses,
+            &HeaderMap::new(),
+            Bytes::from_static(br#"{"model":"m","stream":true}"#),
+            &config,
+            std::time::Instant::now(),
+        )
+        .await;
+        assert!(matches!(
+            result,
+            Err(TransportError::Timeout(
+                StreamTermination::ConnectionTimeout
+            ))
+        ));
+    }
+
+    #[tokio::test]
+    async fn native_stream_contract_adds_heartbeats_for_each_protocol_without_reordering() {
+        let upstream = spawn_router(Router::new().fallback(|| async {
+            let chunks = stream::once(async {
+                tokio::time::sleep(Duration::from_millis(25)).await;
+                Ok::<Bytes, std::io::Error>(Bytes::from_static(
+                    b"data: {\"id\":\"one\"}\n\ndata: [DONE]\n\n",
+                ))
+            });
+            Response::builder()
+                .header("content-type", "text/event-stream")
+                .body(Body::from_stream(chunks))
+                .unwrap()
+        }))
+        .await;
+        let config = StreamConfig {
+            heartbeat_interval: Duration::from_millis(5),
+            connection_timeout: Duration::from_millis(500),
+            first_event_timeout: Duration::from_millis(200),
+            idle_timeout: Duration::from_millis(200),
+            total_timeout: Duration::from_secs(1),
+        };
+        for protocol in [
+            Protocol::OpenAiChatCompletions,
+            Protocol::OpenAiResponses,
+            Protocol::AnthropicMessages,
+        ] {
+            let response = forward_url_with_config(
+                &test_client().unwrap(),
+                &format!("{upstream}/stream"),
+                &account(),
+                None,
+                protocol,
+                &HeaderMap::new(),
+                Bytes::from_static(br#"{"model":"m","stream":true}"#),
+                &config,
+                std::time::Instant::now(),
+            )
+            .await
+            .expect("native streaming response");
+            let body = to_bytes(response.into_body(), 1024 * 1024)
+                .await
+                .expect("native streaming body");
+            let body = String::from_utf8_lossy(&body);
+            assert!(
+                body.contains(": gateway-heartbeat"),
+                "heartbeat missing for {protocol}"
+            );
+            assert!(body.contains("data: {\"id\":\"one\"}"));
+            assert!(body.contains("data: [DONE]"));
         }
     }
 }

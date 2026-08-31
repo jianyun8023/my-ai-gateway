@@ -20,6 +20,7 @@ MiniMax、DeepSeek 等原生支持三协议的 Provider 不进入转换器。Kim
 - 原生协议优先，Adapter 只允许一次直接转换；不支持或未知能力返回结构化错误，不会猜测为支持。
 - 首选 Binding 固定优先；408、429、5xx、传输错误或首选账号不可用时，可进入加权 fallback。
 - 非流式 JSON 与流式 SSE 均支持 usage 采集；逻辑请求和每次上游 attempt 分开记录，fallback 不会重复累计最终 Token。
+- SSE 流式契约提供可配置心跳、连接/首事件/空闲/总时限，并在客户端断开时取消上游读取。
 - Usage 记录实际 `upstream_model_id`、`source_id`、独立的 `client_source`、`usage_source` 和流式 TTFT。
 - PostgreSQL-backed Virtual Key 支持创建、列表、撤销和模型白名单。
 - 管理端已有 Overview、Analysis、Request Events 三个网关原生用量页面。
@@ -62,6 +63,20 @@ curl http://127.0.0.1:8787/healthz
 ```
 
 监听地址通过 `GATEWAY_LISTEN_ADDR` 独立设置，默认是 `127.0.0.1:8787`。
+
+### SSE 流式契约
+
+流式请求使用进程级 `GATEWAY_SSE_*_MS` 参数（见 [`.env.example`](.env.example)）：默认心跳
+15 秒、连接 10 秒、首事件 30 秒、空闲 60 秒、总时长 300 秒；设为 `0` 可禁用单项限制。
+连接超时发生在上游响应头之前，其他超时发生在 SSE 已建立之后。网关心跳是
+`: gateway-heartbeat` SSE comment，不会进入 Provider 事件、Usage 或序列号，也不影响 TTFT。
+已建立流发生超时会发送脱敏的 `gateway_*_timeout` 错误帧并关闭；客户端断开只取消上游
+读取并将 Usage 记为客户端取消，不会触发 fallback。独立运行 Kimi Adapter 时使用同名的
+`KIMI_SSE_*_MS` 参数。
+
+反向代理部署时请关闭响应缓冲并保留 `text/event-stream`（例如 Nginx 使用
+`proxy_buffering off`），代理读取超时应大于网关总时限；代理的 stream idle timeout
+应大于心跳间隔。不要让代理合并、删除或改写以 `:` 开头的 SSE comment。
 
 ### 初始化控制面
 

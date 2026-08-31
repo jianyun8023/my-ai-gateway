@@ -25,12 +25,13 @@ pub(crate) fn test_config() -> config::Config {
         .into_iter()
         .collect(),
         search_status_prefix: "Search results for query:".to_string(),
+        stream_config: config::StreamConfig::default(),
     }
 }
 
 /// All environment variables Config::load reads (plus the debug tee).
 #[cfg(test)]
-pub(crate) const ENV_KEYS: [&str; 10] = [
+pub(crate) const ENV_KEYS: [&str; 17] = [
     "LISTEN_ADDR",
     "KIMI_BASE_URL",
     "KIMI_ANTHROPIC_BETA",
@@ -40,6 +41,13 @@ pub(crate) const ENV_KEYS: [&str; 10] = [
     "KIMI_MAX_TOKENS",
     "KIMI_THINKING_BUDGETS",
     "KIMI_SEARCH_STATUS_PREFIX",
+    "KIMI_SSE_HEARTBEAT_INTERVAL_MS",
+    "KIMI_SSE_HEARTBEAT_MS",
+    "KIMI_SSE_CONNECTION_TIMEOUT_MS",
+    "KIMI_SSE_CONNECT_TIMEOUT_MS",
+    "KIMI_SSE_FIRST_EVENT_TIMEOUT_MS",
+    "KIMI_SSE_IDLE_TIMEOUT_MS",
+    "KIMI_SSE_TOTAL_TIMEOUT_MS",
     "KIMI_DEBUG_SSE_FILE",
 ];
 

@@ -33,7 +33,7 @@
 - [x] 将 Usage 的 Provider 归因与 Source 维度真正解耦（#56；ProviderPreset 与 Source 分列）
 - [ ] Virtual Key 轮换、权限更新和静态 Key 迁移（#51）
 - [ ] 健康状态持久化与主动探测（#52）
-- [ ] SSE 心跳、取消和流式超时契约（#54）
+- [x] SSE 心跳、取消和流式超时契约（#54）
 
 ### 安全、质量与运维
 

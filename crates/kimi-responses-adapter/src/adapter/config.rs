@@ -1,4 +1,121 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, time::Duration};
+
+/// Streaming policy used by the translated and passthrough SSE endpoints.
+/// A zero duration disables an individual limit.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StreamConfig {
+    pub heartbeat_interval: Duration,
+    pub connection_timeout: Duration,
+    pub first_event_timeout: Duration,
+    pub idle_timeout: Duration,
+    pub total_timeout: Duration,
+}
+
+impl Default for StreamConfig {
+    fn default() -> Self {
+        Self {
+            heartbeat_interval: Duration::from_secs(15),
+            connection_timeout: Duration::from_secs(10),
+            first_event_timeout: Duration::from_secs(30),
+            idle_timeout: Duration::from_secs(60),
+            total_timeout: Duration::from_secs(300),
+        }
+    }
+}
+
+impl StreamConfig {
+    pub fn from_durations(
+        heartbeat_interval: Duration,
+        connection_timeout: Duration,
+        first_event_timeout: Duration,
+        idle_timeout: Duration,
+        total_timeout: Duration,
+    ) -> Self {
+        Self {
+            heartbeat_interval,
+            connection_timeout,
+            first_event_timeout,
+            idle_timeout,
+            total_timeout,
+        }
+    }
+
+    pub fn from_env() -> Self {
+        let defaults = Self::default();
+        Self {
+            heartbeat_interval: env_duration(
+                &[
+                    "KIMI_SSE_HEARTBEAT_INTERVAL_MS",
+                    "KIMI_SSE_HEARTBEAT_MS",
+                    "KIMI_SSE_HEARTBEAT_INTERVAL",
+                ],
+                defaults.heartbeat_interval,
+            ),
+            connection_timeout: env_duration(
+                &[
+                    "KIMI_SSE_CONNECTION_TIMEOUT_MS",
+                    "KIMI_SSE_CONNECT_TIMEOUT_MS",
+                    "KIMI_SSE_CONNECTION_TIMEOUT",
+                    "KIMI_SSE_CONNECT_TIMEOUT",
+                ],
+                defaults.connection_timeout,
+            ),
+            first_event_timeout: env_duration(
+                &[
+                    "KIMI_SSE_FIRST_EVENT_TIMEOUT_MS",
+                    "KIMI_SSE_FIRST_EVENT_TIMEOUT",
+                ],
+                defaults.first_event_timeout,
+            ),
+            idle_timeout: env_duration(
+                &["KIMI_SSE_IDLE_TIMEOUT_MS", "KIMI_SSE_IDLE_TIMEOUT"],
+                defaults.idle_timeout,
+            ),
+            total_timeout: env_duration(
+                &["KIMI_SSE_TOTAL_TIMEOUT_MS", "KIMI_SSE_TOTAL_TIMEOUT"],
+                defaults.total_timeout,
+            ),
+        }
+    }
+}
+
+fn env_duration(names: &[&str], default: Duration) -> Duration {
+    for name in names {
+        let Ok(raw) = std::env::var(name) else {
+            continue;
+        };
+        let value = raw.trim();
+        if value.is_empty() {
+            continue;
+        }
+        if matches!(
+            value.to_ascii_lowercase().as_str(),
+            "off" | "none" | "disable" | "disabled"
+        ) {
+            return Duration::ZERO;
+        }
+        let (number, multiplier) = if let Some(number) = value.strip_suffix("ms") {
+            (number, 1u64)
+        } else if let Some(number) = value.strip_suffix('s') {
+            (number, 1_000u64)
+        } else if let Some(number) = value.strip_suffix('m') {
+            (number, 60_000u64)
+        } else if name.ends_with("_MS") {
+            (value, 1u64)
+        } else {
+            (value, 1_000u64)
+        };
+        if let Some(millis) = number
+            .trim()
+            .parse::<u64>()
+            .ok()
+            .and_then(|value| value.checked_mul(multiplier))
+        {
+            return Duration::from_millis(millis);
+        }
+    }
+    default
+}
 
 /// Config holds all adapter configuration. Everything is driven by
 /// environment variables so the binary stays a thin, stateless proxy.
@@ -26,6 +143,8 @@ pub struct Config {
     /// Marks Kimi's web-search status text blocks
     /// (e.g. "Search results for query: ...") that must be suppressed.
     pub search_status_prefix: String,
+    /// Heartbeat and timeout policy for all streaming endpoints.
+    pub stream_config: StreamConfig,
 }
 
 impl Config {
@@ -51,6 +170,7 @@ impl Config {
             ],
             max_tokens: env_int("KIMI_MAX_TOKENS", 32768),
             search_status_prefix: env_or("KIMI_SEARCH_STATUS_PREFIX", "Search results for query:"),
+            stream_config: StreamConfig::from_env(),
             thinking_budgets: [
                 ("low".to_string(), 4096),
                 ("medium".to_string(), 16384),
@@ -122,6 +242,11 @@ mod tests {
         set_env("KIMI_CLIENT_SOURCE", "my-codex/1.0");
         set_env("KIMI_MODELS", "k3,k3-256k");
         set_env("KIMI_MAX_TOKENS", "8192");
+        set_env("KIMI_SSE_HEARTBEAT_INTERVAL_MS", "250");
+        set_env("KIMI_SSE_CONNECTION_TIMEOUT_MS", "1000");
+        set_env("KIMI_SSE_FIRST_EVENT_TIMEOUT_MS", "2000");
+        set_env("KIMI_SSE_IDLE_TIMEOUT_MS", "3000");
+        set_env("KIMI_SSE_TOTAL_TIMEOUT_MS", "4000");
         set_env(
             "KIMI_THINKING_BUDGETS",
             r#"{"low":100,"medium":200,"high":300}"#,
@@ -142,6 +267,17 @@ mod tests {
         assert_eq!(cfg.max_tokens, 8192);
         assert_eq!(cfg.thinking_budgets.get("high"), Some(&300));
         assert_eq!(cfg.search_status_prefix, "STATUS:");
+        assert_eq!(
+            cfg.stream_config.heartbeat_interval,
+            Duration::from_millis(250)
+        );
+        assert_eq!(cfg.stream_config.connection_timeout, Duration::from_secs(1));
+        assert_eq!(
+            cfg.stream_config.first_event_timeout,
+            Duration::from_secs(2)
+        );
+        assert_eq!(cfg.stream_config.idle_timeout, Duration::from_secs(3));
+        assert_eq!(cfg.stream_config.total_timeout, Duration::from_secs(4));
         clear_env();
     }
 
@@ -152,6 +288,18 @@ mod tests {
         set_env("KIMI_BASE_URL", "https://kimi.internal/coding///");
         let cfg = Config::load();
         assert_eq!(cfg.kimi_base_url, "https://kimi.internal/coding");
+        clear_env();
+    }
+
+    #[test]
+    fn env_sse_aliases_and_disable_values_are_supported() {
+        let _g = env_lock();
+        clear_env();
+        set_env("KIMI_SSE_HEARTBEAT_MS", "off");
+        set_env("KIMI_SSE_CONNECT_TIMEOUT_MS", "0");
+        let cfg = Config::load();
+        assert_eq!(cfg.stream_config.heartbeat_interval, Duration::ZERO);
+        assert_eq!(cfg.stream_config.connection_timeout, Duration::ZERO);
         clear_env();
     }
 
@@ -301,6 +449,7 @@ mod tests {
         assert_eq!(cfg.thinking_budgets.get("medium"), Some(&16384));
         assert_eq!(cfg.thinking_budgets.get("high"), Some(&32768));
         assert_eq!(cfg.search_status_prefix, "Search results for query:");
+        assert_eq!(cfg.stream_config, StreamConfig::default());
     }
 
     #[test]
