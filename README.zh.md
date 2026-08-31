@@ -1,483 +1,218 @@
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="./assets/keeper-logo-dark.svg" />
-    <source media="(prefers-color-scheme: light)" srcset="./assets/keeper-logo-light.svg" />
-    <img src="./assets/keeper-logo-light.svg" alt="Keeper" width="560" />
-  </picture>
-</p>
+# my-ai-gateway
 
-<p align="center">
-  <a href="./README.md">English</a> ｜ <a href="./README.zh.md"><strong>简体中文</strong></a>
-</p>
+Rust AI 网关，用一个下游入口统一代理多个上游 Provider、Source 和账号。项目当前处于持续开发阶段，配置、HTTP API 和数据库 Schema 尚未承诺后向兼容，不建议未经额外加固直接暴露到不可信网络。
 
-<h1 align="center">CPA Usage Keeper</h1>
+项目正式支持三类北向协议：
 
-<p align="center">万千流转，皆有迹可循。</p>
+| 协议 | 网关入口 | 上游处理 |
+| --- | --- | --- |
+| OpenAI Chat Completions | `POST /v1/chat/completions` | 原生透传优先 |
+| OpenAI Responses | `POST /v1/responses` | 原生透传或一次明确的 Adapter 转换 |
+| Anthropic Messages | `POST /v1/messages` | 原生透传优先 |
 
-<p align="center">
-  <a href="https://github.com/Willxup/cpa-usage-keeper/releases/latest"><img src="https://img.shields.io/github/v/release/Willxup/cpa-usage-keeper?style=flat-square" alt="最新版本" /></a>
-  <a href="https://github.com/Willxup/cpa-usage-keeper/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Willxup/cpa-usage-keeper/ci.yml?branch=main&amp;style=flat-square&amp;label=CI" alt="CI 状态" /></a>
-  <a href="https://github.com/Willxup/cpa-usage-keeper/pkgs/container/cpa-usage-keeper"><img src="https://img.shields.io/badge/Docker-GHCR-2496ED?style=flat-square&amp;logo=docker&amp;logoColor=white" alt="GHCR Docker 镜像" /></a>
-  <a href="https://github.com/Willxup/homebrew-cpa-usage-keeper"><img src="https://img.shields.io/badge/Homebrew-supported-FBB040?style=flat-square&amp;logo=homebrew&amp;logoColor=black" alt="支持 Homebrew" /></a>
-  <a href="https://github.com/Willxup/cpa-usage-keeper/releases/latest"><img src="https://img.shields.io/badge/Linux-FCC624?style=flat-square&amp;logo=linux&amp;logoColor=black" alt="支持 Linux" /></a>
-  <a href="https://github.com/Willxup/cpa-usage-keeper/releases/latest"><img src="https://img.shields.io/badge/macOS-A2AAAD?style=flat-square&amp;logo=apple&amp;logoColor=black" alt="支持 macOS" /></a>
-  <a href="https://github.com/Willxup/cpa-usage-keeper/releases/latest"><img src="https://img.shields.io/badge/Windows-0078D4?style=flat-square&amp;logo=data:image/svg%2Bxml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZmlsbD0iI2ZmZiIgZD0iTTIgMy41IDExIDJ2OUgyem0xMC0xLjdMMjIgLjNWMTFIMTJ6TTIgMTJoOXY5TDIgMTkuNXptMTAgMGgxMHYxMC43bC0xMC0xLjV6Ii8+PC9zdmc%2B" alt="支持 Windows" /></a>
-  <a href="./LICENSE"><img src="https://img.shields.io/github/license/Willxup/cpa-usage-keeper?style=flat-square" alt="MIT License" /></a>
-</p>
+MiniMax、DeepSeek 等原生支持三协议的 Provider 不进入转换器。Kimi Code 的 Responses 路径使用仓库内置的 `kimi-responses-adapter`，不需要额外部署 Adapter 服务。
 
-CPA Usage Keeper 是面向 [CLIProxyAPI（CPA）](https://github.com/router-for-me/CLIProxyAPI) 的独立用量持久化与分析面板。它将 CPA 用量保存到 SQLite，自动拉取 CPA 配置和凭证数据，并提供用量、成本、请求健康、限额及模型/API 统计。
+## 当前能力
 
-## 界面预览
+- PostgreSQL 是控制面和运行时路由的事实来源。
+- `Source` 管理 Base URL、协议 endpoint、模型目录和能力；`Account` 独立管理凭据、权重、启用状态和健康状态。
+- `LogicalModel`、`SourceModel`、`ModelBinding`、`Route` 分离；`/v1/models` 只公开已确认且至少有可用 Binding 的逻辑模型。
+- 原生协议优先，Adapter 只允许一次直接转换；不支持或未知能力返回结构化错误，不会猜测为支持。
+- 首选 Binding 固定优先；408、429、5xx、传输错误或首选账号不可用时，可进入加权 fallback。
+- 非流式 JSON 与流式 SSE 均支持 usage 采集；逻辑请求和每次上游 attempt 分开记录，fallback 不会重复累计最终 Token。
+- Usage 记录实际 `upstream_model_id`、`source_id`、独立的 `client_source`、`usage_source` 和流式 TTFT。
+- PostgreSQL-backed Virtual Key 支持创建、列表、撤销和模型白名单。
+- 管理端已有 Overview、Analysis、Request Events 三个网关原生用量页面。
+- ProviderPreset、连接测试、模型发现、差异预览、编辑和批量确认 API 已实现。
+- `/admin/capabilities` 从当前 DB runtime snapshot 输出三协议有效能力矩阵和完整转换链。
 
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="./assets/screenshots/overview-dark.png" />
-    <source media="(prefers-color-scheme: light)" srcset="./assets/screenshots/overview-light.png" />
-    <img src="./assets/screenshots/overview-light.png" alt="CPA Usage Keeper 总览" width="49%" />
-  </picture>
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="./assets/screenshots/analysis-dark.png" />
-    <source media="(prefers-color-scheme: light)" srcset="./assets/screenshots/analysis-light.png" />
-    <img src="./assets/screenshots/analysis-light.png" alt="CPA Usage Keeper 分析" width="49%" />
-  </picture>
-</p>
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="./assets/screenshots/auth-files-dark.png" />
-    <source media="(prefers-color-scheme: light)" srcset="./assets/screenshots/auth-files-light.png" />
-    <img src="./assets/screenshots/auth-files-light.png" alt="CPA Usage Keeper Auth Files" width="49%" />
-  </picture>
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="./assets/screenshots/ai-provider-dark.png" />
-    <source media="(prefers-color-scheme: light)" srcset="./assets/screenshots/ai-provider-light.png" />
-    <img src="./assets/screenshots/ai-provider-light.png" alt="CPA Usage Keeper AI Provider" width="49%" />
-  </picture>
-</p>
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="./assets/screenshots/ranking-dark.png" />
-    <source media="(prefers-color-scheme: light)" srcset="./assets/screenshots/ranking-light.png" />
-    <img src="./assets/screenshots/ranking-light.png" alt="CPA Usage Keeper 排名" width="49%" />
-  </picture>
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="./assets/screenshots/login-dark.png" />
-    <source media="(prefers-color-scheme: light)" srcset="./assets/screenshots/login-light.png" />
-    <img src="./assets/screenshots/login-light.png" alt="CPA Usage Keeper 登录页" width="49%" />
-  </picture>
-</p>
-
-## 功能特性
-
-- 将 CPA 用量持久保存到 SQLite，并支持可选的定时备份
-- 统计请求量、Token、成本、缓存、成功率、RPM/TPM 和延迟，并可按时间、模型、API Key、来源及结果筛选
-- 查看和导出请求级事件，并自定义表格列
-- 分析用量趋势、成本构成、模型/API Key/AI Provider 占比、时段热力图和延迟诊断
-- 监控 Auth Files 与 AI Providers 的用量、健康状态和限额，支持健康巡检与限额刷新
-- 可选择加入社区排名，按综合得分、Token、请求量、缓存率、平均 TTFT/延迟或峰值 TPM/RPM 对比表现
-- 为单个 CPA API Key 提供独立的只读用量视图
-- 自动同步 CPA Auth Files、API Keys 和 AI Providers，并维护模型价格用于成本估算
-- 支持 Docker/Docker Compose、Homebrew、二进制和 systemd 部署，并可启用密码保护
-- 通过 CPA 插件将 Keeper Dashboard 嵌入 CPAMC
-
-## 赞助与特别感谢
-
-- 感谢 [CLIProxyAPI（CPA）](https://github.com/router-for-me/CLIProxyAPI) 提供本项目所依赖的上游 CPA 基础与数据来源。
-- 感谢 [@YouShouldBetOnMe](https://github.com/YouShouldBetOnMe) 对 CPA Usage Keeper 的支持。
-- 感谢 CPA 讨论组（QQ群组）的讨论与反馈。
+完整设计和当前进度见 [`docs/ai-gateway-design.md`](docs/ai-gateway-design.md) 与 [`docs/todo.md`](docs/todo.md)。管理 API 契约见 [`docs/admin-api.md`](docs/admin-api.md)。
 
 ## 快速开始
 
-> 使用前请确认 CPA 配置已开启 usage 统计：`usage-statistics-enabled: true`。
->
-> 同一 CPA 接入多个 usage 采集服务时，请确保均使用订阅模式，否则可能导致收数中断或数据不完整。
+### 前置条件
 
-Docker Compose 是推荐部署方式：首次部署可同时运行 CPA + Keeper，已有 CPA 时则使用 Keeper-only Compose。
+- PostgreSQL 16；
+- Rust 1.97.1；
+- Node.js 24（需要构建管理端时）；
+- 推荐使用 [Mise](https://mise.jdx.dev/) 安装仓库锁定的工具版本。
 
-| 场景 | 推荐方式 | 架构 |
-| --- | --- | --- |
-| 首次部署 CPA + Keeper | [Docker Compose：CPA + Keeper](#docker-compose推荐) | `linux/amd64`、`linux/arm64` |
-| 已有 CPA | [Docker Compose：仅 Keeper](#docker-compose推荐) | `linux/amd64`、`linux/arm64` |
-| 已有 CPA，偏好 Docker CLI | [Docker](#dockercpa-已在宿主机运行) | `linux/amd64`、`linux/arm64` |
-| macOS | [Homebrew](#macos-homebrew) | `amd64`、`arm64` |
-| Linux 不使用容器 | [Linux 二进制](#linux-二进制) | `amd64`、`arm64` |
-| Windows | [Windows Binary](#windows-binary) | `amd64`、`arm64` |
+```bash
+mise install
+mise run install
+```
 
-登录保护默认启用。启动 Keeper 前请配置 `LOGIN_PASSWORD`；只有部署环境已可靠隔离访问时，才显式设置 `AUTH_ENABLED=false`。
+### 本地运行
 
-## Benchmark
+`DATABASE_URL` 是 DB-first 运行时的必填项。下面的值仅用于本地开发，请替换示例 Key：
 
-`linux/amd64` 生产型容量测试覆盖持续 ingestion、Dashboard 延迟、CPU 利用率和 Keeper cgroup 峰值内存，完整结果见 [容量 Benchmark 报告](./internal/benchmark/REPORT.zh.md)。
+```bash
+export DATABASE_URL='postgres://gateway:gateway@127.0.0.1:5432/gateway'
+export GATEWAY_API_KEY='replace-with-a-random-data-plane-secret'
+export GATEWAY_ADMIN_KEY='replace-with-a-different-admin-secret'
+cargo run
+```
+
+另一个终端中检查服务：
+
+```bash
+curl http://127.0.0.1:8787/healthz
+```
+
+监听地址通过 `GATEWAY_LISTEN_ADDR` 独立设置，默认是 `127.0.0.1:8787`。
+
+### 初始化控制面
+
+空控制面首次启动时，可以把 [`config.example.json`](config.example.json) 作为 `GATEWAY_CONFIG_JSON` 提供。该 JSON 只用于初始化、显式导入和测试，不是运行期配置源：
+
+```bash
+export GATEWAY_CONFIG_JSON="$(<config.example.json)"
+cargo run
+```
+
+数据库中已有任意管理数据后，普通启动不会再次解析或覆盖该 JSON。只有显式设置 `GATEWAY_CONFIG_IMPORT=true` 才会事务化替换当前开发控制面；该操作会清理并重新导入 Source、Account、模型、Binding 和 Route，不应在未确认数据影响时使用。
+
+示例只引用 `credential_env`，不要把真实 API Key 写入 JSON、仓库或日志。
+
+### Docker Compose
+
+仓库中的 [`docker-compose.yml`](docker-compose.yml) 提供 Gateway + PostgreSQL 16 的开发部署结构：
+
+```bash
+export GATEWAY_API_KEY='replace-with-a-random-secret'
+docker compose up --build
+```
+
+Compose 示例使用开发数据库账号，不是生产安全模板。生产部署前需要单独配置强凭据、Admin Key、TLS、网络边界、备份和 Secret 注入。
+
+## 调用网关
+
+静态 `GATEWAY_API_KEY` 是过渡入口保护；正式客户端优先使用 PostgreSQL-backed Virtual Key。三类协议入口接受 `Authorization: Bearer ...`；兼容客户端也可以使用 `x-api-key`。
+
+```bash
+curl http://127.0.0.1:8787/v1/responses \
+  -H "Authorization: Bearer $GATEWAY_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"kimi-for-coding-highspeed","input":"hello","stream":true}'
+```
+
+Kimi Responses 路由在进程内完成 Responses 与 Anthropic Messages 的转换，并保留 thinking/signature、tool call、web search、usage 和 SSE 事件顺序。
+
+## 控制面
+
+主要资源路径如下。集合路径支持 `GET`、`POST`，单资源路径支持 `GET`、`PUT`、`DELETE`，启停使用 `PUT .../{id}/enabled`：
+
+```text
+/admin/sources
+/admin/accounts
+/admin/logical-models
+/admin/model-bindings
+/admin/routes
+```
+
+其他管理入口包括：
+
+- `/admin/keys` 与 `/admin/keys/:id/revoke`；
+- `/admin/provider-presets`；
+- `/admin/sources/:source_id/connection-tests`；
+- `/admin/sources/:source_id/discoveries`；
+- `/admin/sources/:source_id/models` 与确认接口；
+- `/admin/capabilities`；
+- `/admin/usage/summary|timeseries|breakdown|events|export`。
+
+创建 Virtual Key 时，原始 Key 只在创建响应中返回：
+
+```bash
+curl -X POST http://127.0.0.1:8787/admin/keys \
+  -H "Authorization: Bearer $GATEWAY_ADMIN_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"service-a","allowed_models":["MiniMax-M2.7"]}'
+```
+
+Account 响应不会返回 `credential_ciphertext` 或明文凭据。控制面错误统一使用 `{"error":{"code":"...","message":"..."}}`。
+
+## Usage 语义
+
+Usage API 使用 `version: "v1"` 和 `timezone: "UTC"`。所有查询共享以下组合筛选：
+
+```text
+from, to, logical_model, upstream_model, provider, source_id,
+client_source, account, protocol_in, protocol_upstream,
+virtual_key, status, status_code, usage_source
+```
+
+`from` 和 `to` 接受带 offset 的 RFC3339，并按半开区间 `[from,to)` 解释。`events` 固定按 `(created_at DESC, request_id DESC)` 排序，后续页应原样传回不透明的 `page.next_cursor`。
+
+`source_id` 表示 DB-first Runtime Binding 最终实际选中的 Source；可选请求头 `X-Client-Source` 只记录为独立 `client_source`，不参与路由或鉴权。逻辑事件成功时归因最终成功 attempt，全部失败时归因最终实际 attempt。Token 聚合只累计每个逻辑请求的最终 Usage，`upstream_attempts` 单独统计上游尝试。
+
+```bash
+curl 'http://127.0.0.1:8787/admin/usage/timeseries?granularity=day&logical_model=MiniMax-M2.7' \
+  -H "Authorization: Bearer $GATEWAY_ADMIN_KEY"
+
+curl 'http://127.0.0.1:8787/admin/usage/breakdown?breakdown=source_id&usage_source=upstream' \
+  -H "Authorization: Bearer $GATEWAY_ADMIN_KEY"
+
+curl 'http://127.0.0.1:8787/admin/usage/export?format=csv&status=failure' \
+  -H "Authorization: Bearer $GATEWAY_ADMIN_KEY" -o usage-events.csv
+```
+
+CSV/JSON 导出复用 events 的筛选和排序，并有 10,000 行保护上限。Usage 事件契约默认不保存 prompt/response 正文；失败只保留状态码和脱敏的 `error_summary`。
+
+## 安全边界
+
+当前版本已经具备凭据响应脱敏、正文默认不落库、Virtual Key 哈希存储和可配置的管理接口鉴权，但以下生产安全工作仍在开放 Issue 中：
+
+- Admin API 与数据面静态 Key 完全分离并 fail closed（#44）；
+- Provider URL allowlist、解析后 IP 校验和 SSRF 防护（#46）；
+- 统一 Secret Resolver 与凭据信封加密（#47）；
+- Admin 写操作审计日志（#48）。
+
+当前代码在未设置 `GATEWAY_ADMIN_KEY` 时会临时回退到 `GATEWAY_API_KEY`；两个 Key 都未设置时，Admin API 仍会放行。这只是开发期行为，不应被视为生产隔离。Provider Base URL 也尚未完成默认拒绝私网、元数据地址和危险重定向的策略；在 #46 合入前，只能使用受信任的服务端配置，并限制管理面访问。
+
+日志中禁止输出 Authorization、API Key 和完整请求正文。生产凭据应通过 `credential_env` 或受保护的 Secret 注入，不要把真实 Key 提交到仓库。
+
+## 开发与验证
+
+常用组合任务：
+
+```bash
+mise run dev
+mise run build
+mise run test
+mise run lint
+mise run verify
+```
+
+Rust 基础门禁：
+
+```bash
+CARGO_HOME=/tmp/my-ai-gateway-cargo cargo fmt --all -- --check
+CARGO_HOME=/tmp/my-ai-gateway-cargo cargo check
+CARGO_HOME=/tmp/my-ai-gateway-cargo cargo clippy --all-targets -- -D warnings
+CARGO_HOME=/tmp/my-ai-gateway-cargo cargo test
+python3 -m json.tool config.example.json >/dev/null
+```
+
+PostgreSQL 集成测试只连接显式的 `TEST_DATABASE_URL`，每次运行创建并清理独立 schema。完整控制面回归是 ignored test，验收时必须显式运行，不能把缺少数据库导致的跳过当作通过：
+
+```bash
+TEST_DATABASE_URL='postgres://gateway:gateway@127.0.0.1:5432/gateway_test' \
+  cargo test postgres_db_first_crud_rollback_snapshot_and_models_contract -- --ignored
+```
 
 ## 项目结构
 
 ```text
-cmd/server/              应用入口
-internal/api/            HTTP 路由与处理器
-internal/app/            应用装配与启动
-internal/auth/           Session 与访问控制
-internal/poller/         CPA 用量与配置同步
-internal/repository/     SQLite 持久化与聚合
-internal/service/        用量、定价与身份服务
-internal/quota/          Provider 限额刷新与巡检
-internal/ranking/        社区排名聚合与同步
-internal/benchmark/      容量套件、报告、manifest 与历史 Go microbenchmark
-deploy/                  部署模板
-web/                     React + TypeScript 前端
+src/                           Rust 网关主程序
+crates/kimi-responses-adapter/ 内置 Kimi Responses Adapter
+migrations/                    PostgreSQL migrations
+docs/                          设计、管理 API 和运行文档
+web/                           React + TypeScript 管理端
+config.example.json            初始化/导入示例
 ```
 
-## 本地开发
+## 与 CPA Usage Keeper 的关系
 
-### 前置依赖
+my-ai-gateway 不是 CPA Usage Keeper，也不使用其 Go 后端、SQLite、Redis queue、CPA Management API、Auth Files、Ranking、配额或充值逻辑。
 
-- Go 1.26+
-- Node.js 24+
-- npm
-- 一个可用的 [CLIProxyAPI（CPA）](https://github.com/router-for-me/CLIProxyAPI) 实例
-
-### 本地运行
-
-1. 将 `.env.example` 复制为 `.env`，至少设置 `CPA_BASE_URL` 和 `CPA_MANAGEMENT_KEY`。
-
-```bash
-cp .env.example .env
-vim .env
-```
-
-2. 启动后端。
-
-```bash
-go run ./cmd/server/main.go
-```
-
-3. 在另一个终端安装前端依赖并启动开发服务器。
-
-```bash
-npm --prefix ./web ci
-npm --prefix ./web run dev -- --host 127.0.0.1
-```
-
-打开 `http://127.0.0.1:5173`。前端默认将 `/api` 代理到 `http://127.0.0.1:8080`；后端使用其它端口时可通过 `VITE_API_PROXY_TARGET` 覆盖。
-
-### 测试
-
-运行完整验证：
-
-```bash
-make verify
-```
-
-也可以分别运行：
-
-```bash
-go test ./cmd/... ./internal/...
-npm --prefix ./web run test
-npm --prefix ./web run lint
-npm --prefix ./web run typecheck
-npm --prefix ./web run build
-```
-
-## 部署方式
-
-### Docker Compose（推荐）
-
-Docker Compose 同时推荐用于 CPA + Keeper 联合部署和 Keeper 单独部署。
-
-#### CPA + Keeper
-
-将下面内容保存为 `docker-compose.yml`，并替换管理密钥和登录密码：
-
-```yaml
-services:
-  cli-proxy-api:
-    image: eceasy/cli-proxy-api:latest
-    container_name: cli-proxy-api
-    restart: unless-stopped
-    ports:
-      - "8317:8317"
-      - "1455:1455"
-    volumes:
-      - ./cpa/config.yaml:/CLIProxyAPI/config.yaml
-      - ./cpa/auths:/root/.cli-proxy-api
-      - ./cpa/logs:/CLIProxyAPI/logs
-    networks:
-      - cpa-network
-
-  cpa-usage-keeper:
-    image: ghcr.io/willxup/cpa-usage-keeper:latest
-    container_name: cpa-usage-keeper
-    restart: unless-stopped
-    depends_on:
-      - cli-proxy-api
-    ports:
-      - "8080:8080"
-    environment:
-      TZ: Asia/Shanghai # 设置容器时区，日志时间会按该时区显示。
-      CPA_BASE_URL: http://cli-proxy-api:8317
-      CPA_MANAGEMENT_KEY: replace-with-your-management-key
-      REDIS_QUEUE_ADDR: cli-proxy-api:8317
-      AUTH_ENABLED: true
-      LOGIN_PASSWORD: ${KEEPER_LOGIN_PASSWORD:?set KEEPER_LOGIN_PASSWORD}
-    volumes:
-      - ./keeper:/data
-    networks:
-      - cpa-network
-
-networks:
-  cpa-network:
-    driver: bridge
-```
-
-启动前请在 shell 或 Compose `.env` 文件中设置 `KEEPER_LOGIN_PASSWORD`。
-
-运行 `docker compose up -d` 启动，使用 `docker compose down` 停止。
-
-CPA 数据保存在 `./cpa`，Keeper 数据保存在 `./keeper`。
-
-#### Keeper Only
-
-CPA 已经部署好时，直接使用仓库中的 Keeper-only Compose 模板：
-
-```bash
-cp deploy/docker-compose.example.yml docker-compose.yml
-cp .env.example .env
-vim .env
-```
-
-CPA 运行在 Docker 宿主机上时，可从以下配置开始：
-
-```env
-CPA_BASE_URL=http://host.docker.internal:8317
-CPA_MANAGEMENT_KEY=replace-with-your-management-key
-AUTH_ENABLED=true
-LOGIN_PASSWORD=
-```
-
-启动容器前请设置私有的 `LOGIN_PASSWORD`。
-
-其它网络环境请将 `CPA_BASE_URL` 改为容器可访问的 CPA 地址。CPA 使用非默认 Redis/RESP 地址时，再设置 `REDIS_QUEUE_ADDR`。
-
-运行 `docker compose up -d` 启动 Keeper，使用 `docker compose down` 停止。
-
-模板默认将 Keeper 数据保存在 `./data`。
-
-### Docker（CPA 已在宿主机运行）
-
-偏好使用 `docker run` 时，复用上面 Keeper-only Compose 的 `.env` 配置：
-
-```bash
-docker run -d \
-  --name cpa-usage-keeper \
-  --add-host=host.docker.internal:host-gateway \
-  -p 8080:8080 \
-  -v "$(pwd)/keeper:/data" \
-  --env-file .env \
-  ghcr.io/willxup/cpa-usage-keeper:latest
-```
-
-### macOS Homebrew
-
-Homebrew 是 macOS 推荐安装方式：
-
-```bash
-brew tap Willxup/cpa-usage-keeper
-brew install cpa-usage-keeper
-```
-
-设置 `CPA_BASE_URL`、`CPA_MANAGEMENT_KEY` 和私有的 `LOGIN_PASSWORD`，然后启动服务：
-
-```bash
-vim "$(brew --prefix)/etc/cpa-usage-keeper.env"
-brew services start cpa-usage-keeper
-```
-
-升级和服务管理命令：
-
-```bash
-brew services list
-brew services restart cpa-usage-keeper
-brew update
-brew upgrade cpa-usage-keeper
-```
-
-数据保存在 `$(brew --prefix)/var/cpa-usage-keeper`，日志写入 `$(brew --prefix)/var/log/`。
-
-### Linux 二进制
-
-从 [Releases](https://github.com/Willxup/cpa-usage-keeper/releases/latest) 下载 `linux_amd64` 或 `linux_arm64` 压缩包，然后解压并运行：
-
-```bash
-mkdir -p cpa-usage-keeper
-tar -xzf ./cpa-usage-keeper_*_linux_*.tar.gz -C cpa-usage-keeper --strip-components=1
-cd cpa-usage-keeper
-cp .env.example .env
-vim .env
-./cpa-usage-keeper
-```
-
-#### systemd
-
-Linux 压缩包内置 service 模板。请在解压后的目录中运行：
-
-```bash
-sudo cp cpa-usage-keeper.service /etc/systemd/system/cpa-usage-keeper.service
-sudo sed -i "s|__CPA_USAGE_KEEPER_DIR__|$(pwd)|g" /etc/systemd/system/cpa-usage-keeper.service
-sudo systemctl daemon-reload
-sudo systemctl enable --now cpa-usage-keeper
-```
-
-```bash
-sudo systemctl status cpa-usage-keeper
-sudo journalctl -u cpa-usage-keeper -f
-sudo systemctl restart cpa-usage-keeper
-```
-
-### 命令行参数
-
-二进制支持以下可选启动参数：
-
-```bash
-cpa-usage-keeper --host 127.0.0.1 # 仅为当前进程覆盖 APP_HOST。
-cpa-usage-keeper -v               # 输出构建版本并退出；也支持 --version。
-```
-
-### Windows Binary
-
-从 [Releases](https://github.com/Willxup/cpa-usage-keeper/releases/latest) 下载 `windows_amd64` 或 `windows_arm64` ZIP 并解压。在 PowerShell 中进入解压目录后运行：
-
-```powershell
-Copy-Item .env.example .env
-notepad .env
-.\cpa-usage-keeper.exe
-```
-
-启动前请设置 `CPA_BASE_URL`、`CPA_MANAGEMENT_KEY` 和私有的 `LOGIN_PASSWORD`。认证默认启用；只有隔离部署才显式设置 `AUTH_ENABLED=false`。
-
-## 配置
-
-复制配置模板：
-
-```bash
-cp .env.example .env
-```
-
-新手部署时优先看“最小必填”和“Web 访问与反代”两组，其它配置保持默认即可。
-
-### 最小必填
-
-| 变量 | 必填 | 默认值 | 说明 |
-| --- | --- | --- | --- |
-| `CPA_BASE_URL` | 是 | - | Keeper 服务端访问 CPA 的地址。Docker Compose 内通常是 `http://cli-proxy-api:8317`，可以是内网地址或容器服务名 |
-| `CPA_MANAGEMENT_KEY` | 是 | - | CPA management key，用于读取 CPA 管理接口数据 |
-
-### Web 访问与反代
-
-| 变量 | 必填 | 默认值 | 说明 |
-| --- | --- | --- | --- |
-| `APP_HOST` | 否 | 所有接口 | Keeper HTTP 监听主机；原生部署仅允许本机访问时可设为 `127.0.0.1` |
-| `APP_PORT` | 否 | `8080` | Keeper HTTP 监听端口 |
-| `APP_BASE_PATH` | 否 | 根路径 | Keeper 子路径部署前缀，例如 `/keeper`；留空表示部署在 `/` |
-| `CPA_PUBLIC_URL` | 否 | 当前浏览器同源根路径 | 浏览器访问 CPA 的公开地址，用于“返回 CPA”跳转和 CPAMC frame 信任来源 |
-| `TRUSTED_PROXY_CIDRS` | 否 | 仅本机 loopback | 允许提供 `X-Forwarded-For` 的额外反向代理 CIDR，多个值用逗号分隔 |
-
-- 启动参数 `--host` 的优先级高于 `APP_HOST`。两者都未设置时，Keeper 保持现有行为，监听所有可用网络接口。
-- Docker/Compose 请保持 `APP_HOST` 为空；如需仅允许 Docker 宿主机访问，请将端口发布为 `127.0.0.1:8080:8080`。
-- `APP_BASE_PATH` 必须为空或以 `/` 开头；`/cpa/` 会规范为 `/cpa`。
-- `CPA_BASE_URL` 是服务端访问 CPA 的地址，可以使用内网地址或 Docker 服务名。
-- `CPA_PUBLIC_URL` 控制浏览器跳转和跨域 CPAMC frame 信任。同源且 CPA 位于 `/management.html` 时可留空；域名、端口或路径不同时应设置公开 CPA 地址。
-- Keeper 只信任本机 loopback 和 `TRUSTED_PROXY_CIDRS` 提供的 `X-Forwarded-For`；直连客户端不能通过该请求头切换登录限流来源。只配置实际代理地址或网段，全网 CIDR 会被拒绝。
-
-跨域嵌入 CPAMC 时，`CPA_PUBLIC_URL` 必须是带 host 的完整 `http://` 或 `https://` URL；相对路径只影响浏览器跳转。
-
-### 登录保护
-
-| 变量 | 必填 | 默认值 | 说明 |
-| --- | --- | --- | --- |
-| `AUTH_ENABLED` | 否 | `true` | 是否启用登录保护 |
-| `LOGIN_PASSWORD` | 鉴权启用时必填 | - | 登录密码 |
-| `AUTH_SESSION_TTL` | 否 | `168h` | 登录 session 有效时长 |
-| `API_KEY_VIEWER_LOCAL_RANKING_ENABLED` | 否 | `false` | 允许 API Key 登录用户只读查看本地排行；Community 排行始终只读 |
-
-### 时区与请求行为
-
-| 变量 | 必填 | 默认值 | 说明 |
-| --- | --- | --- | --- |
-| `TZ` | 否 | `Asia/Shanghai` | 统计和展示使用的时区；Today、按天统计、页面时间、日志时间和每日清理时间都会按这个时区计算 |
-| `REQUEST_TIMEOUT` | 否 | `30s` | 请求 CPA HTTP 接口和 Redis 队列的超时时间 |
-| `TLS_SKIP_VERIFY` | 否 | `false` | 跳过 CPA HTTPS 和 Redis 队列 TLS 的证书验证；仅在使用自签名证书时启用 |
-
-### Auth Files 限额刷新
-
-Auth Files 定时限额刷新在 Auth Files 巡检弹窗的小齿轮中配置。设置保存在本地 SQLite，不依赖页面保持打开。
-
-| 变量 | 必填 | 默认值 | 说明 |
-| --- | --- | --- | --- |
-| `QUOTA_REFRESH_WORKER_LIMIT` | 否 | `10` | 手动刷新和定时刷新共用的 Auth Files 限额刷新队列最大并发数，最大 `100` |
-
-### Redis 队列高级配置
-
-| 变量 | 必填 | 默认值 | 说明 |
-| --- | --- | --- | --- |
-| `REDIS_QUEUE_ADDR` | 否 | `CPA_BASE_URL` 主机名 + `8317` | CPA Redis/RESP TCP 地址；一般保持空即可。非默认端口或单独暴露 Redis stream 时填写 `host:port` |
-| `REDIS_QUEUE_TLS` | 否 | `false` | 是否使用 TLS 连接 Redis 队列；显式设置 `REDIS_QUEUE_ADDR` 且需要 TLS 时设为 `true` |
-| `REDIS_QUEUE_BATCH_SIZE` | 否 | `10000` | 每次最多拉取的队列记录数 |
-| `REDIS_QUEUE_IDLE_INTERVAL` | 否 | `1s` | 队列为空时的检查间隔 |
-
-### 存储、日志与备份
-
-| 变量 | 必填 | 默认值 | 说明 |
-| --- | --- | --- | --- |
-| `WORK_DIR` | 否 | `./data` | 应用工作目录；数据库、日志和备份默认分别写入 `app.db`、`logs/`、`backups/` |
-| `LOG_LEVEL` | 否 | `info` | 日志级别 |
-| `LOG_FILE_ENABLED` | 否 | `true` | 是否写入持久化日志文件 |
-| `LOG_RETENTION_DAYS` | 否 | `7` | 综合日志保留历史天数，并额外保留当天；`0` 表示不自动清理。仅错误日志固定保留历史 30 天及当天 |
-| `BACKUP_ENABLED` | 否 | `true` | 是否启用 SQLite 数据库备份 |
-| `BACKUP_INTERVAL` | 否 | `24h` | 数据库备份间隔 |
-| `BACKUP_RETENTION_DAYS` | 否 | `7` | 备份保留天数 |
-
-Keeper 会在每天 04:30 的维护窗口中，把早于 90 个本地自然日的原始 `usage_events` 自动移动到永久保留的 `usage_events_archive` 冷表。该冷表用于未来 schema migration 重建增量数据，正常仪表盘 API 不查询 archive。
-
-启用文件日志后，`cpa-usage-keeper-YYYY-MM-DD.log` 会记录所有已输出级别；error、fatal 和 panic 级别还会同时写入 `cpa-usage-keeper-error-YYYY-MM-DD.log`，该文件固定保留历史 30 个本地自然日及当天。
-
-### 内置 HTTPS
-
-| 变量 | 必填 | 默认值 | 说明 |
-| --- | --- | --- | --- |
-| `TLS_ENABLED` | 否 | `false` | 是否让 Keeper 自己启用 HTTPS/TLS |
-| `TLS_CERT_FILE` | 启用 TLS 时必填 | - | HTTPS 证书文件路径 |
-| `TLS_KEY_FILE` | 启用 TLS 时必填 | - | HTTPS 私钥文件路径 |
-
-通常建议在 nginx、Caddy 等反向代理层处理 HTTPS。只有需要 Keeper 进程直接提供 HTTPS 时，才设置 `TLS_ENABLED=true`，并填写 `TLS_CERT_FILE` 和 `TLS_KEY_FILE`；相对路径会按 `.env` 所在目录解析。
-
-安全与数据说明：
-
-- 浏览器 API 会脱敏 key 类字段，但 SQLite 数据库及其未加密备份仍包含原始数据。
-- 认证默认启用。若显式关闭，请在部署边界限制 Keeper 访问；公网访问应在反向代理层启用 HTTPS。
-- 登录 session hash 会保存在 SQLite 中，直到用户退出或超过 `AUTH_SESSION_TTL`。
-- CPAMC 使用独立的 embed session：优先使用 `HttpOnly` Cookie，不可用时回退到保存在浏览器 session storage 中的单标签页请求头 token。
-- 同源嵌入默认可用；跨域嵌入时，将 `CPA_PUBLIC_URL` 设置为用于 `frame-ancestors` 的公开 CPA/CPAMC 来源。
-- Redis inbox 消息成功后保留到当天结束，失败后保留 7 天。
-
-## Nginx 反向代理
-
-部署到 `/cpa` 时设置 `APP_BASE_PATH=/cpa`，并在反向代理中保留该前缀：
-
-```nginx
-location /cpa/ {
-    proxy_pass http://127.0.0.1:8080;
-    proxy_set_header Host $host;
-    proxy_set_header X-Forwarded-Proto $scheme;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-}
-```
-
-上面的本机 Nginx 配置无需额外设置 Keeper。若反向代理通过容器或其它主机访问 Keeper，请加入准确的代理网段，例如 `TRUSTED_PROXY_CIDRS=172.18.0.0/16`。
-
-CPA 与 Keeper 浏览器同源时，可以不设置 `CPA_PUBLIC_URL`，“返回 CPA”默认使用 `/management.html`。CPA 位于其它域名、端口或路径时，设置公开地址：
-
-```env
-CPA_PUBLIC_URL=https://cpa.example.com
-```
-
-## License
-
-本项目基于 [MIT License](./LICENSE) 开源。
+管理端的 Overview、Analysis、Request Events 页面结构与部分 React 交互基于 CPA Usage Keeper 的 MIT 代码适配。来源、复用边界和完整许可证保存在 [`web/THIRD_PARTY_NOTICES.md`](web/THIRD_PARTY_NOTICES.md) 与 [`web/licenses/CPA_USAGE_KEEPER_LICENSE`](web/licenses/CPA_USAGE_KEEPER_LICENSE)。
