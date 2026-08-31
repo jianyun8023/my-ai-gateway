@@ -13,8 +13,9 @@
 - [x] Provider/Account/Route 配置同步到 PostgreSQL
 - [x] 模型目录领域表与可路由 Binding 仓储基线
 - [x] ProviderPreset、模型发现差异和用户确认 API（#13）
-- [ ] PostgreSQL DB-first 控制面加载、事务化运行时 snapshot 与 Binding 路由（#14）
-- [x] Provider/Account/Route CRUD 与数据库持久化（#14）
+- [x] PostgreSQL DB-first 启动、一次性 JSON 初始化/显式导入与一致性 runtime snapshot（#14）
+- [x] Source/Account/LogicalModel/ModelBinding/Route 事务化 CRUD、启停与结构化错误（#14）
+- [x] confirmed/available Binding resolver、完整协议链与 `/v1/models` 可路由/健康过滤（#14）
 - [ ] Virtual Key 轮换与分组权限
 - [x] Keeper React UI vendor 与静态资源构建
 - [x] 网关原生用量控制台（Overview/Analysis/Request Events）对接 Usage API（#16）
@@ -22,7 +23,8 @@
 - [x] Admin 路由调试端点鉴权与 proxy 结构化路由错误（#20、#22）
 - [x] degraded 仅表示实际损失，所有降级路径记录结构化 warning（#21）
 - [x] 三协议 × native/adapter/unsupported 解析矩阵与原生透传测试（#23）
-- [ ] 有效能力矩阵完整转换链、degraded 状态、DB 能力与 Web 展示（#24）
+- [x] DB runtime 有效能力矩阵 API：完整转换链、primary/fallback、degraded 与结构化不可路由状态（#24）
+- [ ] 有效能力矩阵 Web 展示（#24）
 - [x] 失败 usage 不估算与 usage_source 查询契约对齐（#25）
 - [x] usage 记录 route_id、streamed 与脱敏 error_summary（#26，部分）
 - [ ] usage 记录真实 upstream_model_id 与流式 ttft_ms（#26）

@@ -1,39 +1,49 @@
 use crate::{
-    config::{Capabilities, GatewayConfig, ProtocolMode, RouteConfig},
+    config::{Capabilities, GatewayConfig, ProtocolMode},
+    control_plane::PublishedModel,
     protocol::Protocol,
-    routing::{ResolvedRoute, RouteResolutionError, RouteResolver},
+    routing::{ResolvedBinding, ResolvedRoute, RouteResolutionError, RouteResolver},
 };
+use chrono::{DateTime, Utc};
 use serde::Serialize;
-use std::sync::Arc;
+use std::{collections::BTreeMap, error::Error, fmt};
 
 pub const CAPABILITY_MATRIX_VERSION: &str = "v1";
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CapabilityFactSource {
+    RuntimeSnapshot,
+}
 
 #[derive(Clone, Debug, Serialize)]
 pub struct CapabilityMatrixResponse {
     pub version: &'static str,
+    pub fact_source: CapabilityFactSource,
+    pub snapshot_revision: i64,
+    pub snapshot_generated_at: DateTime<Utc>,
     pub data: Vec<RouteCapabilityMatrix>,
 }
 
 #[derive(Clone, Debug, Serialize)]
 pub struct RouteCapabilityMatrix {
     pub route_id: String,
-    pub source: ConfigSourceRef,
-    pub account: ConfigAccountRef,
-    /// The configured route model expression. It may be an exact model or a
-    /// wildcard pattern and is resolved with the same matching rules as proxy
-    /// traffic.
+    pub source: RuntimeSourceRef,
+    pub account: RuntimeAccountRef,
     pub model: String,
+    pub model_display_name: String,
+    pub upstream_model_id: String,
     pub protocols: Vec<EffectiveProtocolCapability>,
 }
 
-#[derive(Clone, Debug, Serialize)]
-pub struct ConfigSourceRef {
-    pub provider_id: String,
-    pub provider_name: Option<String>,
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct RuntimeSourceRef {
+    pub source_id: String,
+    pub display_name: Option<String>,
 }
 
-#[derive(Clone, Debug, Serialize)]
-pub struct ConfigAccountRef {
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct RuntimeAccountRef {
     pub account_id: String,
     pub display_name: Option<String>,
     pub enabled: Option<bool>,
@@ -44,6 +54,13 @@ pub struct ConfigAccountRef {
 pub enum CapabilityRouteStatus {
     Routable,
     Unroutable,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CapabilityBindingSelection {
+    Primary,
+    Fallback,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -58,9 +75,10 @@ pub struct ProtocolConversionHop {
 pub struct EffectiveProtocolCapability {
     pub protocol_in: Protocol,
     pub status: CapabilityRouteStatus,
+    pub binding_id: Option<i64>,
+    pub selection: Option<CapabilityBindingSelection>,
+    pub selection_rank: Option<usize>,
     pub protocol_upstream: Option<Protocol>,
-    /// A resolved URL assembled only from the configured Provider base URL and
-    /// protocol endpoint. No credential lookup is performed for this API.
     pub endpoint: Option<String>,
     pub mode: Option<ProtocolMode>,
     pub adapter: Option<String>,
@@ -68,159 +86,415 @@ pub struct EffectiveProtocolCapability {
     pub effective_capabilities: Capabilities,
     pub degraded: bool,
     pub degraded_features: Vec<String>,
-    pub allow_lossy_conversion: bool,
+    pub allow_lossy_conversion: Option<bool>,
     pub error: Option<RouteResolutionError>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum CapabilityMatrixBuildError {
+    NotRuntimeSnapshot,
+    MissingRuntimeBindingId {
+        route_id: String,
+        protocol: Protocol,
+    },
+    InvalidRuntimeMode {
+        route_id: String,
+        binding_id: i64,
+        mode: String,
+    },
+    DuplicateRuntimeBinding {
+        route_id: String,
+        binding_id: i64,
+        protocol: Protocol,
+    },
+}
+
+impl CapabilityMatrixBuildError {
+    pub fn code(&self) -> &'static str {
+        "invalid_runtime_snapshot"
+    }
+}
+
+impl fmt::Display for CapabilityMatrixBuildError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NotRuntimeSnapshot => {
+                f.write_str("capability matrix requires the published runtime snapshot")
+            }
+            Self::MissingRuntimeBindingId { route_id, protocol } => write!(
+                f,
+                "runtime route '{route_id}' for {protocol} is missing its binding id"
+            ),
+            Self::InvalidRuntimeMode {
+                route_id,
+                binding_id,
+                mode,
+            } => write!(
+                f,
+                "runtime route '{route_id}' binding {binding_id} has invalid mode '{mode}'"
+            ),
+            Self::DuplicateRuntimeBinding {
+                route_id,
+                binding_id,
+                protocol,
+            } => write!(
+                f,
+                "runtime route '{route_id}' contains duplicate binding {binding_id} for {protocol}"
+            ),
+        }
+    }
+}
+
+impl Error for CapabilityMatrixBuildError {}
+
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct MatrixKey {
+    model: String,
+    route_id: String,
+    source_id: String,
+    account_id: String,
+    upstream_model_id: String,
+}
+
+struct RouteMatrixBuilder {
+    route_id: String,
+    source: RuntimeSourceRef,
+    account: RuntimeAccountRef,
+    model: String,
+    model_display_name: String,
+    upstream_model_id: String,
+    protocols: BTreeMap<Protocol, EffectiveProtocolCapability>,
+}
+
 impl CapabilityMatrixResponse {
-    pub fn from_config(config: Arc<GatewayConfig>) -> Self {
-        let resolver = RouteResolver::new(config.clone());
-        let data = config
-            .routes
-            .iter()
-            .enumerate()
-            .map(|(route_index, route)| RouteCapabilityMatrix {
-                route_id: route.id.clone(),
-                source: ConfigSourceRef {
-                    provider_id: route.provider_id.clone(),
-                    provider_name: config
-                        .provider(&route.provider_id)
-                        .map(|provider| provider.name.clone()),
-                },
-                account: ConfigAccountRef {
-                    account_id: route.primary_account_id.clone(),
-                    display_name: config
-                        .account(&route.primary_account_id)
-                        .map(|account| account.display_name.clone()),
-                    enabled: config
-                        .account(&route.primary_account_id)
-                        .map(|account| account.enabled),
-                },
-                model: route.model.clone(),
-                protocols: Protocol::ALL
-                    .into_iter()
-                    .map(|protocol| {
-                        EffectiveProtocolCapability::resolve(
-                            &resolver,
-                            route_index,
-                            route,
-                            protocol,
-                        )
-                    })
-                    .collect(),
+    /// Build the effective matrix from the same immutable DB-backed snapshot
+    /// used by proxy routing. `config` is only the transport/display metadata
+    /// materialized inside that snapshot; configured routes are never read.
+    pub fn from_runtime_snapshot(
+        config: &GatewayConfig,
+        resolver: &RouteResolver,
+        models: &[PublishedModel],
+        snapshot_revision: i64,
+        snapshot_generated_at: DateTime<Utc>,
+    ) -> Result<Self, CapabilityMatrixBuildError> {
+        if !resolver.is_runtime_snapshot() {
+            return Err(CapabilityMatrixBuildError::NotRuntimeSnapshot);
+        }
+
+        let mut rows = BTreeMap::<MatrixKey, RouteMatrixBuilder>::new();
+        let mut resolutions = BTreeMap::<(String, Protocol), Option<RouteResolutionError>>::new();
+
+        for model in models {
+            for protocol in Protocol::ALL {
+                match resolver.resolve_detailed(protocol, &model.id) {
+                    Ok(resolved) => {
+                        insert_resolved_route(config, model, &resolved, &mut rows)?;
+                        resolutions.insert((model.id.clone(), protocol), None);
+                    }
+                    Err(error) => {
+                        resolutions.insert((model.id.clone(), protocol), Some(error));
+                    }
+                }
+            }
+        }
+
+        let data = rows
+            .into_values()
+            .map(|row| row.finish(&resolutions))
+            .collect();
+        Ok(Self {
+            version: CAPABILITY_MATRIX_VERSION,
+            fact_source: CapabilityFactSource::RuntimeSnapshot,
+            snapshot_revision,
+            snapshot_generated_at,
+            data,
+        })
+    }
+}
+
+fn insert_resolved_route(
+    config: &GatewayConfig,
+    model: &PublishedModel,
+    resolved: &ResolvedRoute,
+    rows: &mut BTreeMap<MatrixKey, RouteMatrixBuilder>,
+) -> Result<(), CapabilityMatrixBuildError> {
+    let binding_id =
+        resolved
+            .binding_id
+            .ok_or_else(|| CapabilityMatrixBuildError::MissingRuntimeBindingId {
+                route_id: resolved.route_id.clone(),
+                protocol: resolved.protocol_in,
+            })?;
+    insert_binding(
+        config,
+        model,
+        &resolved.route_id,
+        resolved.protocol_in,
+        binding_id,
+        &resolved.provider_id,
+        &resolved.primary_account_id,
+        &resolved.upstream_model_id,
+        resolved.protocol_upstream,
+        &resolved.upstream_endpoint,
+        &resolved.mode,
+        resolved.adapter.as_deref(),
+        &resolved.effective_capabilities,
+        &resolved.degraded_features,
+        resolved.allow_lossy_conversion,
+        CapabilityBindingSelection::Primary,
+        0,
+        rows,
+    )?;
+    for (index, binding) in resolved.fallback_bindings.iter().enumerate() {
+        insert_fallback_binding(config, model, resolved, binding, index + 1, rows)?;
+    }
+    Ok(())
+}
+
+fn insert_fallback_binding(
+    config: &GatewayConfig,
+    model: &PublishedModel,
+    resolved: &ResolvedRoute,
+    binding: &ResolvedBinding,
+    selection_rank: usize,
+    rows: &mut BTreeMap<MatrixKey, RouteMatrixBuilder>,
+) -> Result<(), CapabilityMatrixBuildError> {
+    insert_binding(
+        config,
+        model,
+        &resolved.route_id,
+        resolved.protocol_in,
+        binding.binding_id,
+        &binding.provider_id,
+        &binding.account_id,
+        &binding.upstream_model_id,
+        binding.protocol_upstream,
+        &binding.upstream_endpoint,
+        &binding.mode,
+        binding.adapter.as_deref(),
+        &binding.effective_capabilities,
+        &binding.degraded_features,
+        resolved.allow_lossy_conversion,
+        CapabilityBindingSelection::Fallback,
+        selection_rank,
+        rows,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn insert_binding(
+    config: &GatewayConfig,
+    model: &PublishedModel,
+    route_id: &str,
+    protocol_in: Protocol,
+    binding_id: i64,
+    source_id: &str,
+    account_id: &str,
+    upstream_model_id: &str,
+    protocol_upstream: Protocol,
+    endpoint: &str,
+    mode: &str,
+    adapter: Option<&str>,
+    effective_capabilities: &Capabilities,
+    degraded_features: &[String],
+    allow_lossy_conversion: bool,
+    selection: CapabilityBindingSelection,
+    selection_rank: usize,
+    rows: &mut BTreeMap<MatrixKey, RouteMatrixBuilder>,
+) -> Result<(), CapabilityMatrixBuildError> {
+    let mode = runtime_mode(route_id, binding_id, mode)?;
+    let key = MatrixKey {
+        model: model.id.clone(),
+        route_id: route_id.to_owned(),
+        source_id: source_id.to_owned(),
+        account_id: account_id.to_owned(),
+        upstream_model_id: upstream_model_id.to_owned(),
+    };
+    let row = rows.entry(key).or_insert_with(|| RouteMatrixBuilder {
+        route_id: route_id.to_owned(),
+        source: RuntimeSourceRef {
+            source_id: source_id.to_owned(),
+            display_name: config
+                .provider(source_id)
+                .map(|provider| provider.name.clone()),
+        },
+        account: RuntimeAccountRef {
+            account_id: account_id.to_owned(),
+            display_name: config
+                .account(account_id)
+                .map(|account| account.display_name.clone()),
+            enabled: config.account(account_id).map(|account| account.enabled),
+        },
+        model: model.id.clone(),
+        model_display_name: model.display_name.clone(),
+        upstream_model_id: upstream_model_id.to_owned(),
+        protocols: BTreeMap::new(),
+    });
+    let cell = EffectiveProtocolCapability::routable(
+        protocol_in,
+        binding_id,
+        selection,
+        selection_rank,
+        protocol_upstream,
+        endpoint,
+        mode,
+        adapter,
+        effective_capabilities,
+        degraded_features,
+        allow_lossy_conversion,
+    );
+    if row.protocols.insert(protocol_in, cell).is_some() {
+        return Err(CapabilityMatrixBuildError::DuplicateRuntimeBinding {
+            route_id: route_id.to_owned(),
+            binding_id,
+            protocol: protocol_in,
+        });
+    }
+    Ok(())
+}
+
+fn runtime_mode(
+    route_id: &str,
+    binding_id: i64,
+    mode: &str,
+) -> Result<ProtocolMode, CapabilityMatrixBuildError> {
+    match mode {
+        "native" => Ok(ProtocolMode::Native),
+        "adapter" => Ok(ProtocolMode::Adapter),
+        _ => Err(CapabilityMatrixBuildError::InvalidRuntimeMode {
+            route_id: route_id.to_owned(),
+            binding_id,
+            mode: mode.to_owned(),
+        }),
+    }
+}
+
+impl RouteMatrixBuilder {
+    fn finish(
+        mut self,
+        resolutions: &BTreeMap<(String, Protocol), Option<RouteResolutionError>>,
+    ) -> RouteCapabilityMatrix {
+        let protocols = Protocol::ALL
+            .into_iter()
+            .map(|protocol| {
+                self.protocols.remove(&protocol).unwrap_or_else(|| {
+                    let error = match resolutions.get(&(self.model.clone(), protocol)) {
+                        Some(Some(error)) => error.clone(),
+                        Some(None) | None => RouteResolutionError {
+                            code: "runtime_binding_not_available".to_owned(),
+                            message: format!(
+                                "runtime snapshot has no confirmed, available binding for source '{}' account '{}' upstream model '{}' on {protocol}",
+                                self.source.source_id,
+                                self.account.account_id,
+                                self.upstream_model_id
+                            ),
+                            route_id: Some(self.route_id.clone()),
+                        },
+                    };
+                    EffectiveProtocolCapability::unroutable(protocol, error)
+                })
             })
             .collect();
-        Self {
-            version: CAPABILITY_MATRIX_VERSION,
-            data,
+        RouteCapabilityMatrix {
+            route_id: self.route_id,
+            source: self.source,
+            account: self.account,
+            model: self.model,
+            model_display_name: self.model_display_name,
+            upstream_model_id: self.upstream_model_id,
+            protocols,
         }
     }
 }
 
 impl EffectiveProtocolCapability {
-    fn resolve(
-        resolver: &RouteResolver,
-        route_index: usize,
-        route: &RouteConfig,
-        protocol: Protocol,
+    #[allow(clippy::too_many_arguments)]
+    fn routable(
+        protocol_in: Protocol,
+        binding_id: i64,
+        selection: CapabilityBindingSelection,
+        selection_rank: usize,
+        protocol_upstream: Protocol,
+        endpoint: &str,
+        mode: ProtocolMode,
+        adapter: Option<&str>,
+        effective_capabilities: &Capabilities,
+        degraded_features: &[String],
+        allow_lossy_conversion: bool,
     ) -> Self {
-        match resolver.resolve_configured_route(route_index, protocol, &route.model) {
-            Ok(resolved) => Self::routable(resolved),
-            Err(error) => Self::unroutable(route, protocol, error),
-        }
-    }
-
-    fn routable(resolved: ResolvedRoute) -> Self {
-        let mode = match resolved.mode.as_str() {
-            "native" => ProtocolMode::Native,
-            "adapter" => ProtocolMode::Adapter,
-            _ => unreachable!("RouteResolver only emits validated route modes"),
-        };
-        let conversion_chain = vec![ProtocolConversionHop {
-            protocol_from: resolved.protocol_in,
-            protocol_to: resolved.protocol_upstream,
-            mode,
-            adapter: resolved.adapter.clone(),
-        }];
-        let degraded = resolved.is_degraded();
+        let adapter = adapter.map(str::to_owned);
         Self {
-            protocol_in: resolved.protocol_in,
+            protocol_in,
             status: CapabilityRouteStatus::Routable,
-            protocol_upstream: Some(resolved.protocol_upstream),
-            endpoint: Some(resolved.upstream_endpoint),
+            binding_id: Some(binding_id),
+            selection: Some(selection),
+            selection_rank: Some(selection_rank),
+            protocol_upstream: Some(protocol_upstream),
+            endpoint: Some(endpoint.to_owned()),
             mode: Some(mode),
-            adapter: resolved.adapter,
-            conversion_chain,
-            effective_capabilities: resolved.effective_capabilities,
-            degraded,
-            degraded_features: resolved.degraded_features,
-            allow_lossy_conversion: resolved.allow_lossy_conversion,
+            adapter: adapter.clone(),
+            conversion_chain: vec![ProtocolConversionHop {
+                protocol_from: protocol_in,
+                protocol_to: protocol_upstream,
+                mode,
+                adapter,
+            }],
+            effective_capabilities: effective_capabilities.clone(),
+            degraded: !degraded_features.is_empty(),
+            degraded_features: degraded_features.to_vec(),
+            allow_lossy_conversion: Some(allow_lossy_conversion),
             error: None,
         }
     }
 
-    fn unroutable(route: &RouteConfig, protocol: Protocol, error: RouteResolutionError) -> Self {
-        let protocol_not_configured = error.code == "route_protocol_not_configured";
-        let mode = if protocol_not_configured {
-            Some(ProtocolMode::Unsupported)
-        } else {
-            configured_mode(route)
-        };
-        let adapter = (mode == Some(ProtocolMode::Adapter))
-            .then(|| route.adapter.clone())
-            .flatten();
+    fn unroutable(protocol_in: Protocol, error: RouteResolutionError) -> Self {
         Self {
-            protocol_in: protocol,
+            protocol_in,
             status: CapabilityRouteStatus::Unroutable,
+            binding_id: None,
+            selection: None,
+            selection_rank: None,
             protocol_upstream: None,
             endpoint: None,
-            mode,
-            adapter,
+            mode: None,
+            adapter: None,
             conversion_chain: Vec::new(),
             effective_capabilities: Capabilities::default(),
             degraded: false,
             degraded_features: Vec::new(),
-            allow_lossy_conversion: route.allow_lossy_conversion,
+            allow_lossy_conversion: None,
             error: Some(error),
         }
-    }
-}
-
-fn configured_mode(route: &RouteConfig) -> Option<ProtocolMode> {
-    match route.mode.as_str() {
-        "native" => Some(ProtocolMode::Native),
-        "adapter" => Some(ProtocolMode::Adapter),
-        "unsupported" => Some(ProtocolMode::Unsupported),
-        _ => None,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{
-        AccountConfig, CapabilityMode, ModelCapabilityOverride, ProtocolCapability, ProviderConfig,
+    use crate::{
+        config::{AccountConfig, CapabilityMode, ProviderConfig},
+        routing::{RuntimeBinding, RuntimeRoute},
     };
-    use std::collections::HashMap;
+    use std::{collections::HashMap, sync::Arc};
 
     fn provider(id: &str) -> ProviderConfig {
         ProviderConfig {
             id: id.into(),
-            name: format!("{id} name"),
-            base_url: format!("https://{id}.example.test/api/"),
-            models: vec!["model-a".into()],
+            name: format!("{id} display"),
+            base_url: format!("https://{id}.example.test"),
+            models: vec!["upstream-a".into(), "upstream-partial".into()],
             native_protocols: Vec::new(),
             endpoints: HashMap::new(),
-            capabilities: Capabilities::native(),
+            capabilities: Capabilities::default(),
             protocol_capabilities: HashMap::new(),
             model_overrides: HashMap::new(),
         }
     }
 
-    fn account(id: &str, provider_id: &str) -> AccountConfig {
+    fn account(id: &str, source_id: &str) -> AccountConfig {
         AccountConfig {
             id: id.into(),
-            provider_id: provider_id.into(),
+            provider_id: source_id.into(),
             display_name: format!("{id} display"),
             credential_env: Some("CAPABILITY_TEST_SECRET_ENV".into()),
             credential: Some("capability-test-secret-value".into()),
@@ -233,124 +507,182 @@ mod tests {
         }
     }
 
-    fn route(
-        id: &str,
-        model: &str,
-        provider_id: &str,
+    #[allow(clippy::too_many_arguments)]
+    fn binding(
+        binding_id: i64,
+        source_id: &str,
         account_id: &str,
-        protocol: Protocol,
+        upstream_model_id: &str,
+        protocol_upstream: Protocol,
         mode: &str,
-    ) -> RouteConfig {
-        RouteConfig {
-            id: id.into(),
-            model: model.into(),
-            provider_id: provider_id.into(),
-            protocols: vec![protocol],
-            primary_account_id: account_id.into(),
-            fallback_accounts: Vec::new(),
-            strategy: "primary_then_weighted_fallback".into(),
+        adapter: Option<&str>,
+        effective_capabilities: Capabilities,
+        degraded_features: Vec<&str>,
+    ) -> RuntimeBinding {
+        RuntimeBinding {
+            binding_id,
+            provider_id: source_id.into(),
+            account_id: account_id.into(),
+            upstream_model_id: upstream_model_id.into(),
+            protocol_upstream,
+            upstream_endpoint: format!("https://{source_id}.example.test/{}", protocol_upstream),
             mode: mode.into(),
-            adapter: None,
-            allow_lossy_conversion: false,
+            adapter: adapter.map(str::to_owned),
+            effective_capabilities,
+            degraded_features: degraded_features.into_iter().map(str::to_owned).collect(),
         }
     }
 
-    fn gateway(
-        providers: Vec<ProviderConfig>,
-        accounts: Vec<AccountConfig>,
-        routes: Vec<RouteConfig>,
-    ) -> GatewayConfig {
-        GatewayConfig {
+    fn runtime_fixture() -> (
+        Arc<GatewayConfig>,
+        RouteResolver,
+        Vec<PublishedModel>,
+        DateTime<Utc>,
+    ) {
+        let config = Arc::new(GatewayConfig {
             listen_addr: "127.0.0.1:0".into(),
-            providers,
-            accounts,
-            routes,
-        }
+            providers: vec![provider("source-a"), provider("source-b")],
+            accounts: vec![
+                account("account-a", "source-a"),
+                account("account-b", "source-b"),
+            ],
+            routes: Vec::new(),
+        });
+        let translated = Capabilities {
+            streaming: CapabilityMode::Translated,
+            tools: CapabilityMode::Translated,
+            tool_streaming: CapabilityMode::Translated,
+            thinking: CapabilityMode::Translated,
+            web_search: CapabilityMode::Translated,
+            file_search: CapabilityMode::Unsupported,
+            vision: CapabilityMode::Translated,
+            usage: CapabilityMode::Translated,
+        };
+        let routes = vec![
+            RuntimeRoute {
+                route_id: "route-a".into(),
+                model: "logical-a".into(),
+                protocol: Protocol::OpenAiChatCompletions,
+                allow_lossy_conversion: false,
+                bindings: vec![
+                    binding(
+                        1,
+                        "source-a",
+                        "account-a",
+                        "upstream-a",
+                        Protocol::OpenAiChatCompletions,
+                        "native",
+                        None,
+                        Capabilities::native(),
+                        Vec::new(),
+                    ),
+                    binding(
+                        4,
+                        "source-b",
+                        "account-b",
+                        "upstream-a",
+                        Protocol::OpenAiChatCompletions,
+                        "native",
+                        None,
+                        Capabilities::native(),
+                        Vec::new(),
+                    ),
+                ],
+            },
+            RuntimeRoute {
+                route_id: "route-a".into(),
+                model: "logical-a".into(),
+                protocol: Protocol::OpenAiResponses,
+                allow_lossy_conversion: true,
+                bindings: vec![binding(
+                    2,
+                    "source-a",
+                    "account-a",
+                    "upstream-a",
+                    Protocol::AnthropicMessages,
+                    "adapter",
+                    Some("kimi_responses_adapter"),
+                    translated,
+                    vec!["file_search"],
+                )],
+            },
+            RuntimeRoute {
+                route_id: "route-a".into(),
+                model: "logical-a".into(),
+                protocol: Protocol::AnthropicMessages,
+                allow_lossy_conversion: false,
+                bindings: vec![binding(
+                    3,
+                    "source-a",
+                    "account-a",
+                    "upstream-a",
+                    Protocol::AnthropicMessages,
+                    "native",
+                    None,
+                    Capabilities::native(),
+                    Vec::new(),
+                )],
+            },
+            RuntimeRoute {
+                route_id: "route-partial".into(),
+                model: "logical-partial".into(),
+                protocol: Protocol::OpenAiChatCompletions,
+                allow_lossy_conversion: false,
+                bindings: vec![binding(
+                    5,
+                    "source-a",
+                    "account-a",
+                    "upstream-partial",
+                    Protocol::OpenAiChatCompletions,
+                    "native",
+                    None,
+                    Capabilities::native(),
+                    Vec::new(),
+                )],
+            },
+        ];
+        let resolver = RouteResolver::from_runtime(config.clone(), routes);
+        let models = vec![
+            PublishedModel {
+                id: "logical-a".into(),
+                display_name: "Logical A".into(),
+                account_ids: vec!["account-a".into(), "account-b".into()],
+            },
+            PublishedModel {
+                id: "logical-partial".into(),
+                display_name: "Logical Partial".into(),
+                account_ids: vec!["account-a".into()],
+            },
+        ];
+        (config, resolver, models, Utc::now())
     }
 
-    fn matrix_cell<'a>(
-        response: &'a CapabilityMatrixResponse,
-        route_id: &str,
+    fn matrix_cell(
+        row: &RouteCapabilityMatrix,
         protocol: Protocol,
-    ) -> &'a EffectiveProtocolCapability {
-        response
-            .data
-            .iter()
-            .find(|entry| entry.route_id == route_id)
-            .unwrap_or_else(|| panic!("missing matrix entry for {route_id}"))
-            .protocols
+    ) -> &EffectiveProtocolCapability {
+        row.protocols
             .iter()
             .find(|cell| cell.protocol_in == protocol)
-            .unwrap_or_else(|| panic!("missing {protocol} cell for {route_id}"))
+            .unwrap_or_else(|| panic!("missing {protocol} cell"))
     }
 
     #[test]
-    fn three_protocol_matrix_is_typed_complete_and_secret_free() {
-        let mut provider = provider("source-a");
-        provider.endpoints = HashMap::from([
-            (Protocol::OpenAiChatCompletions, "/v1/chat".into()),
-            (Protocol::AnthropicMessages, "/v1/messages".into()),
-        ]);
-        provider.protocol_capabilities = HashMap::from([
-            (
-                Protocol::OpenAiChatCompletions,
-                ProtocolCapability::native(),
-            ),
-            (
-                Protocol::OpenAiResponses,
-                ProtocolCapability::adapter(Protocol::AnthropicMessages, "kimi_responses_adapter"),
-            ),
-            (Protocol::AnthropicMessages, ProtocolCapability::native()),
-        ]);
-        provider.capabilities.file_search = CapabilityMode::Unsupported;
-
-        let mut account = account("account-a", "source-a");
-        account.model_overrides.insert(
-            "model-a".into(),
-            ModelCapabilityOverride {
-                protocol_capabilities: HashMap::new(),
-                capabilities: Some(Capabilities {
-                    tools: CapabilityMode::Unsupported,
-                    file_search: CapabilityMode::Unsupported,
-                    ..Capabilities::native()
-                }),
-            },
-        );
-
-        let chat = route(
-            "chat-native",
-            "model-a",
-            "source-a",
-            "account-a",
-            Protocol::OpenAiChatCompletions,
-            "native",
-        );
-        let mut responses = route(
-            "responses-adapter",
-            "model-a",
-            "source-a",
-            "account-a",
-            Protocol::OpenAiResponses,
-            "adapter",
-        );
-        responses.adapter = Some("kimi_responses_adapter".into());
-        let messages = route(
-            "messages-unsupported",
-            "model-a",
-            "source-a",
-            "account-a",
-            Protocol::AnthropicMessages,
-            "unsupported",
-        );
-
-        let response = CapabilityMatrixResponse::from_config(Arc::new(gateway(
-            vec![provider],
-            vec![account],
-            vec![chat, responses, messages],
-        )));
+    fn runtime_matrix_is_typed_complete_and_secret_free() {
+        let (config, resolver, models, generated_at) = runtime_fixture();
+        let response = CapabilityMatrixResponse::from_runtime_snapshot(
+            &config,
+            &resolver,
+            &models,
+            42,
+            generated_at,
+        )
+        .expect("build runtime capability matrix");
 
         assert_eq!(response.version, "v1");
-        assert_eq!(response.data.len(), 3);
+        assert_eq!(response.fact_source, CapabilityFactSource::RuntimeSnapshot);
+        assert_eq!(response.snapshot_revision, 42);
+        assert_eq!(response.snapshot_generated_at, generated_at);
         assert!(response
             .data
             .iter()
@@ -363,27 +695,20 @@ mod tests {
                 .eq(Protocol::ALL)
         }));
 
-        let chat = matrix_cell(&response, "chat-native", Protocol::OpenAiChatCompletions);
+        let primary = response
+            .data
+            .iter()
+            .find(|entry| entry.model == "logical-a" && entry.source.source_id == "source-a")
+            .expect("primary source matrix row");
+        assert_eq!(primary.upstream_model_id, "upstream-a");
+        let chat = matrix_cell(primary, Protocol::OpenAiChatCompletions);
         assert_eq!(chat.status, CapabilityRouteStatus::Routable);
+        assert_eq!(chat.selection, Some(CapabilityBindingSelection::Primary));
         assert_eq!(chat.mode, Some(ProtocolMode::Native));
-        assert_eq!(
-            chat.protocol_upstream,
-            Some(Protocol::OpenAiChatCompletions)
-        );
-        assert_eq!(
-            chat.endpoint.as_deref(),
-            Some("https://source-a.example.test/api/v1/chat")
-        );
+        assert_eq!(chat.protocol_upstream, Some(chat.protocol_in));
         assert_eq!(chat.conversion_chain.len(), 1);
-        assert_eq!(chat.conversion_chain[0].protocol_from, chat.protocol_in);
-        assert_eq!(chat.conversion_chain[0].protocol_to, chat.protocol_in);
-        assert_eq!(
-            chat.effective_capabilities.tools,
-            CapabilityMode::Unsupported,
-            "account+model capability override must be visible"
-        );
 
-        let responses = matrix_cell(&response, "responses-adapter", Protocol::OpenAiResponses);
+        let responses = matrix_cell(primary, Protocol::OpenAiResponses);
         assert_eq!(responses.status, CapabilityRouteStatus::Routable);
         assert_eq!(responses.mode, Some(ProtocolMode::Adapter));
         assert_eq!(
@@ -392,39 +717,46 @@ mod tests {
         );
         assert_eq!(responses.adapter.as_deref(), Some("kimi_responses_adapter"));
         assert_eq!(responses.conversion_chain.len(), 1);
-        assert_eq!(
-            responses.conversion_chain[0],
-            ProtocolConversionHop {
-                protocol_from: Protocol::OpenAiResponses,
-                protocol_to: Protocol::AnthropicMessages,
-                mode: ProtocolMode::Adapter,
-                adapter: Some("kimi_responses_adapter".into()),
-            }
-        );
         assert!(responses.degraded);
-        assert!(responses.degraded_features.contains(&"streaming".into()));
-        assert!(!responses.degraded_features.contains(&"file_search".into()));
+        assert_eq!(responses.degraded_features, vec!["file_search"]);
+        assert_eq!(responses.allow_lossy_conversion, Some(true));
 
-        let unsupported = matrix_cell(
-            &response,
-            "messages-unsupported",
-            Protocol::AnthropicMessages,
+        let fallback = response
+            .data
+            .iter()
+            .find(|entry| entry.model == "logical-a" && entry.source.source_id == "source-b")
+            .expect("fallback source matrix row");
+        let fallback_chat = matrix_cell(fallback, Protocol::OpenAiChatCompletions);
+        assert_eq!(
+            fallback_chat.selection,
+            Some(CapabilityBindingSelection::Fallback)
         );
+        assert_eq!(fallback_chat.selection_rank, Some(1));
+        let fallback_responses = matrix_cell(fallback, Protocol::OpenAiResponses);
+        assert_eq!(fallback_responses.status, CapabilityRouteStatus::Unroutable);
+        assert_eq!(fallback_responses.mode, None);
+        assert_eq!(fallback_responses.allow_lossy_conversion, None);
+        assert_eq!(
+            fallback_responses
+                .error
+                .as_ref()
+                .map(|error| error.code.as_str()),
+            Some("runtime_binding_not_available")
+        );
+
+        let partial = response
+            .data
+            .iter()
+            .find(|entry| entry.model == "logical-partial")
+            .expect("partial runtime row");
+        let unsupported = matrix_cell(partial, Protocol::OpenAiResponses);
         assert_eq!(unsupported.status, CapabilityRouteStatus::Unroutable);
-        assert_eq!(unsupported.mode, Some(ProtocolMode::Unsupported));
+        assert_eq!(unsupported.mode, None);
         assert_eq!(
             unsupported.error.as_ref().map(|error| error.code.as_str()),
-            Some("unsupported_protocol")
+            Some("route_not_found")
         );
         assert_eq!(unsupported.effective_capabilities, Capabilities::default());
-
-        let unconfigured = matrix_cell(&response, "chat-native", Protocol::AnthropicMessages);
-        assert_eq!(unconfigured.status, CapabilityRouteStatus::Unroutable);
-        assert_eq!(unconfigured.mode, Some(ProtocolMode::Unsupported));
-        assert_eq!(
-            unconfigured.error.as_ref().map(|error| error.code.as_str()),
-            Some("route_protocol_not_configured")
-        );
 
         let serialized = serde_json::to_string(&response).expect("serialize capability matrix");
         for secret in [
@@ -441,182 +773,17 @@ mod tests {
     }
 
     #[test]
-    fn missing_endpoint_and_unknown_adapter_return_structured_errors() {
-        let mut provider = provider("invalid-source");
-        provider
-            .endpoints
-            .insert(Protocol::AnthropicMessages, "/v1/messages".into());
-        provider.protocol_capabilities.insert(
-            Protocol::OpenAiChatCompletions,
-            ProtocolCapability::native(),
-        );
-
-        let missing_endpoint = route(
-            "missing-endpoint",
-            "missing-model",
-            "invalid-source",
-            "invalid-account",
-            Protocol::OpenAiChatCompletions,
-            "native",
-        );
-        let mut unknown_adapter = route(
-            "unknown-adapter",
-            "unknown-model",
-            "invalid-source",
-            "invalid-account",
-            Protocol::OpenAiResponses,
-            "adapter",
-        );
-        unknown_adapter.adapter = Some("does_not_exist".into());
-
-        let response = CapabilityMatrixResponse::from_config(Arc::new(gateway(
-            vec![provider],
-            vec![account("invalid-account", "invalid-source")],
-            vec![missing_endpoint, unknown_adapter],
-        )));
-
-        let missing = matrix_cell(
-            &response,
-            "missing-endpoint",
-            Protocol::OpenAiChatCompletions,
-        );
-        assert_eq!(missing.status, CapabilityRouteStatus::Unroutable);
-        assert_eq!(missing.mode, Some(ProtocolMode::Native));
-        assert!(missing.endpoint.is_none());
-        assert_eq!(
-            missing.error.as_ref().map(|error| error.code.as_str()),
-            Some("endpoint_missing")
-        );
-
-        let unknown = matrix_cell(&response, "unknown-adapter", Protocol::OpenAiResponses);
-        assert_eq!(unknown.status, CapabilityRouteStatus::Unroutable);
-        assert_eq!(unknown.mode, Some(ProtocolMode::Adapter));
-        assert_eq!(unknown.adapter.as_deref(), Some("does_not_exist"));
-        assert!(unknown.conversion_chain.is_empty());
-        assert_eq!(
-            unknown.error.as_ref().map(|error| error.code.as_str()),
-            Some("adapter_unknown")
-        );
-    }
-
-    #[test]
-    fn lossy_conversion_requires_opt_in_and_reports_degradation() {
-        let mut provider = provider("lossy-source");
-        provider
-            .endpoints
-            .insert(Protocol::AnthropicMessages, "/v1/messages".into());
-        provider
-            .protocol_capabilities
-            .insert(Protocol::AnthropicMessages, ProtocolCapability::native());
-        provider.protocol_capabilities.insert(
-            Protocol::OpenAiResponses,
-            ProtocolCapability::adapter(Protocol::AnthropicMessages, "kimi_responses_adapter"),
-        );
-        let mut adapter_route = route(
-            "lossy-adapter",
-            "model-a",
-            "lossy-source",
-            "lossy-account",
-            Protocol::OpenAiResponses,
-            "adapter",
-        );
-        adapter_route.adapter = Some("kimi_responses_adapter".into());
-        let config = gateway(
-            vec![provider],
-            vec![account("lossy-account", "lossy-source")],
-            vec![adapter_route],
-        );
-
-        let rejected = CapabilityMatrixResponse::from_config(Arc::new(config.clone()));
-        let rejected = matrix_cell(&rejected, "lossy-adapter", Protocol::OpenAiResponses);
-        assert_eq!(rejected.status, CapabilityRouteStatus::Unroutable);
-        assert!(!rejected.allow_lossy_conversion);
-        assert!(!rejected.degraded);
-        assert_eq!(
-            rejected.error.as_ref().map(|error| error.code.as_str()),
-            Some("lossy_conversion_not_allowed")
-        );
-
-        let mut allowed_config = config;
-        allowed_config.routes[0].allow_lossy_conversion = true;
-        let allowed = CapabilityMatrixResponse::from_config(Arc::new(allowed_config));
-        let allowed = matrix_cell(&allowed, "lossy-adapter", Protocol::OpenAiResponses);
-        assert_eq!(allowed.status, CapabilityRouteStatus::Routable);
-        assert!(allowed.allow_lossy_conversion);
-        assert!(allowed.degraded);
-        assert!(allowed.degraded_features.contains(&"file_search".into()));
-        assert_eq!(
-            allowed.effective_capabilities.file_search,
-            CapabilityMode::Unsupported
-        );
-    }
-
-    #[test]
-    fn native_route_priority_is_reflected_without_reimplementing_selection() {
-        let mut adapter_provider = provider("adapter-source");
-        adapter_provider
-            .endpoints
-            .insert(Protocol::AnthropicMessages, "/v1/messages".into());
-        adapter_provider
-            .protocol_capabilities
-            .insert(Protocol::AnthropicMessages, ProtocolCapability::native());
-        adapter_provider.protocol_capabilities.insert(
-            Protocol::OpenAiResponses,
-            ProtocolCapability::adapter(Protocol::AnthropicMessages, "kimi_responses_adapter"),
-        );
-        adapter_provider.capabilities.file_search = CapabilityMode::Unsupported;
-
-        let mut native_provider = provider("native-source");
-        native_provider
-            .endpoints
-            .insert(Protocol::OpenAiResponses, "/v1/responses".into());
-        native_provider
-            .protocol_capabilities
-            .insert(Protocol::OpenAiResponses, ProtocolCapability::native());
-
-        let mut adapter_route = route(
-            "adapter-first-in-config",
-            "model-a",
-            "adapter-source",
-            "adapter-account",
-            Protocol::OpenAiResponses,
-            "adapter",
-        );
-        adapter_route.adapter = Some("kimi_responses_adapter".into());
-        let native_route = route(
-            "native-second-in-config",
-            "model-a",
-            "native-source",
-            "native-account",
-            Protocol::OpenAiResponses,
-            "native",
-        );
-
-        let response = CapabilityMatrixResponse::from_config(Arc::new(gateway(
-            vec![adapter_provider, native_provider],
-            vec![
-                account("adapter-account", "adapter-source"),
-                account("native-account", "native-source"),
-            ],
-            vec![adapter_route, native_route],
-        )));
-
-        let adapter = matrix_cell(
-            &response,
-            "adapter-first-in-config",
-            Protocol::OpenAiResponses,
-        );
-        assert_eq!(adapter.status, CapabilityRouteStatus::Unroutable);
-        assert_eq!(
-            adapter.error.as_ref().map(|error| error.code.as_str()),
-            Some("route_not_selected")
-        );
-        let native = matrix_cell(
-            &response,
-            "native-second-in-config",
-            Protocol::OpenAiResponses,
-        );
-        assert_eq!(native.status, CapabilityRouteStatus::Routable);
-        assert_eq!(native.mode, Some(ProtocolMode::Native));
+    fn config_resolver_cannot_masquerade_as_runtime_snapshot() {
+        let (config, _, models, generated_at) = runtime_fixture();
+        let resolver = RouteResolver::new(config.clone());
+        let error = CapabilityMatrixResponse::from_runtime_snapshot(
+            &config,
+            &resolver,
+            &models,
+            1,
+            generated_at,
+        )
+        .expect_err("config resolver must not back the runtime matrix");
+        assert_eq!(error, CapabilityMatrixBuildError::NotRuntimeSnapshot);
     }
 }

@@ -1,0 +1,2607 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>My AI Gateway · 控制台</title>
+  <style>
+    :root {
+      --bg:      oklch(98% 0.005 250);
+      --surface: oklch(100% 0 0);
+      --fg:      oklch(22% 0.02 240);
+      --muted:   oklch(50% 0.018 240);
+      --border:  oklch(90% 0.008 240);
+      --accent:  oklch(58% 0.16 145);
+
+      --accent-soft: color-mix(in oklch, var(--accent) 14%, transparent);
+      --fg-soft:     color-mix(in oklch, var(--fg) 6%, transparent);
+      --success:     oklch(62% 0.16 145);
+      --success-soft: color-mix(in oklch, var(--success) 12%, transparent);
+      --warn:        oklch(70% 0.16 80);
+      --warn-soft:   color-mix(in oklch, var(--warn) 12%, transparent);
+      --danger:      oklch(58% 0.2 25);
+      --danger-soft: color-mix(in oklch, var(--danger) 12%, transparent);
+
+      --font-display: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', system-ui, sans-serif;
+      --font-body:    -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', system-ui, sans-serif;
+      --font-mono:    'JetBrains Mono', 'IBM Plex Mono', ui-monospace, Menlo, monospace;
+
+      --fs-h1: 28px;
+      --fs-h2: 22px;
+      --fs-h3: 16px;
+      --fs-body: 14px;
+      --fs-meta: 12px;
+      --fs-small: 11px;
+
+      --gap-xs: 4px;
+      --gap-sm: 8px;
+      --gap-md: 16px;
+      --gap-lg: 24px;
+      --gap-xl: 32px;
+
+      --radius: 8px;
+      --radius-sm: 6px;
+      --radius-lg: 12px;
+
+      --sidebar-w: 220px;
+      --topbar-h: 52px;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; }
+    html { -webkit-text-size-adjust: 100%; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: var(--font-body);
+      font-size: var(--fs-body);
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+    }
+    img, svg { display: block; max-width: 100%; }
+    a { color: inherit; text-decoration: none; }
+    button { font: inherit; cursor: pointer; border: none; background: none; }
+    table { border-collapse: collapse; }
+    h1,h2,h3,h4,h5 { margin: 0; font-family: var(--font-display); }
+    p { margin: 0; }
+
+    /* ─── app shell ─────────────────────────────────────────────── */
+    .app { display: flex; min-height: 100vh; }
+
+    .sidebar {
+      width: var(--sidebar-w);
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      position: fixed; top: 0; left: 0; bottom: 0;
+      display: flex; flex-direction: column;
+      z-index: 20;
+    }
+    .sidebar-brand {
+      padding: 20px 20px 16px;
+      display: flex; align-items: center; gap: 10px;
+      border-bottom: 1px solid var(--border);
+    }
+    .sidebar-brand .brand-icon {
+      width: 32px; height: 32px;
+      background: var(--accent);
+      border-radius: var(--radius-sm);
+      display: grid; place-items: center;
+      color: var(--surface);
+      font-weight: 700; font-size: 14px;
+      font-family: var(--font-mono);
+    }
+    .sidebar-brand .brand-text {
+      font-size: 15px; font-weight: 600;
+      letter-spacing: -0.01em;
+    }
+    .sidebar-brand .brand-version {
+      font-family: var(--font-mono);
+      font-size: var(--fs-small);
+      color: var(--muted);
+      margin-left: auto;
+    }
+    .sidebar-nav {
+      flex: 1; padding: 12px 8px;
+      display: flex; flex-direction: column; gap: 2px;
+    }
+    .sidebar-nav .nav-section {
+      font-family: var(--font-mono);
+      font-size: var(--fs-small);
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      padding: 16px 12px 6px;
+    }
+    .nav-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 9px 12px;
+      border-radius: var(--radius-sm);
+      font-size: 13.5px;
+      color: var(--muted);
+      transition: background 0.1s, color 0.1s;
+    }
+    .nav-item:hover { background: var(--fg-soft); color: var(--fg); }
+    .nav-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: var(--radius-sm); }
+    .nav-item.active { background: var(--accent-soft); color: var(--accent); font-weight: 500; }
+    .nav-item svg { width: 18px; height: 18px; flex-shrink: 0; }
+    .nav-item .nav-badge {
+      margin-left: auto;
+      font-family: var(--font-mono);
+      font-size: var(--fs-small);
+      background: var(--danger-soft);
+      color: var(--danger);
+      padding: 1px 6px;
+      border-radius: 99px;
+    }
+
+    .sidebar-footer {
+      padding: 12px 16px;
+      border-top: 1px solid var(--border);
+      display: flex; align-items: center; gap: 10px;
+      font-size: 13px; color: var(--muted);
+    }
+    .sidebar-footer .status-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--success);
+    }
+
+    .main-area {
+      margin-left: var(--sidebar-w);
+      flex: 1; display: flex; flex-direction: column;
+    }
+
+    .topbar {
+      height: var(--topbar-h);
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center;
+      padding: 0 24px; gap: 16px;
+      position: sticky; top: 0; z-index: 10;
+    }
+    .topbar-title {
+      font-size: 15px; font-weight: 600;
+    }
+    .topbar-right {
+      margin-left: auto;
+      display: flex; align-items: center; gap: 12px;
+    }
+    .topbar-search {
+      display: flex; align-items: center; gap: 8px;
+      padding: 6px 12px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--muted); font-size: 13px;
+    }
+    .topbar-search kbd {
+      font-family: var(--font-mono);
+      font-size: var(--fs-small);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 1px 5px;
+    }
+    .endpoint-display {
+      display: flex; align-items: center; gap: 6px;
+      padding: 5px 10px;
+      background: var(--fg-soft);
+      border-radius: var(--radius-sm);
+      font-family: var(--font-mono);
+      font-size: var(--fs-meta);
+      color: var(--muted);
+    }
+    .endpoint-display .dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--success);
+    }
+
+    .content { padding: 24px; flex: 1; }
+
+    /* ─── shared components ─────────────────────────────────────── */
+    .page { display: none; }
+    .page.active { display: block; }
+
+    .page-header {
+      display: flex; align-items: flex-end; justify-content: space-between;
+      margin-bottom: var(--gap-lg);
+      gap: var(--gap-md);
+    }
+    .page-header h1 {
+      font-size: var(--fs-h1); font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+    .page-header .page-desc {
+      font-size: 13px; color: var(--muted); margin-top: 4px;
+    }
+
+    .btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 7px 14px;
+      border-radius: var(--radius-sm);
+      font-size: 13px; font-weight: 500;
+      border: 1px solid transparent;
+      transition: background 0.12s, border-color 0.12s;
+    }
+    .btn svg { width: 15px; height: 15px; }
+    .btn-primary { background: var(--accent); color: var(--surface); }
+    .btn-primary:hover { background: color-mix(in oklch, var(--accent) 85%, black); }
+    .btn-primary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .btn-secondary { background: var(--surface); color: var(--fg); border-color: var(--border); }
+    .btn-secondary:hover { border-color: var(--fg); }
+    .btn-secondary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .btn-ghost { background: transparent; color: var(--muted); padding: 6px 8px; }
+    .btn-ghost:hover { color: var(--fg); background: var(--fg-soft); }
+    .btn-ghost:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+    .btn-icon {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 28px; height: 28px;
+      border-radius: var(--radius-sm);
+      color: var(--muted);
+      transition: background 0.1s, color 0.1s;
+    }
+    .btn-icon:hover { background: var(--fg-soft); color: var(--fg); }
+    .btn-icon:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .btn-icon svg { width: 16px; height: 16px; }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 20px;
+    }
+
+    .pill {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 2px 8px;
+      border-radius: 99px;
+      font-family: var(--font-mono);
+      font-size: var(--fs-small);
+      letter-spacing: 0.02em;
+    }
+    .pill-success { background: var(--success-soft); color: var(--success); }
+    .pill-warn { background: var(--warn-soft); color: var(--warn); }
+    .pill-danger { background: var(--danger-soft); color: var(--danger); }
+    .pill-muted { background: var(--fg-soft); color: var(--muted); }
+    .pill-accent { background: var(--accent-soft); color: var(--accent); }
+
+    .num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+    .mono { font-family: var(--font-mono); }
+    .meta { font-size: var(--fs-meta); color: var(--muted); }
+    .text-muted { color: var(--muted); }
+    .text-accent { color: var(--accent); }
+
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap-md); }
+    .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: var(--gap-md); }
+    .grid-4 { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: var(--gap-md); }
+
+    /* ─── KPI card ─────────────────────────────────────────────── */
+    .kpi-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 18px 20px;
+    }
+    .kpi-card .kpi-label {
+      font-size: var(--fs-meta);
+      color: var(--muted);
+      margin-bottom: 8px;
+      display: flex; align-items: center; gap: 6px;
+    }
+    .kpi-card .kpi-value {
+      font-family: var(--font-display);
+      font-size: 28px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      line-height: 1;
+    }
+    .kpi-card .kpi-change {
+      display: inline-flex; align-items: center; gap: 3px;
+      font-family: var(--font-mono);
+      font-size: var(--fs-small);
+      margin-top: 8px;
+    }
+    .kpi-change.up { color: var(--success); }
+    .kpi-change.down { color: var(--danger); }
+
+    /* ─── data table ───────────────────────────────────────────── */
+    .dt { width: 100%; font-size: 13px; }
+    .dt th {
+      text-align: left;
+      padding: 10px 12px;
+      font-family: var(--font-mono);
+      font-size: var(--fs-small);
+      font-weight: 500;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+    }
+    .dt td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: middle;
+    }
+    .dt tbody tr { transition: background 0.08s; }
+    .dt tbody tr:hover { background: var(--fg-soft); }
+    .dt .col-right { text-align: right; }
+    .dt .col-mono { font-family: var(--font-mono); font-size: var(--fs-meta); }
+    .dt .col-num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; text-align: right; }
+
+    /* ─── capability matrix ────────────────────────────────────── */
+    .cap-cell {
+      display: inline-flex; align-items: center; gap: 3px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: var(--font-mono);
+      font-size: var(--fs-small);
+    }
+    .cap-native { background: var(--success-soft); color: var(--success); }
+    .cap-adapter { background: var(--warn-soft); color: var(--warn); }
+    .cap-unsupported { background: var(--fg-soft); color: var(--muted); }
+
+    /* ─── chart bar ────────────────────────────────────────────── */
+    .bar-chart {
+      display: flex; align-items: flex-end;
+      gap: 3px; height: 120px;
+      padding-top: 8px;
+    }
+    .bar-chart .bar-group {
+      flex: 1; display: flex; flex-direction: column;
+      align-items: center; height: 100%;
+      justify-content: flex-end;
+    }
+    .bar-chart .bar-stack {
+      width: 100%; min-width: 8px;
+      display: flex; flex-direction: column;
+      justify-content: flex-end;
+      border-radius: 3px 3px 0 0;
+      overflow: hidden;
+    }
+    .bar-chart .bar {
+      width: 100%;
+      transition: height 0.3s ease;
+    }
+    .bar-chart .bar-label {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--muted);
+      text-align: center;
+      white-space: nowrap;
+      margin-top: 4px;
+    }
+
+    /* ─── distribution bar ─────────────────────────────────────── */
+    .dist-bar {
+      display: flex; height: 8px;
+      border-radius: 4px; overflow: hidden;
+      background: var(--fg-soft);
+    }
+    .dist-bar span { transition: width 0.3s ease; }
+
+    .dist-legend {
+      display: flex; flex-wrap: wrap; gap: 12px;
+      margin-top: 10px;
+    }
+    .dist-legend-item {
+      display: flex; align-items: center; gap: 5px;
+      font-size: var(--fs-meta); color: var(--muted);
+    }
+    .dist-legend-item .dot {
+      width: 8px; height: 8px; border-radius: 2px;
+    }
+
+    /* ─── activity list ────────────────────────────────────────── */
+    .activity-item {
+      display: flex; align-items: flex-start; gap: 12px;
+      padding: 12px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .activity-item:last-child { border-bottom: none; }
+    .activity-icon {
+      width: 28px; height: 28px;
+      border-radius: 6px;
+      display: grid; place-items: center;
+      flex-shrink: 0;
+    }
+    .activity-icon svg { width: 14px; height: 14px; }
+    .activity-icon.success { background: var(--success-soft); color: var(--success); }
+    .activity-icon.danger { background: var(--danger-soft); color: var(--danger); }
+    .activity-icon.warn { background: var(--warn-soft); color: var(--warn); }
+    .activity-content { flex: 1; min-width: 0; }
+    .activity-content .activity-title { font-size: 13px; }
+    .activity-content .activity-meta {
+      font-size: var(--fs-meta); color: var(--muted);
+      font-family: var(--font-mono); margin-top: 2px;
+    }
+
+    /* ─── filter bar ───────────────────────────────────────────── */
+    .filter-bar {
+      display: flex; align-items: center; gap: 8px;
+      flex-wrap: wrap; margin-bottom: var(--gap-md);
+    }
+    .filter-select {
+      padding: 6px 10px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: var(--surface);
+      color: var(--fg);
+      font-size: 13px;
+      font-family: var(--font-body);
+    }
+    .filter-select:focus { border-color: var(--accent); outline: 2px solid var(--accent-soft); }
+
+    /* ─── detail drawer ────────────────────────────────────────── */
+    .drawer-overlay {
+      position: fixed; inset: 0;
+      background: color-mix(in oklch, var(--fg) 30%, transparent);
+      z-index: 30; display: none;
+    }
+    .drawer-overlay.open { display: block; }
+    .drawer {
+      position: fixed; top: 0; right: -420px; bottom: 0;
+      width: 420px; background: var(--surface);
+      border-left: 1px solid var(--border);
+      z-index: 31;
+      transition: right 0.2s ease;
+      display: flex; flex-direction: column;
+      overflow-y: auto;
+    }
+    .drawer.open { right: 0; }
+    .drawer-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .drawer-header h3 { font-size: 15px; font-weight: 600; }
+    .drawer-body { padding: 20px; flex: 1; }
+    .drawer-row {
+      display: flex; justify-content: space-between; align-items: baseline;
+      padding: 8px 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 13px;
+    }
+    .drawer-row .drawer-label { color: var(--muted); }
+    .drawer-row .drawer-value { font-family: var(--font-mono); text-align: right; max-width: 60%; }
+
+    /* ─── settings form ────────────────────────────────────────── */
+    .form-group { margin-bottom: var(--gap-lg); }
+    .form-group label {
+      display: block;
+      font-size: 13px; font-weight: 500;
+      margin-bottom: 6px;
+    }
+    .form-group .form-hint {
+      font-size: var(--fs-meta); color: var(--muted);
+      margin-top: 4px;
+    }
+    .form-input {
+      width: 100%; padding: 8px 12px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: var(--surface);
+      color: var(--fg); font: inherit; font-size: 13px;
+    }
+    .form-input:focus { border-color: var(--accent); outline: 2px solid var(--accent-soft); }
+    .form-input-mono { font-family: var(--font-mono); font-size: var(--fs-meta); }
+
+    /* ─── protocol chain ───────────────────────────────────────── */
+    .proto-chain {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-family: var(--font-mono); font-size: var(--fs-meta);
+    }
+    .proto-chain .proto-node {
+      padding: 2px 8px;
+      background: var(--fg-soft);
+      border-radius: 4px;
+    }
+    .proto-chain .proto-arrow { color: var(--muted); font-size: 10px; }
+
+    /* ─── tabs ─────────────────────────────────────────────────── */
+    .tabs {
+      display: flex; gap: 0; border-bottom: 1px solid var(--border);
+      margin-bottom: var(--gap-lg);
+    }
+    .tab-btn {
+      padding: 10px 16px;
+      font-size: 13px; font-weight: 500;
+      color: var(--muted);
+      border-bottom: 2px solid transparent;
+      margin-bottom: -1px;
+      transition: color 0.1s, border-color 0.1s;
+    }
+    .tab-btn:hover { color: var(--fg); }
+    .tab-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+    .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    /* ─── section titles ───────────────────────────────────────── */
+    .section-title {
+      font-size: 15px; font-weight: 600;
+      margin-bottom: var(--gap-md);
+      display: flex; align-items: center; gap: 8px;
+    }
+    .section-title .section-count {
+      font-family: var(--font-mono);
+      font-size: var(--fs-small);
+      color: var(--muted);
+      background: var(--fg-soft);
+      padding: 1px 6px;
+      border-radius: 4px;
+    }
+
+    /* ─── empty state ──────────────────────────────────────────── */
+    .empty-state {
+      text-align: center; padding: 48px 24px;
+      color: var(--muted);
+    }
+    .empty-state svg { width: 40px; height: 40px; margin: 0 auto 12px; opacity: 0.4; }
+
+    /* ─── key tag ──────────────────────────────────────────────── */
+    .key-display {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 4px 10px;
+      background: var(--fg-soft);
+      border-radius: var(--radius-sm);
+      font-family: var(--font-mono);
+      font-size: var(--fs-meta);
+    }
+
+    /* ─── modal ─────────────────────────────────────────────────── */
+    .modal-overlay {
+      position: fixed; inset: 0;
+      background: color-mix(in oklch, var(--fg) 40%, transparent);
+      z-index: 40; display: none;
+    }
+    .modal-overlay.open { display: grid; place-items: center; }
+    .modal {
+      background: var(--surface);
+      border-radius: var(--radius-lg);
+      border: 1px solid var(--border);
+      width: 90%; max-width: 520px;
+      max-height: 85vh; overflow-y: auto;
+      box-shadow: 0 20px 60px color-mix(in oklch, var(--fg) 15%, transparent);
+    }
+    .modal-header {
+      padding: 20px 24px 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .modal-header h3 { font-size: 17px; font-weight: 600; }
+    .modal-body { padding: 20px 24px; }
+    .modal-footer {
+      padding: 16px 24px;
+      border-top: 1px solid var(--border);
+      display: flex; justify-content: flex-end; gap: 8px;
+    }
+
+    /* ─── config detail drawer ─────────────────────────────────── */
+    .config-drawer {
+      position: fixed; top: 0; right: -500px; bottom: 0;
+      width: 500px; background: var(--surface);
+      border-left: 1px solid var(--border);
+      z-index: 31;
+      transition: right 0.2s ease;
+      display: flex; flex-direction: column;
+      overflow-y: auto;
+    }
+    .config-drawer.open { right: 0; }
+    .config-footer {
+      padding: 14px 20px;
+      border-top: 1px solid var(--border);
+      display: flex; gap: 8px;
+      margin-top: auto;
+    }
+    .config-content { display: none; }
+    .config-content.active { display: block; }
+
+    /* ─── form layout ──────────────────────────────────────────── */
+    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap-md); }
+    .form-full { grid-column: 1 / -1; }
+    .form-separator {
+      font-size: 11px; font-weight: 500; color: var(--muted);
+      text-transform: uppercase; letter-spacing: 0.04em;
+      font-family: var(--font-mono);
+      margin: 20px 0 12px; padding-top: 16px;
+      border-top: 1px solid var(--border);
+    }
+
+    /* ─── capability radio ─────────────────────────────────────── */
+    .cap-radio-group { display: flex; gap: 4px; margin-top: 4px; }
+    .cap-radio {
+      display: flex; align-items: center; gap: 3px;
+      padding: 4px 10px; border-radius: 4px;
+      font-size: 11px; border: 1px solid var(--border);
+      cursor: pointer; transition: all 0.1s;
+      font-family: var(--font-mono);
+    }
+    .cap-radio:hover { border-color: var(--muted); }
+    .cap-radio.active { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+
+    .cap-row { display: flex; flex-direction: column; }
+    .cap-convert-from {
+      display: none; align-items: center; gap: 6px;
+      margin: 6px 0 0 94px;
+      padding: 5px 10px;
+      background: var(--fg-soft);
+      border-radius: var(--radius-sm);
+      font-family: var(--font-mono);
+      font-size: var(--fs-small);
+      color: var(--muted);
+    }
+    .cap-convert-from.visible { display: inline-flex; }
+    .cap-convert-from select {
+      padding: 2px 6px;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      font-family: var(--font-mono);
+      font-size: var(--fs-small);
+      background: var(--surface);
+      color: var(--fg);
+    }
+    .cap-convert-from select:focus { border-color: var(--accent); outline: 2px solid var(--accent-soft); }
+
+    /* ─── binding priority list ────────────────────────────────── */
+    .binding-list { display: flex; flex-direction: column; gap: 6px; }
+    .binding-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 14px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      font-size: 13px;
+    }
+    .binding-handle {
+      color: var(--muted); cursor: grab;
+      display: flex; align-items: center;
+    }
+
+    /* ─── test result inline ───────────────────────────────────── */
+    .test-result {
+      display: flex; align-items: center; gap: 8px;
+      padding: 10px 14px;
+      border-radius: var(--radius-sm);
+      font-size: 13px; margin-top: 10px;
+    }
+    .test-ok { background: var(--success-soft); color: var(--success); }
+    .test-fail { background: var(--danger-soft); color: var(--danger); }
+
+    /* ─── detail heading ───────────────────────────────────────── */
+    .detail-heading {
+      font-size: 11px; font-weight: 500; color: var(--muted);
+      text-transform: uppercase; letter-spacing: 0.04em;
+      font-family: var(--font-mono);
+      margin: 16px 0 10px; padding-top: 16px;
+      border-top: 1px solid var(--border);
+    }
+
+    /* ─── status badge inline ──────────────────────────────────── */
+    .status-inline {
+      display: flex; align-items: center; gap: 8px;
+      margin-bottom: 16px;
+    }
+
+    /* ─── error list ───────────────────────────────────────────── */
+    .error-item {
+      display: flex; align-items: flex-start; gap: 8px;
+      padding: 8px 0; font-size: 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    .error-item:last-child { border-bottom: none; }
+
+    /* ─── btn-danger ───────────────────────────────────────────── */
+    .btn-danger {
+      background: transparent; color: var(--danger);
+      border: 1px solid color-mix(in oklch, var(--danger) 30%, transparent);
+    }
+    .btn-danger:hover { background: var(--danger-soft); border-color: var(--danger); }
+    .btn-danger:focus-visible { outline: 2px solid var(--danger); outline-offset: 2px; }
+
+    .clickable-row { cursor: pointer; }
+
+    /* ─── mobile nav toggle ────────────────────────────────────── */
+    .mobile-menu-btn {
+      display: none;
+      align-items: center; justify-content: center;
+      width: 36px; height: 36px;
+      border-radius: var(--radius-sm);
+      color: var(--fg);
+      flex-shrink: 0;
+    }
+    .mobile-menu-btn:hover { background: var(--fg-soft); }
+    .mobile-menu-btn svg { width: 20px; height: 20px; }
+    .sidebar-close {
+      display: none;
+      position: absolute; top: 14px; right: 12px;
+      width: 32px; height: 32px;
+      align-items: center; justify-content: center;
+      border-radius: var(--radius-sm);
+      color: var(--muted);
+    }
+    .sidebar-close:hover { background: var(--fg-soft); color: var(--fg); }
+    .sidebar-close svg { width: 18px; height: 18px; }
+
+    .mobile-overlay {
+      position: fixed; inset: 0;
+      background: color-mix(in oklch, var(--fg) 30%, transparent);
+      z-index: 19; display: none;
+    }
+
+    /* ─── table scroll wrapper ─────────────────────────────────── */
+    .table-scroll {
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    /* ─── responsive: tablet ≤ 920px ───────────────────────────── */
+    @media (max-width: 920px) {
+      .mobile-menu-btn { display: flex; }
+      .sidebar-close { display: flex; }
+
+      .sidebar {
+        transform: translateX(-100%);
+        transition: transform 0.22s ease;
+        z-index: 21;
+      }
+      .sidebar.mobile-open { transform: translateX(0); }
+      .mobile-overlay.open { display: block; }
+
+      .main-area { margin-left: 0; }
+      .content { padding: 16px; }
+
+      .topbar { padding: 0 16px; gap: 10px; }
+      .topbar-search { display: none; }
+      .endpoint-display { font-size: 11px; padding: 4px 8px; }
+
+      .grid-2, .grid-3 { grid-template-columns: 1fr !important; }
+      .grid-4 { grid-template-columns: 1fr 1fr !important; }
+
+      .page-header { flex-direction: column; align-items: flex-start; gap: 12px; }
+      .page-header h1 { font-size: 22px; }
+
+      .drawer { width: 100%; right: -100%; }
+      .config-drawer { width: 100%; right: -100%; }
+      .form-grid { grid-template-columns: 1fr; }
+
+      .filter-bar { gap: 6px; }
+      .filter-select { font-size: 12px; padding: 5px 8px; flex: 1; min-width: 0; }
+
+      .kpi-card .kpi-value { font-size: 24px; }
+      .kpi-card { padding: 14px 16px; }
+
+      .bar-chart { height: 100px !important; }
+      .bar-chart .bar-label { font-size: 9px; }
+
+      .dt th { font-size: 10px; padding: 8px 10px; }
+      .dt td { padding: 8px 10px; font-size: 12px; }
+
+      .cap-radio-group { flex-wrap: wrap; }
+      .cap-convert-from { margin-left: 0; }
+
+      .dist-legend { gap: 8px; }
+
+      .tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; flex-wrap: nowrap; }
+      .tab-btn { white-space: nowrap; padding: 10px 12px; font-size: 12px; flex-shrink: 0; }
+
+      .proto-chain { font-size: 11px; gap: 4px; }
+      .proto-chain .proto-node { padding: 2px 5px; font-size: 10px; }
+
+      .modal { max-width: 95%; max-height: 90vh; }
+      .modal-body { padding: 16px; }
+      .modal-header { padding: 16px; }
+      .modal-footer { padding: 12px 16px; }
+    }
+
+    /* ─── responsive: phone ≤ 600px ────────────────────────────── */
+    @media (max-width: 600px) {
+      .content { padding: 12px; }
+      .topbar { height: 48px; }
+      .endpoint-display { display: none; }
+
+      .grid-4 { grid-template-columns: 1fr 1fr !important; gap: 8px !important; }
+
+      .page-header h1 { font-size: 20px; }
+      .page-header .page-desc { font-size: 12px; }
+
+      .kpi-card { padding: 12px; }
+      .kpi-card .kpi-value { font-size: 20px; }
+      .kpi-card .kpi-label { font-size: 11px; }
+      .kpi-card .kpi-change { font-size: 10px; }
+
+      .card { padding: 14px; border-radius: var(--radius); }
+
+      .bar-chart { height: 80px !important; gap: 2px; }
+
+      .filter-bar { flex-direction: column; }
+      .filter-select { width: 100%; }
+
+      .section-title { font-size: 14px; }
+
+      .btn { font-size: 12px; padding: 6px 10px; }
+      .btn svg { width: 13px; height: 13px; }
+      .btn-icon { width: 36px; height: 36px; }
+
+      .drawer-body { padding: 14px; }
+      .drawer-row { flex-direction: column; gap: 2px; padding: 6px 0; }
+      .drawer-row .drawer-value { text-align: left; max-width: 100%; }
+
+      .binding-item { padding: 8px 10px; font-size: 12px; }
+
+      .form-group label { font-size: 12px; }
+      .form-input { font-size: 13px; padding: 7px 10px; }
+      .form-hint { font-size: 11px; }
+
+      .cap-radio { padding: 6px 8px; font-size: 10px; }
+
+      .detail-heading { font-size: 10px; }
+
+      .config-footer { flex-wrap: wrap; }
+      .config-footer .btn { flex: 1; justify-content: center; }
+    }
+
+    /* ─── responsive: small phone ≤ 380px ──────────────────────── */
+    @media (max-width: 380px) {
+      .grid-4 { grid-template-columns: 1fr !important; }
+      .kpi-card { flex-direction: row; align-items: center; display: flex; justify-content: space-between; }
+      .kpi-card .kpi-value { font-size: 18px; }
+    }
+  </style>
+</head>
+<body>
+<div class="app">
+  <!-- ─── sidebar ───────────────────────────────────────────── -->
+  <div class="mobile-overlay" id="mobile-overlay" onclick="toggleMobileSidebar()"></div>
+  <aside class="sidebar" id="sidebar" data-od-id="sidebar">
+    <button class="sidebar-close" onclick="toggleMobileSidebar()" aria-label="关闭导航">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg>
+    </button>
+    <div class="sidebar-brand">
+      <div class="brand-icon">AG</div>
+      <span class="brand-text">AI Gateway</span>
+      <span class="brand-version">v0.3</span>
+    </div>
+    <nav class="sidebar-nav">
+      <span class="nav-section">监控</span>
+      <a class="nav-item active" data-page="overview" href="#">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+        总览
+      </a>
+      <a class="nav-item" data-page="analysis" href="#">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>
+        用量分析
+      </a>
+      <a class="nav-item" data-page="events" href="#">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/><path d="M16 13H8M16 17H8M10 9H8"/></svg>
+        请求事件
+        <span class="nav-badge">3</span>
+      </a>
+      <span class="nav-section">配置</span>
+      <a class="nav-item" data-page="providers" href="#">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2L2 7l10 5 10-5-10-5Z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+        来源管理
+      </a>
+      <a class="nav-item" data-page="models" href="#">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
+        模型与路由
+      </a>
+      <span class="nav-section">系统</span>
+      <a class="nav-item" data-page="settings" href="#">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+        系统设置
+      </a>
+    </nav>
+    <div class="sidebar-footer">
+      <div class="status-dot"></div>
+      <span>网关运行中 · 端口 3100</span>
+    </div>
+  </aside>
+
+  <div class="main-area">
+    <!-- ─── topbar ────────────────────────────────────────────── -->
+    <header class="topbar" data-od-id="topbar">
+      <button class="mobile-menu-btn" onclick="toggleMobileSidebar()" aria-label="打开导航">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
+      </button>
+      <span class="topbar-title" id="topbar-title">总览</span>
+      <div class="topbar-right">
+        <div class="endpoint-display">
+          <div class="dot"></div>
+          <span>http://localhost:3100</span>
+        </div>
+        <div class="topbar-search">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          搜索…
+          <kbd>⌘K</kbd>
+        </div>
+      </div>
+    </header>
+
+    <div class="content">
+      <!-- ═══════════════════════════════════════════════════════ -->
+      <!-- PAGE: Overview                                         -->
+      <!-- ═══════════════════════════════════════════════════════ -->
+      <div class="page active" id="page-overview" data-od-id="page-overview">
+        <div class="page-header">
+          <div>
+            <h1>总览</h1>
+            <p class="page-desc">过去 24 小时的网关运行状态</p>
+          </div>
+          <div style="display:flex;gap:8px;">
+            <select class="filter-select">
+              <option>过去 24 小时</option>
+              <option>过去 7 天</option>
+              <option>过去 30 天</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="grid-4" style="margin-bottom:var(--gap-lg);" data-od-id="kpi-row">
+          <div class="kpi-card">
+            <div class="kpi-label">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+              逻辑请求
+            </div>
+            <div class="kpi-value num">2,847</div>
+            <div class="kpi-change up">↑ 12.3% 较昨日</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/></svg>
+              成功率
+            </div>
+            <div class="kpi-value num">98.6<span style="font-size:16px;color:var(--muted)">%</span></div>
+            <div class="kpi-change up">↑ 0.3%</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 12h8M12 8v8"/></svg>
+              Total Token
+            </div>
+            <div class="kpi-value num">4.2<span style="font-size:16px;color:var(--muted)">M</span></div>
+            <div class="kpi-change up">↑ 8.7%</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+              平均延迟
+            </div>
+            <div class="kpi-value num">1.8<span style="font-size:16px;color:var(--muted)">s</span></div>
+            <div class="kpi-change down">↓ 0.2s</div>
+          </div>
+        </div>
+
+        <div class="grid-2" style="grid-template-columns:2fr 1fr;gap:var(--gap-lg);" data-od-id="overview-main">
+          <div class="card" data-od-id="token-trend">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+              <h3 style="font-size:15px;font-weight:600;">Token 使用趋势</h3>
+              <div style="display:flex;gap:12px;" class="meta">
+                <span style="display:flex;align-items:center;gap:4px;"><span style="width:8px;height:8px;border-radius:2px;background:var(--accent);display:inline-block;"></span> Input</span>
+                <span style="display:flex;align-items:center;gap:4px;"><span style="width:8px;height:8px;border-radius:2px;background:color-mix(in oklch, var(--accent) 50%, var(--bg));display:inline-block;"></span> Output</span>
+              </div>
+            </div>
+            <div class="bar-chart" style="height:140px;">
+              <div class="bar-group"><div class="bar-stack" style="height:80%;"><div class="bar" style="height:56%;background:color-mix(in oklch, var(--accent) 45%, var(--bg));"></div><div class="bar" style="height:44%;background:var(--accent);"></div></div><span class="bar-label">00</span></div>
+              <div class="bar-group"><div class="bar-stack" style="height:48%;"><div class="bar" style="height:56%;background:color-mix(in oklch, var(--accent) 45%, var(--bg));"></div><div class="bar" style="height:44%;background:var(--accent);"></div></div><span class="bar-label">02</span></div>
+              <div class="bar-group"><div class="bar-stack" style="height:27%;"><div class="bar" style="height:55%;background:color-mix(in oklch, var(--accent) 45%, var(--bg));"></div><div class="bar" style="height:45%;background:var(--accent);"></div></div><span class="bar-label">04</span></div>
+              <div class="bar-group"><div class="bar-stack" style="height:18%;"><div class="bar" style="height:50%;background:color-mix(in oklch, var(--accent) 45%, var(--bg));"></div><div class="bar" style="height:50%;background:var(--accent);"></div></div><span class="bar-label">06</span></div>
+              <div class="bar-group"><div class="bar-stack" style="height:63%;"><div class="bar" style="height:55%;background:color-mix(in oklch, var(--accent) 45%, var(--bg));"></div><div class="bar" style="height:45%;background:var(--accent);"></div></div><span class="bar-label">08</span></div>
+              <div class="bar-group"><div class="bar-stack" style="height:85%;"><div class="bar" style="height:52%;background:color-mix(in oklch, var(--accent) 45%, var(--bg));"></div><div class="bar" style="height:48%;background:var(--accent);"></div></div><span class="bar-label">10</span></div>
+              <div class="bar-group"><div class="bar-stack" style="height:100%;"><div class="bar" style="height:54%;background:color-mix(in oklch, var(--accent) 45%, var(--bg));"></div><div class="bar" style="height:46%;background:var(--accent);"></div></div><span class="bar-label">12</span></div>
+              <div class="bar-group"><div class="bar-stack" style="height:92%;"><div class="bar" style="height:53%;background:color-mix(in oklch, var(--accent) 45%, var(--bg));"></div><div class="bar" style="height:47%;background:var(--accent);"></div></div><span class="bar-label">14</span></div>
+              <div class="bar-group"><div class="bar-stack" style="height:82%;"><div class="bar" style="height:55%;background:color-mix(in oklch, var(--accent) 45%, var(--bg));"></div><div class="bar" style="height:45%;background:var(--accent);"></div></div><span class="bar-label">16</span></div>
+              <div class="bar-group"><div class="bar-stack" style="height:72%;"><div class="bar" style="height:54%;background:color-mix(in oklch, var(--accent) 45%, var(--bg));"></div><div class="bar" style="height:46%;background:var(--accent);"></div></div><span class="bar-label">18</span></div>
+              <div class="bar-group"><div class="bar-stack" style="height:60%;"><div class="bar" style="height:53%;background:color-mix(in oklch, var(--accent) 45%, var(--bg));"></div><div class="bar" style="height:47%;background:var(--accent);"></div></div><span class="bar-label">20</span></div>
+              <div class="bar-group"><div class="bar-stack" style="height:45%;"><div class="bar" style="height:52%;background:color-mix(in oklch, var(--accent) 45%, var(--bg));"></div><div class="bar" style="height:48%;background:var(--accent);"></div></div><span class="bar-label">22</span></div>
+            </div>
+          </div>
+
+          <div class="card" data-od-id="recent-activity">
+            <h3 style="font-size:15px;font-weight:600;margin-bottom:12px;">最近活动</h3>
+            <div>
+              <div class="activity-item">
+                <div class="activity-icon danger">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6M9 9l6 6"/></svg>
+                </div>
+                <div class="activity-content">
+                  <div class="activity-title">来源 <strong>deepseek-proxy</strong> 连接超时</div>
+                  <div class="activity-meta">3 分钟前 · 已触发 fallback</div>
+                </div>
+              </div>
+              <div class="activity-item">
+                <div class="activity-icon success">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/></svg>
+                </div>
+                <div class="activity-content">
+                  <div class="activity-title">模型 <strong>kimi-k2-0530</strong> 发现完成</div>
+                  <div class="activity-meta">18 分钟前 · 新增 2 个模型</div>
+                </div>
+              </div>
+              <div class="activity-item">
+                <div class="activity-icon warn">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4M12 17h.01"/></svg>
+                </div>
+                <div class="activity-content">
+                  <div class="activity-title">usage 估算比例上升至 <strong class="num">15%</strong></div>
+                  <div class="activity-meta">42 分钟前 · 建议检查流式 usage</div>
+                </div>
+              </div>
+              <div class="activity-item">
+                <div class="activity-icon success">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/></svg>
+                </div>
+                <div class="activity-content">
+                  <div class="activity-title">路由快照已刷新</div>
+                  <div class="activity-meta">1 小时前 · 5 条活跃路由</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:var(--gap-lg);" data-od-id="model-distribution">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+            <h3 style="font-size:15px;font-weight:600;">模型请求分布</h3>
+            <span class="meta">按逻辑模型 · 过去 24 小时</span>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:12px;">
+            <div>
+              <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+                <span class="mono" style="font-size:13px;">deepseek-chat</span>
+                <span class="num meta">1,203 请求 · 1.8M Token</span>
+              </div>
+              <div class="dist-bar"><span style="width:42%;background:var(--accent);"></span></div>
+            </div>
+            <div>
+              <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+                <span class="mono" style="font-size:13px;">kimi-k2-0530</span>
+                <span class="num meta">687 请求 · 1.1M Token</span>
+              </div>
+              <div class="dist-bar"><span style="width:24%;background:color-mix(in oklch, var(--accent) 70%, var(--muted));"></span></div>
+            </div>
+            <div>
+              <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+                <span class="mono" style="font-size:13px;">claude-sonnet-4</span>
+                <span class="num meta">512 请求 · 820K Token</span>
+              </div>
+              <div class="dist-bar"><span style="width:18%;background:color-mix(in oklch, var(--accent) 50%, var(--muted));"></span></div>
+            </div>
+            <div>
+              <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+                <span class="mono" style="font-size:13px;">gpt-4o</span>
+                <span class="num meta">325 请求 · 380K Token</span>
+              </div>
+              <div class="dist-bar"><span style="width:11%;background:color-mix(in oklch, var(--accent) 35%, var(--muted));"></span></div>
+            </div>
+            <div>
+              <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+                <span class="mono" style="font-size:13px;">deepseek-r1</span>
+                <span class="num meta">120 请求 · 95K Token</span>
+              </div>
+              <div class="dist-bar"><span style="width:5%;background:color-mix(in oklch, var(--accent) 25%, var(--muted));"></span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══════════════════════════════════════════════════════ -->
+      <!-- PAGE: Providers                                        -->
+      <!-- ═══════════════════════════════════════════════════════ -->
+      <div class="page" id="page-providers" data-od-id="page-providers">
+        <div class="page-header">
+          <div>
+            <h1>来源管理</h1>
+            <p class="page-desc">管理 Provider Source、Account 和连接配置</p>
+          </div>
+          <button class="btn btn-primary">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+            新增来源
+          </button>
+        </div>
+
+        <div class="card" style="padding:0;overflow:hidden;">
+          <div class="table-scroll">
+          <table class="dt" data-od-id="providers-table">
+            <thead>
+              <tr>
+                <th>来源名称</th>
+                <th>Provider</th>
+                <th>Base URL</th>
+                <th style="text-align:center;">Chat</th>
+                <th style="text-align:center;">Responses</th>
+                <th style="text-align:center;">Messages</th>
+                <th>状态</th>
+                <th>延迟</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>deepseek-official</strong></td>
+                <td><span class="pill pill-accent">DeepSeek</span></td>
+                <td class="col-mono">api.deepseek.com</td>
+                <td style="text-align:center;"><span class="cap-cell cap-native">原生</span></td>
+                <td style="text-align:center;"><span class="cap-cell cap-adapter" title="从 Chat 协议通过 Adapter 转换">转换</span></td>
+                <td style="text-align:center;"><span class="cap-cell cap-unsupported">—</span></td>
+                <td><span class="pill pill-success">● 正常</span></td>
+                <td class="col-num">320ms</td>
+                <td><button class="btn-icon"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg></button></td>
+              </tr>
+              <tr>
+                <td><strong>deepseek-proxy</strong></td>
+                <td><span class="pill pill-accent">DeepSeek</span></td>
+                <td class="col-mono">proxy.example.com</td>
+                <td style="text-align:center;"><span class="cap-cell cap-native">原生</span></td>
+                <td style="text-align:center;"><span class="cap-cell cap-native">原生</span></td>
+                <td style="text-align:center;"><span class="cap-cell cap-unsupported">—</span></td>
+                <td><span class="pill pill-danger">● 超时</span></td>
+                <td class="col-num">—</td>
+                <td><button class="btn-icon"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg></button></td>
+              </tr>
+              <tr>
+                <td><strong>kimi-official</strong></td>
+                <td><span class="pill pill-accent">Kimi</span></td>
+                <td class="col-mono">api.moonshot.cn</td>
+                <td style="text-align:center;"><span class="cap-cell cap-native">原生</span></td>
+                <td style="text-align:center;"><span class="cap-cell cap-adapter" title="从 Chat 协议通过 Kimi Responses Adapter 转换">转换</span></td>
+                <td style="text-align:center;"><span class="cap-cell cap-native">原生</span></td>
+                <td><span class="pill pill-success">● 正常</span></td>
+                <td class="col-num">480ms</td>
+                <td><button class="btn-icon"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg></button></td>
+              </tr>
+              <tr>
+                <td><strong>minimax-official</strong></td>
+                <td><span class="pill pill-accent">MiniMax</span></td>
+                <td class="col-mono">api.minimax.chat</td>
+                <td style="text-align:center;"><span class="cap-cell cap-native">原生</span></td>
+                <td style="text-align:center;"><span class="cap-cell cap-unsupported">—</span></td>
+                <td style="text-align:center;"><span class="cap-cell cap-unsupported">—</span></td>
+                <td><span class="pill pill-success">● 正常</span></td>
+                <td class="col-num">260ms</td>
+                <td><button class="btn-icon"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg></button></td>
+              </tr>
+              <tr>
+                <td><strong>anthropic-direct</strong></td>
+                <td><span class="pill pill-accent">Anthropic</span></td>
+                <td class="col-mono">api.anthropic.com</td>
+                <td style="text-align:center;"><span class="cap-cell cap-adapter" title="从 Messages 协议通过 Adapter 转换">转换</span></td>
+                <td style="text-align:center;"><span class="cap-cell cap-unsupported">—</span></td>
+                <td style="text-align:center;"><span class="cap-cell cap-native">原生</span></td>
+                <td><span class="pill pill-success">● 正常</span></td>
+                <td class="col-num">550ms</td>
+                <td><button class="btn-icon"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg></button></td>
+              </tr>
+            </tbody>
+          </table>
+          </div>
+        </div>
+
+        <div style="margin-top:var(--gap-lg);">
+          <div class="section-title">协议能力矩阵说明</div>
+          <div style="display:flex;flex-wrap:wrap;gap:12px 20px;font-size:13px;color:var(--muted);">
+            <span style="display:flex;align-items:center;gap:6px;"><span class="cap-cell cap-native">原生</span> 上游直接提供该协议 endpoint</span>
+            <span style="display:flex;align-items:center;gap:6px;"><span class="cap-cell cap-adapter">转换</span> 通过 Adapter 从可用协议转换，悬停查看来源协议</span>
+            <span style="display:flex;align-items:center;gap:6px;"><span class="cap-cell cap-unsupported">—</span> 不支持，无法路由</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══════════════════════════════════════════════════════ -->
+      <!-- PAGE: Models & Routes                                  -->
+      <!-- ═══════════════════════════════════════════════════════ -->
+      <div class="page" id="page-models" data-od-id="page-models">
+        <div class="page-header">
+          <div>
+            <h1>模型与路由</h1>
+            <p class="page-desc">逻辑模型映射、来源绑定与协议路由配置</p>
+          </div>
+          <button class="btn btn-primary">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+            新建逻辑模型
+          </button>
+        </div>
+
+        <div class="tabs" data-od-id="models-tabs">
+          <button class="tab-btn active" data-tab="tab-logical-models">逻辑模型</button>
+          <button class="tab-btn" data-tab="tab-routes">路由规则</button>
+          <button class="tab-btn" data-tab="tab-discovery">模型发现</button>
+        </div>
+
+        <div class="tab-content active" id="tab-logical-models">
+          <div class="card" style="padding:0;overflow:hidden;">
+            <div class="table-scroll">
+            <table class="dt">
+              <thead>
+                <tr>
+                  <th>逻辑模型</th>
+                  <th>绑定来源</th>
+                  <th>协议链路</th>
+                  <th>优先级</th>
+                  <th>状态</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>
+                    <strong class="mono">deepseek-chat</strong>
+                    <div class="meta" style="margin-top:2px;">DeepSeek-V3 · 128K 上下文</div>
+                  </td>
+                  <td>
+                    <div style="display:flex;flex-direction:column;gap:4px;">
+                      <span class="mono" style="font-size:12px;">deepseek-official <span class="pill pill-success" style="font-size:10px;">主</span></span>
+                      <span class="mono" style="font-size:12px;color:var(--muted);">deepseek-proxy <span class="pill pill-muted" style="font-size:10px;">备</span></span>
+                    </div>
+                  </td>
+                  <td>
+                    <div class="proto-chain">
+                      <span class="proto-node">Chat</span>
+                      <span class="proto-arrow">→</span>
+                      <span class="proto-node">Chat</span>
+                      <span style="color:var(--success);font-size:11px;margin-left:2px;">原生</span>
+                    </div>
+                  </td>
+                  <td class="col-num">1</td>
+                  <td><span class="pill pill-success">可路由</span></td>
+                  <td><button class="btn-icon"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg></button></td>
+                </tr>
+                <tr>
+                  <td>
+                    <strong class="mono">kimi-k2-0530</strong>
+                    <div class="meta" style="margin-top:2px;">Kimi K2 · 128K 上下文</div>
+                  </td>
+                  <td>
+                    <span class="mono" style="font-size:12px;">kimi-official <span class="pill pill-success" style="font-size:10px;">主</span></span>
+                  </td>
+                  <td>
+                    <div class="proto-chain">
+                      <span class="proto-node">Responses</span>
+                      <span class="proto-arrow">→</span>
+                      <span class="proto-node" style="background:var(--warn-soft);">Adapter</span>
+                      <span class="proto-arrow">→</span>
+                      <span class="proto-node">Chat</span>
+                    </div>
+                  </td>
+                  <td class="col-num">1</td>
+                  <td><span class="pill pill-warn">降级</span></td>
+                  <td><button class="btn-icon"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg></button></td>
+                </tr>
+                <tr>
+                  <td>
+                    <strong class="mono">claude-sonnet-4</strong>
+                    <div class="meta" style="margin-top:2px;">Claude Sonnet 4 · 200K 上下文</div>
+                  </td>
+                  <td>
+                    <span class="mono" style="font-size:12px;">anthropic-direct <span class="pill pill-success" style="font-size:10px;">主</span></span>
+                  </td>
+                  <td>
+                    <div class="proto-chain">
+                      <span class="proto-node">Messages</span>
+                      <span class="proto-arrow">→</span>
+                      <span class="proto-node">Messages</span>
+                      <span style="color:var(--success);font-size:11px;margin-left:2px;">原生</span>
+                    </div>
+                  </td>
+                  <td class="col-num">1</td>
+                  <td><span class="pill pill-success">可路由</span></td>
+                  <td><button class="btn-icon"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg></button></td>
+                </tr>
+                <tr>
+                  <td>
+                    <strong class="mono">gpt-4o</strong>
+                    <div class="meta" style="margin-top:2px;">GPT-4o · 128K 上下文</div>
+                  </td>
+                  <td>
+                    <span class="mono" style="font-size:12px;">deepseek-proxy <span class="pill pill-danger" style="font-size:10px;">异常</span></span>
+                  </td>
+                  <td>
+                    <div class="proto-chain">
+                      <span class="proto-node">Chat</span>
+                      <span class="proto-arrow">→</span>
+                      <span class="proto-node">Chat</span>
+                      <span style="color:var(--success);font-size:11px;margin-left:2px;">原生</span>
+                    </div>
+                  </td>
+                  <td class="col-num">1</td>
+                  <td><span class="pill pill-danger">不可用</span></td>
+                  <td><button class="btn-icon"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg></button></td>
+                </tr>
+                <tr>
+                  <td>
+                    <strong class="mono">deepseek-r1</strong>
+                    <div class="meta" style="margin-top:2px;">DeepSeek-R1 · 64K 上下文</div>
+                  </td>
+                  <td>
+                    <span class="mono" style="font-size:12px;">deepseek-official <span class="pill pill-success" style="font-size:10px;">主</span></span>
+                  </td>
+                  <td>
+                    <div class="proto-chain">
+                      <span class="proto-node">Chat</span>
+                      <span class="proto-arrow">→</span>
+                      <span class="proto-node">Chat</span>
+                      <span style="color:var(--success);font-size:11px;margin-left:2px;">原生</span>
+                    </div>
+                  </td>
+                  <td class="col-num">1</td>
+                  <td><span class="pill pill-success">可路由</span></td>
+                  <td><button class="btn-icon"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg></button></td>
+                </tr>
+              </tbody>
+            </table>
+            </div>
+          </div>
+        </div>
+
+        <div class="tab-content" id="tab-routes">
+          <div class="card" style="padding:0;overflow:hidden;">
+            <div class="table-scroll">
+            <table class="dt">
+              <thead>
+                <tr>
+                  <th>入口协议</th>
+                  <th>逻辑模型</th>
+                  <th>来源选择</th>
+                  <th>Fallback 策略</th>
+                  <th>降级策略</th>
+                  <th>超时</th>
+                  <th>状态</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><span class="pill pill-muted">Chat</span></td>
+                  <td class="mono">deepseek-chat</td>
+                  <td class="mono" style="font-size:12px;">deepseek-official → deepseek-proxy</td>
+                  <td><span class="pill pill-accent">Failover</span></td>
+                  <td><span class="pill pill-muted">禁止降级</span></td>
+                  <td class="col-num">30s</td>
+                  <td><span class="pill pill-success">活跃</span></td>
+                </tr>
+                <tr>
+                  <td><span class="pill pill-muted">Responses</span></td>
+                  <td class="mono">kimi-k2-0530</td>
+                  <td class="mono" style="font-size:12px;">kimi-official</td>
+                  <td><span class="pill pill-muted">无</span></td>
+                  <td><span class="pill pill-warn">Adapter 转换</span></td>
+                  <td class="col-num">30s</td>
+                  <td><span class="pill pill-success">活跃</span></td>
+                </tr>
+                <tr>
+                  <td><span class="pill pill-muted">Messages</span></td>
+                  <td class="mono">claude-sonnet-4</td>
+                  <td class="mono" style="font-size:12px;">anthropic-direct</td>
+                  <td><span class="pill pill-muted">无</span></td>
+                  <td><span class="pill pill-muted">禁止降级</span></td>
+                  <td class="col-num">60s</td>
+                  <td><span class="pill pill-success">活跃</span></td>
+                </tr>
+                <tr>
+                  <td><span class="pill pill-muted">Chat</span></td>
+                  <td class="mono">gpt-4o</td>
+                  <td class="mono" style="font-size:12px;">deepseek-proxy</td>
+                  <td><span class="pill pill-accent">Round-Robin</span></td>
+                  <td><span class="pill pill-warn">丢弃参数</span></td>
+                  <td class="col-num">30s</td>
+                  <td><span class="pill pill-danger">异常</span></td>
+                </tr>
+                <tr>
+                  <td><span class="pill pill-muted">Chat</span></td>
+                  <td class="mono">deepseek-r1</td>
+                  <td class="mono" style="font-size:12px;">deepseek-official</td>
+                  <td><span class="pill pill-accent">Failover</span></td>
+                  <td><span class="pill pill-warn">Adapter + 丢弃</span></td>
+                  <td class="col-num">120s</td>
+                  <td><span class="pill pill-success">活跃</span></td>
+                </tr>
+              </tbody>
+            </table>
+            </div>
+          </div>
+        </div>
+
+        <div class="tab-content" id="tab-discovery">
+          <div class="card">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--gap-md);">
+              <div class="section-title" style="margin-bottom:0;">待确认模型 <span class="section-count">2</span></div>
+              <button class="btn btn-secondary">批量确认</button>
+            </div>
+            <div class="table-scroll">
+            <table class="dt">
+              <thead>
+                <tr>
+                  <th>上游模型 ID</th>
+                  <th>来源</th>
+                  <th>发现时间</th>
+                  <th>元数据来源</th>
+                  <th>状态</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td class="col-mono">deepseek-r1-0528</td>
+                  <td>deepseek-official</td>
+                  <td class="col-mono meta">2026-08-31 09:42</td>
+                  <td><span class="pill pill-accent">preset</span></td>
+                  <td><span class="pill pill-warn">待确认</span></td>
+                  <td>
+                    <button class="btn btn-secondary" style="padding:4px 10px;font-size:12px;">确认导入</button>
+                  </td>
+                </tr>
+                <tr>
+                  <td class="col-mono">moonshot-v2-latest</td>
+                  <td>kimi-official</td>
+                  <td class="col-mono meta">2026-08-31 09:42</td>
+                  <td><span class="pill pill-muted">upstream</span></td>
+                  <td><span class="pill pill-warn">待确认</span></td>
+                  <td>
+                    <button class="btn btn-secondary" style="padding:4px 10px;font-size:12px;">确认导入</button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══════════════════════════════════════════════════════ -->
+      <!-- PAGE: Analysis                                         -->
+      <!-- ═══════════════════════════════════════════════════════ -->
+      <div class="page" id="page-analysis" data-od-id="page-analysis">
+        <div class="page-header">
+          <div>
+            <h1>用量分析</h1>
+            <p class="page-desc">Token 构成、模型分布、来源分析与延迟诊断</p>
+          </div>
+          <div style="display:flex;gap:8px;">
+            <select class="filter-select">
+              <option>过去 7 天</option>
+              <option>过去 24 小时</option>
+              <option>过去 30 天</option>
+            </select>
+            <button class="btn btn-secondary">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></svg>
+              导出 CSV
+            </button>
+          </div>
+        </div>
+
+        <div class="card" style="margin-bottom:var(--gap-lg);" data-od-id="token-composition">
+          <h3 style="font-size:15px;font-weight:600;margin-bottom:var(--gap-md);">Token 构成</h3>
+          <div class="grid-4" style="margin-bottom:var(--gap-md);">
+            <div>
+              <div class="meta" style="margin-bottom:4px;">Input Token</div>
+              <div class="num" style="font-size:22px;font-weight:600;">12.4M</div>
+            </div>
+            <div>
+              <div class="meta" style="margin-bottom:4px;">Output Token</div>
+              <div class="num" style="font-size:22px;font-weight:600;">8.7M</div>
+            </div>
+            <div>
+              <div class="meta" style="margin-bottom:4px;">Reasoning Token</div>
+              <div class="num" style="font-size:22px;font-weight:600;">3.2M</div>
+            </div>
+            <div>
+              <div class="meta" style="margin-bottom:4px;">Cached Token</div>
+              <div class="num" style="font-size:22px;font-weight:600;">5.1M</div>
+            </div>
+          </div>
+          <div class="dist-bar" style="height:12px;">
+            <span style="width:42%;background:var(--accent);" title="Input"></span>
+            <span style="width:30%;background:color-mix(in oklch, var(--accent) 60%, var(--muted));" title="Output"></span>
+            <span style="width:11%;background:var(--warn);" title="Reasoning"></span>
+            <span style="width:17%;background:color-mix(in oklch, var(--accent) 30%, var(--border));" title="Cached"></span>
+          </div>
+          <div class="dist-legend">
+            <span class="dist-legend-item"><span class="dot" style="background:var(--accent);"></span> Input 42%</span>
+            <span class="dist-legend-item"><span class="dot" style="background:color-mix(in oklch, var(--accent) 60%, var(--muted));"></span> Output 30%</span>
+            <span class="dist-legend-item"><span class="dot" style="background:var(--warn);"></span> Reasoning 11%</span>
+            <span class="dist-legend-item"><span class="dot" style="background:color-mix(in oklch, var(--accent) 30%, var(--border));"></span> Cached 17%</span>
+          </div>
+        </div>
+
+        <div class="grid-2" style="margin-bottom:var(--gap-lg);">
+          <div class="card" data-od-id="provider-distribution">
+            <h3 style="font-size:15px;font-weight:600;margin-bottom:var(--gap-md);">Provider 分布</h3>
+            <div style="display:flex;flex-direction:column;gap:10px;">
+              <div>
+                <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px;">
+                  <span>DeepSeek</span><span class="num meta">46.5%</span>
+                </div>
+                <div class="dist-bar"><span style="width:46.5%;background:var(--accent);"></span></div>
+              </div>
+              <div>
+                <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px;">
+                  <span>Kimi</span><span class="num meta">24.1%</span>
+                </div>
+                <div class="dist-bar"><span style="width:24.1%;background:color-mix(in oklch, var(--accent) 65%, var(--muted));"></span></div>
+              </div>
+              <div>
+                <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px;">
+                  <span>Anthropic</span><span class="num meta">18.0%</span>
+                </div>
+                <div class="dist-bar"><span style="width:18%;background:color-mix(in oklch, var(--accent) 45%, var(--muted));"></span></div>
+              </div>
+              <div>
+                <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px;">
+                  <span>MiniMax</span><span class="num meta">11.4%</span>
+                </div>
+                <div class="dist-bar"><span style="width:11.4%;background:color-mix(in oklch, var(--accent) 30%, var(--muted));"></span></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card" data-od-id="protocol-distribution">
+            <h3 style="font-size:15px;font-weight:600;margin-bottom:var(--gap-md);">入口协议分布</h3>
+            <div style="display:flex;flex-direction:column;gap:10px;">
+              <div>
+                <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px;">
+                  <span class="mono">OpenAI Chat Completions</span><span class="num meta">62.3%</span>
+                </div>
+                <div class="dist-bar"><span style="width:62.3%;background:var(--accent);"></span></div>
+              </div>
+              <div>
+                <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px;">
+                  <span class="mono">OpenAI Responses</span><span class="num meta">23.8%</span>
+                </div>
+                <div class="dist-bar"><span style="width:23.8%;background:color-mix(in oklch, var(--accent) 65%, var(--muted));"></span></div>
+              </div>
+              <div>
+                <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px;">
+                  <span class="mono">Anthropic Messages</span><span class="num meta">13.9%</span>
+                </div>
+                <div class="dist-bar"><span style="width:13.9%;background:color-mix(in oklch, var(--accent) 45%, var(--muted));"></span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card" data-od-id="latency-analysis">
+          <h3 style="font-size:15px;font-weight:600;margin-bottom:var(--gap-md);">延迟分析（按来源）</h3>
+          <div class="table-scroll">
+          <table class="dt">
+            <thead>
+              <tr>
+                <th>来源</th>
+                <th class="col-right">P50</th>
+                <th class="col-right">P90</th>
+                <th class="col-right">P99</th>
+                <th class="col-right">请求数</th>
+                <th class="col-right">Usage Source</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="mono">deepseek-official</td>
+                <td class="col-num">320ms</td>
+                <td class="col-num">890ms</td>
+                <td class="col-num">2.4s</td>
+                <td class="col-num">8,421</td>
+                <td style="text-align:right;"><span class="pill pill-success">upstream</span></td>
+              </tr>
+              <tr>
+                <td class="mono">kimi-official</td>
+                <td class="col-num">480ms</td>
+                <td class="col-num">1.2s</td>
+                <td class="col-num">3.1s</td>
+                <td class="col-num">4,687</td>
+                <td style="text-align:right;"><span class="pill pill-success">upstream</span></td>
+              </tr>
+              <tr>
+                <td class="mono">anthropic-direct</td>
+                <td class="col-num">550ms</td>
+                <td class="col-num">1.5s</td>
+                <td class="col-num">4.2s</td>
+                <td class="col-num">3,512</td>
+                <td style="text-align:right;"><span class="pill pill-success">upstream</span></td>
+              </tr>
+              <tr>
+                <td class="mono">minimax-official</td>
+                <td class="col-num">260ms</td>
+                <td class="col-num">650ms</td>
+                <td class="col-num">1.8s</td>
+                <td class="col-num">2,196</td>
+                <td style="text-align:right;"><span class="pill pill-warn">estimated</span></td>
+              </tr>
+            </tbody>
+          </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══════════════════════════════════════════════════════ -->
+      <!-- PAGE: Events                                           -->
+      <!-- ═══════════════════════════════════════════════════════ -->
+      <div class="page" id="page-events" data-od-id="page-events">
+        <div class="page-header">
+          <div>
+            <h1>请求事件</h1>
+            <p class="page-desc">查看每次请求的元数据、重试和 Token 明细</p>
+          </div>
+          <div style="display:flex;gap:8px;">
+            <button class="btn btn-secondary">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></svg>
+              导出
+            </button>
+          </div>
+        </div>
+
+        <div class="filter-bar" data-od-id="events-filter">
+          <select class="filter-select">
+            <option>过去 24 小时</option>
+            <option>过去 7 天</option>
+            <option>过去 30 天</option>
+          </select>
+          <select class="filter-select">
+            <option value="">所有模型</option>
+            <option>deepseek-chat</option>
+            <option>kimi-k2-0530</option>
+            <option>claude-sonnet-4</option>
+            <option>gpt-4o</option>
+            <option>deepseek-r1</option>
+          </select>
+          <select class="filter-select">
+            <option value="">所有来源</option>
+            <option>deepseek-official</option>
+            <option>deepseek-proxy</option>
+            <option>kimi-official</option>
+            <option>minimax-official</option>
+            <option>anthropic-direct</option>
+          </select>
+          <select class="filter-select">
+            <option value="">所有协议</option>
+            <option>Chat</option>
+            <option>Responses</option>
+            <option>Messages</option>
+          </select>
+          <select class="filter-select">
+            <option value="">所有状态</option>
+            <option>成功</option>
+            <option>失败</option>
+            <option>重试</option>
+          </select>
+        </div>
+
+        <div class="card" style="padding:0;overflow:hidden;">
+          <div class="table-scroll">
+          <table class="dt" data-od-id="events-table">
+            <thead>
+              <tr>
+                <th>时间</th>
+                <th>Request ID</th>
+                <th>逻辑模型</th>
+                <th>来源</th>
+                <th>协议</th>
+                <th>状态</th>
+                <th class="col-right">延迟</th>
+                <th class="col-right">Token</th>
+                <th class="col-right">Usage</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="col-mono meta">11:32:14</td>
+                <td class="col-mono" style="font-size:11px;">req_8f3a…d21e</td>
+                <td class="mono">deepseek-chat</td>
+                <td class="mono" style="font-size:12px;">deepseek-official</td>
+                <td><span class="pill pill-muted">Chat</span></td>
+                <td><span class="pill pill-success">200</span></td>
+                <td class="col-num">1.2s</td>
+                <td class="col-num">3,847</td>
+                <td style="text-align:right;"><span class="pill pill-success" style="font-size:10px;">upstream</span></td>
+              </tr>
+              <tr>
+                <td class="col-mono meta">11:31:58</td>
+                <td class="col-mono" style="font-size:11px;">req_2b7c…a9f3</td>
+                <td class="mono">kimi-k2-0530</td>
+                <td class="mono" style="font-size:12px;">kimi-official</td>
+                <td><span class="pill pill-muted">Responses</span></td>
+                <td><span class="pill pill-success">200</span></td>
+                <td class="col-num">2.8s</td>
+                <td class="col-num">6,124</td>
+                <td style="text-align:right;"><span class="pill pill-success" style="font-size:10px;">upstream</span></td>
+              </tr>
+              <tr>
+                <td class="col-mono meta">11:31:42</td>
+                <td class="col-mono" style="font-size:11px;">req_e91d…c4b7</td>
+                <td class="mono">claude-sonnet-4</td>
+                <td class="mono" style="font-size:12px;">anthropic-direct</td>
+                <td><span class="pill pill-muted">Messages</span></td>
+                <td><span class="pill pill-success">200</span></td>
+                <td class="col-num">1.8s</td>
+                <td class="col-num">2,315</td>
+                <td style="text-align:right;"><span class="pill pill-success" style="font-size:10px;">upstream</span></td>
+              </tr>
+              <tr>
+                <td class="col-mono meta">11:30:55</td>
+                <td class="col-mono" style="font-size:11px;">req_4a2f…b8e1</td>
+                <td class="mono">deepseek-chat</td>
+                <td class="mono" style="font-size:12px;"><s style="color:var(--danger);">deepseek-proxy</s> → deepseek-official</td>
+                <td><span class="pill pill-muted">Chat</span></td>
+                <td><span class="pill pill-warn">重试</span></td>
+                <td class="col-num">4.5s</td>
+                <td class="col-num">1,892</td>
+                <td style="text-align:right;"><span class="pill pill-success" style="font-size:10px;">upstream</span></td>
+              </tr>
+              <tr>
+                <td class="col-mono meta">11:29:31</td>
+                <td class="col-mono" style="font-size:11px;">req_7d5e…f2a6</td>
+                <td class="mono">gpt-4o</td>
+                <td class="mono" style="font-size:12px;">deepseek-proxy</td>
+                <td><span class="pill pill-muted">Chat</span></td>
+                <td><span class="pill pill-danger">502</span></td>
+                <td class="col-num">30.0s</td>
+                <td class="col-num">0</td>
+                <td style="text-align:right;"><span class="pill pill-muted" style="font-size:10px;">missing</span></td>
+              </tr>
+              <tr>
+                <td class="col-mono meta">11:28:47</td>
+                <td class="col-mono" style="font-size:11px;">req_c3b8…e7d4</td>
+                <td class="mono">deepseek-chat</td>
+                <td class="mono" style="font-size:12px;">deepseek-official</td>
+                <td><span class="pill pill-muted">Chat</span></td>
+                <td><span class="pill pill-success">200</span></td>
+                <td class="col-num">0.9s</td>
+                <td class="col-num">1,204</td>
+                <td style="text-align:right;"><span class="pill pill-warn" style="font-size:10px;">estimated</span></td>
+              </tr>
+            </tbody>
+          </table>
+          </div>
+          <div style="padding:12px 16px;border-top:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+            <span class="meta">显示 1-6 / 共 2,847 条</span>
+            <div style="display:flex;gap:4px;">
+              <button class="btn btn-ghost" disabled style="opacity:0.4;">← 上一页</button>
+              <button class="btn btn-ghost">下一页 →</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══════════════════════════════════════════════════════ -->
+      <!-- PAGE: Settings                                         -->
+      <!-- ═══════════════════════════════════════════════════════ -->
+      <div class="page" id="page-settings" data-od-id="page-settings">
+        <div class="page-header">
+          <div>
+            <h1>系统设置</h1>
+            <p class="page-desc">网关入口、Virtual Key 和配置管理</p>
+          </div>
+        </div>
+
+        <div class="tabs" data-od-id="settings-tabs">
+          <button class="tab-btn active" data-tab="tab-general">基本设置</button>
+          <button class="tab-btn" data-tab="tab-keys">Virtual Key</button>
+          <button class="tab-btn" data-tab="tab-import-export">导入 / 导出</button>
+        </div>
+
+        <div class="tab-content active" id="tab-general">
+          <div class="card">
+            <div class="form-group">
+              <label>网关入口地址</label>
+              <input type="text" class="form-input form-input-mono" value="http://localhost:3100" />
+              <p class="form-hint">客户端连接此地址使用网关服务。支持 OpenAI Chat、OpenAI Responses 和 Anthropic Messages 协议。</p>
+            </div>
+            <div class="form-group">
+              <label>管理员密钥</label>
+              <div style="display:flex;gap:8px;">
+                <input type="password" class="form-input form-input-mono" value="mag-admin-secret-key" style="flex:1;" />
+                <button class="btn btn-secondary">重置</button>
+              </div>
+              <p class="form-hint">用于访问 /admin/* 管理接口。请妥善保管，不要暴露到公网。</p>
+            </div>
+            <div class="form-group">
+              <label>数据保留策略</label>
+              <select class="filter-select" style="width:auto;">
+                <option>保留 90 天</option>
+                <option>保留 30 天</option>
+                <option>保留 180 天</option>
+                <option>永久保留</option>
+              </select>
+              <p class="form-hint">超过保留期的请求事件将自动清理。</p>
+            </div>
+            <div style="margin-top:var(--gap-lg);">
+              <button class="btn btn-primary">保存设置</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="tab-content" id="tab-keys">
+          <div class="card">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--gap-md);">
+              <div class="section-title" style="margin-bottom:0;">访问密钥 <span class="section-count">3</span></div>
+              <button class="btn btn-primary" style="padding:6px 12px;font-size:12px;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><path d="M12 5v14M5 12h14"/></svg>
+                新建 Key
+              </button>
+            </div>
+            <div class="table-scroll">
+            <table class="dt">
+              <thead>
+                <tr>
+                  <th>名称</th>
+                  <th>Key 前缀</th>
+                  <th>创建时间</th>
+                  <th class="col-right">请求数</th>
+                  <th>状态</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><strong>default</strong> <span class="pill pill-accent" style="font-size:10px;">默认</span></td>
+                  <td class="col-mono">mag-sk-defa…</td>
+                  <td class="col-mono meta">2026-08-15</td>
+                  <td class="col-num">18,204</td>
+                  <td><span class="pill pill-success">活跃</span></td>
+                  <td><button class="btn-icon"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg></button></td>
+                </tr>
+                <tr>
+                  <td><strong>cursor-ide</strong></td>
+                  <td class="col-mono">mag-sk-curs…</td>
+                  <td class="col-mono meta">2026-08-20</td>
+                  <td class="col-num">6,341</td>
+                  <td><span class="pill pill-success">活跃</span></td>
+                  <td><button class="btn-icon"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg></button></td>
+                </tr>
+                <tr>
+                  <td><strong>test-key</strong></td>
+                  <td class="col-mono">mag-sk-test…</td>
+                  <td class="col-mono meta">2026-08-28</td>
+                  <td class="col-num">127</td>
+                  <td><span class="pill pill-muted">停用</span></td>
+                  <td><button class="btn-icon"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg></button></td>
+                </tr>
+              </tbody>
+            </table>
+            </div>
+          </div>
+        </div>
+
+        <div class="tab-content" id="tab-import-export">
+          <div class="grid-2">
+            <div class="card">
+              <h3 style="font-size:15px;font-weight:600;margin-bottom:var(--gap-sm);">导出配置</h3>
+              <p style="font-size:13px;color:var(--muted);margin-bottom:var(--gap-md);">导出当前 Provider、Account、Model Binding 和 Route 配置为 JSON 文件。不包含凭据明文。</p>
+              <button class="btn btn-secondary">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></svg>
+                导出 JSON
+              </button>
+            </div>
+            <div class="card">
+              <h3 style="font-size:15px;font-weight:600;margin-bottom:var(--gap-sm);">导入配置</h3>
+              <p style="font-size:13px;color:var(--muted);margin-bottom:var(--gap-md);">从 JSON 文件导入配置。导入前会预览差异，确认后合并到现有配置。</p>
+              <button class="btn btn-secondary">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m17 8-5-5-5 5"/><path d="M12 3v12"/></svg>
+                选择文件
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ─── detail drawer ────────────────────────────────────────── -->
+<div class="drawer-overlay" id="drawer-overlay" onclick="closeDrawer()"></div>
+<div class="drawer" id="drawer" data-od-id="event-drawer">
+  <div class="drawer-header">
+    <h3>请求详情</h3>
+    <button class="btn-icon" onclick="closeDrawer()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+  </div>
+  <div class="drawer-body">
+    <div style="margin-bottom:var(--gap-md);">
+      <span class="pill pill-success" style="margin-right:6px;">200 OK</span>
+      <span class="pill pill-muted">Chat Completions</span>
+    </div>
+    <div class="drawer-row">
+      <span class="drawer-label">Request ID</span>
+      <span class="drawer-value">req_8f3a…d21e</span>
+    </div>
+    <div class="drawer-row">
+      <span class="drawer-label">时间</span>
+      <span class="drawer-value">2026-08-31 11:32:14 CST</span>
+    </div>
+    <div class="drawer-row">
+      <span class="drawer-label">逻辑模型</span>
+      <span class="drawer-value">deepseek-chat</span>
+    </div>
+    <div class="drawer-row">
+      <span class="drawer-label">上游模型</span>
+      <span class="drawer-value">deepseek-chat</span>
+    </div>
+    <div class="drawer-row">
+      <span class="drawer-label">来源</span>
+      <span class="drawer-value">deepseek-official</span>
+    </div>
+    <div class="drawer-row">
+      <span class="drawer-label">Account</span>
+      <span class="drawer-value">deepseek-main</span>
+    </div>
+    <div class="drawer-row">
+      <span class="drawer-label">入口协议</span>
+      <span class="drawer-value">Chat Completions</span>
+    </div>
+    <div class="drawer-row">
+      <span class="drawer-label">上游协议</span>
+      <span class="drawer-value">Chat Completions</span>
+    </div>
+    <div class="drawer-row">
+      <span class="drawer-label">Virtual Key</span>
+      <span class="drawer-value">default</span>
+    </div>
+    <div style="border-top:1px solid var(--border);margin:var(--gap-md) 0;padding-top:var(--gap-md);">
+      <div class="meta" style="margin-bottom:8px;font-weight:500;text-transform:uppercase;letter-spacing:0.04em;">Token 明细</div>
+    </div>
+    <div class="drawer-row">
+      <span class="drawer-label">Input</span>
+      <span class="drawer-value">1,204</span>
+    </div>
+    <div class="drawer-row">
+      <span class="drawer-label">Output</span>
+      <span class="drawer-value">2,643</span>
+    </div>
+    <div class="drawer-row">
+      <span class="drawer-label">Total</span>
+      <span class="drawer-value" style="font-weight:600;">3,847</span>
+    </div>
+    <div class="drawer-row">
+      <span class="drawer-label">Usage Source</span>
+      <span class="drawer-value"><span class="pill pill-success">upstream</span></span>
+    </div>
+    <div style="border-top:1px solid var(--border);margin:var(--gap-md) 0;padding-top:var(--gap-md);">
+      <div class="meta" style="margin-bottom:8px;font-weight:500;text-transform:uppercase;letter-spacing:0.04em;">性能</div>
+    </div>
+    <div class="drawer-row">
+      <span class="drawer-label">总延迟</span>
+      <span class="drawer-value">1.2s</span>
+    </div>
+    <div class="drawer-row">
+      <span class="drawer-label">流式</span>
+      <span class="drawer-value">是</span>
+    </div>
+    <div class="drawer-row">
+      <span class="drawer-label">重试次数</span>
+      <span class="drawer-value">0</span>
+    </div>
+    <div style="border-top:1px solid var(--border);margin:var(--gap-md) 0;padding-top:var(--gap-md);">
+      <div class="meta" style="margin-bottom:8px;font-weight:500;text-transform:uppercase;letter-spacing:0.04em;">上游尝试</div>
+      <p style="font-size:12px;color:var(--muted);">无重试，仅 1 次尝试。</p>
+    </div>
+  </div>
+</div>
+
+<!-- ─── config detail drawer ─────────────────────────────────── -->
+<div class="drawer-overlay" id="config-overlay"></div>
+<div class="config-drawer" id="config-drawer" data-od-id="config-drawer">
+  <div class="drawer-header">
+    <h3 id="config-title">详情</h3>
+    <button class="btn-icon" onclick="closeConfig()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+  </div>
+  <div class="drawer-body">
+    <!-- Provider detail -->
+    <div class="config-content" id="config-provider" data-od-id="provider-detail">
+      <div class="status-inline">
+        <span class="pill pill-success" id="pd-status">● 正常</span>
+        <span class="num meta" id="pd-latency">P50 320ms</span>
+      </div>
+      <div class="detail-heading" style="border:none;margin-top:0;padding-top:0;">基本信息</div>
+      <div class="drawer-row">
+        <span class="drawer-label">来源名称</span>
+        <span class="drawer-value" id="pd-name">deepseek-official</span>
+      </div>
+      <div class="drawer-row">
+        <span class="drawer-label">Provider</span>
+        <span class="drawer-value" id="pd-provider">DeepSeek</span>
+      </div>
+      <div class="drawer-row">
+        <span class="drawer-label">Base URL</span>
+        <span class="drawer-value" id="pd-url">api.deepseek.com</span>
+      </div>
+      <div class="drawer-row">
+        <span class="drawer-label">Account</span>
+        <span class="drawer-value" id="pd-account">DEEPSEEK_API_KEY</span>
+      </div>
+      <div class="drawer-row">
+        <span class="drawer-label">创建时间</span>
+        <span class="drawer-value" id="pd-created">2026-08-15 10:30</span>
+      </div>
+      <div class="detail-heading">协议能力矩阵</div>
+      <div class="drawer-row">
+        <span class="drawer-label">Chat</span>
+        <span class="drawer-value"><span class="cap-cell cap-native" id="pd-cap-chat">原生</span></span>
+      </div>
+      <div class="drawer-row">
+        <span class="drawer-label">Responses</span>
+        <span class="drawer-value"><span class="cap-cell cap-adapter" id="pd-cap-resp">转换</span> <span class="meta">← Chat</span></span>
+      </div>
+      <div class="drawer-row">
+        <span class="drawer-label">Messages</span>
+        <span class="drawer-value"><span class="cap-cell cap-unsupported" id="pd-cap-msg">—</span></span>
+      </div>
+      <div class="detail-heading">连接测试</div>
+      <div class="drawer-row">
+        <span class="drawer-label">上次测试</span>
+        <span class="drawer-value" id="pd-last-test">2026-08-31 11:28</span>
+      </div>
+      <div id="pd-test-area">
+        <button class="btn btn-secondary" style="width:100%;justify-content:center;margin-top:8px;" onclick="runConnTest()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/></svg>
+          测试连接
+        </button>
+        <div class="test-result test-ok" id="pd-test-result" style="display:none;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/></svg>
+          <span id="pd-test-msg">连接正常</span>
+          <span class="num" id="pd-test-latency">318ms</span>
+        </div>
+      </div>
+      <div class="detail-heading">最近错误</div>
+      <div id="pd-errors">
+        <div class="error-item">
+          <span class="pill pill-danger" style="font-size:10px;">502</span>
+          <span style="flex:1;">upstream_connect_error</span>
+          <span class="meta mono">11:30</span>
+        </div>
+        <div class="error-item">
+          <span class="pill pill-warn" style="font-size:10px;">timeout</span>
+          <span style="flex:1;">connect_timeout · 30s</span>
+          <span class="meta mono">09:15</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Model detail -->
+    <div class="config-content" id="config-model" data-od-id="model-detail">
+      <div class="status-inline">
+        <span class="pill pill-success" id="md-status">可路由</span>
+      </div>
+      <div class="drawer-row" style="border:none;padding-bottom:0;">
+        <span class="drawer-label" style="color:var(--fg);font-weight:600;font-family:var(--font-mono);" id="md-name">deepseek-chat</span>
+      </div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:16px;" id="md-desc">DeepSeek-V3 · 128K 上下文</div>
+
+      <div class="detail-heading" style="border:none;margin-top:0;padding-top:0;">绑定来源（按优先级）</div>
+      <div class="binding-list" id="md-bindings">
+        <div class="binding-item">
+          <span class="binding-handle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M3 8h18M3 16h18"/></svg></span>
+          <span style="flex:1;">
+            <span class="mono" style="font-size:13px;">deepseek-official</span>
+            <span class="pill pill-success" style="font-size:10px;margin-left:4px;">主</span>
+            <div class="meta" style="margin-top:2px;">DeepSeek · api.deepseek.com · 320ms</div>
+          </span>
+          <span class="pill pill-success" style="font-size:10px;">正常</span>
+        </div>
+        <div class="binding-item">
+          <span class="binding-handle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M3 8h18M3 16h18"/></svg></span>
+          <span style="flex:1;">
+            <span class="mono" style="font-size:13px;">deepseek-proxy</span>
+            <span class="pill pill-muted" style="font-size:10px;margin-left:4px;">备</span>
+            <div class="meta" style="margin-top:2px;">DeepSeek · proxy.example.com</div>
+          </span>
+          <span class="pill pill-danger" style="font-size:10px;">超时</span>
+        </div>
+      </div>
+
+      <div class="detail-heading">协议路由</div>
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <div class="drawer-row" style="padding:6px 0;">
+          <span class="drawer-label">Chat</span>
+          <span class="drawer-value"><span class="proto-chain"><span class="proto-node">Chat</span><span class="proto-arrow">→</span><span class="proto-node">Chat</span></span> <span style="color:var(--success);font-size:11px;">原生</span></span>
+        </div>
+        <div class="drawer-row" style="padding:6px 0;">
+          <span class="drawer-label">Responses</span>
+          <span class="drawer-value"><span class="proto-chain"><span class="proto-node">Resp</span><span class="proto-arrow">→</span><span class="proto-node" style="background:var(--warn-soft);">Adpt</span><span class="proto-arrow">→</span><span class="proto-node">Chat</span></span></span>
+        </div>
+        <div class="drawer-row" style="padding:6px 0;">
+          <span class="drawer-label">Messages</span>
+          <span class="drawer-value"><span class="cap-cell cap-unsupported">不支持</span></span>
+        </div>
+      </div>
+
+      <div class="detail-heading">路由配置</div>
+      <div class="drawer-row">
+        <span class="drawer-label">Fallback 策略</span>
+        <span class="drawer-value"><span class="pill pill-accent" id="md-fallback">Failover</span></span>
+      </div>
+      <div class="drawer-row">
+        <span class="drawer-label">降级策略</span>
+        <span class="drawer-value" id="md-degrade"><span class="pill pill-muted">禁止降级</span></span>
+      </div>
+      <div class="drawer-row">
+        <span class="drawer-label">超时阈值</span>
+        <span class="drawer-value num" id="md-timeout">30s</span>
+      </div>
+      <div class="drawer-row">
+        <span class="drawer-label">最大重试</span>
+        <span class="drawer-value num" id="md-max-retry">2</span>
+      </div>
+
+      <div class="detail-heading">使用统计（7 天）</div>
+      <div class="drawer-row">
+        <span class="drawer-label">请求数</span>
+        <span class="drawer-value num" id="md-requests">1,203</span>
+      </div>
+      <div class="drawer-row">
+        <span class="drawer-label">Total Token</span>
+        <span class="drawer-value num" id="md-tokens">1.8M</span>
+      </div>
+      <div class="drawer-row">
+        <span class="drawer-label">平均延迟</span>
+        <span class="drawer-value num" id="md-avg-latency">320ms</span>
+      </div>
+    </div>
+  </div>
+  <div class="config-footer" id="config-footer">
+    <button class="btn btn-secondary" onclick="editCurrent()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+      编辑
+    </button>
+    <button class="btn btn-secondary" id="config-disable-btn">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><circle cx="12" cy="12" r="10"/><path d="m4.93 4.93 14.14 14.14"/></svg>
+      停用
+    </button>
+    <button class="btn btn-danger" style="margin-left:auto;">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+      删除
+    </button>
+  </div>
+</div>
+
+<!-- ─── modal ────────────────────────────────────────────────── -->
+<div class="modal-overlay" id="modal-overlay">
+  <div class="modal" onclick="event.stopPropagation()" data-od-id="modal">
+    <div class="modal-header">
+      <h3 id="modal-title">新增来源</h3>
+      <button class="btn-icon" onclick="closeModal()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+    </div>
+    <div class="modal-body">
+      <!-- New Provider form -->
+      <div class="config-content" id="modal-provider" data-od-id="form-new-provider">
+        <div class="form-grid">
+          <div class="form-group form-full">
+            <label>来源名称</label>
+            <input type="text" class="form-input form-input-mono" placeholder="例如 deepseek-official" />
+          </div>
+          <div class="form-group">
+            <label>Provider 类型</label>
+            <select class="form-input">
+              <option>DeepSeek</option>
+              <option>Kimi / Moonshot</option>
+              <option>Anthropic</option>
+              <option>OpenAI</option>
+              <option>MiniMax</option>
+              <option>自定义</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Base URL</label>
+            <input type="text" class="form-input form-input-mono" placeholder="api.deepseek.com" />
+          </div>
+          <div class="form-group form-full">
+            <label>凭据环境变量</label>
+            <input type="text" class="form-input form-input-mono" placeholder="DEEPSEEK_API_KEY" />
+            <p class="form-hint">网关从此环境变量读取 API Key，不存储明文。</p>
+          </div>
+        </div>
+        <div class="form-separator">协议能力声明</div>
+        <p class="form-hint" style="margin:-8px 0 12px;">选择「转换」时需指定从哪个协议通过 Adapter 转换。</p>
+        <div style="display:flex;flex-direction:column;gap:12px;">
+          <div class="cap-row" data-protocol="chat">
+            <div style="display:flex;align-items:center;justify-content:space-between;">
+              <label style="font-size:13px;font-weight:500;min-width:90px;">Chat</label>
+              <div class="cap-radio-group">
+                <span class="cap-radio active" onclick="toggleCap(this)">原生</span>
+                <span class="cap-radio" onclick="toggleCap(this)">转换</span>
+                <span class="cap-radio" onclick="toggleCap(this)">不支持</span>
+              </div>
+            </div>
+            <div class="cap-convert-from">
+              <span>← 从</span>
+              <select class="convert-select">
+                <option value="messages">Messages</option>
+                <option value="responses">Responses</option>
+              </select>
+              <span>转换</span>
+            </div>
+          </div>
+          <div class="cap-row" data-protocol="responses">
+            <div style="display:flex;align-items:center;justify-content:space-between;">
+              <label style="font-size:13px;font-weight:500;min-width:90px;">Responses</label>
+              <div class="cap-radio-group">
+                <span class="cap-radio" onclick="toggleCap(this)">原生</span>
+                <span class="cap-radio active" onclick="toggleCap(this)">转换</span>
+                <span class="cap-radio" onclick="toggleCap(this)">不支持</span>
+              </div>
+            </div>
+            <div class="cap-convert-from visible">
+              <span>← 从</span>
+              <select class="convert-select">
+                <option value="chat" selected>Chat</option>
+                <option value="messages">Messages</option>
+              </select>
+              <span>转换</span>
+            </div>
+          </div>
+          <div class="cap-row" data-protocol="messages">
+            <div style="display:flex;align-items:center;justify-content:space-between;">
+              <label style="font-size:13px;font-weight:500;min-width:90px;">Messages</label>
+              <div class="cap-radio-group">
+                <span class="cap-radio" onclick="toggleCap(this)">原生</span>
+                <span class="cap-radio" onclick="toggleCap(this)">转换</span>
+                <span class="cap-radio active" onclick="toggleCap(this)">不支持</span>
+              </div>
+            </div>
+            <div class="cap-convert-from">
+              <span>← 从</span>
+              <select class="convert-select">
+                <option value="chat" selected>Chat</option>
+                <option value="responses">Responses</option>
+              </select>
+              <span>转换</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- New Model form -->
+      <div class="config-content" id="modal-model" data-od-id="form-new-model">
+        <div class="form-grid">
+          <div class="form-group form-full">
+            <label>逻辑模型名称</label>
+            <input type="text" class="form-input form-input-mono" placeholder="例如 deepseek-r1" />
+            <p class="form-hint">客户端请求时使用的模型名称。</p>
+          </div>
+          <div class="form-group">
+            <label>显示名称</label>
+            <input type="text" class="form-input" placeholder="DeepSeek R1" />
+          </div>
+          <div class="form-group">
+            <label>上下文长度</label>
+            <input type="number" class="form-input form-input-mono" value="128000" />
+          </div>
+        </div>
+        <div class="form-separator">绑定来源</div>
+        <div class="form-group">
+          <label>主来源</label>
+          <select class="form-input">
+            <option>deepseek-official</option>
+            <option>deepseek-proxy</option>
+            <option>kimi-official</option>
+            <option>minimax-official</option>
+            <option>anthropic-direct</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>备用来源（可选）</label>
+          <select class="form-input">
+            <option value="">无</option>
+            <option>deepseek-official</option>
+            <option>deepseek-proxy</option>
+            <option>kimi-official</option>
+            <option>minimax-official</option>
+            <option>anthropic-direct</option>
+          </select>
+        </div>
+        <div class="form-separator">路由设置</div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Fallback 策略</label>
+            <select class="form-input">
+              <option value="failover">Failover（按优先级逐一切换）</option>
+              <option value="random">Random（随机选择来源）</option>
+              <option value="round-robin">Round-Robin（轮询）</option>
+              <option value="none">无（仅使用主来源）</option>
+            </select>
+            <p class="form-hint">当主来源失败时如何选择备用来源。</p>
+          </div>
+          <div class="form-group">
+            <label>降级策略</label>
+            <select class="form-input">
+              <option value="none">禁止降级</option>
+              <option value="adapter">允许 Adapter 协议转换</option>
+              <option value="strip">允许丢弃不支持参数</option>
+              <option value="both">Adapter 转换 + 丢弃参数</option>
+            </select>
+            <p class="form-hint">当来源不直接支持请求协议时的处理方式。</p>
+          </div>
+        </div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label>超时阈值</label>
+            <div style="display:flex;align-items:center;gap:6px;">
+              <input type="number" class="form-input form-input-mono" value="30" min="5" max="300" style="width:80px;" />
+              <span class="meta">秒</span>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>最大重试次数</label>
+            <input type="number" class="form-input form-input-mono" value="2" min="0" max="5" style="width:80px;" />
+          </div>
+        </div>
+      </div>
+
+      <!-- New Key form -->
+      <div class="config-content" id="modal-key" data-od-id="form-new-key">
+        <div class="form-group">
+          <label>Key 名称</label>
+          <input type="text" class="form-input" placeholder="例如 vscode-copilot" />
+          <p class="form-hint">用于在请求日志中区分不同客户端。</p>
+        </div>
+        <div class="form-group">
+          <label>用途说明（可选）</label>
+          <input type="text" class="form-input" placeholder="VS Code 中使用的 Copilot 插件" />
+        </div>
+        <div style="margin-top:var(--gap-md);padding:14px;background:var(--fg-soft);border-radius:var(--radius-sm);">
+          <div class="meta" style="margin-bottom:6px;">生成的 Key 仅在创建时显示一次，请立即保存。</div>
+        </div>
+      </div>
+
+      <!-- Discovery confirm form -->
+      <div class="config-content" id="modal-discovery" data-od-id="form-discovery-confirm">
+        <div style="padding:14px;background:var(--fg-soft);border-radius:var(--radius-sm);margin-bottom:var(--gap-md);">
+          <div class="drawer-row" style="border:none;padding:4px 0;">
+            <span class="drawer-label">上游模型 ID</span>
+            <span class="drawer-value" id="disc-model-id">deepseek-r1-0528</span>
+          </div>
+          <div class="drawer-row" style="border:none;padding:4px 0;">
+            <span class="drawer-label">来源</span>
+            <span class="drawer-value" id="disc-source">deepseek-official</span>
+          </div>
+          <div class="drawer-row" style="border:none;padding:4px 0;">
+            <span class="drawer-label">发现时间</span>
+            <span class="drawer-value" id="disc-time">2026-08-31 09:42</span>
+          </div>
+          <div class="drawer-row" style="border:none;padding:4px 0;">
+            <span class="drawer-label">元数据来源</span>
+            <span class="drawer-value"><span class="pill pill-accent" id="disc-meta">preset</span></span>
+          </div>
+        </div>
+        <div class="form-separator" style="margin-top:0;">导入配置</div>
+        <div class="form-group">
+          <label>逻辑模型名称</label>
+          <input type="text" class="form-input form-input-mono" id="disc-name-input" value="deepseek-r1-0528" />
+        </div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label>绑定来源</label>
+            <select class="form-input" id="disc-source-select">
+              <option>deepseek-official</option>
+              <option>deepseek-proxy</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>优先级</label>
+            <input type="number" class="form-input form-input-mono" value="1" min="1" max="10" />
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal()">取消</button>
+      <button class="btn btn-primary" id="modal-submit" onclick="closeModal()">确认</button>
+    </div>
+  </div>
+</div>
+
+<script>
+window.toggleMobileSidebar = function() {
+  var sidebar = document.getElementById('sidebar');
+  var overlay = document.getElementById('mobile-overlay');
+  var isOpen = sidebar.classList.contains('mobile-open');
+  sidebar.classList.toggle('mobile-open', !isOpen);
+  overlay.classList.toggle('open', !isOpen);
+  document.body.style.overflow = isOpen ? '' : 'hidden';
+};
+
+(function() {
+  var navItems = document.querySelectorAll('.nav-item[data-page]');
+  var pages = document.querySelectorAll('.page');
+  var topbarTitle = document.getElementById('topbar-title');
+  var titles = {
+    overview: '总览', analysis: '用量分析', events: '请求事件',
+    providers: '来源管理', models: '模型与路由', settings: '系统设置'
+  };
+
+  function navigateTo(pageId) {
+    navItems.forEach(function(n) { n.classList.remove('active'); });
+    var target = document.querySelector('.nav-item[data-page="' + pageId + '"]');
+    if (target) target.classList.add('active');
+    pages.forEach(function(p) { p.classList.remove('active'); });
+    var pg = document.getElementById('page-' + pageId);
+    if (pg) pg.classList.add('active');
+    topbarTitle.textContent = titles[pageId] || pageId;
+    if (window.innerWidth <= 920) {
+      var sidebar = document.getElementById('sidebar');
+      var overlay = document.getElementById('mobile-overlay');
+      sidebar.classList.remove('mobile-open');
+      overlay.classList.remove('open');
+      document.body.style.overflow = '';
+    }
+  }
+  window.navigateTo = navigateTo;
+
+  navItems.forEach(function(item) {
+    item.addEventListener('click', function(e) {
+      e.preventDefault();
+      navigateTo(item.dataset.page);
+    });
+  });
+
+  document.querySelectorAll('.tabs').forEach(function(tabBar) {
+    var btns = tabBar.querySelectorAll('.tab-btn');
+    btns.forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        var tabId = btn.dataset.tab;
+        btns.forEach(function(b) { b.classList.remove('active'); });
+        btn.classList.add('active');
+        var parent = tabBar.parentElement;
+        parent.querySelectorAll('.tab-content').forEach(function(tc) { tc.classList.remove('active'); });
+        parent.querySelector('#' + tabId).classList.add('active');
+      });
+    });
+  });
+
+  var kpiTargets = ['events', 'events', 'analysis', 'analysis'];
+  document.querySelectorAll('[data-od-id="kpi-row"] .kpi-card').forEach(function(card, i) {
+    card.style.cursor = 'pointer';
+    card.addEventListener('click', function() { navigateTo(kpiTargets[i]); });
+  });
+
+  document.querySelectorAll('[data-od-id="recent-activity"] .activity-item').forEach(function(item) {
+    item.style.cursor = 'pointer';
+    item.addEventListener('click', function() { navigateTo('events'); });
+  });
+
+  document.querySelectorAll('[data-od-id="providers-table"] tbody tr').forEach(function(row) {
+    row.classList.add('clickable-row');
+    row.addEventListener('click', function() { openConfig('provider'); });
+  });
+
+  document.querySelectorAll('#tab-logical-models .dt tbody tr').forEach(function(row) {
+    row.classList.add('clickable-row');
+    row.addEventListener('click', function() { openConfig('model'); });
+  });
+
+  document.querySelectorAll('[data-od-id="events-table"] tbody tr').forEach(function(row) {
+    row.classList.add('clickable-row');
+    row.addEventListener('click', function() { openDrawer(); });
+  });
+
+  var addProviderBtn = document.querySelector('#page-providers .page-header .btn-primary');
+  if (addProviderBtn) addProviderBtn.addEventListener('click', function(e) {
+    e.stopPropagation();
+    openModal('provider', '新增 Provider Source', '创建来源');
+  });
+
+  var addModelBtn = document.querySelector('#page-models .page-header .btn-primary');
+  if (addModelBtn) addModelBtn.addEventListener('click', function(e) {
+    e.stopPropagation();
+    openModal('model', '新建逻辑模型', '创建模型');
+  });
+
+  document.querySelectorAll('#tab-keys .btn-primary').forEach(function(btn) {
+    if (btn.textContent.indexOf('新建') !== -1) {
+      btn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        openModal('key', '新建 Virtual Key', '生成 Key');
+      });
+    }
+  });
+
+  document.querySelectorAll('#tab-discovery td .btn-secondary').forEach(function(btn) {
+    btn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      openModal('discovery', '确认导入模型', '确认导入');
+    });
+  });
+
+  document.querySelectorAll('#tab-keys .dt tbody tr').forEach(function(row) {
+    row.classList.add('clickable-row');
+  });
+
+  document.querySelectorAll('#tab-routes .dt tbody tr').forEach(function(row) {
+    row.classList.add('clickable-row');
+    row.addEventListener('click', function() { openConfig('model'); });
+  });
+})();
+
+function openDrawer() {
+  document.getElementById('drawer-overlay').classList.add('open');
+  document.getElementById('drawer').classList.add('open');
+}
+function closeDrawer() {
+  document.getElementById('drawer-overlay').classList.remove('open');
+  document.getElementById('drawer').classList.remove('open');
+}
+
+var _configType = '';
+function openConfig(type) {
+  _configType = type;
+  document.getElementById('config-overlay').classList.add('open');
+  document.getElementById('config-drawer').classList.add('open');
+  document.querySelectorAll('.config-drawer .config-content').forEach(function(c) {
+    c.classList.remove('active');
+  });
+  var el = document.getElementById('config-' + type);
+  if (el) el.classList.add('active');
+  var t = { provider: '来源详情', model: '模型详情' };
+  document.getElementById('config-title').textContent = t[type] || '详情';
+  var disableBtn = document.getElementById('config-disable-btn');
+  if (disableBtn) disableBtn.style.display = (type === 'provider') ? '' : 'none';
+}
+function editCurrent() {
+  closeConfig();
+  var t = { provider: '编辑来源', model: '编辑逻辑模型' };
+  openModal(_configType, t[_configType] || '编辑', '保存更改');
+}
+function closeConfig() {
+  document.getElementById('config-overlay').classList.remove('open');
+  document.getElementById('config-drawer').classList.remove('open');
+}
+document.getElementById('config-overlay').addEventListener('click', closeConfig);
+
+function openModal(type, title, submitLabel) {
+  document.getElementById('modal-overlay').classList.add('open');
+  document.querySelectorAll('#modal-overlay .config-content').forEach(function(c) {
+    c.classList.remove('active');
+  });
+  var el = document.getElementById('modal-' + type);
+  if (el) el.classList.add('active');
+  document.getElementById('modal-title').textContent = title || '新建';
+  document.getElementById('modal-submit').textContent = submitLabel || '确认';
+}
+function closeModal() {
+  document.getElementById('modal-overlay').classList.remove('open');
+}
+document.getElementById('modal-overlay').addEventListener('click', function(e) {
+  if (e.target === document.getElementById('modal-overlay')) closeModal();
+});
+
+function toggleCap(el) {
+  var group = el.parentElement;
+  group.querySelectorAll('.cap-radio').forEach(function(r) { r.classList.remove('active'); });
+  el.classList.add('active');
+  var row = group.closest('.cap-row');
+  if (row) {
+    var convertFrom = row.querySelector('.cap-convert-from');
+    if (convertFrom) {
+      if (el.textContent.trim() === '转换') {
+        convertFrom.classList.add('visible');
+      } else {
+        convertFrom.classList.remove('visible');
+      }
+    }
+  }
+}
+
+function runConnTest() {
+  var result = document.getElementById('pd-test-result');
+  result.style.display = 'flex';
+  result.className = 'test-result';
+  result.style.background = 'var(--fg-soft)';
+  result.style.color = 'var(--muted)';
+  document.getElementById('pd-test-msg').textContent = '测试中…';
+  document.getElementById('pd-test-latency').textContent = '';
+  setTimeout(function() {
+    result.className = 'test-result test-ok';
+    result.style.background = '';
+    result.style.color = '';
+    document.getElementById('pd-test-msg').textContent = '连接正常';
+    document.getElementById('pd-test-latency').textContent = '318ms';
+  }, 1200);
+}
+
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') {
+    closeDrawer();
+    closeConfig();
+    closeModal();
+  }
+});
+</script>
+</body>
+</html>

@@ -234,11 +234,11 @@ user > preset > upstream > unknown
 
 重复刷新同一 `(source_id, upstream_model_id)` 只更新原始发现快照、最近发现时间和可用状态，不创建重复记录。待确认记录会重新应用预设和上游元数据，但保留用户覆盖；已确认记录的元数据和匹配预设均保持不变。发现中消失的模型只标记 `unavailable`，不删除 LogicalModel、Binding 或 Route。
 
-ProviderPreset 与发现确认阶段不改变现有 Route，也不把发现结果自动写入 `logical_models`、`model_bindings` 或 `routes`。新模型保持 `pending`；用户确认只将 SourceModel 变为 `confirmed`，LogicalModel/Binding/Route 仍由独立控制面流程显式创建。`/v1/models` 和运行时 Binding snapshot 的数据库驱动行为属于 #14，本实现未修改这些路径。
+ProviderPreset 与发现确认阶段不改变 Route，也不把发现结果自动写入 `logical_models`、`model_bindings` 或 `routes`。新模型保持 `pending`；用户确认只将 SourceModel 变为 `confirmed`，LogicalModel/Binding/Route 仍由独立控制面流程显式创建。运行时 snapshot 只消费 enabled 且 confirmed/available 的 LogicalModel、SourceModel、SourceModelCapability、ModelBinding、Source、Account 和 Route；`logical_models.enabled` 与 `model_bindings.enabled` 是独立运行期开关，不改变确认/可用状态历史。
 
 每次成功刷新在单个 PostgreSQL 事务中按 Source 加锁，保存原始 snapshot、更新模型并生成按模型 ID 排序的 `added/changed/missing` diff。重复相同刷新得到空 diff；confirmed 元数据保持不变，pending 记录重算 upstream/preset 字段但保留 user 字段；missing 仅改为 `unavailable`。连接测试与 discovery run 分别保留审计历史，最近一次 discovery 可由 API 读取。
 
-开发期 `GATEWAY_CONFIG_JSON` 导入会为尚不存在的 Provider ID 创建一次 `custom@1` Source 快照，并让 Account 显式引用该 Source；后续启动同步不会覆盖已经存在的 Source 快照或用户编辑，PostgreSQL 仍是模型目录事实来源。
+开发期 `GATEWAY_CONFIG_JSON` 只在控制面为空时做一次 `custom@1` 初始化，或在显式设置 `GATEWAY_CONFIG_IMPORT=true` 时事务化替换开发控制面。控制面非空的普通启动不会解析该 JSON，更不会覆盖 Source 快照或用户编辑；启动直接从数据库一致性事务构建 snapshot。
 
 ### 3.6 自定义渠道与跨 Provider Fallback（待实施）
 
@@ -310,9 +310,11 @@ GATEWAY_API_KEY 鉴权
   ↓
 读取 model
   ↓
-匹配 protocol + model Route
+读取原子发布的不可变 PostgreSQL snapshot
   ↓
-检查 Provider 原生能力
+匹配 enabled Route + confirmed/available Binding
+  ↓
+读取 SourceModelCapability 完整协议链
   ├─ native → 原生透传
   └─ adapter → 调用内置 Adapter
   ↓
@@ -334,7 +336,7 @@ GATEWAY_API_KEY 鉴权
 
 ## 5. 当前配置模型
 
-配置入口为 `GATEWAY_CONFIG_JSON`，完整示例见 [`config.example.json`](../config.example.json)。
+PostgreSQL 是运行时配置入口和事实来源，`DATABASE_URL` 为必填项。`GATEWAY_CONFIG_JSON` 仅是空控制面初始化/显式导入格式，完整示例见 [`config.example.json`](../config.example.json)。监听地址由 `GATEWAY_LISTEN_ADDR` 独立覆盖。
 
 ### Provider
 
@@ -470,8 +472,8 @@ Kimi Adapter：
 
 ### PostgreSQL 基础
 
-- `DATABASE_URL` 可选；
-- 启动时按 migration 初始化 `usage_events`、attempt、Virtual Key 和查询索引；
+- `DATABASE_URL` 是 DB-first 运行时必填项；
+- 启动时按 migration 初始化用量、控制面和模型目录表，并在 `REPEATABLE READ READ ONLY` 事务中构建运行时 snapshot；控制面写入在 `SERIALIZABLE` 事务中递增 `snapshot_revision`，内存发布拒绝旧 revision 覆盖新 revision；
 - 请求结束后写入基础请求事件；
 - `request_id` 唯一防重复。
 
@@ -515,9 +517,15 @@ v1 响应 envelope 固定如下：summary 为 `{version, timezone, range, data}`
 
 ### 7.2 PostgreSQL 领域表
 
-当前已经创建 `usage_events`、`usage_event_attempts`、`virtual_keys`、`providers`、`accounts`、`routes`，Provider/Model preset、Source、SourceModel、LogicalModel、ModelBinding、SourceModelCapability 模型目录表，以及 `source_connection_tests`、`source_discovery_runs` 审计表。现有配置会前进回填为 `custom` ProviderPreset 的独立 Source 快照；内置预设以不可变 `(id, version)` 启动注册。模型发现与确认已经使用 PostgreSQL 模型目录，但运行时 Binding snapshot、`/v1/models` 和 DB-first 启动仍由 #14 完成。`request_id` 表示一次北向逻辑请求并保持唯一；重试尝试写入 `usage_event_attempts(request_id, attempt_no)`，同一尝试幂等。`usage_events.logical_model` 保存客户端模型，`upstream_model_id` 在路由能明确提供时填充，否则为空；Virtual Key 鉴权成功时写入 `virtual_key_id`，静态入口 Key 保持为空。时间统一按 PostgreSQL `TIMESTAMPTZ` 以 UTC 存储，展示层负责本地时区转换。
+当前已经创建 `usage_events`、`usage_event_attempts`、`virtual_keys`、`providers`、`accounts`、`routes`，Provider/Model preset、Source、SourceModel、LogicalModel、ModelBinding、SourceModelCapability 模型目录表，以及 `source_connection_tests`、`source_discovery_runs` 审计表。内置预设以不可变 `(id, version)` 启动注册。运行时从 `sources`、`accounts`、`logical_models`、`model_bindings`、`source_models`、`source_model_capabilities` 和 `routes` 构建完整 `protocol_in → protocol_upstream → endpoint/Adapter` 链，旧 `providers` 行不再是运行时事实来源。`request_id` 表示一次北向逻辑请求并保持唯一；重试尝试写入 `usage_event_attempts(request_id, attempt_no)`，同一尝试幂等。`usage_events.logical_model` 保存客户端模型，`upstream_model_id` 保存实际 Binding 的上游模型；Virtual Key 鉴权成功时写入 `virtual_key_id`，静态入口 Key 保持为空。时间统一按 PostgreSQL `TIMESTAMPTZ` 以 UTC 存储，展示层负责本地时区转换。
 
-模型目录数据库回归测试只连接显式的 `TEST_DATABASE_URL`，不会复用运行时 `DATABASE_URL`；未设置时普通单元测试跳过 PostgreSQL 集成部分。
+控制面写入采用 `SERIALIZABLE` 事务：先写候选变更，再校验引用、endpoint、Adapter 注册表与方向、单段转换、能力链和 Binding 可路由性，随后在同一事务读取并构建下一版不可变 snapshot；任一步失败都回滚。提交成功后一次写锁替换整个 snapshot，并发请求只会持有旧版或新版的完整 `Arc`。手工 reload 使用一致性只读事务；失败不替换当前有效 snapshot。
+
+Admin 资源为 `/admin/sources`、`/admin/accounts`、`/admin/logical-models`、`/admin/model-bindings` 和 `/admin/routes`，支持集合 `GET/POST`、单资源 `GET/PUT/DELETE` 与 `PUT /{id}/enabled`。`GET /admin/capabilities` 读取与 proxy 相同的不可变 runtime snapshot，按 Route、Source、Account、logical/upstream model 输出三协议完整矩阵、primary/fallback Binding、直接转换链、degraded 状态和结构化不可路由错误；它不会回退到初始化配置。错误固定为 `{error:{code,message}}`；Account 与能力矩阵响应均不返回 `credential_ciphertext`、`credential_env` 或明文凭据。
+
+控制面写入契约以 Source/Binding 为中心：Source 创建时复制 `provider_preset_id@version` 快照，后续 `PUT` 不允许更换该引用；Account 直接引用 `source_id`，凭据只能提交 `credential_env` 或 `credential_ciphertext`；LogicalModel 的 `status` 与 `enabled` 分离；ModelBinding 明确携带 `logical_model_id/source_id/account_id/upstream_model_id/protocol/status/enabled/priority`；Route 只声明 `logical_model_id/protocols/strategy/allow_lossy_conversion/enabled`，上游 Source、账号、模型、模式和 Adapter 全部由 Binding + SourceModelCapability 解析，Route 不再复制这些字段。ProviderPreset 与 SourceModel 的发现/确认 API 由 #13 负责，不在本控制面重复实现。
+
+PostgreSQL 回归测试只连接显式的 `TEST_DATABASE_URL`，不会复用运行时 `DATABASE_URL`。完整控制面测试为 ignored test，并在实际执行时创建/清理独立 schema；验收必须显式运行，不能把缺少数据库导致的跳过作为通过。
 
 ProviderPreset/模型发现回归使用真实 PostgreSQL 与 mock 上游，覆盖 DeepSeek、MiniMax、Kimi Code 的成功、失败、空列表、重复刷新、模型消失、confirmed/user 覆盖保留、批量确认和日志脱敏。
 
@@ -540,10 +548,12 @@ ProviderPreset/模型发现回归使用真实 PostgreSQL 与 mock 上游，覆�
 
 ### 7.4 统计接口和页面
 
-已完成稳定 v1 `/admin/usage/summary`、`timeseries`、`breakdown`、`events`、`export` 查询契约、组合筛选、确定性游标分页、CSV/JSON 导出，以及 Provider/Account/Route 管理查询 API；同时已 vendor Keeper React 前端、构建静态资源（访问 `/admin/`）。仍待完成：
+已完成稳定 v1 `/admin/usage/summary`、`timeseries`、`breakdown`、`events`、`export` 查询契约、组合筛选、确定性游标分页、CSV/JSON 导出，以及 Source/Account/LogicalModel/ModelBinding/Route 管理 API；同时已 vendor Keeper React 前端、构建静态资源（访问 `/admin/`）。仍待完成：
 
 - Keeper UI 字段改为网关原生字段；
 - Admin Session 登录。
+
+2026-08-31 控制台原型评审后，视觉基线采用 Tech-Utility 设计语言、Signal Green、固定桌面侧栏、紧凑顶部栏、卡片/表格和右侧详情抽屉；正式主导航仍只包含 Overview、Analysis、Request Events。设计 Token 与组件约束维护在 [`brand-spec.md`](brand-spec.md)，原型归档在 [`prototypes/ai-gateway-prototype.html`](prototypes/ai-gateway-prototype.html)，只作为设计参考，不参与构建。Source/Account、LogicalModel/SourceModel/ModelBinding/Route 必须继续按领域职责分离，不能照静态原型合并。响应式按 `<= 920px` overlay 侧栏、`<= 600px` 单列筛选/全宽 drawer、`<= 380px` 紧凑 KPI 渐进降级。实施与验收记录见 GitHub Issue #33。
 
 CPA Usage Keeper 只复用 React 页面和交互，不复用其 Go 后端、SQLite、CPA Redis queue 或 CPA Management API。[CPA Usage Keeper](https://github.com/Willxup/cpa-usage-keeper)
 
@@ -567,6 +577,7 @@ CPA Usage Keeper 只复用 React 页面和交互，不复用其 Go 后端、SQLi
 - 已覆盖非流式 thinking/web search 转换；
 - 已覆盖流式 Anthropic SSE → Responses SSE；
 - 已增加 OpenAI/Anthropic usage JSON 和 SSE 提取单测。
+- 已增加隔离 PostgreSQL schema 的控制面集成测试，覆盖 DB-first 一次性导入、全资源 CRUD/启停、事务回滚、native/adapter Binding 解析、并发 snapshot 切换、刷新失败保留旧 snapshot、凭据脱敏和 `/v1/models` 健康过滤。
 
 ### 7.7 真实联调基线（2026-08-31）
 

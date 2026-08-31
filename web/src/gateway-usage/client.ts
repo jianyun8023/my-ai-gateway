@@ -143,12 +143,13 @@ export class GatewayUsageClient {
   ): Promise<UsageOverviewViewModel> {
     const durationMs = new Date(filters.to).getTime() - new Date(filters.from).getTime();
     const granularity = granularityOverride ?? (durationMs > 3 * 24 * 60 * 60 * 1000 ? 'day' : 'hour');
-    const [summary, timeseries, recentEvents] = await Promise.all([
+    const [summary, timeseries, recentEvents, logicalModels] = await Promise.all([
       this.summary(filters, signal),
       this.timeseries(filters, granularity, signal),
       this.events({ filters, limit: 8 }, signal),
+      this.breakdown(filters, 'logical_model', signal),
     ]);
-    return { summary, timeseries, recentEvents: recentEvents.events };
+    return { summary, timeseries, recentEvents: recentEvents.events, logicalModels };
   }
 
   async eventDetail(requestId: string, signal?: AbortSignal): Promise<unknown> {

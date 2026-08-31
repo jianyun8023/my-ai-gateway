@@ -1,3 +1,4 @@
+#[cfg(test)]
 use crate::config::{AccountConfig, GatewayConfig, ProviderConfig, RouteConfig};
 use crate::model_catalog::ModelCatalogRepository;
 use chrono::{DateTime, TimeZone, Utc};
@@ -226,6 +227,13 @@ impl Database {
         Ok(db)
     }
 
+    #[cfg(test)]
+    pub(crate) async fn from_test_pool(pool: PgPool) -> Result<Self, sqlx::Error> {
+        let db = Self { pool };
+        db.migrate().await?;
+        Ok(db)
+    }
+
     async fn migrate(&self) -> Result<(), sqlx::Error> {
         let mut tx = self.pool.begin().await?;
         // The embedded scripts are idempotent; serialize concurrent gateway
@@ -252,20 +260,22 @@ impl Database {
         sqlx::raw_sql(include_str!("../migrations/0006_control_plane_crud.sql"))
             .execute(&mut *tx)
             .await?;
+        sqlx::raw_sql(include_str!("../migrations/0007_db_first_runtime.sql"))
+            .execute(&mut *tx)
+            .await?;
         sqlx::raw_sql(include_str!("../migrations/0008_provider_discovery.sql"))
             .execute(&mut *tx)
             .await?;
         tx.commit().await
     }
 
+    pub(crate) fn pool(&self) -> &PgPool {
+        &self.pool
+    }
+
     #[allow(dead_code)]
     pub fn model_catalog(&self) -> ModelCatalogRepository {
         ModelCatalogRepository::new(self.pool.clone())
-    }
-
-    #[cfg(test)]
-    pub(crate) fn pool(&self) -> &PgPool {
-        &self.pool
     }
 
     #[allow(dead_code)]
@@ -298,6 +308,7 @@ impl Database {
         tx.commit().await
     }
 
+    #[cfg(test)]
     pub async fn sync_control_plane(&self, config: &GatewayConfig) -> Result<(), sqlx::Error> {
         let mut tx = self.pool.begin().await?;
         for provider in &config.providers {
@@ -312,6 +323,7 @@ impl Database {
         tx.commit().await
     }
 
+    #[cfg(test)]
     async fn upsert_provider_tx(
         &self,
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
@@ -371,6 +383,7 @@ impl Database {
         Ok(())
     }
 
+    #[cfg(test)]
     async fn upsert_account_tx(
         &self,
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
@@ -407,6 +420,7 @@ impl Database {
         Ok(())
     }
 
+    #[cfg(test)]
     async fn upsert_route_tx(
         &self,
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
@@ -437,24 +451,32 @@ impl Database {
         Ok(())
     }
 
+    #[cfg(test)]
+    #[allow(dead_code)]
     pub async fn upsert_provider(&self, provider: &ProviderConfig) -> Result<(), sqlx::Error> {
         let mut tx = self.pool.begin().await?;
         self.upsert_provider_tx(&mut tx, provider).await?;
         tx.commit().await
     }
 
+    #[cfg(test)]
+    #[allow(dead_code)]
     pub async fn upsert_account(&self, account: &AccountConfig) -> Result<(), sqlx::Error> {
         let mut tx = self.pool.begin().await?;
         self.upsert_account_tx(&mut tx, account).await?;
         tx.commit().await
     }
 
+    #[cfg(test)]
+    #[allow(dead_code)]
     pub async fn upsert_route(&self, route: &RouteConfig) -> Result<(), sqlx::Error> {
         let mut tx = self.pool.begin().await?;
         self.upsert_route_tx(&mut tx, route).await?;
         tx.commit().await
     }
 
+    #[cfg(test)]
+    #[allow(dead_code)]
     pub async fn delete_provider(&self, id: &str) -> Result<bool, sqlx::Error> {
         let result = sqlx::query("DELETE FROM providers WHERE id=$1")
             .bind(id)
@@ -463,6 +485,8 @@ impl Database {
         Ok(result.rows_affected() > 0)
     }
 
+    #[cfg(test)]
+    #[allow(dead_code)]
     pub async fn delete_account(&self, id: &str) -> Result<bool, sqlx::Error> {
         let result = sqlx::query("DELETE FROM accounts WHERE id=$1")
             .bind(id)
@@ -471,6 +495,8 @@ impl Database {
         Ok(result.rows_affected() > 0)
     }
 
+    #[cfg(test)]
+    #[allow(dead_code)]
     pub async fn delete_route(&self, id: &str) -> Result<bool, sqlx::Error> {
         let result = sqlx::query("DELETE FROM routes WHERE id=$1")
             .bind(id)
@@ -479,7 +505,8 @@ impl Database {
         Ok(result.rows_affected() > 0)
     }
 
-    #[allow(clippy::type_complexity)]
+    #[cfg(test)]
+    #[allow(clippy::type_complexity, dead_code)]
     pub async fn load_gateway_config(
         &self,
         listen_addr: &str,

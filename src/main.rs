@@ -1,5 +1,6 @@
 mod capabilities;
 mod config;
+mod control_plane;
 mod db;
 mod discovery_api;
 mod health;
@@ -20,13 +21,13 @@ use std::{
 
 use axum::{
     body::{Body, Bytes},
-    extract::{Path, State},
+    extract::{rejection::JsonRejection, Path, State},
     http::{
         header::{CONTENT_DISPOSITION, CONTENT_TYPE},
         HeaderMap, HeaderValue, Request, Response, StatusCode,
     },
     response::IntoResponse,
-    routing::{get, post},
+    routing::{get, post, put},
     Json, Router,
 };
 use config::GatewayConfig;
@@ -39,9 +40,51 @@ use tower::ServiceExt;
 use tower_http::{services::ServeDir, trace::TraceLayer};
 use uuid::Uuid;
 
+#[derive(Clone)]
 struct LiveConfig {
     config: Arc<GatewayConfig>,
     resolver: RouteResolver,
+    models: Arc<Vec<control_plane::PublishedModel>>,
+    revision: i64,
+    generated_at: chrono::DateTime<chrono::Utc>,
+}
+
+impl LiveConfig {
+    #[cfg(test)]
+    fn legacy(config: Arc<GatewayConfig>) -> Self {
+        let account_ids = config
+            .accounts
+            .iter()
+            .filter(|account| account.enabled)
+            .map(|account| account.id.clone())
+            .collect::<Vec<_>>();
+        let models = config
+            .models()
+            .into_iter()
+            .map(|id| control_plane::PublishedModel {
+                display_name: id.clone(),
+                id,
+                account_ids: account_ids.clone(),
+            })
+            .collect();
+        Self {
+            resolver: RouteResolver::new(config.clone()),
+            config,
+            models: Arc::new(models),
+            revision: 0,
+            generated_at: chrono::Utc::now(),
+        }
+    }
+
+    fn from_snapshot(snapshot: control_plane::RuntimeSnapshot) -> Self {
+        Self {
+            config: snapshot.config,
+            resolver: snapshot.resolver,
+            models: snapshot.models,
+            revision: snapshot.revision,
+            generated_at: snapshot.generated_at,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -49,54 +92,76 @@ struct AppState {
     live: Arc<std::sync::RwLock<LiveConfig>>,
     http: reqwest::Client,
     db: Option<db::Database>,
+    control_plane: Option<control_plane::ControlPlane>,
     health: health::HealthRegistry,
-    listen_addr: String,
 }
 
 impl AppState {
-    fn config(&self) -> Arc<GatewayConfig> {
-        self.live.read().unwrap().config.clone()
+    fn snapshot(&self) -> LiveConfig {
+        self.live.read().unwrap().clone()
     }
 
-    fn resolver(&self) -> RouteResolver {
-        self.live.read().unwrap().resolver.clone()
-    }
-
-    fn reload_config(&self, config: GatewayConfig) {
-        let config = Arc::new(config);
-        let resolver = RouteResolver::new(config.clone());
-        *self.live.write().unwrap() = LiveConfig { config, resolver };
+    fn reload_snapshot(&self, snapshot: control_plane::RuntimeSnapshot) {
+        let candidate = LiveConfig::from_snapshot(snapshot);
+        let mut current = self.live.write().unwrap();
+        if candidate.revision >= current.revision {
+            *current = candidate;
+        }
     }
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
-    let config = Arc::new(GatewayConfig::from_env());
-    if let Err(errors) = config.validate() {
-        for error in errors {
-            tracing::error!(%error, "invalid gateway configuration");
+    let database = db::Database::connect_from_env()
+        .await?
+        .ok_or("DATABASE_URL is required for the DB-first runtime")?;
+    let explicit_listen_addr = std::env::var("GATEWAY_LISTEN_ADDR").ok();
+    let mut listen_addr = explicit_listen_addr
+        .clone()
+        .unwrap_or_else(|| "127.0.0.1:8787".to_owned());
+    let force_import = std::env::var("GATEWAY_CONFIG_IMPORT")
+        .ok()
+        .is_some_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes"));
+    let initial_control_plane = control_plane::ControlPlane::new(&database, &listen_addr);
+    let should_import = force_import || initial_control_plane.is_empty().await?;
+    let bootstrap = if should_import {
+        match std::env::var("GATEWAY_CONFIG_JSON") {
+            Ok(raw) if !raw.trim().is_empty() => {
+                let config: GatewayConfig = serde_json::from_str(&raw)?;
+                if explicit_listen_addr.is_none() {
+                    listen_addr = config.listen_addr.clone();
+                }
+                Some(config)
+            }
+            Ok(_) | Err(_) if force_import => {
+                return Err("GATEWAY_CONFIG_IMPORT requires GATEWAY_CONFIG_JSON".into())
+            }
+            Ok(_) | Err(_) => None,
         }
-        return Err("invalid gateway configuration".into());
-    }
-    let addr: SocketAddr = config.listen_addr.parse()?;
-    let listen_addr = config.listen_addr.clone();
-    let db = db::Database::connect_from_env().await?;
-    if let Some(database) = &db {
-        provider_preset::install_builtin_presets(&database.model_catalog()).await?;
-        database.sync_control_plane(&config).await?;
-    }
-    let config = Arc::new(config.as_ref().clone());
-    let live = LiveConfig {
-        resolver: RouteResolver::new(config.clone()),
-        config,
+    } else {
+        None
     };
+    provider_preset::install_builtin_presets(&database.model_catalog()).await?;
+    let control_plane = control_plane::ControlPlane::new(&database, &listen_addr);
+    let snapshot = match bootstrap {
+        Some(config) => match control_plane
+            .initialize_from_config(&config, force_import)
+            .await?
+        {
+            Some(snapshot) => snapshot,
+            None => control_plane.load_snapshot().await?,
+        },
+        None => control_plane.load_snapshot().await?,
+    };
+    let addr: SocketAddr = listen_addr.parse()?;
+    let live = LiveConfig::from_snapshot(snapshot);
     let state = AppState {
         live: Arc::new(std::sync::RwLock::new(live)),
         http: transport::client()?,
-        db,
+        db: Some(database),
+        control_plane: Some(control_plane),
         health: health::HealthRegistry::new(std::time::Duration::from_secs(30)),
-        listen_addr,
     };
     let app = application(state);
     let listener = tokio::net::TcpListener::bind(addr).await?;
@@ -106,7 +171,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn application(state: AppState) -> Router {
-    let discovery_api = discovery_api::router(state.db.clone(), state.http.clone());
+    let discovery_api = discovery_api::auxiliary_router(state.db.clone(), state.http.clone());
     Router::new()
         .route("/healthz", get(healthz))
         .route("/v1/models", get(models))
@@ -122,30 +187,52 @@ fn application(state: AppState) -> Router {
         .route("/admin/usage/export", get(usage_export))
         .route("/admin/usage/aggregate", get(usage_aggregate))
         .route("/admin/usage/events/{request_id}", get(usage_event_detail))
+        .route("/admin/sources", get(list_sources).post(create_source))
         .route(
-            "/admin/providers",
-            get(admin_providers).post(create_or_update_provider),
+            "/admin/sources/{id}",
+            get(get_source).put(update_source).delete(delete_source),
         )
-        .route(
-            "/admin/providers/{id}",
-            axum::routing::delete(delete_provider),
-        )
-        .route(
-            "/admin/accounts",
-            get(admin_accounts).post(create_or_update_account),
-        )
+        .route("/admin/sources/{id}/enabled", put(set_source_enabled))
+        .route("/admin/accounts", get(list_accounts).post(create_account))
         .route(
             "/admin/accounts/{id}",
-            axum::routing::delete(delete_account),
+            get(get_account).put(update_account).delete(delete_account),
+        )
+        .route("/admin/accounts/{id}/enabled", put(set_account_enabled))
+        .route(
+            "/admin/logical-models",
+            get(list_logical_models).post(create_logical_model),
         )
         .route(
-            "/admin/routes",
-            get(admin_routes).post(create_or_update_route),
+            "/admin/logical-models/{id}",
+            get(get_logical_model)
+                .put(update_logical_model)
+                .delete(delete_logical_model),
         )
+        .route(
+            "/admin/logical-models/{id}/enabled",
+            put(set_logical_model_enabled),
+        )
+        .route(
+            "/admin/model-bindings",
+            get(list_model_bindings).post(create_model_binding),
+        )
+        .route(
+            "/admin/model-bindings/{id}",
+            get(get_model_binding)
+                .put(update_model_binding)
+                .delete(delete_model_binding),
+        )
+        .route(
+            "/admin/model-bindings/{id}/enabled",
+            put(set_model_binding_enabled),
+        )
+        .route("/admin/routes", get(list_routes).post(create_route))
         .route(
             "/admin/routes/{id}",
-            axum::routing::delete(delete_route_by_id),
+            get(get_route).put(update_route).delete(delete_route),
         )
+        .route("/admin/routes/{id}/enabled", put(set_route_enabled))
         .route("/admin/config/reload", post(reload_config))
         .route("/admin/capabilities", get(admin_capabilities))
         .route("/admin/health", get(admin_health))
@@ -157,19 +244,27 @@ fn application(state: AppState) -> Router {
 }
 
 async fn healthz(State(state): State<AppState>) -> Json<Value> {
-    let config = state.config();
+    let live = state.snapshot();
     Json(
-        json!({"status":"ok", "providers":config.providers.len(), "accounts":config.accounts.len()}),
+        json!({"status":"ok", "sources":live.config.providers.len(), "accounts":live.config.accounts.len(), "snapshot_revision":live.revision, "snapshot_generated_at":live.generated_at}),
     )
 }
 
 async fn models(State(state): State<AppState>) -> Json<Value> {
-    let config = state.config();
-    let data: Vec<Value> = config
-        .models()
-        .into_iter()
-        .map(|model| json!({"id":model,"object":"model","owned_by":"gateway"}))
-        .collect();
+    let live = state.snapshot();
+    let mut data = Vec::new();
+    for model in live.models.iter() {
+        let mut healthy = false;
+        for account_id in &model.account_ids {
+            if state.health.is_available(account_id).await {
+                healthy = true;
+                break;
+            }
+        }
+        if healthy {
+            data.push(json!({"id":model.id,"object":"model","owned_by":"gateway"}));
+        }
+    }
     Json(json!({"object":"list","data":data}))
 }
 
@@ -739,21 +834,6 @@ fn csv_field(value: &str) -> String {
     }
 }
 
-async fn admin_providers(State(state): State<AppState>, headers: HeaderMap) -> Response<Body> {
-    if !admin_authorized(&headers) {
-        return error_response(
-            StatusCode::UNAUTHORIZED,
-            "unauthorized",
-            "admin key required",
-        );
-    }
-    (
-        StatusCode::OK,
-        Json(json!({"data": state.config().providers})),
-    )
-        .into_response()
-}
-
 async fn usage_event_detail(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -807,120 +887,261 @@ async fn usage_event_detail(
         .into_response()
 }
 
-async fn admin_accounts(State(state): State<AppState>, headers: HeaderMap) -> Response<Body> {
-    if !admin_authorized(&headers) {
-        return error_response(
+#[allow(clippy::result_large_err)]
+fn admin_control_plane<'a>(
+    state: &'a AppState,
+    headers: &HeaderMap,
+) -> Result<&'a control_plane::ControlPlane, Response<Body>> {
+    if !admin_authorized(headers) {
+        return Err(error_response(
             StatusCode::UNAUTHORIZED,
             "unauthorized",
             "admin key required",
-        );
+        ));
     }
-    let accounts: Vec<Value> = state.config().accounts.iter().map(|account| json!({"id":account.id,"provider_id":account.provider_id,"display_name":account.display_name,"enabled":account.enabled,"weight":account.weight})).collect();
-    (StatusCode::OK, Json(json!({"data": accounts}))).into_response()
-}
-
-async fn admin_routes(State(state): State<AppState>, headers: HeaderMap) -> Response<Body> {
-    if !admin_authorized(&headers) {
-        return error_response(
-            StatusCode::UNAUTHORIZED,
-            "unauthorized",
-            "admin key required",
-        );
-    }
-    (StatusCode::OK, Json(json!({"data": state.config().routes}))).into_response()
-}
-
-async fn create_or_update_provider(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Json(provider): Json<config::ProviderConfig>,
-) -> Response<Body> {
-    if !admin_authorized(&headers) {
-        return error_response(
-            StatusCode::UNAUTHORIZED,
-            "unauthorized",
-            "admin key required",
-        );
-    }
-    let Some(database) = &state.db else {
-        return error_response(
+    state.control_plane.as_ref().ok_or_else(|| {
+        error_response(
             StatusCode::SERVICE_UNAVAILABLE,
             "database_unavailable",
             "DATABASE_URL is not configured",
-        );
-    };
-    if let Err(error) = database.upsert_provider(&provider).await {
-        return error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "db_error",
-            &error.to_string(),
-        );
-    }
-    reload_config_inner(&state).await
+        )
+    })
 }
 
-async fn delete_provider(
+fn control_plane_error(error: control_plane::ControlPlaneError) -> Response<Body> {
+    let status = match &error {
+        control_plane::ControlPlaneError::NotFound(_) => StatusCode::NOT_FOUND,
+        control_plane::ControlPlaneError::Conflict(_) => StatusCode::CONFLICT,
+        control_plane::ControlPlaneError::Validation(_)
+        | control_plane::ControlPlaneError::Json(_) => StatusCode::UNPROCESSABLE_ENTITY,
+        control_plane::ControlPlaneError::Database(_) => StatusCode::INTERNAL_SERVER_ERROR,
+    };
+    error_response(status, error.code(), &error.message())
+}
+
+fn admin_result<T: serde::Serialize>(
+    result: Result<T, control_plane::ControlPlaneError>,
+) -> Response<Body> {
+    match result {
+        Ok(record) => (StatusCode::OK, Json(json!({"data": record}))).into_response(),
+        Err(error) => control_plane_error(error),
+    }
+}
+
+fn mutation_result<T: serde::Serialize>(
+    state: &AppState,
+    status: StatusCode,
+    result: Result<control_plane::Mutation<T>, control_plane::ControlPlaneError>,
+) -> Response<Body> {
+    match result {
+        Ok(mutation) => {
+            let revision = mutation.snapshot.revision;
+            let generated_at = mutation.snapshot.generated_at;
+            state.reload_snapshot(mutation.snapshot);
+            (
+                status,
+                Json(json!({"data": mutation.record, "snapshot_revision": revision, "snapshot_generated_at": generated_at})),
+            )
+                .into_response()
+        }
+        Err(error) => control_plane_error(error),
+    }
+}
+
+fn delete_result(
+    state: &AppState,
+    result: Result<control_plane::RuntimeSnapshot, control_plane::ControlPlaneError>,
+) -> Response<Body> {
+    match result {
+        Ok(snapshot) => {
+            state.reload_snapshot(snapshot);
+            StatusCode::NO_CONTENT.into_response()
+        }
+        Err(error) => control_plane_error(error),
+    }
+}
+
+#[allow(clippy::result_large_err)]
+fn json_payload<T>(payload: Result<Json<T>, JsonRejection>) -> Result<T, Response<Body>> {
+    payload.map(|Json(value)| value).map_err(|error| {
+        error_response(StatusCode::BAD_REQUEST, "invalid_json", &error.body_text())
+    })
+}
+
+async fn list_sources(State(state): State<AppState>, headers: HeaderMap) -> Response<Body> {
+    let control_plane = match admin_control_plane(&state, &headers) {
+        Ok(control_plane) => control_plane,
+        Err(response) => return response,
+    };
+    admin_result(control_plane.list_sources().await)
+}
+
+async fn get_source(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Response<Body> {
-    if !admin_authorized(&headers) {
-        return error_response(
-            StatusCode::UNAUTHORIZED,
-            "unauthorized",
-            "admin key required",
-        );
-    }
-    let Some(database) = &state.db else {
-        return error_response(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "database_unavailable",
-            "DATABASE_URL is not configured",
-        );
+    let control_plane = match admin_control_plane(&state, &headers) {
+        Ok(control_plane) => control_plane,
+        Err(response) => return response,
     };
-    match database.delete_provider(&id).await {
-        Ok(true) => {}
-        Ok(false) => {
-            return error_response(StatusCode::NOT_FOUND, "not_found", "provider not found")
-        }
-        Err(error) => {
-            return error_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "db_error",
-                &error.to_string(),
-            )
-        }
-    }
-    reload_config_inner(&state).await
+    admin_result(control_plane.get_source(&id).await)
 }
 
-async fn create_or_update_account(
+async fn create_source(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Json(account): Json<config::AccountConfig>,
+    payload: Result<Json<control_plane::SourceCreateWrite>, JsonRejection>,
 ) -> Response<Body> {
-    if !admin_authorized(&headers) {
-        return error_response(
-            StatusCode::UNAUTHORIZED,
-            "unauthorized",
-            "admin key required",
-        );
-    }
-    let Some(database) = &state.db else {
-        return error_response(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "database_unavailable",
-            "DATABASE_URL is not configured",
-        );
+    let control_plane = match admin_control_plane(&state, &headers) {
+        Ok(control_plane) => control_plane,
+        Err(response) => return response,
     };
-    if let Err(error) = database.upsert_account(&account).await {
-        return error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "db_error",
-            &error.to_string(),
-        );
-    }
-    reload_config_inner(&state).await
+    let input = match json_payload(payload) {
+        Ok(input) => input,
+        Err(response) => return response,
+    };
+    mutation_result(
+        &state,
+        StatusCode::CREATED,
+        control_plane.create_source_from_request(&input).await,
+    )
+}
+
+async fn update_source(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    payload: Result<Json<control_plane::SourceWrite>, JsonRejection>,
+) -> Response<Body> {
+    let control_plane = match admin_control_plane(&state, &headers) {
+        Ok(control_plane) => control_plane,
+        Err(response) => return response,
+    };
+    let input = match json_payload(payload) {
+        Ok(input) => input,
+        Err(response) => return response,
+    };
+    mutation_result(
+        &state,
+        StatusCode::OK,
+        control_plane.update_source(&id, &input).await,
+    )
+}
+
+async fn set_source_enabled(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    payload: Result<Json<control_plane::EnabledWrite>, JsonRejection>,
+) -> Response<Body> {
+    let control_plane = match admin_control_plane(&state, &headers) {
+        Ok(control_plane) => control_plane,
+        Err(response) => return response,
+    };
+    let input = match json_payload(payload) {
+        Ok(input) => input,
+        Err(response) => return response,
+    };
+    mutation_result(
+        &state,
+        StatusCode::OK,
+        control_plane.set_source_enabled(&id, input.enabled).await,
+    )
+}
+
+async fn delete_source(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Response<Body> {
+    let control_plane = match admin_control_plane(&state, &headers) {
+        Ok(control_plane) => control_plane,
+        Err(response) => return response,
+    };
+    delete_result(&state, control_plane.delete_source(&id).await)
+}
+
+async fn list_accounts(State(state): State<AppState>, headers: HeaderMap) -> Response<Body> {
+    let control_plane = match admin_control_plane(&state, &headers) {
+        Ok(control_plane) => control_plane,
+        Err(response) => return response,
+    };
+    admin_result(control_plane.list_accounts().await)
+}
+
+async fn get_account(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Response<Body> {
+    let control_plane = match admin_control_plane(&state, &headers) {
+        Ok(control_plane) => control_plane,
+        Err(response) => return response,
+    };
+    admin_result(control_plane.get_account(&id).await)
+}
+
+async fn create_account(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    payload: Result<Json<control_plane::AccountWrite>, JsonRejection>,
+) -> Response<Body> {
+    let control_plane = match admin_control_plane(&state, &headers) {
+        Ok(control_plane) => control_plane,
+        Err(response) => return response,
+    };
+    let input = match json_payload(payload) {
+        Ok(input) => input,
+        Err(response) => return response,
+    };
+    mutation_result(
+        &state,
+        StatusCode::CREATED,
+        control_plane.create_account(&input).await,
+    )
+}
+
+async fn update_account(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    payload: Result<Json<control_plane::AccountWrite>, JsonRejection>,
+) -> Response<Body> {
+    let control_plane = match admin_control_plane(&state, &headers) {
+        Ok(control_plane) => control_plane,
+        Err(response) => return response,
+    };
+    let input = match json_payload(payload) {
+        Ok(input) => input,
+        Err(response) => return response,
+    };
+    mutation_result(
+        &state,
+        StatusCode::OK,
+        control_plane.update_account(&id, &input).await,
+    )
+}
+
+async fn set_account_enabled(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    payload: Result<Json<control_plane::EnabledWrite>, JsonRejection>,
+) -> Response<Body> {
+    let control_plane = match admin_control_plane(&state, &headers) {
+        Ok(control_plane) => control_plane,
+        Err(response) => return response,
+    };
+    let input = match json_payload(payload) {
+        Ok(input) => input,
+        Err(response) => return response,
+    };
+    mutation_result(
+        &state,
+        StatusCode::OK,
+        control_plane.set_account_enabled(&id, input.enabled).await,
+    )
 }
 
 async fn delete_account(
@@ -928,96 +1149,297 @@ async fn delete_account(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Response<Body> {
-    if !admin_authorized(&headers) {
-        return error_response(
-            StatusCode::UNAUTHORIZED,
-            "unauthorized",
-            "admin key required",
-        );
-    }
-    let Some(database) = &state.db else {
-        return error_response(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "database_unavailable",
-            "DATABASE_URL is not configured",
-        );
+    let control_plane = match admin_control_plane(&state, &headers) {
+        Ok(control_plane) => control_plane,
+        Err(response) => return response,
     };
-    match database.delete_account(&id).await {
-        Ok(true) => {}
-        Ok(false) => {
-            return error_response(StatusCode::NOT_FOUND, "not_found", "account not found")
-        }
-        Err(error) => {
-            return error_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "db_error",
-                &error.to_string(),
-            )
-        }
-    }
-    reload_config_inner(&state).await
+    delete_result(&state, control_plane.delete_account(&id).await)
 }
 
-async fn create_or_update_route(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Json(route): Json<config::RouteConfig>,
-) -> Response<Body> {
-    if !admin_authorized(&headers) {
-        return error_response(
-            StatusCode::UNAUTHORIZED,
-            "unauthorized",
-            "admin key required",
-        );
-    }
-    let Some(database) = &state.db else {
-        return error_response(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "database_unavailable",
-            "DATABASE_URL is not configured",
-        );
+async fn list_logical_models(State(state): State<AppState>, headers: HeaderMap) -> Response<Body> {
+    let control_plane = match admin_control_plane(&state, &headers) {
+        Ok(control_plane) => control_plane,
+        Err(response) => return response,
     };
-    if let Err(error) = database.upsert_route(&route).await {
-        return error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "db_error",
-            &error.to_string(),
-        );
-    }
-    reload_config_inner(&state).await
+    admin_result(control_plane.list_logical_models().await)
 }
 
-async fn delete_route_by_id(
+async fn get_logical_model(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Response<Body> {
-    if !admin_authorized(&headers) {
-        return error_response(
-            StatusCode::UNAUTHORIZED,
-            "unauthorized",
-            "admin key required",
-        );
-    }
-    let Some(database) = &state.db else {
-        return error_response(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "database_unavailable",
-            "DATABASE_URL is not configured",
-        );
+    let control_plane = match admin_control_plane(&state, &headers) {
+        Ok(control_plane) => control_plane,
+        Err(response) => return response,
     };
-    match database.delete_route(&id).await {
-        Ok(true) => {}
-        Ok(false) => return error_response(StatusCode::NOT_FOUND, "not_found", "route not found"),
-        Err(error) => {
-            return error_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "db_error",
-                &error.to_string(),
-            )
-        }
-    }
-    reload_config_inner(&state).await
+    admin_result(control_plane.get_logical_model(&id).await)
+}
+
+async fn create_logical_model(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    payload: Result<Json<control_plane::LogicalModelWrite>, JsonRejection>,
+) -> Response<Body> {
+    let control_plane = match admin_control_plane(&state, &headers) {
+        Ok(control_plane) => control_plane,
+        Err(response) => return response,
+    };
+    let input = match json_payload(payload) {
+        Ok(input) => input,
+        Err(response) => return response,
+    };
+    mutation_result(
+        &state,
+        StatusCode::CREATED,
+        control_plane.create_logical_model(&input).await,
+    )
+}
+
+async fn update_logical_model(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    payload: Result<Json<control_plane::LogicalModelWrite>, JsonRejection>,
+) -> Response<Body> {
+    let control_plane = match admin_control_plane(&state, &headers) {
+        Ok(control_plane) => control_plane,
+        Err(response) => return response,
+    };
+    let input = match json_payload(payload) {
+        Ok(input) => input,
+        Err(response) => return response,
+    };
+    mutation_result(
+        &state,
+        StatusCode::OK,
+        control_plane.update_logical_model(&id, &input).await,
+    )
+}
+
+async fn set_logical_model_enabled(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    payload: Result<Json<control_plane::EnabledWrite>, JsonRejection>,
+) -> Response<Body> {
+    let control_plane = match admin_control_plane(&state, &headers) {
+        Ok(control_plane) => control_plane,
+        Err(response) => return response,
+    };
+    let input = match json_payload(payload) {
+        Ok(input) => input,
+        Err(response) => return response,
+    };
+    mutation_result(
+        &state,
+        StatusCode::OK,
+        control_plane
+            .set_logical_model_enabled(&id, input.enabled)
+            .await,
+    )
+}
+
+async fn delete_logical_model(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Response<Body> {
+    let control_plane = match admin_control_plane(&state, &headers) {
+        Ok(control_plane) => control_plane,
+        Err(response) => return response,
+    };
+    delete_result(&state, control_plane.delete_logical_model(&id).await)
+}
+
+async fn list_model_bindings(State(state): State<AppState>, headers: HeaderMap) -> Response<Body> {
+    let control_plane = match admin_control_plane(&state, &headers) {
+        Ok(control_plane) => control_plane,
+        Err(response) => return response,
+    };
+    admin_result(control_plane.list_model_bindings().await)
+}
+
+async fn get_model_binding(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+) -> Response<Body> {
+    let control_plane = match admin_control_plane(&state, &headers) {
+        Ok(control_plane) => control_plane,
+        Err(response) => return response,
+    };
+    admin_result(control_plane.get_model_binding(id).await)
+}
+
+async fn create_model_binding(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    payload: Result<Json<control_plane::ModelBindingWrite>, JsonRejection>,
+) -> Response<Body> {
+    let control_plane = match admin_control_plane(&state, &headers) {
+        Ok(control_plane) => control_plane,
+        Err(response) => return response,
+    };
+    let input = match json_payload(payload) {
+        Ok(input) => input,
+        Err(response) => return response,
+    };
+    mutation_result(
+        &state,
+        StatusCode::CREATED,
+        control_plane.create_model_binding(&input).await,
+    )
+}
+
+async fn update_model_binding(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+    payload: Result<Json<control_plane::ModelBindingWrite>, JsonRejection>,
+) -> Response<Body> {
+    let control_plane = match admin_control_plane(&state, &headers) {
+        Ok(control_plane) => control_plane,
+        Err(response) => return response,
+    };
+    let input = match json_payload(payload) {
+        Ok(input) => input,
+        Err(response) => return response,
+    };
+    mutation_result(
+        &state,
+        StatusCode::OK,
+        control_plane.update_model_binding(id, &input).await,
+    )
+}
+
+async fn set_model_binding_enabled(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+    payload: Result<Json<control_plane::EnabledWrite>, JsonRejection>,
+) -> Response<Body> {
+    let control_plane = match admin_control_plane(&state, &headers) {
+        Ok(control_plane) => control_plane,
+        Err(response) => return response,
+    };
+    let input = match json_payload(payload) {
+        Ok(input) => input,
+        Err(response) => return response,
+    };
+    mutation_result(
+        &state,
+        StatusCode::OK,
+        control_plane
+            .set_model_binding_enabled(id, input.enabled)
+            .await,
+    )
+}
+
+async fn delete_model_binding(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+) -> Response<Body> {
+    let control_plane = match admin_control_plane(&state, &headers) {
+        Ok(control_plane) => control_plane,
+        Err(response) => return response,
+    };
+    delete_result(&state, control_plane.delete_model_binding(id).await)
+}
+
+async fn list_routes(State(state): State<AppState>, headers: HeaderMap) -> Response<Body> {
+    let control_plane = match admin_control_plane(&state, &headers) {
+        Ok(control_plane) => control_plane,
+        Err(response) => return response,
+    };
+    admin_result(control_plane.list_routes().await)
+}
+
+async fn get_route(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Response<Body> {
+    let control_plane = match admin_control_plane(&state, &headers) {
+        Ok(control_plane) => control_plane,
+        Err(response) => return response,
+    };
+    admin_result(control_plane.get_route(&id).await)
+}
+
+async fn create_route(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    payload: Result<Json<control_plane::RouteWrite>, JsonRejection>,
+) -> Response<Body> {
+    let control_plane = match admin_control_plane(&state, &headers) {
+        Ok(control_plane) => control_plane,
+        Err(response) => return response,
+    };
+    let input = match json_payload(payload) {
+        Ok(input) => input,
+        Err(response) => return response,
+    };
+    mutation_result(
+        &state,
+        StatusCode::CREATED,
+        control_plane.create_route(&input).await,
+    )
+}
+
+async fn update_route(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    payload: Result<Json<control_plane::RouteWrite>, JsonRejection>,
+) -> Response<Body> {
+    let control_plane = match admin_control_plane(&state, &headers) {
+        Ok(control_plane) => control_plane,
+        Err(response) => return response,
+    };
+    let input = match json_payload(payload) {
+        Ok(input) => input,
+        Err(response) => return response,
+    };
+    mutation_result(
+        &state,
+        StatusCode::OK,
+        control_plane.update_route(&id, &input).await,
+    )
+}
+
+async fn set_route_enabled(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    payload: Result<Json<control_plane::EnabledWrite>, JsonRejection>,
+) -> Response<Body> {
+    let control_plane = match admin_control_plane(&state, &headers) {
+        Ok(control_plane) => control_plane,
+        Err(response) => return response,
+    };
+    let input = match json_payload(payload) {
+        Ok(input) => input,
+        Err(response) => return response,
+    };
+    mutation_result(
+        &state,
+        StatusCode::OK,
+        control_plane.set_route_enabled(&id, input.enabled).await,
+    )
+}
+
+async fn delete_route(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Response<Body> {
+    let control_plane = match admin_control_plane(&state, &headers) {
+        Ok(control_plane) => control_plane,
+        Err(response) => return response,
+    };
+    delete_result(&state, control_plane.delete_route(&id).await)
 }
 
 async fn admin_health(State(state): State<AppState>, headers: HeaderMap) -> Response<Body> {
@@ -1029,9 +1451,9 @@ async fn admin_health(State(state): State<AppState>, headers: HeaderMap) -> Resp
         );
     }
     let health_map = state.health.all_health().await;
-    let config = state.config();
+    let live = state.snapshot();
     let mut data = Vec::new();
-    for account in &config.accounts {
+    for account in &live.config.accounts {
         let health = match health_map.get(&account.id) {
             Some(h) => h.clone(),
             None => health::AccountHealth {
@@ -1052,10 +1474,11 @@ async fn admin_health(State(state): State<AppState>, headers: HeaderMap) -> Resp
 }
 
 async fn admin_capabilities(State(state): State<AppState>, headers: HeaderMap) -> Response<Body> {
-    admin_capabilities_response(admin_authorized(&headers), state.config())
+    let live = state.snapshot();
+    admin_capabilities_response(admin_authorized(&headers), &live)
 }
 
-fn admin_capabilities_response(authorized: bool, config: Arc<GatewayConfig>) -> Response<Body> {
+fn admin_capabilities_response(authorized: bool, live: &LiveConfig) -> Response<Body> {
     if !authorized {
         return error_response(
             StatusCode::UNAUTHORIZED,
@@ -1063,11 +1486,20 @@ fn admin_capabilities_response(authorized: bool, config: Arc<GatewayConfig>) -> 
             "admin key required",
         );
     }
-    (
-        StatusCode::OK,
-        Json(capabilities::CapabilityMatrixResponse::from_config(config)),
-    )
-        .into_response()
+    match capabilities::CapabilityMatrixResponse::from_runtime_snapshot(
+        &live.config,
+        &live.resolver,
+        &live.models,
+        live.revision,
+        live.generated_at,
+    ) {
+        Ok(response) => (StatusCode::OK, Json(response)).into_response(),
+        Err(error) => error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            error.code(),
+            &error.to_string(),
+        ),
+    }
 }
 
 #[cfg(test)]
@@ -1075,13 +1507,20 @@ mod admin_capabilities_api_tests {
     use super::*;
     use axum::body::to_bytes;
 
-    fn empty_config() -> Arc<GatewayConfig> {
-        Arc::new(GatewayConfig {
+    fn empty_runtime() -> LiveConfig {
+        let config = Arc::new(GatewayConfig {
             listen_addr: "127.0.0.1:0".into(),
             providers: Vec::new(),
             accounts: Vec::new(),
             routes: Vec::new(),
-        })
+        });
+        LiveConfig {
+            resolver: RouteResolver::from_runtime(config.clone(), Vec::new()),
+            config,
+            models: Arc::new(Vec::new()),
+            revision: 7,
+            generated_at: chrono::Utc::now(),
+        }
     }
 
     async fn response_json(response: Response<Body>) -> Value {
@@ -1095,7 +1534,7 @@ mod admin_capabilities_api_tests {
 
     #[tokio::test]
     async fn capability_matrix_preserves_admin_authorization() {
-        let response = admin_capabilities_response(false, empty_config());
+        let response = admin_capabilities_response(false, &empty_runtime());
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
         let body = response_json(response).await;
         assert_eq!(body["error"]["code"], "unauthorized");
@@ -1103,11 +1542,13 @@ mod admin_capabilities_api_tests {
     }
 
     #[tokio::test]
-    async fn authorized_capability_matrix_uses_versioned_contract() {
-        let response = admin_capabilities_response(true, empty_config());
+    async fn authorized_capability_matrix_uses_runtime_snapshot_contract() {
+        let response = admin_capabilities_response(true, &empty_runtime());
         assert_eq!(response.status(), StatusCode::OK);
         let body = response_json(response).await;
         assert_eq!(body["version"], "v1");
+        assert_eq!(body["fact_source"], "runtime_snapshot");
+        assert_eq!(body["snapshot_revision"], 7);
         assert_eq!(body["data"], json!([]));
     }
 }
@@ -1124,27 +1565,25 @@ async fn reload_config(State(state): State<AppState>, headers: HeaderMap) -> Res
 }
 
 async fn reload_config_inner(state: &AppState) -> Response<Body> {
-    let Some(database) = &state.db else {
+    let Some(control_plane) = &state.control_plane else {
         return error_response(
             StatusCode::SERVICE_UNAVAILABLE,
             "database_unavailable",
             "DATABASE_URL is not configured",
         );
     };
-    match database.load_gateway_config(&state.listen_addr).await {
-        Ok(new_config) => {
-            if let Err(errors) = new_config.validate() {
-                let msg = errors.join("; ");
-                return error_response(StatusCode::UNPROCESSABLE_ENTITY, "validation_failed", &msg);
-            }
-            state.reload_config(new_config);
-            (StatusCode::OK, Json(json!({"status":"reloaded"}))).into_response()
+    match control_plane.load_snapshot().await {
+        Ok(snapshot) => {
+            let revision = snapshot.revision;
+            let generated_at = snapshot.generated_at;
+            state.reload_snapshot(snapshot);
+            (
+                StatusCode::OK,
+                Json(json!({"status":"reloaded", "snapshot_revision":revision, "snapshot_generated_at":generated_at})),
+            )
+                .into_response()
         }
-        Err(error) => error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "reload_failed",
-            &error.to_string(),
-        ),
+        Err(error) => control_plane_error(error),
     }
 }
 
@@ -1156,8 +1595,9 @@ async fn proxy(
 ) -> Response<Body> {
     let started = Instant::now();
     let request_id = Uuid::new_v4().to_string();
-    let config = state.config();
-    let resolver = state.resolver();
+    let live = state.snapshot();
+    let config = live.config;
+    let resolver = live.resolver;
     let payload: Value = match serde_json::from_slice(&body) {
         Ok(value) => value,
         Err(_) => {
@@ -1213,6 +1653,9 @@ async fn proxy(
         if let Some(candidate) =
             select_fallback_candidate(&config, &state.health, &route, model, protocol).await
         {
+            if !route.is_degraded() && !candidate.degraded_features.is_empty() {
+                warn_degraded_features(&request_id, &route.route_id, &candidate.degraded_features);
+            }
             let forwarded_body = if candidate.upstream_model != model {
                 rewrite_model_in_body(&body, &candidate.upstream_model)
             } else {
@@ -1224,7 +1667,10 @@ async fn proxy(
                 &state.http,
                 candidate.provider,
                 candidate.account,
-                protocol,
+                candidate.protocol_upstream,
+                &candidate.mode,
+                candidate.adapter.as_deref(),
+                candidate.upstream_endpoint.as_deref(),
                 &headers,
                 forwarded_body,
             )
@@ -1235,7 +1681,7 @@ async fn proxy(
                     .get("stream")
                     .and_then(Value::as_bool)
                     .unwrap_or(false);
-                let degraded = route.is_degraded();
+                let degraded = !candidate.degraded_features.is_empty();
                 let error_summary = if !response.status().is_success() {
                     Some(format!("HTTP {}", response.status().as_u16()))
                 } else {
@@ -1258,8 +1704,8 @@ async fn proxy(
                         upstream_model_id: Some(candidate.upstream_model.clone()),
                         source,
                         protocol_in: protocol.to_string(),
-                        protocol_upstream: route.protocol_upstream.to_string(),
-                        mode: route.mode.clone(),
+                        protocol_upstream: candidate.protocol_upstream.to_string(),
+                        mode: candidate.mode.clone(),
                         status_code: response.status().as_u16() as i32,
                         success: response.status().is_success(),
                         retry_count: 0,
@@ -1316,6 +1762,11 @@ async fn proxy(
         );
     }
     let usage_request_body = body.clone();
+    let primary_body = if route.upstream_model_id != model {
+        rewrite_model_in_body(&body, &route.upstream_model_id)
+    } else {
+        body.clone()
+    };
     let result_started = Instant::now();
     let result = forward_account(
         &config,
@@ -1323,9 +1774,8 @@ async fn proxy(
         &route,
         provider,
         account,
-        protocol,
         &headers,
-        body.clone(),
+        primary_body,
     )
     .await;
     let mut attempts = Vec::new();
@@ -1335,7 +1785,7 @@ async fn proxy(
                 attempt_no: 0,
                 provider_id: provider.id.clone(),
                 account_id: account.id.clone(),
-                upstream_model_id: None,
+                upstream_model_id: Some(route.upstream_model_id.clone()),
                 status_code: response.status().as_u16() as i32,
                 success: false,
                 latency_ms: result_started.elapsed().as_millis() as i64,
@@ -1361,7 +1811,7 @@ async fn proxy(
                 attempt_no: 0,
                 provider_id: provider.id.clone(),
                 account_id: account.id.clone(),
-                upstream_model_id: None,
+                upstream_model_id: Some(route.upstream_model_id.clone()),
                 status_code: response.status().as_u16() as i32,
                 success: response.status().is_success(),
                 latency_ms: result_started.elapsed().as_millis() as i64,
@@ -1374,7 +1824,7 @@ async fn proxy(
                 attempt_no: 0,
                 provider_id: provider.id.clone(),
                 account_id: account.id.clone(),
-                upstream_model_id: None,
+                upstream_model_id: Some(route.upstream_model_id.clone()),
                 status_code: 599,
                 success: false,
                 latency_ms: result_started.elapsed().as_millis() as i64,
@@ -1401,7 +1851,30 @@ async fn proxy(
         .get("stream")
         .and_then(Value::as_bool)
         .unwrap_or(false);
-    let degraded = route.is_degraded();
+    let final_attempt = attempts
+        .iter()
+        .rev()
+        .find(|attempt| attempt.success)
+        .or_else(|| attempts.last());
+    let final_binding = final_attempt.and_then(|attempt| {
+        route.fallback_bindings.iter().find(|binding| {
+            binding.account_id == attempt.account_id
+                && attempt.upstream_model_id.as_deref() == Some(binding.upstream_model_id.as_str())
+        })
+    });
+    let final_protocol_upstream = final_binding
+        .map(|binding| binding.protocol_upstream)
+        .unwrap_or(route.protocol_upstream);
+    let final_mode = final_binding
+        .map(|binding| binding.mode.as_str())
+        .unwrap_or(route.mode.as_str());
+    let final_degraded_features = final_binding
+        .map(|binding| &binding.degraded_features)
+        .unwrap_or(&route.degraded_features);
+    let degraded = !final_degraded_features.is_empty();
+    if final_binding.is_some() && !route.is_degraded() && degraded {
+        warn_degraded_features(&request_id, &route.route_id, final_degraded_features);
+    }
     let error_summary = if !response.status().is_success() {
         Some(format!("HTTP {}", response.status().as_u16()))
     } else {
@@ -1414,24 +1887,27 @@ async fn proxy(
             .filter(|value| !value.is_empty())
             .unwrap_or("unknown")
             .to_string();
-        let final_account_id = attempts
-            .iter()
-            .rev()
-            .find(|attempt| attempt.success)
+        let final_account_id = final_attempt
             .map(|attempt| attempt.account_id.clone())
             .unwrap_or_else(|| account.id.clone());
+        let final_provider_id = final_attempt
+            .map(|attempt| attempt.provider_id.clone())
+            .unwrap_or_else(|| route.provider_id.clone());
+        let final_upstream_model_id = final_attempt
+            .and_then(|attempt| attempt.upstream_model_id.clone())
+            .or_else(|| Some(route.upstream_model_id.clone()));
         let event = db::UsageEvent {
             request_id,
             virtual_key_id,
-            provider_id: route.provider_id.clone(),
+            provider_id: final_provider_id,
             account_id: final_account_id,
             model: model.to_string(),
             logical_model: model.to_string(),
-            upstream_model_id: Some(model.to_string()),
+            upstream_model_id: final_upstream_model_id,
             source,
             protocol_in: protocol.to_string(),
-            protocol_upstream: route.protocol_upstream.to_string(),
-            mode: route.mode.clone(),
+            protocol_upstream: final_protocol_upstream.to_string(),
+            mode: final_mode.to_owned(),
             status_code: response.status().as_u16() as i32,
             success: response.status().is_success(),
             retry_count: attempts.len().saturating_sub(1) as i32,
@@ -1468,14 +1944,19 @@ async fn proxy(
 }
 
 fn warn_degraded_route(request_id: &str, route: &ResolvedRoute) {
-    if route.is_degraded() {
-        tracing::warn!(
-            request_id = %request_id,
-            route_id = %route.route_id,
-            degraded_features = ?route.degraded_features,
-            "route has degraded features due to adapter conversion"
-        );
+    if !route.is_degraded() {
+        return;
     }
+    warn_degraded_features(request_id, &route.route_id, &route.degraded_features);
+}
+
+fn warn_degraded_features(request_id: &str, route_id: &str, degraded_features: &[String]) {
+    tracing::warn!(
+        request_id = %request_id,
+        route_id = %route_id,
+        degraded_features = ?degraded_features,
+        "route has degraded features due to adapter conversion"
+    );
 }
 
 fn is_event_stream(response: &Response<Body>) -> bool {
@@ -1545,7 +2026,6 @@ async fn forward_account(
     route: &ResolvedRoute,
     provider: &config::ProviderConfig,
     account: &config::AccountConfig,
-    protocol: Protocol,
     headers: &HeaderMap,
     body: Bytes,
 ) -> Result<Response<Body>, transport::TransportError> {
@@ -1559,12 +2039,12 @@ async fn forward_account(
             "unknown embedded adapter".into(),
         ))
     } else {
-        transport::forward(
+        transport::forward_url(
             http,
-            provider,
+            &route.upstream_endpoint,
             account,
             credential.as_deref(),
-            protocol,
+            route.protocol_upstream,
             headers,
             body,
         )
@@ -1630,6 +2110,11 @@ struct FallbackCandidate<'a> {
     account: &'a config::AccountConfig,
     provider: &'a config::ProviderConfig,
     upstream_model: String,
+    protocol_upstream: Protocol,
+    mode: String,
+    adapter: Option<String>,
+    upstream_endpoint: Option<String>,
+    degraded_features: Vec<String>,
 }
 
 async fn select_fallback_candidate<'a>(
@@ -1640,35 +2125,68 @@ async fn select_fallback_candidate<'a>(
     protocol: Protocol,
 ) -> Option<FallbackCandidate<'a>> {
     let mut available = Vec::new();
-    for id in &route.fallback_accounts {
-        let Some(account) = config.account(id) else {
-            continue;
-        };
-        if !account.enabled {
-            continue;
-        }
-        if !health.is_available(&account.id).await {
-            continue;
-        }
-        let Some(provider) = config.provider(&account.provider_id) else {
-            continue;
-        };
-        if account.provider_id != route.provider_id {
-            let cap = config.protocol_capability(&provider.id, Some(&account.id), model, protocol);
-            if cap.mode != config::ProtocolMode::Native {
+    if !route.fallback_bindings.is_empty() {
+        for binding in &route.fallback_bindings {
+            let Some(account) = config.account(&binding.account_id) else {
+                continue;
+            };
+            if !account.enabled || !health.is_available(&account.id).await {
                 continue;
             }
+            let Some(provider) = config.provider(&binding.provider_id) else {
+                continue;
+            };
+            available.push(FallbackCandidate {
+                account,
+                provider,
+                upstream_model: binding.upstream_model_id.clone(),
+                protocol_upstream: binding.protocol_upstream,
+                mode: binding.mode.clone(),
+                adapter: binding.adapter.clone(),
+                upstream_endpoint: Some(binding.upstream_endpoint.clone()),
+                degraded_features: binding.degraded_features.clone(),
+            });
         }
-        let upstream_model = account
-            .model_map
-            .get(model)
-            .cloned()
-            .unwrap_or_else(|| model.to_string());
-        available.push(FallbackCandidate {
-            account,
-            provider,
-            upstream_model,
-        });
+        if available.iter().any(|candidate| candidate.mode == "native") {
+            available.retain(|candidate| candidate.mode == "native");
+        }
+    } else {
+        for id in &route.fallback_accounts {
+            let Some(account) = config.account(id) else {
+                continue;
+            };
+            if !account.enabled {
+                continue;
+            }
+            if !health.is_available(&account.id).await {
+                continue;
+            }
+            let Some(provider) = config.provider(&account.provider_id) else {
+                continue;
+            };
+            if account.provider_id != route.provider_id {
+                let cap =
+                    config.protocol_capability(&provider.id, Some(&account.id), model, protocol);
+                if cap.mode != config::ProtocolMode::Native {
+                    continue;
+                }
+            }
+            let upstream_model = account
+                .model_map
+                .get(model)
+                .cloned()
+                .unwrap_or_else(|| model.to_string());
+            available.push(FallbackCandidate {
+                account,
+                provider,
+                upstream_model,
+                protocol_upstream: route.protocol_upstream,
+                mode: route.mode.clone(),
+                adapter: route.adapter.clone(),
+                upstream_endpoint: None,
+                degraded_features: route.degraded_features.clone(),
+            });
+        }
     }
     if available.is_empty() {
         return None;
@@ -1730,7 +2248,10 @@ async fn try_fallback(
         http,
         candidate.provider,
         candidate.account,
-        protocol,
+        candidate.protocol_upstream,
+        &candidate.mode,
+        candidate.adapter.as_deref(),
+        candidate.upstream_endpoint.as_deref(),
         headers,
         forwarded_body,
     )
@@ -1804,7 +2325,10 @@ async fn try_fallback_error(
         http,
         candidate.provider,
         candidate.account,
-        protocol,
+        candidate.protocol_upstream,
+        &candidate.mode,
+        candidate.adapter.as_deref(),
+        candidate.upstream_endpoint.as_deref(),
         headers,
         forwarded_body,
     )
@@ -1820,29 +2344,71 @@ async fn try_fallback_error(
                 success: response.status().is_success(),
                 latency_ms: started.elapsed().as_millis() as i64,
             });
+            if is_retryable(response.status()) {
+                health.mark_failure(&candidate.account.id).await;
+            } else {
+                health.mark_success(&candidate.account.id).await;
+            }
             (response, attempts)
         }
-        Err(_) => (
-            error_response(
-                StatusCode::BAD_GATEWAY,
-                "upstream_request_failed",
-                first_error.message(),
-            ),
-            attempts,
-        ),
+        Err(_) => {
+            attempts.push(db::UsageAttempt {
+                attempt_no: 1,
+                provider_id: candidate.provider.id.clone(),
+                account_id: candidate.account.id.clone(),
+                upstream_model_id: Some(candidate.upstream_model),
+                status_code: 599,
+                success: false,
+                latency_ms: started.elapsed().as_millis() as i64,
+            });
+            health.mark_failure(&candidate.account.id).await;
+            (
+                error_response(
+                    StatusCode::BAD_GATEWAY,
+                    "upstream_request_failed",
+                    first_error.message(),
+                ),
+                attempts,
+            )
+        }
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn forward_fallback(
     config: &GatewayConfig,
     http: &reqwest::Client,
     provider: &config::ProviderConfig,
     account: &config::AccountConfig,
     protocol: Protocol,
+    mode: &str,
+    adapter: Option<&str>,
+    upstream_endpoint: Option<&str>,
     headers: &HeaderMap,
     body: Bytes,
 ) -> Result<Response<Body>, transport::TransportError> {
     let credential = config.credential_for(account);
+    if mode == "adapter" {
+        if adapter == Some("kimi_responses_adapter") {
+            return embedded_kimi_adapter(provider, account, credential.as_deref(), headers, body)
+                .await;
+        }
+        return Err(transport::TransportError::Request(
+            "unknown embedded adapter".into(),
+        ));
+    }
+    if let Some(endpoint) = upstream_endpoint {
+        return transport::forward_url(
+            http,
+            endpoint,
+            account,
+            credential.as_deref(),
+            protocol,
+            headers,
+            body,
+        )
+        .await;
+    }
     transport::forward(
         http,
         provider,
@@ -1927,10 +2493,10 @@ async fn resolve_route(
     let Ok(protocol) = protocol.parse::<Protocol>() else {
         return (
             StatusCode::BAD_REQUEST,
-            Json(json!({"error":"unknown protocol"})),
+            Json(json!({"error":{"code":"unknown_protocol","message":"unknown protocol"}})),
         );
     };
-    match state.resolver().resolve_detailed(protocol, &model) {
+    match state.snapshot().resolver.resolve_detailed(protocol, &model) {
         Ok(route) => (StatusCode::OK, Json(json!(route))),
         Err(error) => {
             let status = if error.code == "route_not_found" {
@@ -2067,16 +2633,13 @@ mod audit_closeout_tests {
 
     fn state(config: GatewayConfig) -> AppState {
         let config = Arc::new(config);
-        let live = LiveConfig {
-            resolver: RouteResolver::new(config.clone()),
-            config,
-        };
+        let live = LiveConfig::legacy(config);
         AppState {
             live: Arc::new(std::sync::RwLock::new(live)),
             http: transport::client().expect("audit HTTP client"),
             db: None,
+            control_plane: None,
             health: health::HealthRegistry::new(std::time::Duration::from_secs(30)),
-            listen_addr: "127.0.0.1:0".into(),
         }
     }
 
@@ -2259,7 +2822,11 @@ mod audit_closeout_tests {
 
         let logs = logs.content();
         assert_eq!(
-            logs.matches("route has degraded features due to adapter conversion")
+            logs.lines()
+                .filter(|line| {
+                    line.contains("route has degraded features due to adapter conversion")
+                        && line.contains("route_id=degraded-fallback-route")
+                })
                 .count(),
             1,
             "expected one degraded warning: {logs}"
@@ -2297,16 +2864,13 @@ mod usage_api_tests {
             accounts: vec![],
             routes: vec![],
         });
-        let live = LiveConfig {
-            resolver: RouteResolver::new(config.clone()),
-            config,
-        };
+        let live = LiveConfig::legacy(config);
         AppState {
             live: Arc::new(std::sync::RwLock::new(live)),
             http: transport::client().expect("HTTP client"),
             db: Some(database),
+            control_plane: None,
             health: health::HealthRegistry::new(std::time::Duration::from_secs(1)),
-            listen_addr: "127.0.0.1:0".into(),
         }
     }
 
@@ -2600,16 +3164,13 @@ mod kimi_adapter_e2e_tests {
             }],
         };
         let config = Arc::new(config);
-        let live = LiveConfig {
-            resolver: RouteResolver::new(config.clone()),
-            config,
-        };
+        let live = LiveConfig::legacy(config);
         AppState {
             live: Arc::new(std::sync::RwLock::new(live)),
             http: transport::client().expect("http client"),
             db: None,
+            control_plane: None,
             health: health::HealthRegistry::new(std::time::Duration::from_secs(1)),
-            listen_addr: "127.0.0.1:0".into(),
         }
     }
 

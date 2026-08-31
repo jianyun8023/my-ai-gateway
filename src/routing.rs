@@ -8,6 +8,34 @@ use std::{fmt, sync::Arc};
 #[derive(Clone)]
 pub struct RouteResolver {
     config: Arc<GatewayConfig>,
+    runtime_routes: Option<Arc<Vec<RuntimeRoute>>>,
+}
+
+/// A validated, immutable route candidate built from one confirmed model
+/// binding and its SourceModelCapability row.
+#[derive(Clone, Debug)]
+pub struct RuntimeBinding {
+    pub binding_id: i64,
+    pub provider_id: String,
+    pub account_id: String,
+    pub upstream_model_id: String,
+    pub protocol_upstream: Protocol,
+    pub upstream_endpoint: String,
+    pub mode: String,
+    pub adapter: Option<String>,
+    pub effective_capabilities: Capabilities,
+    pub degraded_features: Vec<String>,
+}
+
+/// Route policy plus all currently routable bindings, in deterministic
+/// preference order. It is never mutated after publication.
+#[derive(Clone, Debug)]
+pub struct RuntimeRoute {
+    pub route_id: String,
+    pub model: String,
+    pub protocol: Protocol,
+    pub allow_lossy_conversion: bool,
+    pub bindings: Vec<RuntimeBinding>,
 }
 
 /// Complete ingress -> upstream explanation of a selected route.
@@ -20,9 +48,14 @@ pub struct ResolvedRoute {
     pub protocol_upstream: Protocol,
     pub model: String,
     pub requested_model: String,
+    pub upstream_model_id: String,
     pub provider_id: String,
     pub primary_account_id: String,
     pub fallback_accounts: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fallback_bindings: Vec<ResolvedBinding>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub binding_id: Option<i64>,
     pub upstream_endpoint: String,
     pub mode: String,
     pub adapter: Option<String>,
@@ -35,6 +68,20 @@ impl ResolvedRoute {
     pub fn is_degraded(&self) -> bool {
         !self.degraded_features.is_empty()
     }
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct ResolvedBinding {
+    pub binding_id: i64,
+    pub provider_id: String,
+    pub account_id: String,
+    pub upstream_model_id: String,
+    pub protocol_upstream: Protocol,
+    pub upstream_endpoint: String,
+    pub mode: String,
+    pub adapter: Option<String>,
+    pub effective_capabilities: Capabilities,
+    pub degraded_features: Vec<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -62,8 +109,19 @@ impl fmt::Display for RouteResolutionError {
 impl std::error::Error for RouteResolutionError {}
 
 impl RouteResolver {
+    #[cfg(test)]
     pub fn new(config: Arc<GatewayConfig>) -> Self {
-        Self { config }
+        Self {
+            config,
+            runtime_routes: None,
+        }
+    }
+
+    pub fn from_runtime(config: Arc<GatewayConfig>, routes: Vec<RuntimeRoute>) -> Self {
+        Self {
+            config,
+            runtime_routes: Some(Arc::new(routes)),
+        }
     }
 
     pub fn resolve_detailed(
@@ -71,57 +129,15 @@ impl RouteResolver {
         protocol: Protocol,
         model: &str,
     ) -> Result<ResolvedRoute, RouteResolutionError> {
+        if let Some(routes) = &self.runtime_routes {
+            return resolve_runtime_route(routes, protocol, model);
+        }
         self.resolve_selected(protocol, model)
             .map(|(_, route)| route)
     }
 
-    /// Resolve one configured route while still applying the resolver's global
-    /// candidate ordering. This is used by diagnostics that need to explain
-    /// every configured route without maintaining a second routing algorithm.
-    pub(crate) fn resolve_configured_route(
-        &self,
-        route_index: usize,
-        protocol: Protocol,
-        model: &str,
-    ) -> Result<ResolvedRoute, RouteResolutionError> {
-        let Some(route) = self.config.routes.get(route_index) else {
-            return Err(RouteResolutionError::new(
-                "route_not_found",
-                format!("configured route index {route_index} does not exist"),
-                None,
-            ));
-        };
-        if !route.protocols.contains(&protocol) {
-            return Err(RouteResolutionError::new(
-                "route_protocol_not_configured",
-                format!(
-                    "route '{}' is not configured for protocol {protocol}",
-                    route.id
-                ),
-                Some(&route.id),
-            ));
-        }
-        if model_match_rank(&route.model, model).is_none() {
-            return Err(RouteResolutionError::new(
-                "route_model_not_matched",
-                format!("route '{}' does not match model '{model}'", route.id),
-                Some(&route.id),
-            ));
-        }
-
-        let candidate = self.resolve_candidate(route_index, protocol, model)?;
-        let (selected_index, selected) = self.resolve_selected(protocol, model)?;
-        if selected_index != route_index {
-            return Err(RouteResolutionError::new(
-                "route_not_selected",
-                format!(
-                    "route '{}' is routable but route '{}' has higher priority",
-                    route.id, selected.route_id
-                ),
-                Some(&route.id),
-            ));
-        }
-        Ok(candidate)
+    pub(crate) fn is_runtime_snapshot(&self) -> bool {
+        self.runtime_routes.is_some()
     }
 
     fn resolve_selected(
@@ -357,9 +373,12 @@ impl RouteResolver {
             protocol_upstream: upstream,
             model: model.to_owned(),
             requested_model: model.to_owned(),
+            upstream_model_id: model.to_owned(),
             provider_id: provider.id.clone(),
             primary_account_id: account.id.clone(),
             fallback_accounts: route.fallback_accounts.clone(),
+            fallback_bindings: Vec::new(),
+            binding_id: None,
             upstream_endpoint: join_endpoint(&provider.base_url, endpoint),
             mode,
             adapter: adapter_name,
@@ -368,6 +387,70 @@ impl RouteResolver {
             allow_lossy_conversion: route.allow_lossy_conversion,
         })
     }
+}
+
+fn resolve_runtime_route(
+    routes: &[RuntimeRoute],
+    protocol: Protocol,
+    model: &str,
+) -> Result<ResolvedRoute, RouteResolutionError> {
+    let Some(route) = routes
+        .iter()
+        .find(|route| route.protocol == protocol && route.model == model)
+    else {
+        return Err(RouteResolutionError::new(
+            "route_not_found",
+            format!("no route matches protocol {protocol} and model '{model}'"),
+            None,
+        ));
+    };
+    let Some(primary) = route.bindings.first() else {
+        return Err(RouteResolutionError::new(
+            "route_unavailable",
+            format!("route '{}' has no available binding", route.route_id),
+            Some(&route.route_id),
+        ));
+    };
+    let fallback_bindings = route
+        .bindings
+        .iter()
+        .skip(1)
+        .map(|binding| ResolvedBinding {
+            binding_id: binding.binding_id,
+            provider_id: binding.provider_id.clone(),
+            account_id: binding.account_id.clone(),
+            upstream_model_id: binding.upstream_model_id.clone(),
+            protocol_upstream: binding.protocol_upstream,
+            upstream_endpoint: binding.upstream_endpoint.clone(),
+            mode: binding.mode.clone(),
+            adapter: binding.adapter.clone(),
+            effective_capabilities: binding.effective_capabilities.clone(),
+            degraded_features: binding.degraded_features.clone(),
+        })
+        .collect::<Vec<_>>();
+    Ok(ResolvedRoute {
+        route_id: route.route_id.clone(),
+        protocol,
+        protocol_in: protocol,
+        protocol_upstream: primary.protocol_upstream,
+        model: model.to_owned(),
+        requested_model: model.to_owned(),
+        upstream_model_id: primary.upstream_model_id.clone(),
+        provider_id: primary.provider_id.clone(),
+        primary_account_id: primary.account_id.clone(),
+        fallback_accounts: fallback_bindings
+            .iter()
+            .map(|binding| binding.account_id.clone())
+            .collect(),
+        fallback_bindings,
+        binding_id: Some(primary.binding_id),
+        upstream_endpoint: primary.upstream_endpoint.clone(),
+        mode: primary.mode.clone(),
+        adapter: primary.adapter.clone(),
+        effective_capabilities: primary.effective_capabilities.clone(),
+        degraded_features: primary.degraded_features.clone(),
+        allow_lossy_conversion: route.allow_lossy_conversion,
+    })
 }
 
 fn model_match_rank(pattern: &str, model: &str) -> Option<(bool, usize)> {
@@ -382,7 +465,7 @@ fn model_match_rank(pattern: &str, model: &str) -> Option<(bool, usize)> {
     }
 }
 
-fn join_endpoint(base: &str, endpoint: &str) -> String {
+pub(crate) fn join_endpoint(base: &str, endpoint: &str) -> String {
     if endpoint.starts_with("http://") || endpoint.starts_with("https://") {
         endpoint.to_owned()
     } else {
@@ -394,7 +477,7 @@ fn join_endpoint(base: &str, endpoint: &str) -> String {
     }
 }
 
-fn intersect_capabilities(
+pub(crate) fn intersect_capabilities(
     model: &Capabilities,
     adapter: Option<&Capabilities>,
     allow_lossy: bool,
