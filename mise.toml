@@ -6,6 +6,10 @@ node = "24.11.1"
 description = "安装前端锁定依赖"
 run = "npm --prefix web ci"
 
+[tasks.config-check]
+description = "校验仓库 JSON 配置示例"
+run = "node -e \"JSON.parse(require('node:fs').readFileSync('config.example.json', 'utf8'))\""
+
 [tasks.dev]
 description = "启动 Rust 网关与前端开发环境"
 run = "cargo run & gateway_pid=$!; trap 'kill $gateway_pid 2>/dev/null || true' EXIT INT TERM; npm --prefix web run dev"
@@ -16,12 +20,32 @@ run = "npm --prefix web run build && cargo build"
 
 [tasks.test]
 description = "运行 Rust 与前端单元测试"
-run = "cargo test && npm --prefix web test"
+run = "cargo test --workspace -- --test-threads=1 && npm --prefix web test"
+
+[tasks.test-postgres]
+description = "运行显式忽略的 PostgreSQL 集成测试"
+run = '''
+if [ -z "${TEST_DATABASE_URL:-}" ]; then
+  echo "TEST_DATABASE_URL is required for PostgreSQL integration tests" >&2
+  exit 1
+fi
+cargo test --workspace -- --ignored --test-threads=1
+'''
 
 [tasks.lint]
 description = "运行 Rust 与前端静态检查"
-run = "cargo fmt --all -- --check && cargo clippy --all-targets -- -D warnings && npm --prefix web run lint && npm --prefix web run typecheck"
+run = "cargo fmt --all -- --check && cargo check --workspace && cargo clippy --all-targets -- -D warnings && npm --prefix web run lint && npm --prefix web run typecheck"
 
 [tasks.verify]
 description = "部署前完整门禁：静态检查、构建、单元测试"
-run = "mise run lint && mise run build && mise run test"
+run = '''
+mise run config-check
+mise run lint
+mise run build
+mise run test
+if [ -n "${TEST_DATABASE_URL:-}" ]; then
+  mise run test-postgres
+else
+  echo "TEST_DATABASE_URL is not set; ignored PostgreSQL integration tests were skipped" >&2
+fi
+'''
