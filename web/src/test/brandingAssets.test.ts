@@ -3,35 +3,21 @@ import { describe, expect, it } from 'vitest';
 
 const mainSource = readFileSync(new URL('../main.tsx', import.meta.url), 'utf8');
 const indexHtml = readFileSync(new URL('../../index.html', import.meta.url), 'utf8');
-const readmeEnglish = readFileSync(new URL('../../../README.md', import.meta.url), 'utf8');
-const readmeChinese = readFileSync(new URL('../../../README.zh.md', import.meta.url), 'utf8');
-const lightLogoUrl = new URL('../../../assets/keeper-logo-light.svg', import.meta.url);
-const darkLogoUrl = new URL('../../../assets/keeper-logo-dark.svg', import.meta.url);
-const lightLogo = readFileSync(lightLogoUrl, 'utf8');
-const darkLogo = readFileSync(darkLogoUrl, 'utf8');
+const attribution = readFileSync(new URL('../../THIRD_PARTY_NOTICES.md', import.meta.url), 'utf8');
 
-describe('Keeper branding assets', () => {
-  it('uses the Keeper SVG as the browser favicon', () => {
-    expect(mainSource).toContain("import faviconUrl from './assets/keeper-icon.svg'");
+describe('gateway branding and attribution', () => {
+  it('uses the gateway SVG as the browser favicon', () => {
+    expect(mainSource).toContain("import faviconUrl from './assets/gateway-icon.svg'");
     expect(mainSource).toContain("faviconEl.type = 'image/svg+xml'");
   });
 
-  it('uses KEEPER as the browser tab title', () => {
-    expect(indexHtml).toContain('<title>KEEPER</title>');
+  it('uses the gateway browser tab title', () => {
+    expect(indexHtml).toContain('<title>my-ai-gateway Usage</title>');
   });
 
-  it('keeps the theme-aware centered logo in both public READMEs', () => {
-    for (const readme of [readmeEnglish, readmeChinese]) {
-      expect(readme).toContain('<p align="center">');
-      expect(readme).toContain('<picture>');
-      expect(readme).toContain('media="(prefers-color-scheme: dark)"');
-      expect(readme).toContain('./assets/keeper-logo-dark.svg');
-      expect(readme).toContain('./assets/keeper-logo-light.svg');
-    }
-  });
-
-  it('uses black and white wordmarks for light and dark README themes', () => {
-    expect(lightLogo).toContain('fill="#111111"');
-    expect(darkLogo).toContain('fill="#ffffff"');
+  it('keeps the CPA Usage Keeper source and MIT attribution', () => {
+    expect(attribution).toContain('https://github.com/Willxup/cpa-usage-keeper');
+    expect(attribution).toContain('MIT License');
+    expect(attribution).toContain('Copyright (c) 2026 Will');
   });
 });
