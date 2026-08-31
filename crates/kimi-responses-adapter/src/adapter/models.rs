@@ -51,6 +51,15 @@ pub struct ModelRegistry {
 
 impl ModelRegistry {
     pub fn new(ttl: Duration) -> ModelRegistry {
+        Self::with_client(
+            ttl,
+            reqwest::Client::builder()
+                .build()
+                .expect("reqwest client builds"),
+        )
+    }
+
+    pub fn with_client(ttl: Duration, client: reqwest::Client) -> ModelRegistry {
         let models = builtin_models()
             .into_iter()
             .map(|m| (m.id.clone(), m))
@@ -61,10 +70,7 @@ impl ModelRegistry {
                 fetched_at: None,
             }),
             ttl,
-            client: reqwest::Client::builder()
-                .timeout(Duration::from_secs(5))
-                .build()
-                .expect("reqwest client builds"),
+            client,
         }
     }
 
@@ -91,7 +97,10 @@ impl ModelRegistry {
             st.fetched_at = Some(Instant::now());
         }
 
-        let mut req = self.client.get(format!("{base_url}/v1/models"));
+        let mut req = self
+            .client
+            .get(format!("{base_url}/v1/models"))
+            .timeout(Duration::from_secs(5));
         for (k, v) in auth {
             req = req.header(k, v);
         }

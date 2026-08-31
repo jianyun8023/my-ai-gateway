@@ -167,7 +167,7 @@ fn state(config: GatewayConfig, database: Option<db::Database>) -> AppState {
     let config = Arc::new(config);
     AppState {
         live: Arc::new(std::sync::RwLock::new(LiveConfig::legacy(config))),
-        http: transport::client().expect("runtime HTTP client"),
+        http: transport::test_client().expect("runtime HTTP client"),
         db: database,
         control_plane: None,
         health: health::HealthRegistry::new(Duration::from_secs(1)),
@@ -334,13 +334,13 @@ async fn transport_error_path_uses_fallback_and_records_its_actual_model() {
     let (response, attempts) = try_fallback_error(
         &config,
         &health::HealthRegistry::new(Duration::from_secs(1)),
-        &transport::client().unwrap(),
+        &transport::test_client().unwrap(),
         &resolved,
         "logical-model",
         Protocol::OpenAiChatCompletions,
         &HeaderMap::new(),
         Bytes::from_static(br#"{"model":"logical-model","messages":[]}"#),
-        transport::TransportError::Request("primary transport failed".into()),
+        transport::TransportError::Request,
     )
     .await;
     assert_eq!(response.status(), StatusCode::OK);
@@ -375,13 +375,13 @@ async fn fallback_transport_failure_is_retained_as_the_final_actual_attempt() {
     let (response, attempts) = try_fallback_error(
         &config,
         &health::HealthRegistry::new(Duration::from_secs(1)),
-        &transport::client().unwrap(),
+        &transport::test_client().unwrap(),
         &resolved,
         "logical-model",
         Protocol::OpenAiChatCompletions,
         &HeaderMap::new(),
         Bytes::from_static(br#"{"model":"logical-model","messages":[]}"#),
-        transport::TransportError::Request("primary transport failed".into()),
+        transport::TransportError::Request,
     )
     .await;
     assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
@@ -640,7 +640,11 @@ async fn postgres_db_first_source_attribution_covers_primary_fallback_stream_and
             ),
         ],
     };
-    let control_plane = control_plane::ControlPlane::new(&database, "127.0.0.1:0");
+    let control_plane = control_plane::ControlPlane::with_url_policy(
+        &database,
+        "127.0.0.1:0",
+        crate::source_url::test_policy(),
+    );
     let snapshot = control_plane
         .initialize_from_config(&config, false)
         .await
@@ -648,7 +652,7 @@ async fn postgres_db_first_source_attribution_covers_primary_fallback_stream_and
         .expect("empty isolated control plane publishes a snapshot");
     let state = AppState {
         live: Arc::new(std::sync::RwLock::new(LiveConfig::from_snapshot(snapshot))),
-        http: transport::client().expect("runtime HTTP client"),
+        http: transport::test_client().expect("runtime HTTP client"),
         db: Some(database.clone()),
         control_plane: None,
         health: health::HealthRegistry::new(Duration::from_secs(30)),

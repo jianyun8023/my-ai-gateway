@@ -9,6 +9,7 @@ services:
       GATEWAY_CONFIG_JSON: ${GATEWAY_CONFIG_JSON:-}
       GATEWAY_CONFIG_IMPORT: ${GATEWAY_CONFIG_IMPORT:-false}
       GATEWAY_API_KEY: ${GATEWAY_API_KEY:?set GATEWAY_API_KEY}
+      GATEWAY_SOURCE_URL_ALLOWLIST: ${GATEWAY_SOURCE_URL_ALLOWLIST:-}
     depends_on:
       postgres:
         condition: service_healthy
