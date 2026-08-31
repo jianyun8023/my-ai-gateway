@@ -109,7 +109,7 @@ curl "$ADMIN_URL/admin/ops/schema" \
   -H "Authorization: Bearer $GATEWAY_ADMIN_KEY"
 ```
 
-恢复不会带回原始 Virtual Key 值，也不会把任何凭据值写回数据库；恢复后应重新创建下游 Virtual Key 并轮换必要 Secret。
+恢复不会带回原始 Virtual Key 值，也不会把任何凭据值写回数据库；目标库中已有的 Virtual Key 会保留。新库恢复后应重新创建下游 Virtual Key 并轮换必要 Secret。
 
 ## PostgreSQL 物理备份
 

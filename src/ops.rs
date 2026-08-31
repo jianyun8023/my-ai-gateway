@@ -508,6 +508,13 @@ impl OpsRepository {
         batch_number: i32,
     ) -> Result<(i64, bool), OpsError> {
         let mut tx = self.pool.begin().await?;
+        // Usage events and attempts are written concurrently by request
+        // handlers.  A serializable cleanup batch either observes a complete
+        // committed attempt graph or aborts and can be retried without
+        // cascading a newly inserted attempt.
+        sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
+            .execute(&mut *tx)
+            .await?;
         sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
             .bind(&run.id)
             .execute(&mut *tx)
@@ -795,18 +802,18 @@ impl OpsRepository {
         let mut model_presets = self.table_rows("model_presets", "id,version").await?;
         let mut sources = self.table_rows("sources", "id").await?;
         let mut accounts = self.table_rows("accounts", "id").await?;
-        let source_models = self
+        let mut source_models = self
             .table_rows("source_models", "source_id,upstream_model_id")
             .await?;
-        let source_model_capabilities = self
+        let mut source_model_capabilities = self
             .table_rows(
                 "source_model_capabilities",
                 "source_id,upstream_model_id,protocol",
             )
             .await?;
-        let logical_models = self.table_rows("logical_models", "id").await?;
-        let model_bindings = self.table_rows("model_bindings", "id").await?;
-        let routes = self.table_rows("routes", "id").await?;
+        let mut logical_models = self.table_rows("logical_models", "id").await?;
+        let mut model_bindings = self.table_rows("model_bindings", "id").await?;
+        let mut routes = self.table_rows("routes", "id").await?;
         let mut providers = self.table_rows("providers", "id").await?;
         let mut virtual_keys = self.table_rows("virtual_keys", "id").await?;
 
@@ -820,10 +827,27 @@ impl OpsRepository {
             *row = sanitize_json(row.clone());
         }
         for row in &mut sources {
+            *row = sanitize_json(row.clone());
             sanitize_source_row(row);
         }
         for row in &mut accounts {
+            let credential_env = row.get("credential_env").cloned().unwrap_or(Value::Null);
+            *row = sanitize_json(row.clone());
+            if let Some(object) = row.as_object_mut() {
+                object.insert("credential_env".into(), credential_env);
+            }
             sanitize_account_row(row);
+        }
+        for rows in [
+            &mut source_models,
+            &mut source_model_capabilities,
+            &mut logical_models,
+            &mut model_bindings,
+            &mut routes,
+        ] {
+            for row in rows.iter_mut() {
+                *row = sanitize_json(row.clone());
+            }
         }
         for row in &mut virtual_keys {
             sanitize_virtual_key_row(row);
@@ -1851,8 +1875,8 @@ fn reject_plaintext_secret_fields(value: &Value) -> Result<(), OpsError> {
 
 async fn clear_control_plane_tx(tx: &mut Transaction<'_, Postgres>) -> Result<(), OpsError> {
     // Delete children explicitly so this remains correct if a future schema
-    // changes one of the cascade actions.  Historical usage is intentionally
-    // untouched by a control-plane restore.
+    // changes one of the cascade actions. Historical usage and unexportable
+    // Virtual Keys are intentionally untouched by a control-plane restore.
     for statement in [
         "DELETE FROM routes",
         "DELETE FROM model_bindings",
@@ -1862,7 +1886,6 @@ async fn clear_control_plane_tx(tx: &mut Transaction<'_, Postgres>) -> Result<()
         "DELETE FROM accounts",
         "DELETE FROM sources",
         "DELETE FROM providers",
-        "DELETE FROM virtual_keys",
     ] {
         sqlx::query(statement).execute(&mut **tx).await?;
     }
