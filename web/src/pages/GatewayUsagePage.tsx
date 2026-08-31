@@ -39,8 +39,8 @@ const TAB_META: Record<GatewayUsageTab, { description: string; shortLabel: strin
 };
 
 const ADMIN_KEY_STORAGE_KEY = 'my-ai-gateway-admin-key-v1';
-const FILTER_STORAGE_KEY = 'my-ai-gateway-usage-filters-v1';
-const COLUMNS_STORAGE_KEY = 'my-ai-gateway-usage-event-columns-v1';
+const FILTER_STORAGE_KEY = 'my-ai-gateway-usage-filters-v2';
+const COLUMNS_STORAGE_KEY = 'my-ai-gateway-usage-event-columns-v2';
 
 const EVENT_COLUMNS = [
   'time',
@@ -48,6 +48,7 @@ const EVENT_COLUMNS = [
   'upstreamModel',
   'provider',
   'sourceAccount',
+  'clientSource',
   'protocol',
   'status',
   'retries',
@@ -63,7 +64,8 @@ const EVENT_COLUMN_LABELS: Record<EventColumn, string> = {
   logicalModel: 'Logical model',
   upstreamModel: 'Upstream model',
   provider: 'Provider',
-  sourceAccount: 'Client Source / Account',
+  sourceAccount: 'Source / Account',
+  clientSource: 'Client Source',
   protocol: '协议',
   status: '状态',
   retries: '重试',
@@ -78,6 +80,7 @@ const DEFAULT_VISIBLE_COLUMNS: EventColumn[] = [
   'upstreamModel',
   'provider',
   'sourceAccount',
+  'clientSource',
   'protocol',
   'status',
   'retries',
@@ -228,7 +231,8 @@ function FilterBar({ draft, onChange, onApply, loading }: FilterBarProps) {
       <label>Logical model<input value={draft.logicalModel ?? ''} onChange={(event) => update('logicalModel', event.target.value)} placeholder="全部" /></label>
       <label>Upstream model<input value={draft.upstreamModel ?? ''} onChange={(event) => update('upstreamModel', event.target.value)} placeholder="全部" /></label>
       <label>Provider<input value={draft.provider ?? ''} onChange={(event) => update('provider', event.target.value)} placeholder="全部" /></label>
-      <label>Client Source<input value={draft.source ?? ''} onChange={(event) => update('source', event.target.value)} placeholder="全部" /></label>
+      <label>Source ID<input value={draft.sourceId ?? ''} onChange={(event) => update('sourceId', event.target.value)} placeholder="全部" /></label>
+      <label>Client Source<input value={draft.clientSource ?? ''} onChange={(event) => update('clientSource', event.target.value)} placeholder="全部" /></label>
       <label>Account<input value={draft.account ?? ''} onChange={(event) => update('account', event.target.value)} placeholder="全部" /></label>
       <label>入站协议<input value={draft.protocolIn ?? ''} onChange={(event) => update('protocolIn', event.target.value)} placeholder="全部" /></label>
       <label>上游协议<input value={draft.protocolUpstream ?? ''} onChange={(event) => update('protocolUpstream', event.target.value)} placeholder="全部" /></label>
@@ -357,7 +361,7 @@ function Overview({ data, metric, onMetricChange }: { data: UsageOverviewViewMod
                 <span className={styles.statusDot} data-success={event.success} />
                 <time>{formatTime(event.createdAt)}</time>
                 <strong>{event.logicalModel}</strong>
-                <span>{event.provider} · {event.source} / {event.account}</span>
+                <span>{event.provider} · {event.sourceId} / {event.account}</span>
                 <em>{formatNumber(event.tokens.total)} Token</em>
               </div>
             ))}</div>
@@ -373,7 +377,8 @@ const ANALYSIS_DIMENSIONS: Array<{ dimension: UsageBreakdownDimension; title: st
   { dimension: 'logical_model', title: 'Logical model' },
   { dimension: 'upstream_model', title: 'Upstream model' },
   { dimension: 'provider', title: 'Provider' },
-  { dimension: 'source', title: 'Source / Client Source' },
+  { dimension: 'source_id', title: 'Source' },
+  { dimension: 'client_source', title: 'Client Source' },
   { dimension: 'account', title: 'Account' },
   { dimension: 'protocol_in', title: '入站协议' },
   { dimension: 'protocol_upstream', title: '上游协议' },
@@ -423,7 +428,8 @@ const renderEventCell = (event: UsageEventViewModel, column: EventColumn) => {
     case 'logicalModel': return <strong>{event.logicalModel}</strong>;
     case 'upstreamModel': return event.upstreamModel;
     case 'provider': return event.provider;
-    case 'sourceAccount': return <span>{event.source}<small>{event.account}</small></span>;
+    case 'sourceAccount': return <span>{event.sourceId}<small>{event.account}</small></span>;
+    case 'clientSource': return event.clientSource;
     case 'protocol': return <span>{event.protocolIn}<small>→ {event.protocolUpstream}</small></span>;
     case 'status': return <span className={styles.statusBadge} data-success={event.success}>{event.statusCode || '—'} · {event.success ? '成功' : '失败'}</span>;
     case 'retries': return event.fallback ? `${event.retryCount} · fallback` : String(event.retryCount);
@@ -436,6 +442,7 @@ const renderEventCell = (event: UsageEventViewModel, column: EventColumn) => {
 interface UsageAttemptDetail {
   attemptNo: number;
   provider: string;
+  sourceId: string;
   account: string;
   upstreamModel: string;
   statusCode: number;
@@ -457,10 +464,11 @@ function EventDetails({ event, onClose, client }: { event: UsageEventViewModel; 
     let cancelled = false;
     client.eventDetail(event.requestId).then((data) => {
       if (cancelled) return;
-      const detail = data as { attempts?: Array<{ attempt_no?: number; provider_id?: string; account_id?: string; upstream_model_id?: string; status_code?: number; success?: boolean; latency_ms?: number }> };
+      const detail = data as { attempts?: Array<{ attempt_no?: number; provider_id?: string; source_id?: string; account_id?: string; upstream_model_id?: string; status_code?: number; success?: boolean; latency_ms?: number }> };
       setAttempts((detail.attempts ?? []).map((a) => ({
         attemptNo: a.attempt_no ?? 0,
         provider: a.provider_id ?? '—',
+        sourceId: a.source_id ?? 'unknown',
         account: a.account_id ?? '—',
         upstreamModel: a.upstream_model_id ?? '—',
         statusCode: a.status_code ?? 0,
@@ -478,6 +486,7 @@ function EventDetails({ event, onClose, client }: { event: UsageEventViewModel; 
   const displayAttempts = attempts.length > 0 ? attempts : event.attempts.map((a) => ({
     attemptNo: a.attemptIndex,
     provider: a.provider,
+    sourceId: a.sourceId,
     account: a.account,
     upstreamModel: a.upstreamModel,
     statusCode: a.statusCode,
@@ -495,7 +504,9 @@ function EventDetails({ event, onClose, client }: { event: UsageEventViewModel; 
           <div><span>Logical model</span><strong>{event.logicalModel}</strong></div>
           <div><span>Upstream model</span><strong>{event.upstreamModel}</strong></div>
           <div><span>Provider</span><strong>{event.provider}</strong></div>
-          <div><span>Client Source / Account</span><strong>{event.source} / {event.account}</strong></div>
+          <div><span>Source</span><strong>{event.sourceId}</strong></div>
+          <div><span>Client Source</span><strong>{event.clientSource}</strong></div>
+          <div><span>Account</span><strong>{event.account}</strong></div>
           <div><span>协议</span><strong>{event.protocolIn} → {event.protocolUpstream}</strong></div>
           <div><span>Usage source</span><strong><UsageBadge source={event.usageSource} /></strong></div>
           <div><span>延迟</span><strong>{formatNumber(event.latencyMs)} ms</strong></div>
@@ -506,7 +517,7 @@ function EventDetails({ event, onClose, client }: { event: UsageEventViewModel; 
         </Card>
         <Card title="上游尝试" subtitle="失败尝试没有可确认 usage 时不会虚构 Token">
           {loadingAttempts ? <div style={{ padding: '1rem', opacity: 0.6 }}>加载 attempt 明细…</div> : displayAttempts.length === 0 ? <EmptyState title="没有独立 attempt 明细" description="事件仍保留最终账号与 retry_count。" /> : (
-            <ol className={styles.attemptList}>{displayAttempts.map((attempt) => <li key={attempt.attemptNo}><span>#{attempt.attemptNo + 1}</span><strong>{attempt.account}</strong><span>{attempt.provider} · {attempt.upstreamModel}</span><span className={attempt.success ? styles.statusSuccess : styles.statusFailure}>{attempt.statusCode} · {attempt.latencyMs} ms</span></li>)}</ol>
+            <ol className={styles.attemptList}>{displayAttempts.map((attempt) => <li key={attempt.attemptNo}><span>#{attempt.attemptNo + 1}</span><strong>{attempt.account}</strong><span>{attempt.sourceId} · {attempt.provider} · {attempt.upstreamModel}</span><span className={attempt.success ? styles.statusSuccess : styles.statusFailure}>{attempt.statusCode} · {attempt.latencyMs} ms</span></li>)}</ol>
           )}
         </Card>
         {event.errorSummary && <Card title="脱敏错误摘要"><p className={styles.errorSummary}>{event.errorSummary}</p></Card>}

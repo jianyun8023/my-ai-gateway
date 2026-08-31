@@ -8,7 +8,8 @@ const filters: GatewayUsageFilters = {
   logicalModel: 'logical-a',
   upstreamModel: 'upstream-a',
   provider: 'provider-a',
-  source: 'source-a',
+  sourceId: 'source-a',
+  clientSource: 'codex-desktop',
   account: 'account-a',
   protocolIn: 'openai_responses',
   protocolUpstream: 'anthropic_messages',
@@ -21,7 +22,7 @@ describe('GatewayUsageClient', () => {
   it('serializes the complete combination filter contract', () => {
     const url = buildGatewayUsageURL('events', filters, { cursor: 'next', limit: 100 });
     expect(url).toContain('/admin/usage/events?');
-    for (const key of ['from', 'to', 'logical_model', 'upstream_model', 'provider', 'source', 'account', 'protocol_in', 'protocol_upstream', 'virtual_key', 'status', 'usage_source', 'cursor', 'limit']) {
+    for (const key of ['from', 'to', 'logical_model', 'upstream_model', 'provider', 'source_id', 'client_source', 'account', 'protocol_in', 'protocol_upstream', 'virtual_key', 'status', 'usage_source', 'cursor', 'limit']) {
       expect(new URL(url, 'http://gateway.local').searchParams.has(key)).toBe(true);
     }
   });

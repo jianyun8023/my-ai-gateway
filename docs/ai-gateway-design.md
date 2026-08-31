@@ -246,7 +246,7 @@ ProviderPreset 与发现确认阶段不改变 Route，也不把发现结果自�
 
 规则：
 
-- fallback 转发使用候选账号自己 Provider 的 `base_url`/`endpoints`/凭据；attempt 与最终 usage 事件记录实际的 `provider_id`/`account_id`/`upstream_model_id`。
+- fallback 转发使用候选账号自己 Provider 的 `base_url`/`endpoints`/凭据；attempt 与最终 usage 事件记录实际的 `provider_id`/`source_id`/`account_id`/`upstream_model_id`。
 - 跨 Provider fallback 仅限 `native` 链路：候选 Provider 必须对该入站协议声明 `native` 且配置了非空 endpoint；`adapter` 路由不允许跨 Provider fallback（配置校验拒绝，不做静默降级）。
 - `AccountConfig` 新增可选 `model_map`（逻辑模型 → 上游模型 ID）：转发前重写请求体顶层 `model` 字段；未命中映射则原样透传；重写结果记入 attempt 的 `upstream_model_id`。
 - 配置校验：fallback 账号/Provider 必须存在；跨 Provider 且候选 Provider 未声明该模型时，要求候选账号 `model_map` 存在对应映射；错误信息带配置路径。
@@ -487,16 +487,16 @@ Kimi Adapter：
 - 成功鉴权后更新 `last_used_at`；
 - `GET /admin/usage/summary` 返回逻辑请求、上游尝试、重试、成功/失败、延迟和 Token 汇总。
 - `GET /admin/usage/timeseries?granularity=hour|day` 返回 UTC 小时/日时间桶。
-- `GET /admin/usage/breakdown?breakdown=...` 支持 `logical_model`、`upstream_model`、`provider`、`source`、`account`、`protocol_in`、`protocol_upstream`、`virtual_key`、`status` 和 `usage_source`。
+- `GET /admin/usage/breakdown?breakdown=...` 支持 `logical_model`、`upstream_model`、`provider`、`source_id`、`client_source`、`account`、`protocol_in`、`protocol_upstream`、`virtual_key`、`status` 和 `usage_source`。
 - `GET /admin/usage/events?limit=100&cursor=...` 使用 `(created_at DESC, request_id DESC)` 的确定性 keyset 游标，`limit` 范围为 `1..500`。
 - `GET /admin/usage/export?format=csv|json` 按与 events 相同的筛选和排序导出全部匹配事件；不包含 prompt/response 正文。
 - `GET /admin/usage/aggregate` 保留为 summary、timeseries 和单一 breakdown 的组合入口，响应与独立入口共享 `version: v1` 契约。
 
-所有 Usage 查询共享组合筛选参数：`from`、`to`、`logical_model`、`upstream_model`、`provider`、`source`、`account`、`protocol_in`、`protocol_upstream`、`virtual_key`、`status`、`status_code` 和 `usage_source`。`from`/`to` 接受带 offset 的 RFC3339，服务端转换为 UTC，并以半开区间 `[from,to)` 解释；响应桶固定为 UTC，UI 只在展示层换算本地时区。`source` 来自可选的下游 `X-Client-Source` 请求头，缺省为 `unknown`；该字段仅用于统计维度，不改变路由或认证。
+所有 Usage 查询共享组合筛选参数：`from`、`to`、`logical_model`、`upstream_model`、`provider`、`source_id`、`client_source`、`account`、`protocol_in`、`protocol_upstream`、`virtual_key`、`status`、`status_code` 和 `usage_source`。`from`/`to` 接受带 offset 的 RFC3339，服务端转换为 UTC，并以半开区间 `[from,to)` 解释；响应桶固定为 UTC，UI 只在展示层换算本地时区。`source_id` 来自 DB-first RuntimeRoute/Binding 的最终实际 attempt；可选下游 `X-Client-Source` 只写入 `client_source`，缺省为 `unknown`，不参与路由或认证。
 
 v1 响应 envelope 固定如下：summary 为 `{version, timezone, range, data}`；timeseries 额外返回 `granularity`，每个 `data` 元素包含 UTC `bucket`；breakdown 额外返回 `dimension`，每个元素使用可空 `key` 表示分组值；events 返回 `{data, page:{limit, has_more, next_cursor}}`。聚合指标统一包含 `logical_requests`、`upstream_attempts`、`retries`、`successes`、`failures`、`success_rate`、`average_latency_ms`、`p95_latency_ms` 和五类 Token；breakdown 另含 `logical_request_share`、`total_token_share`。客户端应把 `next_cursor` 视作不透明值并原样传回。
 
-聚合中的 `logical_requests`、成功/失败、延迟和 Token 来自筛选后的 `usage_events`，因此每个逻辑请求和最终 Usage 只累计一次。`upstream_attempts` 来自这些逻辑请求关联的 `usage_event_attempts`；`retries` 来自逻辑事件的重试计数。Provider、Source、Account、协议等筛选先选择逻辑请求，再统计其关联 attempt，避免把失败 fallback 的 Token 当成已确认 Usage。`usage_source=missing` 的请求保留请求数但 Token 为零。
+聚合中的 `logical_requests`、成功/失败、延迟和 Token 来自筛选后的 `usage_events`，因此每个逻辑请求和最终 Usage 只累计一次。`upstream_attempts` 来自这些逻辑请求关联的 `usage_event_attempts`；`retries` 来自逻辑事件的重试计数。Provider、Source、Client Source、Account、协议等筛选先选择逻辑请求，再统计其关联 attempt，避免把失败 fallback 的 Token 当成已确认 Usage。每个 attempt 仍独立保存自己的 `source_id`，使跨 Source fallback 可审计；逻辑事件成功时归因成功 attempt，全部失败时归因最终实际 attempt。`usage_source=missing` 的请求保留请求数但 Token 为零。
 
 ### 部署
 
@@ -517,7 +517,7 @@ v1 响应 envelope 固定如下：summary 为 `{version, timezone, range, data}`
 
 ### 7.2 PostgreSQL 领域表
 
-当前已经创建 `usage_events`、`usage_event_attempts`、`virtual_keys`、`providers`、`accounts`、`routes`，Provider/Model preset、Source、SourceModel、LogicalModel、ModelBinding、SourceModelCapability 模型目录表，以及 `source_connection_tests`、`source_discovery_runs` 审计表。内置预设以不可变 `(id, version)` 启动注册。运行时从 `sources`、`accounts`、`logical_models`、`model_bindings`、`source_models`、`source_model_capabilities` 和 `routes` 构建完整 `protocol_in → protocol_upstream → endpoint/Adapter` 链，旧 `providers` 行不再是运行时事实来源。`request_id` 表示一次北向逻辑请求并保持唯一；重试尝试写入 `usage_event_attempts(request_id, attempt_no)`，同一尝试幂等。`usage_events.logical_model` 保存客户端模型，`upstream_model_id` 保存实际 Binding 的上游模型；Virtual Key 鉴权成功时写入 `virtual_key_id`，静态入口 Key 保持为空。时间统一按 PostgreSQL `TIMESTAMPTZ` 以 UTC 存储，展示层负责本地时区转换。
+当前已经创建 `usage_events`、`usage_event_attempts`、`virtual_keys`、`providers`、`accounts`、`routes`，Provider/Model preset、Source、SourceModel、LogicalModel、ModelBinding、SourceModelCapability 模型目录表，以及 `source_connection_tests`、`source_discovery_runs` 审计表。内置预设以不可变 `(id, version)` 启动注册。运行时从 `sources`、`accounts`、`logical_models`、`model_bindings`、`source_models`、`source_model_capabilities` 和 `routes` 构建完整 `protocol_in → protocol_upstream → endpoint/Adapter` 链，旧 `providers` 行不再是运行时事实来源。`request_id` 表示一次北向逻辑请求并保持唯一；重试尝试写入 `usage_event_attempts(request_id, attempt_no)`，同一尝试幂等。`usage_events.logical_model` 保存客户端模型，`upstream_model_id` 保存实际 Binding 的上游模型，`source_id` 保存最终实际 Source，`client_source` 独立保存客户端自报来源；attempt 逐次保存自己的 `source_id`。历史旧 `source` 值迁入 `client_source`，历史 `source_id` 保持 `NULL`；Usage 历史不对控制面 `sources` 设置外键，因此删除 Source 不会删除或抹除历史归因。Virtual Key 鉴权成功时写入 `virtual_key_id`，静态入口 Key 保持为空。时间统一按 PostgreSQL `TIMESTAMPTZ` 以 UTC 存储，展示层负责本地时区转换。
 
 控制面写入采用 `SERIALIZABLE` 事务：先写候选变更，再校验引用、endpoint、Adapter 注册表与方向、单段转换、能力链和 Binding 可路由性，随后在同一事务读取并构建下一版不可变 snapshot；任一步失败都回滚。提交成功后一次写锁替换整个 snapshot，并发请求只会持有旧版或新版的完整 `Arc`。手工 reload 使用一致性只读事务；失败不替换当前有效 snapshot。
 

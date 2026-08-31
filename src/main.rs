@@ -393,6 +393,9 @@ struct UsageQuery {
 fn parse_usage_query(
     query: &std::collections::HashMap<String, String>,
 ) -> Result<UsageQuery, String> {
+    if query.contains_key("source") {
+        return Err("source is no longer supported; use source_id or client_source".into());
+    }
     let parse_time = |name: &str| -> Result<Option<chrono::DateTime<chrono::Utc>>, String> {
         query
             .get(name)
@@ -458,7 +461,8 @@ fn parse_usage_query(
         "logical_model"
             | "upstream_model"
             | "provider"
-            | "source"
+            | "source_id"
+            | "client_source"
             | "account"
             | "protocol_in"
             | "protocol_upstream"
@@ -497,7 +501,8 @@ fn parse_usage_query(
             logical_model: query.get("logical_model").cloned(),
             upstream_model_id: query.get("upstream_model").cloned(),
             provider_id: query.get("provider").cloned(),
-            source: query.get("source").cloned(),
+            source_id: query.get("source_id").cloned(),
+            client_source: query.get("client_source").cloned(),
             account_id: query.get("account").cloned(),
             protocol_in: query.get("protocol_in").cloned(),
             protocol_upstream: query.get("protocol_upstream").cloned(),
@@ -779,7 +784,7 @@ async fn usage_export(
 }
 
 fn usage_events_csv(events: &[db::UsageEventRecord]) -> String {
-    let mut output = String::from("request_id,created_at,virtual_key_id,logical_model,upstream_model_id,provider_id,source,account_id,protocol_in,protocol_upstream,mode,status_code,success,retry_count,latency_ms,ttft_ms,input_tokens,output_tokens,reasoning_tokens,cached_tokens,total_tokens,usage_source,degraded,route_id,streamed,error_summary\n");
+    let mut output = String::from("request_id,created_at,virtual_key_id,logical_model,upstream_model_id,provider_id,source_id,client_source,account_id,protocol_in,protocol_upstream,mode,status_code,success,retry_count,latency_ms,ttft_ms,input_tokens,output_tokens,reasoning_tokens,cached_tokens,total_tokens,usage_source,degraded,route_id,streamed,error_summary\n");
     for event in events {
         let values = [
             event.request_id.clone(),
@@ -791,7 +796,8 @@ fn usage_events_csv(events: &[db::UsageEventRecord]) -> String {
             event.logical_model.clone(),
             event.upstream_model_id.clone().unwrap_or_default(),
             event.provider_id.clone(),
-            event.source.clone(),
+            event.source_id.clone().unwrap_or_default(),
+            event.client_source.clone(),
             event.account_id.clone(),
             event.protocol_in.clone(),
             event.protocol_upstream.clone(),
@@ -1720,12 +1726,7 @@ async fn proxy(
             None
         };
         if let Some(database) = &state.db {
-            let source = headers
-                .get("x-client-source")
-                .and_then(|value| value.to_str().ok())
-                .filter(|value| !value.is_empty())
-                .unwrap_or("unknown")
-                .to_string();
+            let client_source = client_source_from_headers(&headers);
             let event = db::UsageEvent {
                 request_id,
                 virtual_key_id,
@@ -1734,7 +1735,8 @@ async fn proxy(
                 model: model.to_string(),
                 logical_model: model.to_string(),
                 upstream_model_id: Some(prepared.upstream_model_id.clone()),
-                source,
+                source_id: candidate.source_id.clone(),
+                client_source,
                 protocol_in: protocol.to_string(),
                 protocol_upstream: candidate.protocol_upstream.to_string(),
                 mode: candidate.mode.clone(),
@@ -1763,6 +1765,7 @@ async fn proxy(
             let attempts = vec![db::UsageAttempt {
                 attempt_no: 0,
                 provider_id: candidate.provider.id.clone(),
+                source_id: candidate.source_id.clone(),
                 account_id: candidate.account.id.clone(),
                 upstream_model_id: Some(prepared.upstream_model_id),
                 status_code: attempt_status,
@@ -1813,6 +1816,7 @@ async fn proxy(
             attempts.push(db::UsageAttempt {
                 attempt_no: 0,
                 provider_id: provider.id.clone(),
+                source_id: route.provider_id.clone(),
                 account_id: account.id.clone(),
                 upstream_model_id: Some(primary_request.upstream_model_id.clone()),
                 status_code: response.status().as_u16() as i32,
@@ -1839,6 +1843,7 @@ async fn proxy(
             attempts.push(db::UsageAttempt {
                 attempt_no: 0,
                 provider_id: provider.id.clone(),
+                source_id: route.provider_id.clone(),
                 account_id: account.id.clone(),
                 upstream_model_id: Some(primary_request.upstream_model_id.clone()),
                 status_code: response.status().as_u16() as i32,
@@ -1852,6 +1857,7 @@ async fn proxy(
             attempts.push(db::UsageAttempt {
                 attempt_no: 0,
                 provider_id: provider.id.clone(),
+                source_id: route.provider_id.clone(),
                 account_id: account.id.clone(),
                 upstream_model_id: Some(primary_request.upstream_model_id.clone()),
                 status_code: 599,
@@ -1887,7 +1893,8 @@ async fn proxy(
         .or_else(|| attempts.last());
     let final_binding = final_attempt.and_then(|attempt| {
         route.fallback_bindings.iter().find(|binding| {
-            binding.account_id == attempt.account_id
+            attempt.source_id == binding.provider_id
+                && binding.account_id == attempt.account_id
                 && attempt.upstream_model_id.as_deref() == Some(binding.upstream_model_id.as_str())
         })
     });
@@ -1910,17 +1917,15 @@ async fn proxy(
         None
     };
     if let Some(database) = &state.db {
-        let source = headers
-            .get("x-client-source")
-            .and_then(|value| value.to_str().ok())
-            .filter(|value| !value.is_empty())
-            .unwrap_or("unknown")
-            .to_string();
+        let client_source = client_source_from_headers(&headers);
         let final_account_id = final_attempt
             .map(|attempt| attempt.account_id.clone())
             .unwrap_or_else(|| account.id.clone());
         let final_provider_id = final_attempt
             .map(|attempt| attempt.provider_id.clone())
+            .unwrap_or_else(|| route.provider_id.clone());
+        let final_source_id = final_attempt
+            .map(|attempt| attempt.source_id.clone())
             .unwrap_or_else(|| route.provider_id.clone());
         let final_upstream_model_id = final_attempt
             .and_then(|attempt| attempt.upstream_model_id.clone())
@@ -1933,7 +1938,8 @@ async fn proxy(
             model: model.to_string(),
             logical_model: model.to_string(),
             upstream_model_id: final_upstream_model_id,
-            source,
+            source_id: final_source_id,
+            client_source,
             protocol_in: protocol.to_string(),
             protocol_upstream: final_protocol_upstream.to_string(),
             mode: final_mode.to_owned(),
@@ -1971,6 +1977,16 @@ async fn proxy(
         }
     }
     response
+}
+
+fn client_source_from_headers(headers: &HeaderMap) -> String {
+    headers
+        .get("x-client-source")
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("unknown")
+        .to_owned()
 }
 
 fn warn_degraded_route(request_id: &str, route: &ResolvedRoute) {
@@ -2132,6 +2148,7 @@ async fn embedded_kimi_adapter(
 struct FallbackCandidate<'a> {
     account: &'a config::AccountConfig,
     provider: &'a config::ProviderConfig,
+    source_id: String,
     upstream_model: String,
     protocol_upstream: Protocol,
     mode: String,
@@ -2162,6 +2179,7 @@ async fn select_fallback_candidate<'a>(
             available.push(FallbackCandidate {
                 account,
                 provider,
+                source_id: binding.provider_id.clone(),
                 upstream_model: binding.upstream_model_id.clone(),
                 protocol_upstream: binding.protocol_upstream,
                 mode: binding.mode.clone(),
@@ -2202,6 +2220,7 @@ async fn select_fallback_candidate<'a>(
             available.push(FallbackCandidate {
                 account,
                 provider,
+                source_id: provider.id.clone(),
                 upstream_model,
                 protocol_upstream: route.protocol_upstream,
                 mode: route.mode.clone(),
@@ -2269,6 +2288,7 @@ async fn try_fallback(
             attempts.push(db::UsageAttempt {
                 attempt_no: 1,
                 provider_id: candidate.provider.id.clone(),
+                source_id: candidate.source_id.clone(),
                 account_id: candidate.account.id.clone(),
                 upstream_model_id: Some(prepared.upstream_model_id),
                 status_code: response.status().as_u16() as i32,
@@ -2286,6 +2306,7 @@ async fn try_fallback(
             attempts.push(db::UsageAttempt {
                 attempt_no: 1,
                 provider_id: candidate.provider.id.clone(),
+                source_id: candidate.source_id.clone(),
                 account_id: candidate.account.id.clone(),
                 upstream_model_id: Some(prepared.upstream_model_id),
                 status_code: 599,
@@ -2342,6 +2363,7 @@ async fn try_fallback_error(
             attempts.push(db::UsageAttempt {
                 attempt_no: 1,
                 provider_id: candidate.provider.id.clone(),
+                source_id: candidate.source_id.clone(),
                 account_id: candidate.account.id.clone(),
                 upstream_model_id: Some(prepared.upstream_model_id),
                 status_code: response.status().as_u16() as i32,
@@ -2359,6 +2381,7 @@ async fn try_fallback_error(
             attempts.push(db::UsageAttempt {
                 attempt_no: 1,
                 provider_id: candidate.provider.id.clone(),
+                source_id: candidate.source_id.clone(),
                 account_id: candidate.account.id.clone(),
                 upstream_model_id: Some(prepared.upstream_model_id),
                 status_code: 599,
@@ -2888,8 +2911,10 @@ mod usage_api_tests {
             ("to".into(), "2026-01-02T00:00:00Z".into()),
             ("logical_model".into(), "logical-a".into()),
             ("upstream_model".into(), "upstream-a".into()),
+            ("source_id".into(), "source-a".into()),
+            ("client_source".into(), "cli-a".into()),
             ("status".into(), "failure".into()),
-            ("breakdown".into(), "protocol_upstream".into()),
+            ("breakdown".into(), "client_source".into()),
         ]);
         let parsed = parse_usage_query(&query).expect("valid usage query");
         assert_eq!(
@@ -2897,7 +2922,14 @@ mod usage_api_tests {
             "2026-01-01T00:00:00+00:00"
         );
         assert_eq!(parsed.filter.success, Some(false));
-        assert_eq!(parsed.breakdown, "protocol_upstream");
+        assert_eq!(parsed.filter.source_id.as_deref(), Some("source-a"));
+        assert_eq!(parsed.filter.client_source.as_deref(), Some("cli-a"));
+        assert_eq!(parsed.breakdown, "client_source");
+
+        assert_eq!(
+            parse_usage_query(&HashMap::from([("source".into(), "legacy".into())])).unwrap_err(),
+            "source is no longer supported; use source_id or client_source"
+        );
 
         let parsed_source =
             parse_usage_query(&HashMap::from([("usage_source".into(), "parsed".into())]))
@@ -2919,6 +2951,7 @@ mod usage_api_tests {
         assert_eq!(csv_field("a,b\"c"), "\"a,b\"\"c\"");
         let header = usage_events_csv(&[]);
         assert!(header.contains("logical_model,upstream_model_id"));
+        assert!(header.contains("provider_id,source_id,client_source,account_id"));
         assert!(header.contains("route_id,streamed,error_summary"));
         assert!(!header.contains("prompt"));
         assert!(!header.contains("response_body"));
@@ -2943,7 +2976,8 @@ mod usage_api_tests {
             model: logical_model.clone(),
             logical_model: logical_model.clone(),
             upstream_model_id: Some("upstream-api".into()),
-            source: "api-test".into(),
+            source_id: "source-api".into(),
+            client_source: "api-test".into(),
             protocol_in: "openai_responses".into(),
             protocol_upstream: "anthropic_messages".into(),
             mode: "adapter".into(),
@@ -2967,6 +3001,7 @@ mod usage_api_tests {
             db::UsageAttempt {
                 attempt_no: 0,
                 provider_id: "provider-api".into(),
+                source_id: "source-primary".into(),
                 account_id: "account-api".into(),
                 upstream_model_id: Some("upstream-api".into()),
                 status_code: 429,
@@ -2976,6 +3011,7 @@ mod usage_api_tests {
             db::UsageAttempt {
                 attempt_no: 1,
                 provider_id: "provider-api".into(),
+                source_id: "source-api".into(),
                 account_id: "account-api".into(),
                 upstream_model_id: Some("upstream-api".into()),
                 status_code: 200,
@@ -2992,7 +3028,7 @@ mod usage_api_tests {
         let summary = app
             .clone()
             .oneshot(admin_request(&format!(
-                "/admin/usage/summary?logical_model={logical_model}"
+                "/admin/usage/summary?logical_model={logical_model}&source_id=source-api&client_source=api-test"
             )))
             .await
             .expect("summary response");
@@ -3006,6 +3042,22 @@ mod usage_api_tests {
         assert_eq!(summary["version"], "v1");
         assert_eq!(summary["data"]["logical_requests"], 1);
         assert_eq!(summary["data"]["upstream_attempts"], 2);
+
+        let breakdown = app
+            .clone()
+            .oneshot(admin_request(&format!(
+                "/admin/usage/breakdown?logical_model={logical_model}&breakdown=source_id"
+            )))
+            .await
+            .expect("Source breakdown response");
+        let breakdown: Value = serde_json::from_slice(
+            &axum::body::to_bytes(breakdown.into_body(), 1024 * 1024)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(breakdown["dimension"], "source_id");
+        assert_eq!(breakdown["data"][0]["key"], "source-api");
 
         let events = app
             .clone()
@@ -3021,11 +3073,33 @@ mod usage_api_tests {
         )
         .unwrap();
         assert_eq!(events["data"][0]["logical_model"], logical_model);
+        assert_eq!(events["data"][0]["source_id"], "source-api");
+        assert_eq!(events["data"][0]["client_source"], "api-test");
         assert!(events["data"][0].get("prompt").is_none());
 
-        let export = app
+        let detail = app
+            .clone()
             .oneshot(admin_request(&format!(
-                "/admin/usage/export?logical_model={logical_model}&format=csv"
+                "/admin/usage/events/{}",
+                event.request_id
+            )))
+            .await
+            .expect("event detail response");
+        let detail: Value = serde_json::from_slice(
+            &axum::body::to_bytes(detail.into_body(), 1024 * 1024)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(detail["data"]["source_id"], "source-api");
+        assert_eq!(detail["data"]["client_source"], "api-test");
+        assert_eq!(detail["attempts"][0]["source_id"], "source-primary");
+        assert_eq!(detail["attempts"][1]["source_id"], "source-api");
+
+        let export = app
+            .clone()
+            .oneshot(admin_request(&format!(
+                "/admin/usage/export?logical_model={logical_model}&source_id=source-api&client_source=api-test&format=csv"
             )))
             .await
             .expect("export response");
@@ -3037,7 +3111,25 @@ mod usage_api_tests {
         let export = axum::body::to_bytes(export.into_body(), 1024 * 1024)
             .await
             .unwrap();
-        assert!(String::from_utf8_lossy(&export).contains(&event.request_id));
+        let export = String::from_utf8_lossy(&export);
+        assert!(export.contains(&event.request_id));
+        assert!(export.contains("provider_id,source_id,client_source,account_id"));
+
+        let json_export = app
+            .oneshot(admin_request(&format!(
+                "/admin/usage/export?logical_model={logical_model}&source_id=source-api&client_source=api-test&format=json"
+            )))
+            .await
+            .expect("JSON export response");
+        assert_eq!(json_export.status(), StatusCode::OK);
+        let json_export: Value = serde_json::from_slice(
+            &axum::body::to_bytes(json_export.into_body(), 1024 * 1024)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(json_export["data"][0]["source_id"], "source-api");
+        assert_eq!(json_export["data"][0]["client_source"], "api-test");
         database
             .delete_usage_events_for_test(&prefix)
             .await

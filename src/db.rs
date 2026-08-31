@@ -20,7 +20,8 @@ pub struct UsageEvent {
     pub model: String,
     pub logical_model: String,
     pub upstream_model_id: Option<String>,
-    pub source: String,
+    pub source_id: String,
+    pub client_source: String,
     pub protocol_in: String,
     pub protocol_upstream: String,
     pub mode: String,
@@ -61,7 +62,8 @@ pub struct UsageEventRecord {
     pub account_id: String,
     pub logical_model: String,
     pub upstream_model_id: Option<String>,
-    pub source: String,
+    pub source_id: Option<String>,
+    pub client_source: String,
     pub protocol_in: String,
     pub protocol_upstream: String,
     pub mode: String,
@@ -87,6 +89,7 @@ pub struct UsageEventRecord {
 pub struct UsageAttempt {
     pub attempt_no: i32,
     pub provider_id: String,
+    pub source_id: String,
     pub account_id: String,
     pub upstream_model_id: Option<String>,
     pub status_code: i32,
@@ -98,6 +101,7 @@ pub struct UsageAttempt {
 pub struct UsageAttemptRecord {
     pub attempt_no: i32,
     pub provider_id: String,
+    pub source_id: Option<String>,
     pub account_id: String,
     pub upstream_model_id: Option<String>,
     pub status_code: i32,
@@ -113,7 +117,8 @@ pub struct UsageFilter {
     pub logical_model: Option<String>,
     pub upstream_model_id: Option<String>,
     pub provider_id: Option<String>,
-    pub source: Option<String>,
+    pub source_id: Option<String>,
+    pub client_source: Option<String>,
     pub account_id: Option<String>,
     pub protocol_in: Option<String>,
     pub protocol_upstream: Option<String>,
@@ -266,6 +271,11 @@ impl Database {
         sqlx::raw_sql(include_str!("../migrations/0008_provider_discovery.sql"))
             .execute(&mut *tx)
             .await?;
+        sqlx::raw_sql(include_str!(
+            "../migrations/0009_usage_source_dimensions.sql"
+        ))
+        .execute(&mut *tx)
+        .await?;
         tx.commit().await
     }
 
@@ -290,9 +300,9 @@ impl Database {
     ) -> Result<(), sqlx::Error> {
         let now: DateTime<Utc> = Utc::now();
         let mut tx = self.pool.begin().await?;
-        sqlx::query("INSERT INTO usage_events (request_id, virtual_key_id, provider_id, account_id, model, logical_model, upstream_model_id, source, protocol_in, protocol_upstream, mode, status_code, success, retry_count, latency_ms, ttft_ms, input_tokens, output_tokens, reasoning_tokens, cached_tokens, total_tokens, usage_source, degraded, route_id, streamed, error_summary, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27) ON CONFLICT (request_id) DO NOTHING")
+        sqlx::query("INSERT INTO usage_events (request_id, virtual_key_id, provider_id, account_id, model, logical_model, upstream_model_id, source_id, client_source, protocol_in, protocol_upstream, mode, status_code, success, retry_count, latency_ms, ttft_ms, input_tokens, output_tokens, reasoning_tokens, cached_tokens, total_tokens, usage_source, degraded, route_id, streamed, error_summary, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28) ON CONFLICT (request_id) DO NOTHING")
             .bind(&event.request_id).bind(event.virtual_key_id).bind(&event.provider_id).bind(&event.account_id).bind(&event.model)
-            .bind(&event.logical_model).bind(&event.upstream_model_id).bind(&event.source)
+            .bind(&event.logical_model).bind(&event.upstream_model_id).bind(&event.source_id).bind(&event.client_source)
             .bind(&event.protocol_in).bind(&event.protocol_upstream).bind(&event.mode).bind(event.status_code)
             .bind(event.success).bind(event.retry_count).bind(event.latency_ms).bind(event.ttft_ms)
             .bind(event.input_tokens).bind(event.output_tokens).bind(event.reasoning_tokens)
@@ -300,9 +310,9 @@ impl Database {
             .bind(&event.route_id).bind(event.streamed).bind(&event.error_summary).bind(now)
             .execute(&mut *tx).await?;
         for attempt in attempts {
-            sqlx::query("INSERT INTO usage_event_attempts (request_id,attempt_no,provider_id,account_id,upstream_model_id,status_code,success,latency_ms) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (request_id,attempt_no) DO NOTHING")
+            sqlx::query("INSERT INTO usage_event_attempts (request_id,attempt_no,provider_id,source_id,account_id,upstream_model_id,status_code,success,latency_ms) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (request_id,attempt_no) DO NOTHING")
                 .bind(&event.request_id).bind(attempt.attempt_no).bind(&attempt.provider_id)
-                .bind(&attempt.account_id).bind(&attempt.upstream_model_id).bind(attempt.status_code)
+                .bind(&attempt.source_id).bind(&attempt.account_id).bind(&attempt.upstream_model_id).bind(attempt.status_code)
                 .bind(attempt.success).bind(attempt.latency_ms).execute(&mut *tx).await?;
         }
         tx.commit().await
@@ -776,7 +786,7 @@ impl Database {
         &self,
         request_id: &str,
     ) -> Result<Vec<UsageAttemptRecord>, sqlx::Error> {
-        sqlx::query_as::<_, UsageAttemptRecord>("SELECT attempt_no,provider_id,account_id,upstream_model_id,status_code,success,latency_ms,created_at FROM usage_event_attempts WHERE request_id=$1 ORDER BY attempt_no")
+        sqlx::query_as::<_, UsageAttemptRecord>("SELECT attempt_no,provider_id,source_id,account_id,upstream_model_id,status_code,success,latency_ms,created_at FROM usage_event_attempts WHERE request_id=$1 ORDER BY attempt_no")
             .bind(request_id)
             .fetch_all(&self.pool)
             .await
@@ -836,7 +846,8 @@ impl Database {
             "logical_model" => ("logical_model", "f.logical_model"),
             "upstream_model" => ("upstream_model_id", "f.upstream_model_id"),
             "provider" => ("provider_id", "f.provider_id"),
-            "source" => ("source", "f.source"),
+            "source_id" => ("source_id", "f.source_id"),
+            "client_source" => ("client_source", "f.client_source"),
             "account" => ("account_id", "f.account_id"),
             "protocol_in" => ("protocol_in", "f.protocol_in"),
             "protocol_upstream" => ("protocol_upstream", "f.protocol_upstream"),
@@ -859,7 +870,7 @@ impl Database {
 }
 
 fn usage_event_select() -> &'static str {
-    "SELECT request_id,virtual_key_id,provider_id,account_id,logical_model,upstream_model_id,source,protocol_in,protocol_upstream,mode,status_code,success,retry_count,latency_ms,ttft_ms,input_tokens,output_tokens,reasoning_tokens,cached_tokens,total_tokens,usage_source,degraded,route_id,streamed,error_summary,created_at FROM usage_events"
+    "SELECT request_id,virtual_key_id,provider_id,account_id,logical_model,upstream_model_id,source_id,client_source,protocol_in,protocol_upstream,mode,status_code,success,retry_count,latency_ms,ttft_ms,input_tokens,output_tokens,reasoning_tokens,cached_tokens,total_tokens,usage_source,degraded,route_id,streamed,error_summary,created_at FROM usage_events"
 }
 
 fn filter_sql(filter: &UsageFilter) -> (String, Vec<FilterBind>) {
@@ -877,7 +888,8 @@ fn filter_sql(filter: &UsageFilter) -> (String, Vec<FilterBind>) {
         ("logical_model", &filter.logical_model),
         ("upstream_model_id", &filter.upstream_model_id),
         ("provider_id", &filter.provider_id),
-        ("source", &filter.source),
+        ("source_id", &filter.source_id),
+        ("client_source", &filter.client_source),
         ("account_id", &filter.account_id),
         ("protocol_in", &filter.protocol_in),
         ("protocol_upstream", &filter.protocol_upstream),
@@ -951,7 +963,8 @@ mod tests {
         protocol::Protocol,
     };
     use serde_json::json;
-    use std::collections::BTreeMap;
+    use sqlx::postgres::PgConnectOptions;
+    use std::{collections::BTreeMap, str::FromStr};
 
     #[test]
     fn filters_support_combined_dimensions_and_utc_bounds() {
@@ -961,7 +974,8 @@ mod tests {
             logical_model: Some("m".into()),
             upstream_model_id: Some("upstream-m".into()),
             provider_id: Some("p".into()),
-            source: Some("cli".into()),
+            source_id: Some("source-a".into()),
+            client_source: Some("cli".into()),
             account_id: Some("a".into()),
             protocol_in: Some("openai_chat_completions".into()),
             protocol_upstream: Some("anthropic_messages".into()),
@@ -973,10 +987,12 @@ mod tests {
         let (sql, binds) = filter_sql(&filter);
         assert!(sql.contains("created_at >= $1"));
         assert!(sql.contains("logical_model = $3"));
-        assert!(sql.contains("protocol_upstream = $9"));
-        assert!(sql.contains("virtual_key_id = $11"));
-        assert!(sql.contains("status_code = $13"));
-        assert_eq!(binds.len(), 13);
+        assert!(sql.contains("source_id = $6"));
+        assert!(sql.contains("client_source = $7"));
+        assert!(sql.contains("protocol_upstream = $10"));
+        assert!(sql.contains("virtual_key_id = $12"));
+        assert!(sql.contains("status_code = $14"));
+        assert_eq!(binds.len(), 14);
     }
 
     #[test]
@@ -1002,6 +1018,100 @@ mod tests {
         assert!(fields_schema.contains("route_id TEXT"));
         assert!(fields_schema.contains("streamed BOOLEAN"));
         assert!(fields_schema.contains("error_summary TEXT"));
+        let source_schema = include_str!("../migrations/0009_usage_source_dimensions.sql");
+        assert!(source_schema.contains("RENAME COLUMN source TO client_source"));
+        assert!(source_schema.contains("ADD COLUMN IF NOT EXISTS source_id TEXT"));
+        assert!(!source_schema.contains("REFERENCES sources"));
+    }
+
+    #[tokio::test]
+    async fn postgres_migrates_legacy_client_source_without_inventing_runtime_source() {
+        let Ok(url) = std::env::var("TEST_DATABASE_URL") else {
+            eprintln!("skipping PostgreSQL usage migration test: TEST_DATABASE_URL is not set");
+            return;
+        };
+        let admin = PgPoolOptions::new()
+            .max_connections(2)
+            .connect(&url)
+            .await
+            .expect("connect PostgreSQL migration test admin database");
+        let schema = format!("usage_source_{}", uuid::Uuid::new_v4().simple());
+        sqlx::query(&format!("CREATE SCHEMA \"{schema}\""))
+            .execute(&admin)
+            .await
+            .expect("create isolated usage migration schema");
+        let options = PgConnectOptions::from_str(&url)
+            .expect("parse TEST_DATABASE_URL")
+            .options([("search_path", schema.as_str())]);
+        let pool = PgPoolOptions::new()
+            .max_connections(2)
+            .connect_with(options)
+            .await
+            .expect("connect isolated usage migration schema");
+
+        sqlx::raw_sql(include_str!("../migrations/0001_init.sql"))
+            .execute(&pool)
+            .await
+            .expect("apply legacy usage schema");
+        sqlx::query("CREATE INDEX idx_usage_events_source_created_at ON usage_events (source, created_at DESC)")
+            .execute(&pool)
+            .await
+            .expect("create legacy source index");
+        sqlx::query("INSERT INTO usage_events (request_id,provider_id,account_id,model,logical_model,source,protocol_in,protocol_upstream,mode,status_code,success) VALUES ('legacy-request','legacy-provider','legacy-account','legacy-model','legacy-model','legacy-cli','openai_responses','openai_responses','native',200,TRUE)")
+            .execute(&pool)
+            .await
+            .expect("insert legacy usage event");
+        sqlx::query("INSERT INTO usage_event_attempts (request_id,attempt_no,provider_id,account_id,status_code,success) VALUES ('legacy-request',0,'legacy-provider','legacy-account',200,TRUE)")
+            .execute(&pool)
+            .await
+            .expect("insert legacy usage attempt");
+
+        sqlx::raw_sql(include_str!(
+            "../migrations/0009_usage_source_dimensions.sql"
+        ))
+        .execute(&pool)
+        .await
+        .expect("apply Source dimension migration");
+        // The gateway embeds idempotent scripts and replays them at startup.
+        sqlx::raw_sql(include_str!("../migrations/0004_usage_query_contract.sql"))
+            .execute(&pool)
+            .await
+            .expect("replay earlier usage indexes after migration");
+        sqlx::raw_sql(include_str!(
+            "../migrations/0009_usage_source_dimensions.sql"
+        ))
+        .execute(&pool)
+        .await
+        .expect("replay Source dimension migration");
+
+        let event: (Option<String>, String) = sqlx::query_as(
+            "SELECT source_id,client_source FROM usage_events WHERE request_id='legacy-request'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("read migrated usage event");
+        assert_eq!(event, (None, "legacy-cli".into()));
+        let attempt_source: Option<String> = sqlx::query_scalar(
+            "SELECT source_id FROM usage_event_attempts WHERE request_id='legacy-request'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("read migrated usage attempt");
+        assert_eq!(attempt_source, None);
+        let legacy_column_exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='usage_events' AND column_name='source')",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("inspect migrated usage columns");
+        assert!(!legacy_column_exists);
+
+        pool.close().await;
+        sqlx::query(&format!("DROP SCHEMA \"{schema}\" CASCADE"))
+            .execute(&admin)
+            .await
+            .expect("drop isolated usage migration schema");
+        admin.close().await;
     }
 
     async fn postgres_test_database() -> Option<Database> {
@@ -1083,7 +1193,7 @@ mod tests {
         ];
         for (suffix, created_at, success, usage_source, tokens, retry_count) in fixtures {
             let request_id = format!("{prefix}{suffix}");
-            sqlx::query("INSERT INTO usage_events (request_id,virtual_key_id,provider_id,account_id,model,logical_model,upstream_model_id,source,protocol_in,protocol_upstream,mode,status_code,success,retry_count,latency_ms,input_tokens,output_tokens,total_tokens,usage_source,created_at) VALUES ($1,$2,'provider-a','account-a',$3,$3,'upstream-a','test','openai_responses','anthropic_messages','adapter',$4,$5,$6,25,$7,0,$7,$8,$9)")
+            sqlx::query("INSERT INTO usage_events (request_id,virtual_key_id,provider_id,account_id,model,logical_model,upstream_model_id,source_id,client_source,protocol_in,protocol_upstream,mode,status_code,success,retry_count,latency_ms,input_tokens,output_tokens,total_tokens,usage_source,created_at) VALUES ($1,$2,'provider-a','account-a',$3,$3,'upstream-a','source-a','test','openai_responses','anthropic_messages','adapter',$4,$5,$6,25,$7,0,$7,$8,$9)")
                 .bind(&request_id)
                 .bind(virtual_key_id)
                 .bind(&logical_model)
@@ -1097,7 +1207,7 @@ mod tests {
                 .await
                 .expect("insert usage fixture");
             for attempt_no in 0..=retry_count {
-                sqlx::query("INSERT INTO usage_event_attempts (request_id,attempt_no,provider_id,account_id,status_code,success,latency_ms) VALUES ($1,$2,'provider-a','account-a',$3,$4,10)")
+                sqlx::query("INSERT INTO usage_event_attempts (request_id,attempt_no,provider_id,source_id,account_id,status_code,success,latency_ms) VALUES ($1,$2,'provider-a','source-a','account-a',$3,$4,10)")
                     .bind(&request_id)
                     .bind(attempt_no)
                     .bind(if success { 200 } else { 429 })
@@ -1113,7 +1223,8 @@ mod tests {
             logical_model: Some(logical_model.clone()),
             upstream_model_id: Some("upstream-a".into()),
             provider_id: Some("provider-a".into()),
-            source: Some("test".into()),
+            source_id: Some("source-a".into()),
+            client_source: Some("test".into()),
             account_id: Some("account-a".into()),
             protocol_in: Some("openai_responses".into()),
             protocol_upstream: Some("anthropic_messages".into()),
@@ -1149,6 +1260,16 @@ mod tests {
             .await
             .expect("breakdown");
         assert_eq!(breakdown.len(), 2);
+        let source_breakdown = database
+            .usage_breakdown(&filter, "source_id")
+            .await
+            .expect("Source breakdown");
+        assert_eq!(source_breakdown[0].key.as_deref(), Some("source-a"));
+        let client_source_breakdown = database
+            .usage_breakdown(&filter, "client_source")
+            .await
+            .expect("Client Source breakdown");
+        assert_eq!(client_source_breakdown[0].key.as_deref(), Some("test"));
         let exported = database
             .export_usage_events(&filter, 10_000)
             .await
@@ -1182,7 +1303,8 @@ mod tests {
             model: logical_model.clone(),
             logical_model: logical_model.clone(),
             upstream_model_id: Some("upstream-parsed".into()),
-            source: "test".into(),
+            source_id: "source-parsed".into(),
+            client_source: "test".into(),
             protocol_in: "openai_responses".into(),
             protocol_upstream: "anthropic_messages".into(),
             mode: "adapter".into(),
@@ -1238,6 +1360,93 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn postgres_source_deletion_preserves_usage_history() {
+        let Some(database) = postgres_test_database().await else {
+            eprintln!("skipping PostgreSQL Source history test: TEST_DATABASE_URL is not set");
+            return;
+        };
+        let suffix = uuid::Uuid::new_v4().to_string();
+        let source_id = format!("deleted-source-{suffix}");
+        let request_id = format!("deleted-source-request-{suffix}");
+        sqlx::query("INSERT INTO sources (id,display_name,provider_preset_id,provider_preset_version,provider_preset_snapshot,base_url) VALUES ($1,$2,'custom',1,'{}'::jsonb,'https://deleted-source.example')")
+            .bind(&source_id)
+            .bind(format!("Deleted Source {suffix}"))
+            .execute(&database.pool)
+            .await
+            .expect("insert Source history fixture");
+        let event = UsageEvent {
+            request_id: request_id.clone(),
+            virtual_key_id: None,
+            provider_id: source_id.clone(),
+            account_id: format!("deleted-account-{suffix}"),
+            model: "history-model".into(),
+            logical_model: "history-model".into(),
+            upstream_model_id: Some("history-upstream".into()),
+            source_id: source_id.clone(),
+            client_source: "history-client".into(),
+            protocol_in: "openai_chat_completions".into(),
+            protocol_upstream: "openai_chat_completions".into(),
+            mode: "native".into(),
+            status_code: 200,
+            success: true,
+            retry_count: 0,
+            latency_ms: 5,
+            ttft_ms: None,
+            input_tokens: 1,
+            output_tokens: 1,
+            reasoning_tokens: 0,
+            cached_tokens: 0,
+            total_tokens: 2,
+            usage_source: "upstream".into(),
+            degraded: false,
+            route_id: Some("history-route".into()),
+            streamed: false,
+            error_summary: None,
+        };
+        database
+            .insert_usage_with_attempts(
+                &event,
+                &[UsageAttempt {
+                    attempt_no: 0,
+                    provider_id: source_id.clone(),
+                    source_id: source_id.clone(),
+                    account_id: format!("deleted-account-{suffix}"),
+                    upstream_model_id: Some("history-upstream".into()),
+                    status_code: 200,
+                    success: true,
+                    latency_ms: 5,
+                }],
+            )
+            .await
+            .expect("insert Source history usage fixture");
+
+        sqlx::query("DELETE FROM sources WHERE id=$1")
+            .bind(&source_id)
+            .execute(&database.pool)
+            .await
+            .expect("delete control-plane Source");
+
+        let persisted = database
+            .get_usage_event_detail(&request_id)
+            .await
+            .expect("query usage after Source deletion")
+            .expect("usage history survives Source deletion");
+        assert_eq!(persisted.source_id.as_deref(), Some(source_id.as_str()));
+        assert_eq!(persisted.client_source, "history-client");
+        let attempts = database
+            .list_attempts_for_event(&request_id)
+            .await
+            .expect("query attempts after Source deletion");
+        assert_eq!(attempts[0].source_id.as_deref(), Some(source_id.as_str()));
+
+        sqlx::query("DELETE FROM usage_events WHERE request_id=$1")
+            .bind(&request_id)
+            .execute(&database.pool)
+            .await
+            .expect("clean Source history usage fixture");
+    }
+
+    #[tokio::test]
     async fn postgres_cursor_handles_large_pages_without_duplicates_or_omissions() {
         let Some(database) = postgres_test_database().await else {
             eprintln!("skipping PostgreSQL pagination test: TEST_DATABASE_URL is not set");
@@ -1245,7 +1454,7 @@ mod tests {
         };
         let prefix = format!("usage-page-{}-", uuid::Uuid::new_v4());
         let logical_model = format!("logical-{prefix}");
-        sqlx::query("INSERT INTO usage_events (request_id,provider_id,account_id,model,logical_model,source,protocol_in,protocol_upstream,mode,status_code,success,retry_count,latency_ms,usage_source,created_at) SELECT $1 || LPAD(i::TEXT,4,'0'),'provider-page','account-page',$2,$2,'test','openai_responses','openai_responses','native',200,TRUE,0,1,'missing','2026-02-01T00:00:00Z'::TIMESTAMPTZ FROM generate_series(1,503) AS i")
+        sqlx::query("INSERT INTO usage_events (request_id,provider_id,account_id,model,logical_model,source_id,client_source,protocol_in,protocol_upstream,mode,status_code,success,retry_count,latency_ms,usage_source,created_at) SELECT $1 || LPAD(i::TEXT,4,'0'),'provider-page','account-page',$2,$2,'source-page','test','openai_responses','openai_responses','native',200,TRUE,0,1,'missing','2026-02-01T00:00:00Z'::TIMESTAMPTZ FROM generate_series(1,503) AS i")
             .bind(&prefix)
             .bind(&logical_model)
             .execute(&database.pool)

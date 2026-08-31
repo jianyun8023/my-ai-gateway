@@ -54,7 +54,7 @@ curl -X POST http://127.0.0.1:8787/admin/keys \
   -d '{"name":"service-a","allowed_models":["MiniMax-M2.7"]}'
 ```
 
-Usage API 返回显式的 `version: "v1"` 和 `timezone: "UTC"`。所有入口共享 `from`、`to`（RFC3339、半开区间 `[from,to)`）、`logical_model`、`upstream_model`、`provider`、`source`、`account`、`protocol_in`、`protocol_upstream`、`virtual_key`、`status=success|failure`、`status_code` 和 `usage_source` 组合筛选。`source` 当前对应下游 `X-Client-Source`；Virtual Key 鉴权的请求会记录 Key ID，静态 `GATEWAY_API_KEY` 请求为 `null`。
+Usage API 返回显式的 `version: "v1"` 和 `timezone: "UTC"`。所有入口共享 `from`、`to`（RFC3339、半开区间 `[from,to)`）、`logical_model`、`upstream_model`、`provider`、`source_id`、`client_source`、`account`、`protocol_in`、`protocol_upstream`、`virtual_key`、`status=success|failure`、`status_code` 和 `usage_source` 组合筛选。`source_id` 是 DB-first Runtime Binding 最终实际选中的一等 Source；可选下游 `X-Client-Source` 只记录为独立 `client_source`，缺省为 `unknown`。Virtual Key 鉴权的请求会记录 Key ID，静态 `GATEWAY_API_KEY` 请求为 `null`。
 
 ProviderPreset、连接测试、模型发现和确认接口的完整请求/响应契约见 [`docs/admin-api.md`](./docs/admin-api.md)。最小流程为：创建 Source 快照 → 选择关联且启用的 Account 按协议测试 → 执行 discovery → 查看 diff/待确认模型 → 编辑并批量确认。确认 SourceModel 仍不会自动创建 LogicalModel、Binding 或 Route。
 
@@ -62,14 +62,14 @@ ProviderPreset、连接测试、模型发现和确认接口的完整请求/响�
 curl 'http://127.0.0.1:8787/admin/usage/timeseries?from=2026-08-01T00:00:00Z&to=2026-09-01T00:00:00Z&granularity=day&logical_model=MiniMax-M2.7' \
   -H "Authorization: Bearer $GATEWAY_ADMIN_KEY"
 
-curl 'http://127.0.0.1:8787/admin/usage/breakdown?breakdown=provider&usage_source=upstream' \
+curl 'http://127.0.0.1:8787/admin/usage/breakdown?breakdown=source_id&usage_source=upstream' \
   -H "Authorization: Bearer $GATEWAY_ADMIN_KEY"
 
 curl 'http://127.0.0.1:8787/admin/usage/export?format=csv&status=failure' \
   -H "Authorization: Bearer $GATEWAY_ADMIN_KEY" -o usage-events.csv
 ```
 
-`events` 固定按 `(created_at DESC, request_id DESC)` 排序，`limit` 为 `1..500`；后续页应原样传回响应中的 `page.next_cursor`。Summary、timeseries 和 breakdown 的 Token 只累计每个逻辑请求的最终 Usage，不会因 fallback 重复；`upstream_attempts` 单独统计关联的上游尝试。CSV/JSON 导出复用完全相同的筛选与排序，且事件契约不包含 prompt/response 正文。
+`events` 固定按 `(created_at DESC, request_id DESC)` 排序，`limit` 为 `1..500`；后续页应原样传回响应中的 `page.next_cursor`。逻辑事件的 `source_id` 对应成功 attempt，全部失败时对应最终实际 attempt；attempt 明细也独立携带 `source_id`。Summary、timeseries 和 breakdown 的 Token 只累计每个逻辑请求的最终 Usage，不会因 fallback 重复；`upstream_attempts` 单独统计关联的上游尝试。CSV/JSON 导出复用完全相同的筛选与排序，显式区分 `source_id`/`client_source`，且事件契约不包含 prompt/response 正文。
 
 可通过 `GATEWAY_CONFIG_JSON` 初始化多个 Source、账号和固定路由（示例）：
 

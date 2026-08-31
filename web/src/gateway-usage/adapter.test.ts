@@ -25,14 +25,41 @@ describe('gateway usage adapter', () => {
     const page = adaptUsageEventPage(gatewayUsageEventsFixture);
     expect(page.hasMore).toBe(true);
     expect(page.nextCursor).toBe('cursor-2');
-    expect(page.events[0]).toMatchObject({ usageSource: 'estimated', retryCount: 1, fallback: true, account: 'fallback-account' });
+    expect(page.events[0]).toMatchObject({
+      usageSource: 'estimated',
+      retryCount: 1,
+      fallback: true,
+      sourceId: 'source-tokyo',
+      clientSource: 'codex-desktop',
+      account: 'fallback-account',
+    });
+    expect(page.events[0].attempts.map((attempt) => attempt.sourceId)).toEqual(['source-singapore', 'source-tokyo']);
     expect(page.events[0].attempts.map((attempt) => attempt.statusCode)).toEqual([429, 200]);
     expect(page.events[1]).toMatchObject({ usageSource: 'missing', success: false, tokens: { total: 0 } });
   });
 
-  it('also accepts the current flat E4.1a event shape during #15 integration', () => {
-    const page = adaptUsageEventPage({ events: [{ request_id: 'r1', created_at: '2026-08-30T00:00:00Z', model: 'm', source: 'client-a', status_code: 200, success: true, input_tokens: 2, output_tokens: 3, total_tokens: 5 }] });
-    expect(page.events[0]).toMatchObject({ requestId: 'r1', logicalModel: 'm', source: 'client-a', tokens: { input: 2, output: 3, total: 5 } });
+  it('keeps runtime Source and client-reported Source separate in the v1 event contract', () => {
+    const page = adaptUsageEventPage({
+      data: [{
+        request_id: 'r1',
+        created_at: '2026-08-30T00:00:00Z',
+        logical_model: 'm',
+        source_id: 'source-a',
+        client_source: 'client-a',
+        status_code: 200,
+        success: true,
+        input_tokens: 2,
+        output_tokens: 3,
+        total_tokens: 5,
+      }],
+    });
+    expect(page.events[0]).toMatchObject({
+      requestId: 'r1',
+      logicalModel: 'm',
+      sourceId: 'source-a',
+      clientSource: 'client-a',
+      tokens: { input: 2, output: 3, total: 5 },
+    });
   });
 
   it('matches the versioned #15 data/page envelope', () => {

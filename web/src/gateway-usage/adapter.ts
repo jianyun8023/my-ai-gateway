@@ -154,7 +154,7 @@ const adaptAttempt = (payload: unknown, fallbackIndex: number): UsageAttemptView
   return {
     attemptIndex: readNumber(item, ['attempt_index', 'attempt_no'], fallbackIndex),
     provider: readString(item, ['provider', 'provider_name', 'provider_id'], '—'),
-    source: readString(item, ['source_name', 'source_id', 'source'], '—'),
+    sourceId: readString(item, ['source_id'], 'unknown'),
     account: readString(item, ['account_name', 'account_id'], '—'),
     upstreamModel: readString(item, ['upstream_model', 'upstream_model_id'], '—'),
     protocolUpstream: readString(item, ['protocol_upstream', 'protocol_out'], '—'),
@@ -178,7 +178,8 @@ export const adaptUsageEvent = (payload: RawGatewayUsagePayload): UsageEventView
     logicalModel: readString(item, ['logical_model', 'model'], '—'),
     upstreamModel: readString(item, ['upstream_model_id', 'upstream_model'], '—'),
     provider: readString(item, ['provider_name', 'provider', 'provider_id'], '—'),
-    source: readString(item, ['source_name', 'source_id', 'source'], '—'),
+    sourceId: readString(item, ['source_id'], 'unknown'),
+    clientSource: readString(item, ['client_source'], 'unknown'),
     account: readString(item, ['account_name', 'account_id'], '—'),
     protocolIn: readString(item, ['protocol_in'], '—'),
     protocolUpstream: readString(item, ['protocol_upstream', 'protocol_out'], '—'),

@@ -11,7 +11,7 @@ describe('GatewayUsagePage logic', () => {
   });
 
   it('persists only supported columns and never allows an empty table', () => {
-    expect(normalizeVisibleEventColumns(['time', 'usageSource', 'cost'])).toEqual(['time', 'usageSource']);
+    expect(normalizeVisibleEventColumns(['time', 'clientSource', 'usageSource', 'cost'])).toEqual(['time', 'clientSource', 'usageSource']);
     expect(normalizeVisibleEventColumns([]).length).toBeGreaterThan(0);
   });
 
