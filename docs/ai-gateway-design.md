@@ -513,6 +513,8 @@ v1 响应 envelope 固定如下：summary 为 `{version, timezone, range, data}`
 - Keeper UI 字段改为网关原生字段；
 - Admin Session 登录。
 
+2026-08-31 控制台原型评审后，视觉基线采用 Tech-Utility 设计语言、Signal Green、固定桌面侧栏、紧凑顶部栏、卡片/表格和右侧详情抽屉；正式主导航仍只包含 Overview、Analysis、Request Events。设计 Token 与组件约束维护在 [`brand-spec.md`](brand-spec.md)，原型归档在 [`prototypes/ai-gateway-prototype.html`](prototypes/ai-gateway-prototype.html)，只作为设计参考，不参与构建。Source/Account、LogicalModel/SourceModel/ModelBinding/Route 必须继续按领域职责分离，不能照静态原型合并。响应式按 `<= 920px` overlay 侧栏、`<= 600px` 单列筛选/全宽 drawer、`<= 380px` 紧凑 KPI 渐进降级。实施与验收记录见 GitHub Issue #33。
+
 CPA Usage Keeper 只复用 React 页面和交互，不复用其 Go 后端、SQLite、CPA Redis queue 或 CPA Management API。[CPA Usage Keeper](https://github.com/Willxup/cpa-usage-keeper)
 
 ### 7.5 账号健康和生产化

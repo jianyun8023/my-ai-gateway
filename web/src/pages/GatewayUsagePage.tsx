@@ -1,11 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Bar, Doughnut, Line } from 'react-chartjs-2';
 import '@/lib/chartjs';
+import gatewayIcon from '@/assets/gateway-icon.svg';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { EmptyState } from '@/components/ui/EmptyState';
-import { GatewayUsageClient, type GatewayUsageFilters, type UsageBreakdownDimension, type UsageBreakdownItem, type UsageEventViewModel, type UsageOverviewViewModel } from '@/gateway-usage';
+import { IconChartLine, IconFileText, IconFilterAll, IconMenu, IconRefreshCw, IconX } from '@/components/ui/icons';
+import { GatewayUsageClient, type GatewayUsageFilters, type UsageBreakdownDimension, type UsageBreakdownItem, type UsageEventViewModel, type UsageOverviewViewModel, type UsageSummaryViewModel } from '@/gateway-usage';
 import { useThemeStore } from '@/stores/useThemeStore';
 import styles from './GatewayUsagePage.module.scss';
 
@@ -16,6 +18,24 @@ const TAB_LABELS: Record<GatewayUsageTab, string> = {
   overview: 'Overview',
   analysis: 'Analysis',
   events: 'Request Events',
+};
+
+const TAB_META: Record<GatewayUsageTab, { description: string; shortLabel: string; icon: ReactNode }> = {
+  overview: {
+    description: 'Token 总览、时间趋势与最近请求活动',
+    shortLabel: '总览',
+    icon: <IconFilterAll size={18} />,
+  },
+  analysis: {
+    description: '模型、Provider、Source、协议与延迟分布',
+    shortLabel: '用量分析',
+    icon: <IconChartLine size={18} />,
+  },
+  events: {
+    description: '请求元数据、fallback、attempt 与 Token 明细',
+    shortLabel: '请求事件',
+    icon: <IconFileText size={18} />,
+  },
 };
 
 const ADMIN_KEY_STORAGE_KEY = 'my-ai-gateway-admin-key-v1';
@@ -163,7 +183,21 @@ const formatBucket = (value: string): string => new Intl.DateTimeFormat(undefine
   minute: '2-digit',
 }).format(new Date(value));
 
-const makeChartColors = () => ['#5d7cfa', '#22b8a7', '#f0a44b', '#b77bf3', '#e76f83', '#64a7db', '#90a85b'];
+const formatDuration = (value: number): string => {
+  if (value <= 0) return '—';
+  if (value < 1000) return `${formatNumber(value)} ms`;
+  return `${(value / 1000).toFixed(value < 10_000 ? 1 : 0)} s`;
+};
+
+const makeChartColors = () => [
+  'oklch(58% 0.16 145)',
+  'oklch(74% 0.08 195)',
+  'oklch(70% 0.16 80)',
+  'oklch(78% 0.05 220)',
+  'oklch(58% 0.2 25)',
+  'oklch(66% 0.08 240)',
+  'oklch(68% 0.1 125)',
+];
 
 interface FilterBarProps {
   draft: GatewayUsageFilters;
@@ -201,7 +235,7 @@ function FilterBar({ draft, onChange, onApply, loading }: FilterBarProps) {
       <label>Virtual Key ID<input inputMode="numeric" value={draft.virtualKey ?? ''} onChange={(event) => update('virtualKey', event.target.value)} placeholder="全部" /></label>
       <label>状态<select value={draft.status ?? ''} onChange={(event) => update('status', event.target.value)}><option value="">全部</option><option value="success">成功</option><option value="failure">失败</option></select></label>
       <label>Usage source<select value={draft.usageSource ?? ''} onChange={(event) => update('usageSource', event.target.value)}><option value="">全部</option><option value="upstream">upstream</option><option value="parsed">parsed</option><option value="estimated">estimated</option><option value="missing">missing</option></select></label>
-      <Button className={styles.applyFilters} onClick={onApply} loading={loading}>应用筛选</Button>
+      <Button className={styles.applyFilters} variant="secondary" onClick={onApply} loading={loading}>应用筛选</Button>
     </section>
   );
 }
@@ -238,6 +272,47 @@ function extractMetricData(data: UsageOverviewViewModel, metric: TrendMetric): n
   }
 }
 
+function TokenComposition({ summary }: { summary: UsageSummaryViewModel }) {
+  const colors = makeChartColors();
+  const rows = [
+    { label: 'Input', value: summary.tokens.input, color: colors[0] },
+    { label: 'Output', value: summary.tokens.output, color: colors[1] },
+    { label: 'Reasoning', value: summary.tokens.reasoning, color: colors[2] },
+    { label: 'Cached', value: summary.tokens.cached, color: colors[3] },
+  ];
+  const compositionData = {
+    labels: rows.map((row) => row.label),
+    datasets: [{ data: rows.map((row) => row.value), backgroundColor: rows.map((row) => row.color), borderWidth: 0 }],
+  };
+
+  return (
+    <Card title="Token 构成" subtitle="原始 Token 口径，不依赖价格配置">
+      <div className={styles.tokenComposition}>
+        <div className={styles.chartSmall}><Doughnut data={compositionData} options={{ responsive: true, maintainAspectRatio: false, cutout: '70%', plugins: { legend: { display: false } } }} /></div>
+        <dl>{rows.map((row) => <div key={row.label}><dt><i style={{ background: row.color }} />{row.label}</dt><dd>{formatNumber(row.value)}</dd></div>)}</dl>
+      </div>
+    </Card>
+  );
+}
+
+function ModelDistribution({ rows }: { rows: UsageBreakdownItem[] }) {
+  const visibleRows = rows.slice(0, 6);
+  const maxTokens = Math.max(...visibleRows.map((row) => row.tokens.total), 1);
+
+  return (
+    <Card title="模型 Token 分布" subtitle="按 Logical model · Total Token 排序">
+      {visibleRows.length === 0 ? <EmptyState title="暂无模型分布" /> : (
+        <div className={styles.distributionList}>{visibleRows.map((row) => (
+          <div key={row.key}>
+            <div><strong>{row.label}</strong><span>{formatNumber(row.logicalRequests)} 请求 · {formatNumber(row.tokens.total)} Token</span></div>
+            <span className={styles.distributionTrack}><i style={{ width: `${Math.max(4, (row.tokens.total / maxTokens) * 100)}%` }} /></span>
+          </div>
+        ))}</div>
+      )}
+    </Card>
+  );
+}
+
 function Overview({ data, metric, onMetricChange }: { data: UsageOverviewViewModel; metric: TrendMetric; onMetricChange: (m: TrendMetric) => void }) {
   const { summary } = data;
   const hasData = summary.logicalRequests > 0 || summary.tokens.total > 0;
@@ -251,52 +326,45 @@ function Overview({ data, metric, onMetricChange }: { data: UsageOverviewViewMod
   const trendData = {
     labels: data.timeseries.map((point) => formatBucket(point.bucket)),
     datasets: [
-      { label: metricLabel, data: extractMetricData(data, metric), borderColor: colors[0], backgroundColor: 'rgba(93,124,250,.14)', fill: true, tension: 0.35 },
+      { label: metricLabel, data: extractMetricData(data, metric), borderColor: colors[0], backgroundColor: 'oklch(58% 0.16 145 / 0.14)', fill: true, tension: 0.35 },
       { label: secondaryLabel, data: extractMetricData(data, secondaryMetric), borderColor: colors[1], backgroundColor: colors[1], tension: 0.35, yAxisID: 'secondary' },
     ],
-  };
-  const compositionData = {
-    labels: ['Input', 'Output', 'Reasoning', 'Cached'],
-    datasets: [{ data: [summary.tokens.input, summary.tokens.output, summary.tokens.reasoning, summary.tokens.cached], backgroundColor: colors.slice(0, 4), borderWidth: 0 }],
   };
 
   return (
     <div className={styles.stack}>
-      <div className={styles.statsGrid}>
-        <Stat label="逻辑请求" value={formatNumber(summary.logicalRequests)} hint={`${formatNumber(summary.upstreamAttempts)} 次上游尝试`} />
+      <div className={styles.statsGrid} data-od-id="kpi-row">
+        <Stat label="逻辑请求" value={formatNumber(summary.logicalRequests)} hint={`${formatNumber(summary.upstreamAttempts)} 次上游尝试 · ${formatNumber(summary.retries)} 次重试`} />
         <Stat label="成功率" value={`${(summary.successRate * 100).toFixed(1)}%`} hint={`${summary.failedRequests} 次失败`} tone={summary.failedRequests > 0 ? 'warning' : 'success'} />
         <Stat label="Total Token" value={formatNumber(summary.tokens.total)} hint="最终逻辑请求口径" />
-        <Stat label="Input Token" value={formatNumber(summary.tokens.input)} />
-        <Stat label="Output Token" value={formatNumber(summary.tokens.output)} />
-        <Stat label="Reasoning Token" value={formatNumber(summary.tokens.reasoning)} />
-        <Stat label="Cached Token" value={formatNumber(summary.tokens.cached)} />
-        <Stat label="Fallback / 重试" value={formatNumber(summary.retries)} hint="不重复累计最终 Token" />
+        <Stat label="平均延迟" value={formatDuration(summary.averageLatencyMs)} hint={`P95 ${formatDuration(summary.p95LatencyMs)}`} />
       </div>
       <div className={styles.chartGrid}>
-        <Card title="用量趋势" subtitle="UTC 存储，按浏览器本地时区展示" extra={
+        <Card title="用量趋势" subtitle="UTC 存储，按浏览器本地时区展示" data-od-id="token-trend" extra={
           <select value={metric} onChange={(e) => onMetricChange(e.target.value as TrendMetric)} className={styles.metricSelect}>
             {TREND_METRICS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
           </select>
         }>
           <div className={styles.chartLarge}><Line data={trendData} options={{ responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, scales: { secondary: { position: 'right', grid: { display: false } } } }} /></div>
         </Card>
-        <Card title="Token 构成" subtitle="无价格配置时仍完整展示">
-          <div className={styles.chartSmall}><Doughnut data={compositionData} options={{ responsive: true, maintainAspectRatio: false, cutout: '68%' }} /></div>
-        </Card>
+        <TokenComposition summary={summary} />
       </div>
-      <Card title="最近活动" subtitle="仅显示请求元数据，不包含 prompt / response 正文">
-        <div className={styles.recentList}>
-          {data.recentEvents.map((event) => (
-            <div key={`${event.id}:${event.createdAt}`}>
-              <span className={styles.statusDot} data-success={event.success} />
-              <time>{formatTime(event.createdAt)}</time>
-              <strong>{event.logicalModel}</strong>
-              <span>{event.provider} · {event.source} / {event.account}</span>
-              <em>{formatNumber(event.tokens.total)} Token</em>
-            </div>
-          ))}
-        </div>
-      </Card>
+      <div className={styles.overviewLowerGrid}>
+        <Card title="最近活动" subtitle="仅显示请求元数据，不包含 prompt / response 正文" data-od-id="recent-activity">
+          {data.recentEvents.length === 0 ? <EmptyState title="暂无最近请求" /> : (
+            <div className={styles.recentList}>{data.recentEvents.map((event) => (
+              <div key={`${event.id}:${event.createdAt}`}>
+                <span className={styles.statusDot} data-success={event.success} />
+                <time>{formatTime(event.createdAt)}</time>
+                <strong>{event.logicalModel}</strong>
+                <span>{event.provider} · {event.source} / {event.account}</span>
+                <em>{formatNumber(event.tokens.total)} Token</em>
+              </div>
+            ))}</div>
+          )}
+        </Card>
+        <div data-od-id="model-distribution"><ModelDistribution rows={data.logicalModels} /></div>
+      </div>
     </div>
   );
 }
@@ -305,7 +373,7 @@ const ANALYSIS_DIMENSIONS: Array<{ dimension: UsageBreakdownDimension; title: st
   { dimension: 'logical_model', title: 'Logical model' },
   { dimension: 'upstream_model', title: 'Upstream model' },
   { dimension: 'provider', title: 'Provider' },
-  { dimension: 'source', title: 'Client Source' },
+  { dimension: 'source', title: 'Source / Client Source' },
   { dimension: 'account', title: 'Account' },
   { dimension: 'protocol_in', title: '入站协议' },
   { dimension: 'protocol_upstream', title: '上游协议' },
@@ -324,20 +392,23 @@ function BreakdownChart({ title, rows }: { title: string; rows: UsageBreakdownIt
   );
 }
 
-function Analysis({ breakdowns }: { breakdowns: Partial<Record<UsageBreakdownDimension, UsageBreakdownItem[]>> }) {
+function Analysis({ breakdowns, summary }: { breakdowns: Partial<Record<UsageBreakdownDimension, UsageBreakdownItem[]>>; summary: UsageSummaryViewModel }) {
   const allRows = Object.values(breakdowns).flatMap((rows) => rows ?? []);
   const latencyRows = [...allRows].filter((row) => row.averageLatencyMs !== undefined).sort((a, b) => (b.averageLatencyMs ?? 0) - (a.averageLatencyMs ?? 0)).slice(0, 8);
-  if (allRows.length === 0) return <EmptyState title="当前范围暂无分析数据" description="分布数据由网关 Usage breakdown API 提供。" />;
+  if (allRows.length === 0 && summary.tokens.total === 0) return <EmptyState title="当前范围暂无分析数据" description="分布数据由网关 Usage breakdown API 提供。" />;
   return (
-    <div className={styles.analysisGrid}>
-      {ANALYSIS_DIMENSIONS.map(({ dimension, title }) => <BreakdownChart key={dimension} title={title} rows={breakdowns[dimension] ?? []} />)}
-      <Card title="延迟诊断" subtitle="按聚合维度显示平均延迟">
-        {latencyRows.length === 0 ? <EmptyState title="暂无延迟聚合" /> : (
-          <div className={styles.breakdownChart}>
-            <Bar data={{ labels: latencyRows.map((item) => item.label), datasets: [{ label: '平均延迟（ms）', data: latencyRows.map((item) => item.averageLatencyMs ?? 0), backgroundColor: makeChartColors()[2], borderRadius: 6 }] }} options={{ responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }} />
-          </div>
-        )}
-      </Card>
+    <div className={styles.stack}>
+      <TokenComposition summary={summary} />
+      <div className={styles.analysisGrid}>
+        {ANALYSIS_DIMENSIONS.map(({ dimension, title }) => <BreakdownChart key={dimension} title={title} rows={breakdowns[dimension] ?? []} />)}
+        <Card title="延迟诊断" subtitle="按聚合维度显示平均延迟">
+          {latencyRows.length === 0 ? <EmptyState title="暂无延迟聚合" /> : (
+            <div className={styles.breakdownChart}>
+              <Bar data={{ labels: latencyRows.map((item) => item.label), datasets: [{ label: '平均延迟（ms）', data: latencyRows.map((item) => item.averageLatencyMs ?? 0), backgroundColor: makeChartColors()[2], borderRadius: 6 }] }} options={{ responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }} />
+            </div>
+          )}
+        </Card>
+      </div>
     </div>
   );
 }
@@ -416,7 +487,7 @@ function EventDetails({ event, onClose, client }: { event: UsageEventViewModel; 
 
   return (
     <div className={styles.drawerBackdrop} role="presentation" onMouseDown={(mouseEvent) => mouseEvent.target === mouseEvent.currentTarget && onClose()}>
-      <aside className={styles.drawer} role="dialog" aria-modal="true" aria-label="请求事件详情">
+      <aside className={styles.drawer} role="dialog" aria-modal="true" aria-label="请求事件详情" data-od-id="event-drawer">
         <header><div><span>Request Event</span><h2>{event.requestId}</h2></div><Button variant="ghost" onClick={onClose}>关闭</Button></header>
         <section className={styles.detailGrid}>
           <div><span>时间</span><strong>{formatTime(event.createdAt)}</strong></div>
@@ -476,7 +547,7 @@ function EventsTable({ events, hasMore, loadingMore, onLoadMore, visibleColumns,
   if (events.length === 0) return <EmptyState title="当前范围没有请求事件" description="事件详情只包含元数据与脱敏错误摘要。" />;
 
   return (
-    <Card variant="flush" title="请求事件" subtitle="稳定游标分页 · 虚拟滚动" extra={<div className={styles.eventActions}><details><summary>列偏好</summary><div className={styles.columnMenu}>{EVENT_COLUMNS.map((column) => <label key={column}><input type="checkbox" checked={visibleColumns.includes(column)} onChange={() => onVisibleColumnsChange(visibleColumns.includes(column) ? visibleColumns.filter((item) => item !== column) : EVENT_COLUMNS.filter((item) => visibleColumns.includes(item) || item === column))} />{EVENT_COLUMN_LABELS[column]}</label>)}</div></details><Button size="sm" variant="secondary" onClick={() => onExport('csv')}>导出 CSV</Button><Button size="sm" variant="secondary" onClick={() => onExport('json')}>导出 JSON</Button></div>}>
+    <Card variant="flush" title="请求事件" subtitle="稳定游标分页 · 虚拟滚动" data-od-id="events-table" extra={<div className={styles.eventActions}><details><summary>列偏好</summary><div className={styles.columnMenu}>{EVENT_COLUMNS.map((column) => <label key={column}><input type="checkbox" checked={visibleColumns.includes(column)} onChange={() => onVisibleColumnsChange(visibleColumns.includes(column) ? visibleColumns.filter((item) => item !== column) : EVENT_COLUMNS.filter((item) => visibleColumns.includes(item) || item === column))} />{EVENT_COLUMN_LABELS[column]}</label>)}</div></details><Button size="sm" variant="secondary" onClick={() => onExport('csv')}>导出 CSV</Button><Button size="sm" variant="secondary" onClick={() => onExport('json')}>导出 JSON</Button></div>}>
       <div className={styles.eventTable} style={{ '--event-columns': visibleColumns.length } as CSSProperties}>
         <div className={styles.eventHeader}>{visibleColumns.map((column) => <span key={column}>{EVENT_COLUMN_LABELS[column]}</span>)}</div>
         <div ref={parentRef} className={styles.eventScroll}>
@@ -500,12 +571,14 @@ function EventsTable({ events, hasMore, loadingMore, onLoadMore, visibleColumns,
 
 export function GatewayUsagePage() {
   const [activeTab, setActiveTab] = useState<GatewayUsageTab>(() => resolveGatewayUsageTab(window.location.hash));
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [adminKey, setAdminKey] = useState(() => safeSessionRead(ADMIN_KEY_STORAGE_KEY));
   const adminKeyRef = useRef(adminKey);
   const clientRef = useRef(new GatewayUsageClient({ getAdminKey: () => adminKeyRef.current }));
   const [draftFilters, setDraftFilters] = useState<GatewayUsageFilters>(safeParseFilters);
   const [filters, setFilters] = useState<GatewayUsageFilters>(draftFilters);
   const [overview, setOverview] = useState<UsageOverviewViewModel>();
+  const [analysisSummary, setAnalysisSummary] = useState<UsageSummaryViewModel>();
   const [breakdowns, setBreakdowns] = useState<Partial<Record<UsageBreakdownDimension, UsageBreakdownItem[]>>>({});
   const [events, setEvents] = useState<UsageEventViewModel[]>([]);
   const [nextCursor, setNextCursor] = useState<string>();
@@ -527,10 +600,14 @@ export function GatewayUsagePage() {
         const granularityParam = granularity === 'auto' ? undefined : granularity;
         setOverview(await clientRef.current.overview(filters, granularityParam, signal));
       } else if (activeTab === 'analysis') {
-        const results = await Promise.all(ANALYSIS_DIMENSIONS.map(async ({ dimension }) => [
-          dimension,
-          await clientRef.current.breakdown(filters, dimension, signal),
-        ] as const));
+        const [summary, results] = await Promise.all([
+          clientRef.current.summary(filters, signal),
+          Promise.all(ANALYSIS_DIMENSIONS.map(async ({ dimension }) => [
+            dimension,
+            await clientRef.current.breakdown(filters, dimension, signal),
+          ] as const)),
+        ]);
+        setAnalysisSummary(summary);
         setBreakdowns(Object.fromEntries(results));
       } else {
         const page = await clientRef.current.events({ filters, limit: 100 }, signal);
@@ -547,9 +624,39 @@ export function GatewayUsagePage() {
   }, [activeTab, filters, granularity]);
 
   useEffect(() => {
-    const onHashChange = () => setActiveTab(resolveGatewayUsageTab(window.location.hash));
+    const onHashChange = () => {
+      setActiveTab(resolveGatewayUsageTab(window.location.hash));
+      setMobileNavOpen(false);
+    };
     window.addEventListener('hashchange', onHashChange);
     return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
+
+  useEffect(() => {
+    if (!mobileNavOpen) {
+      document.body.style.overflow = '';
+      return;
+    }
+    const previousOverflow = document.body.style.overflow;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMobileNavOpen(false);
+    };
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [mobileNavOpen]);
+
+  useEffect(() => {
+    const media = window.matchMedia?.('(max-width: 920px)');
+    if (!media) return;
+    const closeOnDesktop = () => {
+      if (!media.matches) setMobileNavOpen(false);
+    };
+    media.addEventListener('change', closeOnDesktop);
+    return () => media.removeEventListener('change', closeOnDesktop);
   }, []);
 
   useEffect(() => {
@@ -561,6 +668,7 @@ export function GatewayUsagePage() {
   const navigate = (tab: GatewayUsageTab) => {
     window.location.hash = tab;
     setActiveTab(tab);
+    setMobileNavOpen(false);
   };
 
   const applyFilters = () => {
@@ -617,39 +725,63 @@ export function GatewayUsagePage() {
   const localTimeZone = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone, []);
 
   return (
-    <div className={styles.page}>
-      <header className={styles.topbar}>
-        <div className={styles.brand}><span>G</span><div><strong>my-ai-gateway</strong><small>Usage Console</small></div></div>
-        <nav aria-label="主导航">{GATEWAY_USAGE_TABS.map((tab) => <button key={tab} data-active={activeTab === tab} onClick={() => navigate(tab)}>{TAB_LABELS[tab]}</button>)}</nav>
-        <div className={styles.headerActions}>
-          <label className={styles.keyInput}>Admin Key<input type="password" value={adminKey} onChange={(event) => setAdminKey(event.target.value)} placeholder="未配置时可留空" /><Button size="sm" variant="secondary" onClick={saveAdminKey}>应用</Button></label>
-          <Button size="sm" variant="ghost" onClick={() => setTheme(theme === 'dark' ? 'white' : 'dark')}>{theme === 'dark' ? '浅色' : '深色'}</Button>
-          <Button size="sm" onClick={() => void loadActiveTab()} loading={loading}>刷新</Button>
+    <div className={styles.page} data-od-id={`page-${activeTab}`}>
+      <aside id="gateway-navigation" className={styles.sidebar} data-open={mobileNavOpen} data-od-id="sidebar" aria-label="控制台侧栏">
+        <div className={styles.brand}>
+          <img src={gatewayIcon} alt="" />
+          <div><strong>AI Gateway</strong><small>my-ai-gateway</small></div>
+          <button type="button" className={styles.sidebarClose} aria-label="关闭导航" onClick={() => setMobileNavOpen(false)}><IconX size={18} /></button>
         </div>
-      </header>
-      <main className={styles.main}>
-        <section className={styles.pageHeading}><div><span>PostgreSQL Usage Events</span><h1>{TAB_LABELS[activeTab]}</h1><p>逻辑请求与上游尝试分开统计 · 本地时区：{localTimeZone}</p></div><aside><strong>UTC</strong><span>存储边界</span></aside></section>
-        <FilterBar draft={draftFilters} onChange={setDraftFilters} onApply={applyFilters} loading={loading} />
-        {activeTab === 'overview' && (
-          <div className={styles.granularityBar}>
-            <span>时间粒度</span>
-            {(['auto', 'hour', 'day'] as const).map((g) => (
-              <button key={g} data-active={granularity === g} onClick={() => setGranularity(g)}>
-                {g === 'auto' ? '自动' : g === 'hour' ? '小时' : '天'}
-              </button>
-            ))}
+        <nav aria-label="主导航">
+          <span className={styles.navSection}>监控</span>
+          {GATEWAY_USAGE_TABS.map((tab) => (
+            <button key={tab} type="button" data-active={activeTab === tab} aria-current={activeTab === tab ? 'page' : undefined} onClick={() => navigate(tab)}>
+              <span className={styles.navIcon}>{TAB_META[tab].icon}</span>
+              <span><strong>{TAB_LABELS[tab]}</strong><small>{TAB_META[tab].shortLabel}</small></span>
+            </button>
+          ))}
+        </nav>
+        <div className={styles.sidebarFooter}><strong>UTC</strong><span>PostgreSQL 存储边界</span><small>{localTimeZone} 展示</small></div>
+      </aside>
+      <button type="button" className={styles.mobileOverlay} data-open={mobileNavOpen} aria-label="关闭导航遮罩" tabIndex={mobileNavOpen ? 0 : -1} onClick={() => setMobileNavOpen(false)} />
+
+      <section className={styles.workspace}>
+        <header className={styles.topbar} data-od-id="topbar">
+          <button type="button" className={styles.mobileMenuButton} aria-label="打开导航" aria-controls="gateway-navigation" aria-expanded={mobileNavOpen} onClick={() => setMobileNavOpen(true)}><IconMenu size={20} /></button>
+          <div className={styles.topbarTitle}><strong>{TAB_LABELS[activeTab]}</strong><small>{TAB_META[activeTab].shortLabel}</small></div>
+          <div className={styles.headerActions}>
+            <label className={styles.keyInput}><span>Admin Key</span><input type="password" value={adminKey} onChange={(event) => setAdminKey(event.target.value)} placeholder="可留空" /><Button size="sm" variant="secondary" onClick={saveAdminKey}>应用</Button></label>
+            <Button size="sm" variant="ghost" onClick={() => setTheme(theme === 'dark' ? 'white' : 'dark')}>{theme === 'dark' ? '浅色' : '深色'}</Button>
+            <Button size="sm" variant="secondary" onClick={() => void loadActiveTab()} loading={loading}><IconRefreshCw size={14} />刷新</Button>
           </div>
-        )}
-        {error && <div className={styles.errorBanner} role="alert"><span>{error}</span><Button size="sm" variant="secondary" onClick={() => void loadActiveTab()}>重试</Button></div>}
-        {loading && !error ? <div className={styles.loadingState} aria-busy="true">正在加载网关用量…</div> : (
-          activeTab === 'overview'
-            ? overview && <Overview data={overview} metric={trendMetric} onMetricChange={setTrendMetric} />
-            : activeTab === 'analysis'
-              ? <Analysis breakdowns={breakdowns} />
-              : <EventsTable events={events} hasMore={hasMore} loadingMore={loadingMore} onLoadMore={() => void loadMore()} visibleColumns={visibleColumns} onVisibleColumnsChange={changeVisibleColumns} onExport={(format) => void exportEvents(format)} client={clientRef.current} />
-        )}
-      </main>
-      <footer className={styles.footer}>my-ai-gateway · UI interactions adapted from CPA Usage Keeper under the MIT License</footer>
+        </header>
+
+        <main className={styles.main}>
+          <section className={styles.pageHeading}>
+            <div><span>PostgreSQL Usage Events</span><h1>{TAB_LABELS[activeTab]}</h1><p>{TAB_META[activeTab].description} · 本地时区：{localTimeZone}</p></div>
+          </section>
+          <FilterBar draft={draftFilters} onChange={setDraftFilters} onApply={applyFilters} loading={loading} />
+          {activeTab === 'overview' && (
+            <div className={styles.granularityBar}>
+              <span>时间粒度</span>
+              {(['auto', 'hour', 'day'] as const).map((g) => (
+                <button key={g} data-active={granularity === g} onClick={() => setGranularity(g)}>
+                  {g === 'auto' ? '自动' : g === 'hour' ? '小时' : '天'}
+                </button>
+              ))}
+            </div>
+          )}
+          {error && <div className={styles.errorBanner} role="alert"><span>{error}</span><Button size="sm" variant="secondary" onClick={() => void loadActiveTab()}>重试</Button></div>}
+          {loading && !error ? <div className={styles.loadingState} aria-busy="true">正在加载网关用量…</div> : (
+            activeTab === 'overview'
+              ? overview && <Overview data={overview} metric={trendMetric} onMetricChange={setTrendMetric} />
+              : activeTab === 'analysis'
+                ? analysisSummary && <Analysis breakdowns={breakdowns} summary={analysisSummary} />
+                : <EventsTable events={events} hasMore={hasMore} loadingMore={loadingMore} onLoadMore={() => void loadMore()} visibleColumns={visibleColumns} onVisibleColumnsChange={changeVisibleColumns} onExport={(format) => void exportEvents(format)} client={clientRef.current} />
+          )}
+        </main>
+        <footer className={styles.footer}>my-ai-gateway · UI interactions adapted from CPA Usage Keeper under the MIT License</footer>
+      </section>
     </div>
   );
 }

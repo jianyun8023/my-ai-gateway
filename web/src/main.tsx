@@ -5,6 +5,7 @@ import faviconUrl from './assets/gateway-icon.svg';
 import './styles/reset.scss';
 import './styles/variables.scss';
 import './styles/themes.scss';
+import './styles/gateway-brand.scss';
 import './styles/layout.scss';
 import './styles/components.scss';
 import './styles/global.scss';
