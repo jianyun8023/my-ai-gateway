@@ -215,6 +215,12 @@ function ensureDirectory(directory) {
   chmodSync(directory, 0o700)
 }
 
+export function secureFile(filePath) {
+  if (!existsSync(filePath)) return false
+  chmodSync(filePath, 0o600)
+  return true
+}
+
 function prepareWorkspace(workspace, canary) {
   ensureDirectory(workspace)
   const canaryPath = path.join(workspace, 'CANARY.txt')
@@ -223,7 +229,7 @@ function prepareWorkspace(workspace, canary) {
     check(current.startsWith('codex-gateway-'), 'refusing to overwrite an unrelated workspace CANARY.txt')
   }
   writeFileSync(canaryPath, `${canary}\n`, { mode: 0o600 })
-  chmodSync(canaryPath, 0o600)
+  secureFile(canaryPath)
   return canaryPath
 }
 
@@ -431,7 +437,7 @@ async function runCase(context, testCase, options, runId, canary) {
     baseUrl: context.gatewayBaseUrl,
     clientSource,
   }), { mode: 0o600 })
-  chmodSync(configPath, 0o600)
+  secureFile(configPath)
   const outputPath = path.join(options.home, `.last-message-${testCase.id.replaceAll('.', '-')}.txt`)
   const prompt = testCase.kind === 'tool' ? toolPrompt(canary) : searchPrompt()
   const args = buildCodexArgs({
@@ -457,7 +463,10 @@ async function runCase(context, testCase, options, runId, canary) {
   const parsed = parseCodexJsonLines(result.stdout)
   const summary = summarizeCodexEvents(parsed.events, canary)
   let finalText = ''
-  try { finalText = readFileSync(outputPath, 'utf8') } catch {}
+  try {
+    secureFile(outputPath)
+    finalText = readFileSync(outputPath, 'utf8')
+  } catch {}
   const evaluation = testCase.kind === 'tool'
     ? evaluateToolResult(finalText, summary, canary)
     : evaluateSearchResult(finalText, summary)
@@ -549,7 +558,7 @@ async function main() {
   }
   const outputPath = path.join(options.outputDirectory, `${runId}.json`)
   writeFileSync(outputPath, `${JSON.stringify(artifact, null, 2)}\n`, { mode: 0o600 })
-  chmodSync(outputPath, 0o600)
+  secureFile(outputPath)
   console.log(`RESULT ${path.relative(repositoryRoot, outputPath)}`)
   console.log(`SUMMARY passed=${summary.passed} failed=${summary.failed}`)
   if (summary.failed > 0) process.exitCode = 1

@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict'
+import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import test from 'node:test'
 
 import {
@@ -11,6 +14,7 @@ import {
   parseArguments,
   parseCodexJsonLines,
   sanitizeCodexEnvironment,
+  secureFile,
   selectCases,
   summarizeCodexEvents,
 } from './codex-e2e-smoke.mjs'
@@ -66,6 +70,19 @@ test('Admin Usage queries strip only the Responses /v1 suffix', () => {
   assert.equal(gatewayAdminBaseUrl('http://127.0.0.1:8788/v1'), 'http://127.0.0.1:8788')
   assert.equal(gatewayAdminBaseUrl('https://gateway.example.test/api/v1/'), 'https://gateway.example.test/api')
   assert.equal(gatewayAdminBaseUrl('http://127.0.0.1:8788'), 'http://127.0.0.1:8788')
+})
+
+test('Codex output files are reduced to owner-only permissions', () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), 'codex-e2e-permissions-'))
+  const filePath = path.join(directory, 'final.txt')
+  try {
+    writeFileSync(filePath, 'test', { mode: 0o664 })
+    assert.equal(secureFile(filePath), true)
+    assert.equal(statSync(filePath).mode & 0o777, 0o600)
+    assert.equal(secureFile(path.join(directory, 'missing.txt')), false)
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
 })
 
 test('search flag is placed before the exec subcommand', () => {
