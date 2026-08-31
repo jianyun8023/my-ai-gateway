@@ -231,7 +231,7 @@ fn insert_resolved_route(
         &resolved.route_id,
         resolved.protocol_in,
         binding_id,
-        &resolved.provider_id,
+        &resolved.source_id,
         &resolved.primary_account_id,
         &resolved.upstream_model_id,
         resolved.protocol_upstream,
@@ -265,7 +265,7 @@ fn insert_fallback_binding(
         &resolved.route_id,
         resolved.protocol_in,
         binding.binding_id,
-        &binding.provider_id,
+        &binding.source_id,
         &binding.account_id,
         &binding.upstream_model_id,
         binding.protocol_upstream,
@@ -521,6 +521,7 @@ mod tests {
     ) -> RuntimeBinding {
         RuntimeBinding {
             binding_id,
+            source_id: source_id.into(),
             provider_id: source_id.into(),
             account_id: account_id.into(),
             upstream_model_id: upstream_model_id.into(),

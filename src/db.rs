@@ -276,6 +276,11 @@ impl Database {
         ))
         .execute(&mut *tx)
         .await?;
+        sqlx::raw_sql(include_str!(
+            "../migrations/0010_usage_provider_attribution.sql"
+        ))
+        .execute(&mut *tx)
+        .await?;
         tx.commit().await
     }
 
@@ -1022,6 +1027,11 @@ mod tests {
         assert!(source_schema.contains("RENAME COLUMN source TO client_source"));
         assert!(source_schema.contains("ADD COLUMN IF NOT EXISTS source_id TEXT"));
         assert!(!source_schema.contains("REFERENCES sources"));
+        let provider_schema = include_str!("../migrations/0010_usage_provider_attribution.sql");
+        assert!(provider_schema.contains("source.provider_preset_id"));
+        assert!(provider_schema.contains("provider_id = event.source_id"));
+        assert!(provider_schema.contains("provider_id = attempt.source_id"));
+        assert!(provider_schema.contains("'unknown'"));
     }
 
     #[tokio::test]
@@ -1111,6 +1121,91 @@ mod tests {
             .execute(&admin)
             .await
             .expect("drop isolated usage migration schema");
+        admin.close().await;
+    }
+
+    #[tokio::test]
+    async fn postgres_repairs_db_first_provider_attribution_without_guessing_deleted_sources() {
+        let Ok(url) = std::env::var("TEST_DATABASE_URL") else {
+            eprintln!("skipping PostgreSQL provider attribution migration test: TEST_DATABASE_URL is not set");
+            return;
+        };
+        let admin = PgPoolOptions::new()
+            .max_connections(2)
+            .connect(&url)
+            .await
+            .expect("connect PostgreSQL provider attribution migration admin database");
+        let schema = format!("usage_provider_{}", uuid::Uuid::new_v4().simple());
+        sqlx::query(&format!("CREATE SCHEMA \"{schema}\""))
+            .execute(&admin)
+            .await
+            .expect("create isolated provider attribution migration schema");
+        let options = PgConnectOptions::from_str(&url)
+            .expect("parse TEST_DATABASE_URL")
+            .options([("search_path", schema.as_str())]);
+        let pool = PgPoolOptions::new()
+            .max_connections(2)
+            .connect_with(options)
+            .await
+            .expect("connect isolated provider attribution migration schema");
+        let database = Database::from_test_pool(pool.clone())
+            .await
+            .expect("apply migrations in provider attribution schema");
+
+        sqlx::query("INSERT INTO provider_presets (id,version,display_name,definition) VALUES ('provider-a',1,'Provider A','{}'::jsonb)")
+            .execute(&pool)
+            .await
+            .expect("insert provider preset fixture");
+        sqlx::query("INSERT INTO sources (id,display_name,provider_preset_id,provider_preset_version,provider_preset_snapshot,base_url) VALUES ('source-a','Source A','provider-a',1,'{}'::jsonb,'https://source-a.example'),('source-b','Source B','provider-a',1,'{}'::jsonb,'https://source-b.example')")
+            .execute(&pool)
+            .await
+            .expect("insert Source fixtures");
+        sqlx::query("INSERT INTO usage_events (request_id,provider_id,account_id,model,logical_model,source_id,client_source,protocol_in,protocol_upstream,mode,status_code,success) VALUES ('mapped-a','source-a','account-a','model','model','source-a','test','openai_responses','openai_responses','native',200,TRUE),('mapped-b','source-b','account-b','model','model','source-b','test','openai_responses','openai_responses','native',200,TRUE),('deleted','deleted-source','account-deleted','model','model','deleted-source','test','openai_responses','openai_responses','native',200,TRUE),('legacy','legacy-provider','legacy-account','model','model',NULL,'test','openai_responses','openai_responses','native',200,TRUE)")
+            .execute(&pool)
+            .await
+            .expect("insert provider attribution event fixtures");
+        sqlx::query("INSERT INTO usage_event_attempts (request_id,attempt_no,provider_id,source_id,account_id,status_code,success) VALUES ('mapped-a',0,'source-a','source-a','account-a',200,TRUE),('mapped-b',0,'source-b','source-b','account-b',200,TRUE),('deleted',0,'deleted-source','deleted-source','account-deleted',200,TRUE),('legacy',0,'legacy-provider',NULL,'legacy-account',200,TRUE)")
+            .execute(&pool)
+            .await
+            .expect("insert provider attribution attempt fixtures");
+
+        for _ in 0..2 {
+            sqlx::raw_sql(include_str!(
+                "../migrations/0010_usage_provider_attribution.sql"
+            ))
+            .execute(&pool)
+            .await
+            .expect("replay provider attribution migration");
+        }
+
+        let events: Vec<(String, String)> =
+            sqlx::query_as("SELECT request_id,provider_id FROM usage_events ORDER BY request_id")
+                .fetch_all(&pool)
+                .await
+                .expect("query repaired provider event attribution");
+        assert_eq!(
+            events,
+            vec![
+                ("deleted".into(), "unknown".into()),
+                ("legacy".into(), "legacy-provider".into()),
+                ("mapped-a".into(), "provider-a".into()),
+                ("mapped-b".into(), "provider-a".into()),
+            ]
+        );
+        let attempts: Vec<(String, String)> = sqlx::query_as(
+            "SELECT request_id,provider_id FROM usage_event_attempts ORDER BY request_id",
+        )
+        .fetch_all(&pool)
+        .await
+        .expect("query repaired provider attempt attribution");
+        assert_eq!(attempts, events);
+
+        drop(database);
+        pool.close().await;
+        sqlx::query(&format!("DROP SCHEMA \"{schema}\" CASCADE"))
+            .execute(&admin)
+            .await
+            .expect("drop isolated provider attribution migration schema");
         admin.close().await;
     }
 

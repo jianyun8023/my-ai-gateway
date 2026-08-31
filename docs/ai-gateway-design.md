@@ -252,9 +252,9 @@ ProviderPreset 与发现确认阶段不改变 Route，也不把发现结果自�
 - 候选请求使用自己的 Source Base URL、协议 endpoint 和 Account 凭据；请求体顶层 `model` 按实际 Binding 的 `upstream_model_id` 重写。开发期初始化配置中的账号 `model_map` 也会在三类协议主路径和 fallback 路径生效。
 - 跨 Source/Provider fallback 只允许原生协议链。Adapter 路由不能跨 Provider fallback；非法方向、多段转换和缺失 endpoint 会在配置或控制面事务中被拒绝。
 - 响应已经开始向下游发送后不能再切换账号。
-- 每次上游尝试写入独立 UsageAttempt；逻辑 UsageEvent 成功时归因最终成功 attempt，全部失败时归因最后一次实际 attempt，并保留实际 `source_id`、`account_id` 和 `upstream_model_id`。
+- 每次上游尝试写入独立 UsageAttempt；逻辑 UsageEvent 成功时归因最终成功 attempt，全部失败时归因最后一次实际 attempt，并保留固化的 `provider_preset_id` 作为 `provider_id`，以及实际 `source_id`、`account_id` 和 `upstream_model_id`。
 
-已知限制：账号健康状态仍只保存在内存中，持久化与主动探测由 #52 跟踪；当前 DB-first snapshot 仍把 Source ID 同时用作 Usage 的 `provider_id`，Provider 与 Source 的独立归因由 #56 修正。具体 Source 与 Binding 初始化示例见 [`config.example.json`](../config.example.json)，凭据只允许通过服务端 Secret 配置。
+已知限制：账号健康状态仍只保存在内存中，持久化与主动探测由 #52 跟踪。Provider 与 Source 已独立归因：同一 ProviderPreset 的多个 Source 使用相同 `provider_id`，但各自保留实际 `source_id`。具体 Source 与 Binding 初始化示例见 [`config.example.json`](../config.example.json)，凭据只允许通过服务端 Secret 配置。
 
 ## 4. 请求处理流程
 
@@ -453,11 +453,11 @@ Kimi Adapter：
 - `GET /admin/usage/export?format=csv|json` 按与 events 相同的筛选和排序导出全部匹配事件；不包含 prompt/response 正文。
 - `GET /admin/usage/aggregate` 保留为 summary、timeseries 和单一 breakdown 的组合入口，响应与独立入口共享 `version: v1` 契约。
 
-所有 Usage 查询共享组合筛选参数：`from`、`to`、`logical_model`、`upstream_model`、`provider`、`source_id`、`client_source`、`account`、`protocol_in`、`protocol_upstream`、`virtual_key`、`status`、`status_code` 和 `usage_source`。`from`/`to` 接受带 offset 的 RFC3339，服务端转换为 UTC，并以半开区间 `[from,to)` 解释；响应桶固定为 UTC，UI 只在展示层换算本地时区。`source_id` 来自 DB-first RuntimeRoute/Binding 的最终实际 attempt；可选下游 `X-Client-Source` 只写入 `client_source`，缺省为 `unknown`，不参与路由或认证。
+所有 Usage 查询共享组合筛选参数：`from`、`to`、`logical_model`、`upstream_model`、`provider`、`source_id`、`client_source`、`account`、`protocol_in`、`protocol_upstream`、`virtual_key`、`status`、`status_code` 和 `usage_source`。`from`/`to` 接受带 offset 的 RFC3339，服务端转换为 UTC，并以半开区间 `[from,to)` 解释；响应桶固定为 UTC，UI 只在展示层换算本地时区。`provider` 来自 Source 固化的 `provider_preset_id`，`source_id` 来自 DB-first RuntimeRoute/Binding 的最终实际 attempt；可选下游 `X-Client-Source` 只写入 `client_source`，缺省为 `unknown`，不参与路由或认证。
 
 v1 响应 envelope 固定如下：summary 为 `{version, timezone, range, data}`；timeseries 额外返回 `granularity`，每个 `data` 元素包含 UTC `bucket`；breakdown 额外返回 `dimension`，每个元素使用可空 `key` 表示分组值；events 返回 `{data, page:{limit, has_more, next_cursor}}`。聚合指标统一包含 `logical_requests`、`upstream_attempts`、`retries`、`successes`、`failures`、`success_rate`、`average_latency_ms`、`p95_latency_ms` 和五类 Token；breakdown 另含 `logical_request_share`、`total_token_share`。客户端应把 `next_cursor` 视作不透明值并原样传回。
 
-聚合中的 `logical_requests`、成功/失败、延迟和 Token 来自筛选后的 `usage_events`，因此每个逻辑请求和最终 Usage 只累计一次。`upstream_attempts` 来自这些逻辑请求关联的 `usage_event_attempts`；`retries` 来自逻辑事件的重试计数。Provider、Source、Client Source、Account、协议等筛选先选择逻辑请求，再统计其关联 attempt，避免把失败 fallback 的 Token 当成已确认 Usage。每个 attempt 仍独立保存自己的 `source_id`，使跨 Source fallback 可审计；逻辑事件成功时归因成功 attempt，全部失败时归因最终实际 attempt。`usage_source=missing` 的请求保留请求数但 Token 为零。
+聚合中的 `logical_requests`、成功/失败、延迟和 Token 来自筛选后的 `usage_events`，因此每个逻辑请求和最终 Usage 只累计一次。`upstream_attempts` 来自这些逻辑请求关联的 `usage_event_attempts`；`retries` 来自逻辑事件的重试计数。Provider、Source、Client Source、Account、协议等筛选先选择逻辑请求，再统计其关联 attempt，避免把失败 fallback 的 Token 当成已确认 Usage。每个 attempt 独立保存 `provider_id` 与 `source_id`，使同 Provider 多 Source 和跨 Provider fallback 都可审计；逻辑事件成功时归因成功 attempt，全部失败时归因最终实际 attempt。`usage_source=missing` 的请求保留请求数但 Token 为零。
 
 ### 部署
 
@@ -478,7 +478,7 @@ v1 响应 envelope 固定如下：summary 为 `{version, timezone, range, data}`
 
 ### 7.2 PostgreSQL 持久化剩余项
 
-当前已经创建 `usage_events`、`usage_event_attempts`、`virtual_keys`、`providers`、`accounts`、`routes`，Provider/Model preset、Source、SourceModel、LogicalModel、ModelBinding、SourceModelCapability 模型目录表，以及 `source_connection_tests`、`source_discovery_runs` 记录表。内置预设以不可变 `(id, version)` 启动注册。运行时从 `sources`、`accounts`、`logical_models`、`model_bindings`、`source_models`、`source_model_capabilities` 和 `routes` 构建完整 `protocol_in → protocol_upstream → endpoint/Adapter` 链，旧 `providers` 行不再是运行时事实来源。`request_id` 表示一次北向逻辑请求并保持唯一；重试尝试写入 `usage_event_attempts(request_id, attempt_no)`，同一尝试幂等。`usage_events.logical_model` 保存客户端模型，`upstream_model_id` 保存实际 Binding 的上游模型，`source_id` 保存最终实际 Source，`client_source` 独立保存客户端自报来源；attempt 逐次保存自己的 `source_id`。历史旧 `source` 值迁入 `client_source`，历史 `source_id` 保持 `NULL`；Usage 历史不对控制面 `sources` 设置外键，因此删除 Source 不会删除或抹除历史归因。Virtual Key 鉴权成功时写入 `virtual_key_id`，静态入口 Key 保持为空。时间统一按 PostgreSQL `TIMESTAMPTZ` 以 UTC 存储，展示层负责本地时区转换。
+当前已经创建 `usage_events`、`usage_event_attempts`、`virtual_keys`、`providers`、`accounts`、`routes`，Provider/Model preset、Source、SourceModel、LogicalModel、ModelBinding、SourceModelCapability 模型目录表，以及 `source_connection_tests`、`source_discovery_runs` 记录表。内置预设以不可变 `(id, version)` 启动注册。运行时从 `sources`、`accounts`、`logical_models`、`model_bindings`、`source_models`、`source_model_capabilities` 和 `routes` 构建完整 `protocol_in → protocol_upstream → endpoint/Adapter` 链，旧 `providers` 行不再是运行时事实来源。`request_id` 表示一次北向逻辑请求并保持唯一；重试尝试写入 `usage_event_attempts(request_id, attempt_no)`，同一尝试幂等。`usage_events.logical_model` 保存客户端模型，`upstream_model_id` 保存实际 Binding 的上游模型，`provider_id` 保存 Source 固化的 ProviderPreset ID，`source_id` 保存最终实际 Source，`client_source` 独立保存客户端自报来源；attempt 逐次保存自己的 Provider 与 Source。历史旧 `source` 值迁入 `client_source`，历史 `source_id` 保持 `NULL`；0010 migration 只把 `source_id IS NOT NULL AND provider_id = source_id` 的 DB-first 错误归因回填为 ProviderPreset ID，Source 已删除且无法可靠映射时显式写为 `unknown`。Usage 历史不对控制面 `sources` 设置外键，因此删除 Source 不会删除历史归因。Virtual Key 鉴权成功时写入 `virtual_key_id`，静态入口 Key 保持为空。时间统一按 PostgreSQL `TIMESTAMPTZ` 以 UTC 存储，展示层负责本地时区转换。
 
 控制面写入采用 `SERIALIZABLE` 事务：先写候选变更，再校验引用、endpoint、Adapter 注册表与方向、单段转换、能力链和 Binding 可路由性，随后在同一事务读取并构建下一版不可变 snapshot；任一步失败都回滚。提交成功后一次写锁替换整个 snapshot，并发请求只会持有旧版或新版的完整 `Arc`。手工 reload 使用一致性只读事务；失败不替换当前有效 snapshot。
 
@@ -498,7 +498,7 @@ ProviderPreset/模型发现回归使用真实 PostgreSQL 与 mock 上游，覆�
 
 UsageEvent 已记录实际 `upstream_model_id`、`route_id`、`streamed`、脱敏 `error_summary`、最终 `source_id`、独立 `client_source` 和 `ttft_ms`。流式 TTFT 从逻辑请求开始计到首个非空上游 body chunk，不预取、不缓冲，也不改变 SSE 顺序或背压；空流和无法观察首块的失败保持 `NULL`。每个 fallback attempt 另存实际 Source、账号、上游模型、状态和耗时。
 
-当前统计语义的已知缺口不是 Token 提取，而是 Provider 与 Source 归因仍使用同一运行时 ID；多个 Source 无法正确聚合到同一 ProviderPreset。该问题由 #56 跟踪。
+Provider 与 Source 已使用独立运行时身份：Provider 按 Source 固化的 ProviderPreset 聚合，Source 保留每次实际 Binding/attempt 的具体来源；组合筛选不会重复逻辑请求或 Token。
 
 ### 7.4 统计接口和页面
 
@@ -546,7 +546,7 @@ Provider URL allowlist、解析后 IP 校验、重定向限制和 SSRF 防护（
 
 上述真实环境基线之后，主线已通过 mock 上游和真实 PostgreSQL 回归补齐实际 `upstream_model_id`、流式 TTFT、首选账号不可用时的 early fallback、HTTP/传输错误统一加权选择、全部失败归因和跨 Source attempt 审计。三家真实 Provider 尚未在这些修复后完整重跑，因此这是待复验项，不再作为“功能未实现”记录。
 
-当前仍确认存在的运行时语义缺口是 Usage 的 `provider_id` 与 `source_id` 尚未真正分离（#56）。另外，活动 Web 源码只请求 `/admin/usage/*`；`web/dist` 是构建产物，必须由当前源码生成，不能复用历史 Keeper 构建。
+Usage 的 `provider_id` 与 `source_id` 已在 DB-first snapshot、主路径、early fallback、HTTP/传输 fallback、全失败与流式路径中分离，并有真实 PostgreSQL 回归。活动 Web 源码只请求 `/admin/usage/*`；`web/dist` 是构建产物，必须由当前源码生成，不能复用历史 Keeper 构建。
 
 ## 8. 验收标准
 
@@ -580,7 +580,7 @@ Provider URL allowlist、解析后 IP 校验、重定向限制和 SSRF 防护（
 
 - 每个请求有唯一 request_id；
 - 成功和失败请求都可查询；
-- 能按协议、模型、Source、账号和 Key 聚合；Provider 与 Source 独立归因完成后再关闭 #8；
+- 能按协议、模型、Provider、Source、账号和 Key 独立聚合并组合筛选；
 - 上游 usage 优先；
 - 缺失 usage 时明确标记估算或缺失。
 
@@ -590,6 +590,6 @@ Provider URL allowlist、解析后 IP 校验、重定向限制和 SSRF 防护（
 
 1. 在已完成自动验证门禁、Admin Key 分离和 URL/SSRF 防护（#49、#44、#46）的基础上，继续收口 Secret 和审计安全基线（#47、#48）。
 2. 在已完成独立 Management 外壳（#42）的基础上，并行接入有效能力矩阵（#43）和 Source/模型发现确认流（#45）。
-3. 修正 Provider/Source 独立归因（#56），随后完成 #8 用量分析 Epic 验收。
+3. 完成 #8 用量分析 Epic 的最终验收并关闭。
 4. 完成 Virtual Key 生命周期、健康持久化/主动探测和 SSE 生命周期契约（#51、#52、#54）。
 5. 接入 Prometheus/OpenTelemetry，并建立数据保留、备份与恢复流程（#50、#53）。
