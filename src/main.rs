@@ -1,3 +1,4 @@
+mod capabilities;
 mod config;
 mod db;
 mod discovery_api;
@@ -1051,34 +1052,64 @@ async fn admin_health(State(state): State<AppState>, headers: HeaderMap) -> Resp
 }
 
 async fn admin_capabilities(State(state): State<AppState>, headers: HeaderMap) -> Response<Body> {
-    if !admin_authorized(&headers) {
+    admin_capabilities_response(admin_authorized(&headers), state.config())
+}
+
+fn admin_capabilities_response(authorized: bool, config: Arc<GatewayConfig>) -> Response<Body> {
+    if !authorized {
         return error_response(
             StatusCode::UNAUTHORIZED,
             "unauthorized",
             "admin key required",
         );
     }
-    let config = state.config();
-    let mut result = Vec::new();
-    for route in &config.routes {
-        let model = &route.model;
-        let provider_id = &route.provider_id;
-        let account_id = &route.primary_account_id;
-        let protocol_caps =
-            config.effective_protocol_capabilities(provider_id, Some(account_id), model);
-        let feature_caps = config.capabilities(provider_id, Some(account_id), model);
-        result.push(json!({
-            "route_id": route.id,
-            "model": model,
-            "provider_id": provider_id,
-            "account_id": account_id,
-            "mode": route.mode,
-            "protocols": route.protocols,
-            "protocol_capabilities": protocol_caps,
-            "capabilities": feature_caps,
-        }));
+    (
+        StatusCode::OK,
+        Json(capabilities::CapabilityMatrixResponse::from_config(config)),
+    )
+        .into_response()
+}
+
+#[cfg(test)]
+mod admin_capabilities_api_tests {
+    use super::*;
+    use axum::body::to_bytes;
+
+    fn empty_config() -> Arc<GatewayConfig> {
+        Arc::new(GatewayConfig {
+            listen_addr: "127.0.0.1:0".into(),
+            providers: Vec::new(),
+            accounts: Vec::new(),
+            routes: Vec::new(),
+        })
     }
-    (StatusCode::OK, Json(json!({"data": result}))).into_response()
+
+    async fn response_json(response: Response<Body>) -> Value {
+        serde_json::from_slice(
+            &to_bytes(response.into_body(), 1024 * 1024)
+                .await
+                .expect("read capabilities response"),
+        )
+        .expect("capabilities JSON response")
+    }
+
+    #[tokio::test]
+    async fn capability_matrix_preserves_admin_authorization() {
+        let response = admin_capabilities_response(false, empty_config());
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        let body = response_json(response).await;
+        assert_eq!(body["error"]["code"], "unauthorized");
+        assert!(body.get("data").is_none());
+    }
+
+    #[tokio::test]
+    async fn authorized_capability_matrix_uses_versioned_contract() {
+        let response = admin_capabilities_response(true, empty_config());
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response_json(response).await;
+        assert_eq!(body["version"], "v1");
+        assert_eq!(body["data"], json!([]));
+    }
 }
 
 async fn reload_config(State(state): State<AppState>, headers: HeaderMap) -> Response<Body> {

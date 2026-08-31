@@ -71,6 +71,64 @@ impl RouteResolver {
         protocol: Protocol,
         model: &str,
     ) -> Result<ResolvedRoute, RouteResolutionError> {
+        self.resolve_selected(protocol, model)
+            .map(|(_, route)| route)
+    }
+
+    /// Resolve one configured route while still applying the resolver's global
+    /// candidate ordering. This is used by diagnostics that need to explain
+    /// every configured route without maintaining a second routing algorithm.
+    pub(crate) fn resolve_configured_route(
+        &self,
+        route_index: usize,
+        protocol: Protocol,
+        model: &str,
+    ) -> Result<ResolvedRoute, RouteResolutionError> {
+        let Some(route) = self.config.routes.get(route_index) else {
+            return Err(RouteResolutionError::new(
+                "route_not_found",
+                format!("configured route index {route_index} does not exist"),
+                None,
+            ));
+        };
+        if !route.protocols.contains(&protocol) {
+            return Err(RouteResolutionError::new(
+                "route_protocol_not_configured",
+                format!(
+                    "route '{}' is not configured for protocol {protocol}",
+                    route.id
+                ),
+                Some(&route.id),
+            ));
+        }
+        if model_match_rank(&route.model, model).is_none() {
+            return Err(RouteResolutionError::new(
+                "route_model_not_matched",
+                format!("route '{}' does not match model '{model}'", route.id),
+                Some(&route.id),
+            ));
+        }
+
+        let candidate = self.resolve_candidate(route_index, protocol, model)?;
+        let (selected_index, selected) = self.resolve_selected(protocol, model)?;
+        if selected_index != route_index {
+            return Err(RouteResolutionError::new(
+                "route_not_selected",
+                format!(
+                    "route '{}' is routable but route '{}' has higher priority",
+                    route.id, selected.route_id
+                ),
+                Some(&route.id),
+            ));
+        }
+        Ok(candidate)
+    }
+
+    fn resolve_selected(
+        &self,
+        protocol: Protocol,
+        model: &str,
+    ) -> Result<(usize, ResolvedRoute), RouteResolutionError> {
         let mut candidates: Vec<(usize, usize, bool, u8)> = self
             .config
             .routes
@@ -96,7 +154,7 @@ impl RouteResolver {
         let mut last_error = None;
         for (index, _, _, _) in candidates {
             match self.resolve_candidate(index, protocol, model) {
-                Ok(route) => return Ok(route),
+                Ok(route) => return Ok((index, route)),
                 Err(error) => last_error = Some(error),
             }
         }

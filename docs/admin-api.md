@@ -143,6 +143,79 @@ Content-Type: application/json
 
 任一模型不存在、不可用或元数据非法时整批回滚。confirmed 模型刷新时保持已确认元数据和匹配预设；pending 模型刷新会重算 upstream/preset 字段，但保留所有 `user` 字段。
 
+## 配置层有效能力矩阵
+
+`GET /admin/capabilities` 返回当前内存配置中每条 Route、Provider、主账号和模型表达式的有效三协议矩阵。该接口不要求 `DATABASE_URL`，但仍要求 Admin Key 鉴权。
+
+响应使用稳定的 `v1` 契约。每条 Route 固定包含 `openai_chat_completions`、`openai_responses`、`anthropic_messages` 三个协议单元；`model` 是 Route 配置中的精确模型或通配表达式。以下示例为节省篇幅只展开一个协议单元，实际响应固定返回三项。
+
+```json
+{
+  "version": "v1",
+  "data": [
+    {
+      "route_id": "kimi-responses-adapter",
+      "source": {
+        "provider_id": "kimi_code",
+        "provider_name": "Kimi Code"
+      },
+      "account": {
+        "account_id": "kimi-main",
+        "display_name": "Kimi 主账号",
+        "enabled": true
+      },
+      "model": "kimi-for-coding-highspeed",
+      "protocols": [
+        {
+          "protocol_in": "openai_responses",
+          "status": "routable",
+          "protocol_upstream": "anthropic_messages",
+          "endpoint": "https://api.kimi.com/coding/v1/messages",
+          "mode": "adapter",
+          "adapter": "kimi_responses_adapter",
+          "conversion_chain": [
+            {
+              "protocol_from": "openai_responses",
+              "protocol_to": "anthropic_messages",
+              "mode": "adapter",
+              "adapter": "kimi_responses_adapter"
+            }
+          ],
+          "effective_capabilities": {
+            "streaming": "translated",
+            "tools": "translated",
+            "tool_streaming": "unsupported",
+            "thinking": "translated",
+            "web_search": "translated",
+            "file_search": "unsupported",
+            "vision": "unsupported",
+            "usage": "translated"
+          },
+          "degraded": true,
+          "degraded_features": [
+            "streaming",
+            "tools",
+            "thinking",
+            "web_search",
+            "usage"
+          ],
+          "allow_lossy_conversion": false,
+          "error": null
+        }
+      ]
+    }
+  ]
+}
+```
+
+`routable` 单元的 `conversion_chain` 完整描述入口协议到上游协议的直接步骤；native 路径也显式包含一个同协议步骤。`endpoint` 只由受控 Provider Base URL 与协议 endpoint 组合，不读取账号凭据。
+
+无法路由的单元使用 `status=unroutable`，将未知的 `protocol_upstream`、`endpoint` 设为 `null`、转换链设为空，并返回 `{code,message,route_id}` 结构化 `error`。常见错误包括 `route_protocol_not_configured`、`unsupported_protocol`、`endpoint_missing`、`adapter_unknown`、`lossy_conversion_not_allowed` 和 `route_not_selected`。功能能力在无法确认时全部显式为 `unsupported`，不会把 unknown 或 unsupported 猜测为支持。
+
+矩阵聚合直接复用运行时 `RouteResolver`：精确模型、最长前缀、同等匹配时 native 优先以及最多一次直接 Adapter 的规则与真实请求一致。Adapter 翻译或显式允许的能力损失会列入 `degraded_features`；不允许的 lossy 转换保持不可路由。
+
+本接口只覆盖配置层。数据库 `SourceModelCapability`、confirmed/unknown/unsupported snapshot 与运行期 Binding 的接入仍属于 #14；Web UI 由后续任务实现。响应不包含 `credential_env`、凭据、Authorization、API Key 或请求/响应正文。
+
 ## 错误与安全
 
 HTTP 错误统一使用：

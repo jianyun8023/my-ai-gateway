@@ -598,19 +598,15 @@ impl GatewayConfig {
         account_id: Option<&str>,
         model: &str,
     ) -> ProtocolCapabilityMatrix {
-        [
-            Protocol::OpenAiChatCompletions,
-            Protocol::OpenAiResponses,
-            Protocol::AnthropicMessages,
-        ]
-        .into_iter()
-        .map(|protocol| {
-            (
-                protocol,
-                self.protocol_capability(provider_id, account_id, model, protocol),
-            )
-        })
-        .collect()
+        Protocol::ALL
+            .into_iter()
+            .map(|protocol| {
+                (
+                    protocol,
+                    self.protocol_capability(provider_id, account_id, model, protocol),
+                )
+            })
+            .collect()
     }
 
     #[allow(dead_code)]
