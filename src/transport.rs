@@ -98,8 +98,13 @@ pub async fn forward_url(
             .bytes()
             .await
             .map_err(|error| TransportError::Request(error.to_string()))?;
-        let report = extract_json_bytes(&bytes)
-            .or_else(|| Some(crate::usage::estimate(&request_payload, &bytes)));
+        let report = extract_json_bytes(&bytes).or_else(|| {
+            if status.is_success() {
+                Some(crate::usage::estimate(&request_payload, &bytes))
+            } else {
+                None
+            }
+        });
         let body = Body::from(bytes);
         let mut response = Response::new(body);
         *response.status_mut() = status;

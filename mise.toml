@@ -1,0 +1,27 @@
+[tools]
+rust = { version = "1.97.1", components = "rustfmt,clippy" }
+node = "24.11.1"
+
+[tasks.install]
+description = "安装前端锁定依赖"
+run = "npm --prefix web ci"
+
+[tasks.dev]
+description = "启动 Rust 网关与前端开发环境"
+run = "cargo run & gateway_pid=$!; trap 'kill $gateway_pid 2>/dev/null || true' EXIT INT TERM; npm --prefix web run dev"
+
+[tasks.build]
+description = "构建前端静态资源与 Rust 网关"
+run = "npm --prefix web run build && cargo build"
+
+[tasks.test]
+description = "运行 Rust 与前端单元测试"
+run = "cargo test && npm --prefix web test"
+
+[tasks.lint]
+description = "运行 Rust 与前端静态检查"
+run = "cargo fmt --all -- --check && cargo clippy --all-targets -- -D warnings && npm --prefix web run lint && npm --prefix web run typecheck"
+
+[tasks.verify]
+description = "部署前完整门禁：静态检查、构建、单元测试"
+run = "mise run lint && mise run build && mise run test"

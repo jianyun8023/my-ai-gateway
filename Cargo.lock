@@ -918,6 +918,7 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "futures-util",
+ "http-body-util",
  "rand 0.9.5",
  "reqwest",
  "serde",
@@ -925,6 +926,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-util",
+ "tower",
  "tracing",
 ]
 

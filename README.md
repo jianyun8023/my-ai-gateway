@@ -23,12 +23,21 @@ Rust AI 网关 MVP，目标是将多个上游账号统一为一个入口，并�
 - PostgreSQL-backed Virtual Key：创建、列表、撤销、模型白名单鉴权。
 - 管理接口：`/admin/keys`、`/admin/keys/:id/revoke`，以及 `/admin/usage/summary|timeseries|breakdown|events|export`；`/admin/usage/aggregate` 保留为一次获取三类聚合的组合入口。
 
+工具链由 [Mise](https://mise.jdx.dev/) 管理（Rust 1.97.1 + Node 24，见 [`mise.toml`](./mise.toml)）：
+
+```bash
+mise install      # 安装 Rust 与 Node 工具链
+mise run install  # 安装 web/ 前端锁定依赖
+```
+
 运行：
 
 ```bash
 cargo run
 curl http://127.0.0.1:8787/healthz
 ```
+
+常用任务：`mise run dev`（网关 + Vite 开发环境）、`mise run build`、`mise run test`、`mise run lint`、`mise run verify`（完整门禁）。
 
 设置 `GATEWAY_ADMIN_KEY` 后可创建下游 Virtual Key，原始 Key 只在创建响应中返回：
 

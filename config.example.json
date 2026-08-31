@@ -10,7 +10,7 @@
       "endpoints": {
         "openai_chat_completions": "/v1/chat/completions",
         "openai_responses": "/v1/responses",
-        "anthropic_messages": "/v1/messages"
+        "anthropic_messages": "/anthropic/v1/messages"
       },
       "capabilities": {"streaming": "native", "tools": "native", "thinking": "native", "web_search": "native", "usage": "native"},
       "protocol_capabilities": {
@@ -29,7 +29,7 @@
       "endpoints": {
         "openai_chat_completions": "/v1/chat/completions",
         "openai_responses": "/v1/responses",
-        "anthropic_messages": "/v1/messages"
+        "anthropic_messages": "/anthropic/v1/messages"
       },
       "capabilities": {"streaming": "native", "tools": "native", "thinking": "native", "web_search": "native", "usage": "native"},
       "protocol_capabilities": {
@@ -61,7 +61,8 @@
   "accounts": [
     {"id": "minimax-main", "provider_id": "minimax", "display_name": "MiniMax 主账号", "credential_env": "MINIMAX_API_KEY", "enabled": true, "weight": 100},
     {"id": "minimax-backup", "provider_id": "minimax", "display_name": "MiniMax 备用账号", "credential_env": "MINIMAX_API_KEY_2", "enabled": true, "weight": 50},
-    {"id": "deepseek-main", "provider_id": "deepseek", "display_name": "DeepSeek 主账号", "credential_env": "DEEPSEEK_API_KEY", "enabled": true, "weight": 100},
+    {"id": "deepseek-main", "provider_id": "deepseek", "display_name": "DeepSeek 主账号", "credential_env": "DEEPSEEK_API_KEY", "enabled": true, "weight": 100,
+      "model_map": {"MiniMax-M2.7": "deepseek-chat"}},
     {"id": "kimi-main", "provider_id": "kimi_code", "display_name": "Kimi Code", "credential_env": "KIMI_API_KEY", "enabled": true, "weight": 100,
       "model_overrides": {"kimi-for-coding-highspeed": {"capabilities": {"web_search": "native", "thinking": "native"}}}}
   ],
@@ -72,7 +73,7 @@
       "provider_id": "minimax",
       "protocols": ["openai_chat_completions", "openai_responses", "anthropic_messages"],
       "primary_account_id": "minimax-main",
-      "fallback_accounts": ["minimax-backup"],
+      "fallback_accounts": ["minimax-backup", "deepseek-main"],
       "mode": "native"
     },
     {

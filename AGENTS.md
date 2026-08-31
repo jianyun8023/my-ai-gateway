@@ -61,6 +61,7 @@ config.example.json          Provider/Account/Route 示例
 
 ## 技术栈
 
+- Mise：工具链与任务管理（Rust、Node 版本固定在 `mise.toml`，常用任务见 `mise tasks`）；
 - Tokio + Axum：HTTP/SSE 服务；
 - Reqwest：上游 HTTP；
 - Serde：协议和配置模型；
@@ -86,7 +87,7 @@ CARGO_HOME=/tmp/my-ai-gateway-cargo cargo test
 python3 -m json.tool config.example.json >/dev/null
 ```
 
-以上命令用于验证，不应主动修改无关文件；需要修复格式时才单独运行 `CARGO_HOME=/tmp/my-ai-gateway-cargo cargo fmt --all`。如环境允许，也可以直接使用普通 `cargo` 命令。当前开发环境默认 Cargo 缓存目录可能不可写，因此优先使用临时 `CARGO_HOME`。
+以上命令用于验证，不应主动修改无关文件；需要修复格式时才单独运行 `CARGO_HOME=/tmp/my-ai-gateway-cargo cargo fmt --all`。如环境允许，也可以直接使用普通 `cargo` 命令。当前开发环境默认 Cargo 缓存目录可能不可写，因此优先使用临时 `CARGO_HOME`。工具链由 Mise 管理时，也可以用 `mise run lint`（Rust + 前端静态检查）和 `mise run verify`（静态检查 + 构建 + 测试）作为组合门禁。
 
 ## Adapter 开发要求
 

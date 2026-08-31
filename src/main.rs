@@ -35,13 +35,34 @@ use tower::ServiceExt;
 use tower_http::{services::ServeDir, trace::TraceLayer};
 use uuid::Uuid;
 
-#[derive(Clone)]
-struct AppState {
+struct LiveConfig {
     config: Arc<GatewayConfig>,
     resolver: RouteResolver,
+}
+
+#[derive(Clone)]
+struct AppState {
+    live: Arc<std::sync::RwLock<LiveConfig>>,
     http: reqwest::Client,
     db: Option<db::Database>,
     health: health::HealthRegistry,
+    listen_addr: String,
+}
+
+impl AppState {
+    fn config(&self) -> Arc<GatewayConfig> {
+        self.live.read().unwrap().config.clone()
+    }
+
+    fn resolver(&self) -> RouteResolver {
+        self.live.read().unwrap().resolver.clone()
+    }
+
+    fn reload_config(&self, config: GatewayConfig) {
+        let config = Arc::new(config);
+        let resolver = RouteResolver::new(config.clone());
+        *self.live.write().unwrap() = LiveConfig { config, resolver };
+    }
 }
 
 #[tokio::main]
@@ -55,16 +76,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("invalid gateway configuration".into());
     }
     let addr: SocketAddr = config.listen_addr.parse()?;
+    let listen_addr = config.listen_addr.clone();
     let db = db::Database::connect_from_env().await?;
     if let Some(database) = &db {
         database.sync_control_plane(&config).await?;
     }
-    let state = AppState {
+    let config = Arc::new(config.as_ref().clone());
+    let live = LiveConfig {
         resolver: RouteResolver::new(config.clone()),
         config,
+    };
+    let state = AppState {
+        live: Arc::new(std::sync::RwLock::new(live)),
         http: transport::client()?,
         db,
         health: health::HealthRegistry::new(std::time::Duration::from_secs(30)),
+        listen_addr,
     };
     let app = application(state);
     let listener = tokio::net::TcpListener::bind(addr).await?;
@@ -88,9 +115,34 @@ fn application(state: AppState) -> Router {
         .route("/admin/usage/events", get(usage_events))
         .route("/admin/usage/export", get(usage_export))
         .route("/admin/usage/aggregate", get(usage_aggregate))
-        .route("/admin/providers", get(admin_providers))
-        .route("/admin/accounts", get(admin_accounts))
-        .route("/admin/routes", get(admin_routes))
+        .route("/admin/usage/events/{request_id}", get(usage_event_detail))
+        .route(
+            "/admin/providers",
+            get(admin_providers).post(create_or_update_provider),
+        )
+        .route(
+            "/admin/providers/{id}",
+            axum::routing::delete(delete_provider),
+        )
+        .route(
+            "/admin/accounts",
+            get(admin_accounts).post(create_or_update_account),
+        )
+        .route(
+            "/admin/accounts/{id}",
+            axum::routing::delete(delete_account),
+        )
+        .route(
+            "/admin/routes",
+            get(admin_routes).post(create_or_update_route),
+        )
+        .route(
+            "/admin/routes/{id}",
+            axum::routing::delete(delete_route_by_id),
+        )
+        .route("/admin/config/reload", post(reload_config))
+        .route("/admin/capabilities", get(admin_capabilities))
+        .route("/admin/health", get(admin_health))
         .route("/admin/routes/{protocol}/{model}", get(resolve_route))
         .nest_service("/admin", ServeDir::new("web/dist"))
         .with_state(state)
@@ -98,14 +150,15 @@ fn application(state: AppState) -> Router {
 }
 
 async fn healthz(State(state): State<AppState>) -> Json<Value> {
+    let config = state.config();
     Json(
-        json!({"status":"ok", "providers":state.config.providers.len(), "accounts":state.config.accounts.len()}),
+        json!({"status":"ok", "providers":config.providers.len(), "accounts":config.accounts.len()}),
     )
 }
 
 async fn models(State(state): State<AppState>) -> Json<Value> {
-    let data: Vec<Value> = state
-        .config
+    let config = state.config();
+    let data: Vec<Value> = config
         .models()
         .into_iter()
         .map(|model| json!({"id":model,"object":"model","owned_by":"gateway"}))
@@ -580,7 +633,11 @@ async fn usage_export(
         Ok(query) => query,
         Err(message) => return invalid_usage_query(&message),
     };
-    let events = match database.export_usage_events(&query.filter).await {
+    let export_limit: i64 = 10_000;
+    let events = match database
+        .export_usage_events(&query.filter, export_limit + 1)
+        .await
+    {
         Ok(events) => events,
         Err(error) => {
             return error_response(
@@ -590,6 +647,13 @@ async fn usage_export(
             )
         }
     };
+    if events.len() as i64 > export_limit {
+        return error_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "export_too_large",
+            &format!("export exceeds {export_limit} rows; narrow the time range or add filters"),
+        );
+    }
     if query.format == "csv" {
         Response::builder()
             .status(StatusCode::OK)
@@ -614,7 +678,7 @@ async fn usage_export(
 }
 
 fn usage_events_csv(events: &[db::UsageEventRecord]) -> String {
-    let mut output = String::from("request_id,created_at,virtual_key_id,logical_model,upstream_model_id,provider_id,source,account_id,protocol_in,protocol_upstream,mode,status_code,success,retry_count,latency_ms,ttft_ms,input_tokens,output_tokens,reasoning_tokens,cached_tokens,total_tokens,usage_source,degraded\n");
+    let mut output = String::from("request_id,created_at,virtual_key_id,logical_model,upstream_model_id,provider_id,source,account_id,protocol_in,protocol_upstream,mode,status_code,success,retry_count,latency_ms,ttft_ms,input_tokens,output_tokens,reasoning_tokens,cached_tokens,total_tokens,usage_source,degraded,route_id,streamed,error_summary\n");
     for event in events {
         let values = [
             event.request_id.clone(),
@@ -646,6 +710,9 @@ fn usage_events_csv(events: &[db::UsageEventRecord]) -> String {
             event.total_tokens.to_string(),
             event.usage_source.clone(),
             event.degraded.to_string(),
+            event.route_id.clone().unwrap_or_default(),
+            event.streamed.to_string(),
+            event.error_summary.clone().unwrap_or_default(),
         ];
         let line = values
             .iter()
@@ -675,7 +742,60 @@ async fn admin_providers(State(state): State<AppState>, headers: HeaderMap) -> R
     }
     (
         StatusCode::OK,
-        Json(json!({"data": state.config.providers})),
+        Json(json!({"data": state.config().providers})),
+    )
+        .into_response()
+}
+
+async fn usage_event_detail(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(request_id): Path<String>,
+) -> Response<Body> {
+    if !admin_authorized(&headers) {
+        return error_response(
+            StatusCode::UNAUTHORIZED,
+            "unauthorized",
+            "admin key required",
+        );
+    }
+    let Some(database) = &state.db else {
+        return error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "database_unavailable",
+            "DATABASE_URL is not configured",
+        );
+    };
+    let event = match database.get_usage_event_detail(&request_id).await {
+        Ok(Some(event)) => event,
+        Ok(None) => {
+            return error_response(
+                StatusCode::NOT_FOUND,
+                "event_not_found",
+                "usage event not found",
+            )
+        }
+        Err(error) => {
+            return error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "event_detail_failed",
+                &error.to_string(),
+            )
+        }
+    };
+    let attempts = match database.list_attempts_for_event(&request_id).await {
+        Ok(attempts) => attempts,
+        Err(error) => {
+            return error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "event_detail_failed",
+                &error.to_string(),
+            )
+        }
+    };
+    (
+        StatusCode::OK,
+        Json(json!({"version":"v1","data":event,"attempts":attempts})),
     )
         .into_response()
 }
@@ -688,7 +808,7 @@ async fn admin_accounts(State(state): State<AppState>, headers: HeaderMap) -> Re
             "admin key required",
         );
     }
-    let accounts: Vec<Value> = state.config.accounts.iter().map(|account| json!({"id":account.id,"provider_id":account.provider_id,"display_name":account.display_name,"enabled":account.enabled,"weight":account.weight})).collect();
+    let accounts: Vec<Value> = state.config().accounts.iter().map(|account| json!({"id":account.id,"provider_id":account.provider_id,"display_name":account.display_name,"enabled":account.enabled,"weight":account.weight})).collect();
     (StatusCode::OK, Json(json!({"data": accounts}))).into_response()
 }
 
@@ -700,7 +820,295 @@ async fn admin_routes(State(state): State<AppState>, headers: HeaderMap) -> Resp
             "admin key required",
         );
     }
-    (StatusCode::OK, Json(json!({"data": state.config.routes}))).into_response()
+    (StatusCode::OK, Json(json!({"data": state.config().routes}))).into_response()
+}
+
+async fn create_or_update_provider(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(provider): Json<config::ProviderConfig>,
+) -> Response<Body> {
+    if !admin_authorized(&headers) {
+        return error_response(
+            StatusCode::UNAUTHORIZED,
+            "unauthorized",
+            "admin key required",
+        );
+    }
+    let Some(database) = &state.db else {
+        return error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "database_unavailable",
+            "DATABASE_URL is not configured",
+        );
+    };
+    if let Err(error) = database.upsert_provider(&provider).await {
+        return error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "db_error",
+            &error.to_string(),
+        );
+    }
+    reload_config_inner(&state).await
+}
+
+async fn delete_provider(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Response<Body> {
+    if !admin_authorized(&headers) {
+        return error_response(
+            StatusCode::UNAUTHORIZED,
+            "unauthorized",
+            "admin key required",
+        );
+    }
+    let Some(database) = &state.db else {
+        return error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "database_unavailable",
+            "DATABASE_URL is not configured",
+        );
+    };
+    match database.delete_provider(&id).await {
+        Ok(true) => {}
+        Ok(false) => {
+            return error_response(StatusCode::NOT_FOUND, "not_found", "provider not found")
+        }
+        Err(error) => {
+            return error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "db_error",
+                &error.to_string(),
+            )
+        }
+    }
+    reload_config_inner(&state).await
+}
+
+async fn create_or_update_account(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(account): Json<config::AccountConfig>,
+) -> Response<Body> {
+    if !admin_authorized(&headers) {
+        return error_response(
+            StatusCode::UNAUTHORIZED,
+            "unauthorized",
+            "admin key required",
+        );
+    }
+    let Some(database) = &state.db else {
+        return error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "database_unavailable",
+            "DATABASE_URL is not configured",
+        );
+    };
+    if let Err(error) = database.upsert_account(&account).await {
+        return error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "db_error",
+            &error.to_string(),
+        );
+    }
+    reload_config_inner(&state).await
+}
+
+async fn delete_account(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Response<Body> {
+    if !admin_authorized(&headers) {
+        return error_response(
+            StatusCode::UNAUTHORIZED,
+            "unauthorized",
+            "admin key required",
+        );
+    }
+    let Some(database) = &state.db else {
+        return error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "database_unavailable",
+            "DATABASE_URL is not configured",
+        );
+    };
+    match database.delete_account(&id).await {
+        Ok(true) => {}
+        Ok(false) => {
+            return error_response(StatusCode::NOT_FOUND, "not_found", "account not found")
+        }
+        Err(error) => {
+            return error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "db_error",
+                &error.to_string(),
+            )
+        }
+    }
+    reload_config_inner(&state).await
+}
+
+async fn create_or_update_route(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(route): Json<config::RouteConfig>,
+) -> Response<Body> {
+    if !admin_authorized(&headers) {
+        return error_response(
+            StatusCode::UNAUTHORIZED,
+            "unauthorized",
+            "admin key required",
+        );
+    }
+    let Some(database) = &state.db else {
+        return error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "database_unavailable",
+            "DATABASE_URL is not configured",
+        );
+    };
+    if let Err(error) = database.upsert_route(&route).await {
+        return error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "db_error",
+            &error.to_string(),
+        );
+    }
+    reload_config_inner(&state).await
+}
+
+async fn delete_route_by_id(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Response<Body> {
+    if !admin_authorized(&headers) {
+        return error_response(
+            StatusCode::UNAUTHORIZED,
+            "unauthorized",
+            "admin key required",
+        );
+    }
+    let Some(database) = &state.db else {
+        return error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "database_unavailable",
+            "DATABASE_URL is not configured",
+        );
+    };
+    match database.delete_route(&id).await {
+        Ok(true) => {}
+        Ok(false) => return error_response(StatusCode::NOT_FOUND, "not_found", "route not found"),
+        Err(error) => {
+            return error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "db_error",
+                &error.to_string(),
+            )
+        }
+    }
+    reload_config_inner(&state).await
+}
+
+async fn admin_health(State(state): State<AppState>, headers: HeaderMap) -> Response<Body> {
+    if !admin_authorized(&headers) {
+        return error_response(
+            StatusCode::UNAUTHORIZED,
+            "unauthorized",
+            "admin key required",
+        );
+    }
+    let health_map = state.health.all_health().await;
+    let config = state.config();
+    let mut data = Vec::new();
+    for account in &config.accounts {
+        let health = match health_map.get(&account.id) {
+            Some(h) => h.clone(),
+            None => health::AccountHealth {
+                available: account.enabled,
+                consecutive_failures: 0,
+                cooldown_remaining_ms: 0,
+            },
+        };
+        data.push(json!({
+            "account_id": account.id,
+            "provider_id": account.provider_id,
+            "display_name": account.display_name,
+            "enabled": account.enabled,
+            "health": health,
+        }));
+    }
+    (StatusCode::OK, Json(json!({"data": data}))).into_response()
+}
+
+async fn admin_capabilities(State(state): State<AppState>, headers: HeaderMap) -> Response<Body> {
+    if !admin_authorized(&headers) {
+        return error_response(
+            StatusCode::UNAUTHORIZED,
+            "unauthorized",
+            "admin key required",
+        );
+    }
+    let config = state.config();
+    let mut result = Vec::new();
+    for route in &config.routes {
+        let model = &route.model;
+        let provider_id = &route.provider_id;
+        let account_id = &route.primary_account_id;
+        let protocol_caps =
+            config.effective_protocol_capabilities(provider_id, Some(account_id), model);
+        let feature_caps = config.capabilities(provider_id, Some(account_id), model);
+        result.push(json!({
+            "route_id": route.id,
+            "model": model,
+            "provider_id": provider_id,
+            "account_id": account_id,
+            "mode": route.mode,
+            "protocols": route.protocols,
+            "protocol_capabilities": protocol_caps,
+            "capabilities": feature_caps,
+        }));
+    }
+    (StatusCode::OK, Json(json!({"data": result}))).into_response()
+}
+
+async fn reload_config(State(state): State<AppState>, headers: HeaderMap) -> Response<Body> {
+    if !admin_authorized(&headers) {
+        return error_response(
+            StatusCode::UNAUTHORIZED,
+            "unauthorized",
+            "admin key required",
+        );
+    }
+    reload_config_inner(&state).await
+}
+
+async fn reload_config_inner(state: &AppState) -> Response<Body> {
+    let Some(database) = &state.db else {
+        return error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "database_unavailable",
+            "DATABASE_URL is not configured",
+        );
+    };
+    match database.load_gateway_config(&state.listen_addr).await {
+        Ok(new_config) => {
+            if let Err(errors) = new_config.validate() {
+                let msg = errors.join("; ");
+                return error_response(StatusCode::UNPROCESSABLE_ENTITY, "validation_failed", &msg);
+            }
+            state.reload_config(new_config);
+            (StatusCode::OK, Json(json!({"status":"reloaded"}))).into_response()
+        }
+        Err(error) => error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "reload_failed",
+            &error.to_string(),
+        ),
+    }
 }
 
 async fn proxy(
@@ -711,6 +1119,8 @@ async fn proxy(
 ) -> Response<Body> {
     let started = Instant::now();
     let request_id = Uuid::new_v4().to_string();
+    let config = state.config();
+    let resolver = state.resolver();
     let payload: Value = match serde_json::from_slice(&body) {
         Ok(value) => value,
         Err(_) => {
@@ -735,45 +1145,143 @@ async fn proxy(
             )
         }
     };
-    let Some(route) = state.resolver.resolve(protocol, model) else {
-        return error_response(
-            StatusCode::NOT_FOUND,
-            "route_not_found",
-            "no route matches protocol and model",
-        );
+    let route = match resolver.resolve_detailed(protocol, model) {
+        Ok(route) => route,
+        Err(error) => {
+            let status = match error.code.as_str() {
+                "route_not_found" => StatusCode::NOT_FOUND,
+                "account_disabled" | "account_cooling_down" => StatusCode::SERVICE_UNAVAILABLE,
+                _ => StatusCode::UNPROCESSABLE_ENTITY,
+            };
+            return error_response(status, &error.code, &error.message);
+        }
     };
-    let Some(provider) = state.config.provider(&route.provider_id) else {
+    let Some(provider) = config.provider(&route.provider_id) else {
         return error_response(
             StatusCode::BAD_GATEWAY,
             "provider_not_found",
             "route references an unknown provider",
         );
     };
-    let Some(account) = state.config.account(&route.primary_account_id) else {
+    let Some(account) = config.account(&route.primary_account_id) else {
         return error_response(
             StatusCode::BAD_GATEWAY,
             "account_not_found",
             "route references an unknown account",
         );
     };
-    if !account.enabled {
+    let primary_unavailable = !account.enabled || !state.health.is_available(&account.id).await;
+    if primary_unavailable {
+        if let Some(candidate) =
+            select_fallback_candidate(&config, &state.health, &route, model, protocol).await
+        {
+            let forwarded_body = if candidate.upstream_model != model {
+                rewrite_model_in_body(&body, &candidate.upstream_model)
+            } else {
+                body.clone()
+            };
+            let started = Instant::now();
+            if let Ok(response) = forward_fallback(
+                &config,
+                &state.http,
+                candidate.provider,
+                candidate.account,
+                protocol,
+                &headers,
+                forwarded_body,
+            )
+            .await
+            {
+                let usage = transport::usage_from_response(&response);
+                let is_streamed = payload
+                    .get("stream")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+                let degraded = !route.degraded_features.is_empty();
+                let error_summary = if !response.status().is_success() {
+                    Some(format!("HTTP {}", response.status().as_u16()))
+                } else {
+                    None
+                };
+                if let Some(database) = &state.db {
+                    let source = headers
+                        .get("x-client-source")
+                        .and_then(|v| v.to_str().ok())
+                        .filter(|v| !v.is_empty())
+                        .unwrap_or("unknown")
+                        .to_string();
+                    let event = db::UsageEvent {
+                        request_id,
+                        virtual_key_id,
+                        provider_id: candidate.provider.id.clone(),
+                        account_id: candidate.account.id.clone(),
+                        model: model.to_string(),
+                        logical_model: model.to_string(),
+                        upstream_model_id: Some(candidate.upstream_model.clone()),
+                        source,
+                        protocol_in: protocol.to_string(),
+                        protocol_upstream: route.protocol_upstream.to_string(),
+                        mode: route.mode.clone(),
+                        status_code: response.status().as_u16() as i32,
+                        success: response.status().is_success(),
+                        retry_count: 0,
+                        latency_ms: started.elapsed().as_millis() as i64,
+                        ttft_ms: None,
+                        input_tokens: usage.as_ref().map(|u| u.input_tokens).unwrap_or(0),
+                        output_tokens: usage.as_ref().map(|u| u.output_tokens).unwrap_or(0),
+                        reasoning_tokens: usage.as_ref().map(|u| u.reasoning_tokens).unwrap_or(0),
+                        cached_tokens: usage.as_ref().map(|u| u.cached_tokens).unwrap_or(0),
+                        total_tokens: usage.as_ref().map(|u| u.total_tokens).unwrap_or(0),
+                        usage_source: usage
+                            .as_ref()
+                            .map(|u| u.source.clone())
+                            .unwrap_or_else(|| "missing".into()),
+                        degraded,
+                        route_id: Some(route.route_id.clone()),
+                        streamed: is_streamed,
+                        error_summary,
+                    };
+                    let attempts = vec![db::UsageAttempt {
+                        attempt_no: 0,
+                        provider_id: candidate.provider.id.clone(),
+                        account_id: candidate.account.id.clone(),
+                        upstream_model_id: Some(candidate.upstream_model),
+                        status_code: response.status().as_u16() as i32,
+                        success: response.status().is_success(),
+                        latency_ms: started.elapsed().as_millis() as i64,
+                    }];
+                    if is_event_stream(&response) {
+                        return wrap_stream_usage(
+                            response,
+                            database.clone(),
+                            event,
+                            body,
+                            attempts,
+                        );
+                    }
+                    if let Err(error) = database.insert_usage_with_attempts(&event, &attempts).await
+                    {
+                        tracing::warn!(%error, "failed to persist usage event");
+                    }
+                }
+                return response;
+            }
+        }
         return error_response(
             StatusCode::SERVICE_UNAVAILABLE,
-            "account_disabled",
-            "primary account is disabled",
-        );
-    }
-    if !state.health.is_available(&account.id).await {
-        return error_response(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "account_cooling_down",
-            "primary account is cooling down",
+            if account.enabled {
+                "account_cooling_down"
+            } else {
+                "account_disabled"
+            },
+            "primary account is unavailable and no fallback succeeded",
         );
     }
     let usage_request_body = body.clone();
     let result_started = Instant::now();
     let result = forward_account(
-        &state,
+        &config,
+        &state.http,
         &route,
         provider,
         account,
@@ -795,8 +1303,18 @@ async fn proxy(
                 latency_ms: result_started.elapsed().as_millis() as i64,
             });
             state.health.mark_failure(&account.id).await;
-            let (response, mut fallback_attempts) =
-                try_fallback(&state, &route, provider, protocol, &headers, body, response).await;
+            let (response, mut fallback_attempts) = try_fallback(
+                &config,
+                &state.health,
+                &state.http,
+                &route,
+                model,
+                protocol,
+                &headers,
+                body,
+                response,
+            )
+            .await;
             attempts.append(&mut fallback_attempts);
             response
         }
@@ -824,13 +1342,41 @@ async fn proxy(
                 latency_ms: result_started.elapsed().as_millis() as i64,
             });
             state.health.mark_failure(&account.id).await;
-            let (response, mut fallback_attempts) =
-                try_fallback_error(&state, &route, provider, protocol, &headers, body, error).await;
+            let (response, mut fallback_attempts) = try_fallback_error(
+                &config,
+                &state.health,
+                &state.http,
+                &route,
+                model,
+                protocol,
+                &headers,
+                body,
+                error,
+            )
+            .await;
             attempts.append(&mut fallback_attempts);
             response
         }
     };
     let usage = transport::usage_from_response(&response);
+    let is_streamed = payload
+        .get("stream")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let degraded = !route.degraded_features.is_empty();
+    if degraded {
+        tracing::warn!(
+            route_id = %route.route_id,
+            model = %model,
+            degraded_features = ?route.degraded_features,
+            "route has degraded features due to adapter conversion"
+        );
+    }
+    let error_summary = if !response.status().is_success() {
+        Some(format!("HTTP {}", response.status().as_u16()))
+    } else {
+        None
+    };
     if let Some(database) = &state.db {
         let source = headers
             .get("x-client-source")
@@ -851,7 +1397,7 @@ async fn proxy(
             account_id: final_account_id,
             model: model.to_string(),
             logical_model: model.to_string(),
-            upstream_model_id: None,
+            upstream_model_id: Some(model.to_string()),
             source,
             protocol_in: protocol.to_string(),
             protocol_upstream: route.protocol_upstream.to_string(),
@@ -870,7 +1416,10 @@ async fn proxy(
                 .as_ref()
                 .map(|u| u.source.clone())
                 .unwrap_or_else(|| "missing".into()),
-            degraded: route.allow_lossy_conversion,
+            degraded,
+            route_id: Some(route.route_id.clone()),
+            streamed: is_streamed,
+            error_summary: error_summary.clone(),
         };
         if is_event_stream(&response) {
             return wrap_stream_usage(
@@ -931,7 +1480,7 @@ fn wrap_stream_usage(
                         event.cached_tokens = usage.cached_tokens;
                         event.total_tokens = usage.total_tokens;
                         event.usage_source = usage.source;
-                    } else {
+                    } else if event.success {
                         let usage = crate::usage::estimate(&request_body, &captured);
                         event.input_tokens = usage.input_tokens;
                         event.output_tokens = usage.output_tokens;
@@ -953,8 +1502,10 @@ fn wrap_stream_usage(
     Response::from_parts(parts, Body::from_stream(stream))
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn forward_account(
-    state: &AppState,
+    config: &GatewayConfig,
+    http: &reqwest::Client,
     route: &ResolvedRoute,
     provider: &config::ProviderConfig,
     account: &config::AccountConfig,
@@ -962,7 +1513,7 @@ async fn forward_account(
     headers: &HeaderMap,
     body: Bytes,
 ) -> Result<Response<Body>, transport::TransportError> {
-    let credential = state.config.credential_for(account);
+    let credential = config.credential_for(account);
     if route.mode == "adapter" {
         if route.adapter.as_deref() == Some("kimi_responses_adapter") {
             return embedded_kimi_adapter(provider, account, credential.as_deref(), headers, body)
@@ -973,7 +1524,7 @@ async fn forward_account(
         ))
     } else {
         transport::forward(
-            &state.http,
+            http,
             provider,
             account,
             credential.as_deref(),
@@ -1039,96 +1590,164 @@ async fn embedded_kimi_adapter(
         .map_err(|error| transport::TransportError::Request(error.to_string()))
 }
 
-async fn try_fallback(
-    state: &AppState,
+struct FallbackCandidate<'a> {
+    account: &'a config::AccountConfig,
+    provider: &'a config::ProviderConfig,
+    upstream_model: String,
+}
+
+async fn select_fallback_candidate<'a>(
+    config: &'a GatewayConfig,
+    health: &health::HealthRegistry,
     route: &ResolvedRoute,
-    provider: &config::ProviderConfig,
+    model: &str,
     protocol: Protocol,
-    headers: &HeaderMap,
-    body: Bytes,
-    first: Response<Body>,
-) -> (Response<Body>, Vec<db::UsageAttempt>) {
-    let mut attempts = Vec::new();
-    if route.fallback_accounts.is_empty() {
-        return (first, attempts);
-    }
-    let candidates: Vec<&config::AccountConfig> = route
-        .fallback_accounts
-        .iter()
-        .filter_map(|id| state.config.account(id))
-        .filter(|a| a.enabled && a.provider_id == provider.id)
-        .collect();
+) -> Option<FallbackCandidate<'a>> {
     let mut available = Vec::new();
-    for candidate in candidates {
-        if state.health.is_available(&candidate.id).await {
-            available.push(candidate);
+    for id in &route.fallback_accounts {
+        let Some(account) = config.account(id) else {
+            continue;
+        };
+        if !account.enabled {
+            continue;
         }
+        if !health.is_available(&account.id).await {
+            continue;
+        }
+        let Some(provider) = config.provider(&account.provider_id) else {
+            continue;
+        };
+        if account.provider_id != route.provider_id {
+            let cap = config.protocol_capability(&provider.id, Some(&account.id), model, protocol);
+            if cap.mode != config::ProtocolMode::Native {
+                continue;
+            }
+        }
+        let upstream_model = account
+            .model_map
+            .get(model)
+            .cloned()
+            .unwrap_or_else(|| model.to_string());
+        available.push(FallbackCandidate {
+            account,
+            provider,
+            upstream_model,
+        });
     }
-    let mut candidates = available;
-    if candidates.is_empty() {
-        return (first, attempts);
+    if available.is_empty() {
+        return None;
     }
-    let total: u32 = candidates.iter().map(|a| a.weight.max(1)).sum();
+    let total: u32 = available.iter().map(|c| c.account.weight.max(1)).sum();
     let tick = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .subsec_nanos()
         % total.max(1);
     let mut cursor = 0;
-    let mut selected = candidates[0];
-    for candidate in candidates.drain(..) {
-        cursor += candidate.weight.max(1);
+    let mut selected_index = 0;
+    for (i, candidate) in available.iter().enumerate() {
+        cursor += candidate.account.weight.max(1);
         if tick < cursor {
-            selected = candidate;
+            selected_index = i;
             break;
         }
     }
+    Some(available.swap_remove(selected_index))
+}
+
+fn rewrite_model_in_body(body: &Bytes, new_model: &str) -> Bytes {
+    if let Ok(mut payload) = serde_json::from_slice::<Value>(body) {
+        if let Some(obj) = payload.as_object_mut() {
+            obj.insert("model".into(), Value::String(new_model.into()));
+        }
+        Bytes::from(serde_json::to_vec(&payload).unwrap_or_else(|_| body.to_vec()))
+    } else {
+        body.clone()
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn try_fallback(
+    config: &GatewayConfig,
+    health: &health::HealthRegistry,
+    http: &reqwest::Client,
+    route: &ResolvedRoute,
+    model: &str,
+    protocol: Protocol,
+    headers: &HeaderMap,
+    body: Bytes,
+    first: Response<Body>,
+) -> (Response<Body>, Vec<db::UsageAttempt>) {
+    let mut attempts = Vec::new();
+    let Some(candidate) = select_fallback_candidate(config, health, route, model, protocol).await
+    else {
+        return (first, attempts);
+    };
+    let forwarded_body = if candidate.upstream_model != model {
+        rewrite_model_in_body(&body, &candidate.upstream_model)
+    } else {
+        body
+    };
     let started = Instant::now();
-    match forward_account(state, route, provider, selected, protocol, headers, body).await {
+    match forward_fallback(
+        config,
+        http,
+        candidate.provider,
+        candidate.account,
+        protocol,
+        headers,
+        forwarded_body,
+    )
+    .await
+    {
         Ok(response) => {
             attempts.push(db::UsageAttempt {
                 attempt_no: 1,
-                provider_id: provider.id.clone(),
-                account_id: selected.id.clone(),
-                upstream_model_id: None,
+                provider_id: candidate.provider.id.clone(),
+                account_id: candidate.account.id.clone(),
+                upstream_model_id: Some(candidate.upstream_model),
                 status_code: response.status().as_u16() as i32,
                 success: response.status().is_success(),
                 latency_ms: started.elapsed().as_millis() as i64,
             });
             if is_retryable(response.status()) {
-                state.health.mark_failure(&selected.id).await;
+                health.mark_failure(&candidate.account.id).await;
             } else {
-                state.health.mark_success(&selected.id).await;
+                health.mark_success(&candidate.account.id).await;
             }
             (response, attempts)
         }
         Err(_) => {
             attempts.push(db::UsageAttempt {
                 attempt_no: 1,
-                provider_id: provider.id.clone(),
-                account_id: selected.id.clone(),
-                upstream_model_id: None,
+                provider_id: candidate.provider.id.clone(),
+                account_id: candidate.account.id.clone(),
+                upstream_model_id: Some(candidate.upstream_model),
                 status_code: 599,
                 success: false,
                 latency_ms: started.elapsed().as_millis() as i64,
             });
-            state.health.mark_failure(&selected.id).await;
+            health.mark_failure(&candidate.account.id).await;
             (first, attempts)
         }
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn try_fallback_error(
-    state: &AppState,
+    config: &GatewayConfig,
+    health: &health::HealthRegistry,
+    http: &reqwest::Client,
     route: &ResolvedRoute,
-    provider: &config::ProviderConfig,
+    model: &str,
     protocol: Protocol,
     headers: &HeaderMap,
     body: Bytes,
     first_error: transport::TransportError,
 ) -> (Response<Body>, Vec<db::UsageAttempt>) {
     let mut attempts = Vec::new();
-    let Some(account_id) = route.fallback_accounts.first() else {
+    let Some(candidate) = select_fallback_candidate(config, health, route, model, protocol).await
+    else {
         return (
             error_response(
                 StatusCode::BAD_GATEWAY,
@@ -1138,24 +1757,29 @@ async fn try_fallback_error(
             attempts,
         );
     };
-    let Some(account) = state.config.account(account_id) else {
-        return (
-            error_response(
-                StatusCode::BAD_GATEWAY,
-                "upstream_request_failed",
-                first_error.message(),
-            ),
-            attempts,
-        );
+    let forwarded_body = if candidate.upstream_model != model {
+        rewrite_model_in_body(&body, &candidate.upstream_model)
+    } else {
+        body
     };
     let started = Instant::now();
-    match forward_account(state, route, provider, account, protocol, headers, body).await {
+    match forward_fallback(
+        config,
+        http,
+        candidate.provider,
+        candidate.account,
+        protocol,
+        headers,
+        forwarded_body,
+    )
+    .await
+    {
         Ok(response) => {
             attempts.push(db::UsageAttempt {
                 attempt_no: 1,
-                provider_id: provider.id.clone(),
-                account_id: account.id.clone(),
-                upstream_model_id: None,
+                provider_id: candidate.provider.id.clone(),
+                account_id: candidate.account.id.clone(),
+                upstream_model_id: Some(candidate.upstream_model),
                 status_code: response.status().as_u16() as i32,
                 success: response.status().is_success(),
                 latency_ms: started.elapsed().as_millis() as i64,
@@ -1171,6 +1795,28 @@ async fn try_fallback_error(
             attempts,
         ),
     }
+}
+
+async fn forward_fallback(
+    config: &GatewayConfig,
+    http: &reqwest::Client,
+    provider: &config::ProviderConfig,
+    account: &config::AccountConfig,
+    protocol: Protocol,
+    headers: &HeaderMap,
+    body: Bytes,
+) -> Result<Response<Body>, transport::TransportError> {
+    let credential = config.credential_for(account);
+    transport::forward(
+        http,
+        provider,
+        account,
+        credential.as_deref(),
+        protocol,
+        headers,
+        body,
+    )
+    .await
 }
 
 fn is_retryable(status: StatusCode) -> bool {
@@ -1231,15 +1877,22 @@ fn error_response(status: StatusCode, kind: &str, message: &str) -> Response<Bod
 
 async fn resolve_route(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path((protocol, model)): Path<(String, String)>,
 ) -> impl IntoResponse {
+    if !admin_authorized(&headers) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error":{"type":"unauthorized","message":"admin key required"}})),
+        );
+    }
     let Ok(protocol) = protocol.parse::<Protocol>() else {
         return (
             StatusCode::BAD_REQUEST,
             Json(json!({"error":"unknown protocol"})),
         );
     };
-    match state.resolver.resolve_detailed(protocol, &model) {
+    match state.resolver().resolve_detailed(protocol, &model) {
         Ok(route) => (StatusCode::OK, Json(json!(route))),
         Err(error) => {
             let status = if error.code == "route_not_found" {
@@ -1274,12 +1927,16 @@ mod usage_api_tests {
             accounts: vec![],
             routes: vec![],
         });
-        AppState {
+        let live = LiveConfig {
             resolver: RouteResolver::new(config.clone()),
             config,
+        };
+        AppState {
+            live: Arc::new(std::sync::RwLock::new(live)),
             http: transport::client().expect("HTTP client"),
             db: Some(database),
             health: health::HealthRegistry::new(std::time::Duration::from_secs(1)),
+            listen_addr: "127.0.0.1:0".into(),
         }
     }
 
@@ -1316,6 +1973,7 @@ mod usage_api_tests {
         assert_eq!(csv_field("a,b\"c"), "\"a,b\"\"c\"");
         let header = usage_events_csv(&[]);
         assert!(header.contains("logical_model,upstream_model_id"));
+        assert!(header.contains("route_id,streamed,error_summary"));
         assert!(!header.contains("prompt"));
         assert!(!header.contains("response_body"));
     }
@@ -1355,6 +2013,9 @@ mod usage_api_tests {
             total_tokens: 17,
             usage_source: "upstream".into(),
             degraded: false,
+            route_id: Some("test-route".into()),
+            streamed: false,
+            error_summary: None,
         };
         let attempts = [
             db::UsageAttempt {
@@ -1548,6 +2209,7 @@ mod kimi_adapter_e2e_tests {
                 protocol_capabilities: HashMap::new(),
                 capabilities: None,
                 model_overrides: HashMap::new(),
+                model_map: HashMap::new(),
             }],
             routes: vec![config::RouteConfig {
                 id: "kimi-responses-adapter".into(),
@@ -1563,12 +2225,16 @@ mod kimi_adapter_e2e_tests {
             }],
         };
         let config = Arc::new(config);
-        AppState {
+        let live = LiveConfig {
             resolver: RouteResolver::new(config.clone()),
             config,
+        };
+        AppState {
+            live: Arc::new(std::sync::RwLock::new(live)),
             http: transport::client().expect("http client"),
             db: None,
             health: health::HealthRegistry::new(std::time::Duration::from_secs(1)),
+            listen_addr: "127.0.0.1:0".into(),
         }
     }
 
