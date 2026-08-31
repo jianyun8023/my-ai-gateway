@@ -1589,6 +1589,36 @@ fn looks_like_secret(value: &str) -> bool {
         || (value.starts_with("Bearer ") && value.len() >= 20)
 }
 
+fn sanitize_string(value: String) -> String {
+    if looks_like_secret(&value) {
+        return "[REDACTED]".into();
+    }
+    if let Ok(mut url) = reqwest::Url::parse(&value) {
+        let query_is_sensitive = url.query().is_some_and(|query| {
+            let query = query.to_ascii_lowercase();
+            query.contains("api_key")
+                || query.contains("apikey")
+                || query.contains("token")
+                || query.contains("secret")
+                || query.contains("password")
+        });
+        if !url.username().is_empty()
+            || url.password().is_some()
+            || query_is_sensitive
+            || url.fragment().is_some()
+        {
+            let _ = url.set_username("");
+            let _ = url.set_password(None);
+            if query_is_sensitive {
+                url.set_query(None);
+            }
+            url.set_fragment(None);
+            return url.to_string();
+        }
+    }
+    value
+}
+
 fn sanitize_json(value: Value) -> Value {
     match value {
         Value::Object(object) => Value::Object(
@@ -1611,6 +1641,7 @@ fn sanitize_json(value: Value) -> Value {
                 .collect(),
         ),
         Value::Array(values) => Value::Array(values.into_iter().map(sanitize_json).collect()),
+        Value::String(value) => Value::String(sanitize_string(value)),
         other => other,
     }
 }
@@ -2076,6 +2107,12 @@ mod tests {
         assert_eq!(sanitized["auth"]["authorization"], "[REDACTED]");
         assert_eq!(sanitized["headers"]["X-Key"], "[REDACTED]");
         assert_eq!(sanitized["metadata"]["max_output_tokens"], 4096);
+        assert_eq!(
+            sanitize_json(json!(
+                "https://user:password@example.test/path?api_key=secret"
+            )),
+            json!("https://example.test/path")
+        );
     }
 
     #[test]
