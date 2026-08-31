@@ -1,7 +1,7 @@
 # my-ai-gateway Usage Console
 
 The active web application is a gateway-native, token-first usage console with
-three pages:
+three pages in a desktop-first sidebar shell:
 
 - Overview: logical requests, upstream attempts, success rate, token
   composition, timeseries, and recent activity.
@@ -29,6 +29,15 @@ timezone.
 An Admin key can be entered in the header when `GATEWAY_ADMIN_KEY` (or the
 temporary `GATEWAY_API_KEY` fallback) protects the Admin API. It is kept only in
 `sessionStorage`; no Admin Session login is implemented here.
+
+The information hierarchy is adapted from the reviewed single-file prototype
+archived at `docs/prototypes/ai-gateway-prototype.html`. The executable design
+tokens in `src/styles/gateway-brand.scss` trace back to `docs/brand-spec.md`.
+The prototype is not imported by the web build, and its Source/Account and
+model/routing forms are intentionally not treated as domain contracts.
+Responsive behavior uses an overlay navigation drawer at 920px, stacked phone
+controls and a full-width detail drawer at 600px, and compact single-column KPI
+rows at 380px.
 
 ## Development
 

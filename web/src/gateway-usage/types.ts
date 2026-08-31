@@ -32,6 +32,8 @@ export interface UsageSummaryViewModel {
   successRate: number;
   upstreamAttempts: number;
   retries: number;
+  averageLatencyMs: number;
+  p95LatencyMs: number;
   tokens: TokenTotals;
   usageSources: Record<string, number>;
 }
@@ -111,6 +113,7 @@ export interface UsageOverviewViewModel {
   summary: UsageSummaryViewModel;
   timeseries: UsageTimeseriesPoint[];
   recentEvents: UsageEventViewModel[];
+  logicalModels: UsageBreakdownItem[];
 }
 
 export type RawGatewayUsagePayload = unknown;

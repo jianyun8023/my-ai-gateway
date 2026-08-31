@@ -1,0 +1,88 @@
+/*
+ * Executable subset of docs/brand-spec.md for the active gateway console.
+ * The legacy Keeper variable names remain mapped so shared Card/Button
+ * components consume one source of truth without changing their public API.
+ */
+.app-frame {
+  --bg: oklch(98% 0.005 250);
+  --surface: oklch(100% 0 0);
+  --fg: oklch(22% 0.02 240);
+  --muted: oklch(50% 0.018 240);
+  --border: oklch(90% 0.008 240);
+  --accent: oklch(58% 0.16 145);
+
+  --accent-soft: color-mix(in oklch, var(--accent) 14%, transparent);
+  --fg-soft: color-mix(in oklch, var(--fg) 6%, transparent);
+  --success: oklch(62% 0.16 145);
+  --success-soft: color-mix(in oklch, var(--success) 12%, transparent);
+  --warn: oklch(70% 0.16 80);
+  --warn-soft: color-mix(in oklch, var(--warn) 12%, transparent);
+  --danger: oklch(58% 0.2 25);
+  --danger-soft: color-mix(in oklch, var(--danger) 12%, transparent);
+
+  --font-display: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', system-ui, sans-serif;
+  --font-body: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'IBM Plex Mono', ui-monospace, Menlo, monospace;
+
+  --fs-h1: 28px;
+  --fs-h2: 22px;
+  --fs-h3: 16px;
+  --fs-body: 14px;
+  --fs-meta: 12px;
+  --fs-small: 11px;
+
+  --gap-xs: 4px;
+  --gap-sm: 8px;
+  --gap-md: 16px;
+  --gap-lg: 24px;
+  --gap-xl: 32px;
+
+  --radius: 8px;
+  --radius-sm: 6px;
+  --radius-lg: 12px;
+
+  --bg-secondary: var(--bg);
+  --bg-primary: color-mix(in oklch, var(--fg) 3%, var(--surface));
+  --bg-tertiary: var(--fg-soft);
+  --bg-hover: var(--fg-soft);
+  --bg-quinary: color-mix(in oklch, var(--fg) 2%, var(--surface));
+  --bg-error-light: var(--danger-soft);
+  --floating-surface: var(--surface);
+  --floating-border: var(--border);
+  --text-primary: var(--fg);
+  --text-secondary: var(--muted);
+  --text-tertiary: color-mix(in oklch, var(--muted) 72%, transparent);
+  --text-quaternary: color-mix(in oklch, var(--muted) 45%, transparent);
+  --text-muted: var(--muted);
+  --border-color: var(--border);
+  --border-primary: color-mix(in oklch, var(--border) 82%, var(--fg));
+  --border-hover: color-mix(in oklch, var(--border) 68%, var(--fg));
+  --primary-color: var(--accent);
+  --primary-hover: color-mix(in oklch, var(--accent) 85%, black);
+  --primary-active: color-mix(in oklch, var(--accent) 75%, black);
+  --primary-contrast: var(--surface);
+  --success-color: var(--success);
+  --warning-color: var(--warn);
+  --error-color: var(--danger);
+  --danger-color: var(--danger);
+
+  font-family: var(--font-body);
+}
+
+/* Dark is an application compatibility extension; the canonical light tokens
+ * and component semantics remain defined by docs/brand-spec.md. */
+[data-theme='dark'] .app-frame {
+  --bg: oklch(17% 0.012 250);
+  --surface: oklch(22% 0.012 245);
+  --fg: oklch(94% 0.006 250);
+  --muted: oklch(72% 0.012 245);
+  --border: oklch(34% 0.012 245);
+  --accent: oklch(68% 0.15 145);
+  --success: oklch(72% 0.15 145);
+  --warn: oklch(76% 0.15 80);
+  --danger: oklch(70% 0.18 25);
+  --bg-primary: color-mix(in oklch, var(--surface) 88%, var(--fg));
+  --text-tertiary: color-mix(in oklch, var(--muted) 80%, transparent);
+  --text-quaternary: color-mix(in oklch, var(--muted) 55%, transparent);
+  --primary-contrast: oklch(16% 0.01 250);
+}

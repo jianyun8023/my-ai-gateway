@@ -3,6 +3,8 @@ export const gatewayUsageSummaryFixture = {
   timezone: 'UTC',
   logical_requests: { total: 3, successes: 2, failures: 1 },
   upstream_attempts: { total: 5, retries: 2 },
+  average_latency_ms: 940,
+  p95_latency_ms: 1280,
   tokens: { input: 1200, output: 420, reasoning: 160, cached: 300, total: 1780 },
   usage_sources: [
     { usage_source: 'upstream', requests: 1 },

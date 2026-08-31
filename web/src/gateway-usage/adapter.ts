@@ -105,6 +105,8 @@ export const adaptUsageSummary = (payload: RawGatewayUsagePayload): UsageSummary
     successRate: logicalRequests > 0 ? successfulRequests / logicalRequests : 0,
     upstreamAttempts,
     retries,
+    averageLatencyMs: readNumber(summary, ['average_latency_ms', 'avg_latency_ms']),
+    p95LatencyMs: readNumber(summary, ['p95_latency_ms']),
     tokens: adaptTokenTotals(summary),
     usageSources,
   };
@@ -213,6 +215,8 @@ export const emptyUsageSummary = (): UsageSummaryViewModel => ({
   successRate: 0,
   upstreamAttempts: 0,
   retries: 0,
+  averageLatencyMs: 0,
+  p95LatencyMs: 0,
   tokens: { ...EMPTY_TOKENS },
   usageSources: {},
 });
