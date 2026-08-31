@@ -186,6 +186,23 @@ UI 流程为：
 
 字段优先级为：用户覆盖 > 模型预设 > 上游发现 > unknown。刷新模型时不得覆盖用户已经确认的字段；新发现的模型先进入待确认列表，不自动改变现有路由。
 
+当前实现内置 `deepseek@1`、`minimax@1`、`kimi_code@1` 三个版本化 ProviderPreset，以及首批 DeepSeek V4、MiniMax M3/M2.7、Kimi K3/K2.7 Code ModelPreset。ProviderPreset 完整声明默认 Base URL、三协议 endpoint/模式、认证和 Header 模板、最小连接测试请求、默认能力及发现规则；Kimi Code 因官方未提供已认证模型列表 endpoint，明确声明 `discovery.support=unsupported`，不会猜测接口。
+
+管理 API 流程为：
+
+```text
+GET  /admin/provider-presets
+POST /admin/sources
+POST /admin/sources/:source_id/connection-tests
+POST /admin/sources/:source_id/discoveries
+GET  /admin/sources/:source_id/discoveries/latest
+GET  /admin/sources/:source_id/models?confirmation_status=pending
+PATCH /admin/sources/:source_id/models
+POST /admin/sources/:source_id/models/confirm
+```
+
+连接测试按入口协议执行；Adapter 模式同时返回实际 `upstream_protocol`。测试与发现只从关联且启用的 Account 的 `credential_env` 取凭据，请求日志和持久化记录不包含 Authorization/API Key 或完整失败响应正文。失败记录仅保存稳定错误码、脱敏消息、HTTP 状态、耗时、操作者、Account、预设版本和 UTC 时间。成功 discovery 保存有大小上限的完整模型列表 snapshot；解析和数据库更新位于明确的失败边界，失败不会修改既有 SourceModel。
+
 ### 3.5 模型目录持久化基线
 
 模型目录使用独立领域表，和当前 `ProviderConfig.models`、`routes` 运行时配置分离：
@@ -217,7 +234,9 @@ user > preset > upstream > unknown
 
 重复刷新同一 `(source_id, upstream_model_id)` 只更新原始发现快照、最近发现时间和可用状态，不创建重复记录。待确认记录会重新应用预设和上游元数据，但保留用户覆盖；已确认记录的元数据和匹配预设均保持不变。发现中消失的模型只标记 `unavailable`，不删除 LogicalModel、Binding 或 Route。
 
-本阶段只提供 migration、领域类型和仓储查询，不改变现有 Route，也不把发现结果自动写入 `logical_models`、`model_bindings` 或 `routes`。`/v1/models` 和运行时路由切换到 PostgreSQL 模型目录属于后续 PostgreSQL-backed 控制面任务。
+ProviderPreset 与发现确认阶段不改变现有 Route，也不把发现结果自动写入 `logical_models`、`model_bindings` 或 `routes`。新模型保持 `pending`；用户确认只将 SourceModel 变为 `confirmed`，LogicalModel/Binding/Route 仍由独立控制面流程显式创建。`/v1/models` 和运行时 Binding snapshot 的数据库驱动行为属于 #14，本实现未修改这些路径。
+
+每次成功刷新在单个 PostgreSQL 事务中按 Source 加锁，保存原始 snapshot、更新模型并生成按模型 ID 排序的 `added/changed/missing` diff。重复相同刷新得到空 diff；confirmed 元数据保持不变，pending 记录重算 upstream/preset 字段但保留 user 字段；missing 仅改为 `unavailable`。连接测试与 discovery run 分别保留审计历史，最近一次 discovery 可由 API 读取。
 
 开发期 `GATEWAY_CONFIG_JSON` 导入会为尚不存在的 Provider ID 创建一次 `custom@1` Source 快照，并让 Account 显式引用该 Source；后续启动同步不会覆盖已经存在的 Source 快照或用户编辑，PostgreSQL 仍是模型目录事实来源。
 
@@ -431,6 +450,17 @@ Kimi Adapter：
 - 权重选择；
 - Adapter/native 模式区分。
 
+### ProviderPreset 与模型发现
+
+- DeepSeek、MiniMax、Kimi Code 内置版本化 ProviderPreset；
+- 首批版本化 ModelPreset，字段来源严格为 `preset/unknown`；
+- Source 创建时复制完整预设快照，最新预设仅用于差异预览；
+- Source 独立 Base URL、endpoint、认证和协议能力快照用于后续连接测试；
+- DeepSeek/MiniMax 模型列表发现；Kimi Code 显式报告不支持发现；
+- discovery 原始 snapshot、脱敏失败、Account/操作者/耗时/预设版本审计；
+- 稳定 added/changed/missing、待确认列表、用户编辑和事务化批量确认；
+- 不自动创建 LogicalModel、Binding 或 Route，不改变 `/v1/models` 和运行时路由。
+
 ### Kimi Adapter
 
 - 以 workspace crate 内置；
@@ -485,9 +515,11 @@ v1 响应 envelope 固定如下：summary 为 `{version, timezone, range, data}`
 
 ### 7.2 PostgreSQL 领域表
 
-当前已经创建 `usage_events`、`usage_event_attempts`、`virtual_keys`、`providers`、`accounts`、`routes`，以及 Provider/Model preset、Source、SourceModel、LogicalModel、ModelBinding、SourceModelCapability 模型目录表。现有配置会前进回填为 `custom` ProviderPreset 的独立 Source 快照，但运行时仍继续使用当前配置路径，直到 PostgreSQL-backed 控制面任务完成。`request_id` 表示一次北向逻辑请求并保持唯一；重试尝试写入 `usage_event_attempts(request_id, attempt_no)`，同一尝试幂等。`usage_events.logical_model` 保存客户端模型，`upstream_model_id` 在路由能明确提供时填充，否则为空；Virtual Key 鉴权成功时写入 `virtual_key_id`，静态入口 Key 保持为空。时间统一按 PostgreSQL `TIMESTAMPTZ` 以 UTC 存储，展示层负责本地时区转换。
+当前已经创建 `usage_events`、`usage_event_attempts`、`virtual_keys`、`providers`、`accounts`、`routes`，Provider/Model preset、Source、SourceModel、LogicalModel、ModelBinding、SourceModelCapability 模型目录表，以及 `source_connection_tests`、`source_discovery_runs` 审计表。现有配置会前进回填为 `custom` ProviderPreset 的独立 Source 快照；内置预设以不可变 `(id, version)` 启动注册。模型发现与确认已经使用 PostgreSQL 模型目录，但运行时 Binding snapshot、`/v1/models` 和 DB-first 启动仍由 #14 完成。`request_id` 表示一次北向逻辑请求并保持唯一；重试尝试写入 `usage_event_attempts(request_id, attempt_no)`，同一尝试幂等。`usage_events.logical_model` 保存客户端模型，`upstream_model_id` 在路由能明确提供时填充，否则为空；Virtual Key 鉴权成功时写入 `virtual_key_id`，静态入口 Key 保持为空。时间统一按 PostgreSQL `TIMESTAMPTZ` 以 UTC 存储，展示层负责本地时区转换。
 
 模型目录数据库回归测试只连接显式的 `TEST_DATABASE_URL`，不会复用运行时 `DATABASE_URL`；未设置时普通单元测试跳过 PostgreSQL 集成部分。
+
+ProviderPreset/模型发现回归使用真实 PostgreSQL 与 mock 上游，覆盖 DeepSeek、MiniMax、Kimi Code 的成功、失败、空列表、重复刷新、模型消失、confirmed/user 覆盖保留、批量确认和日志脱敏。
 
 - `health_snapshots`；
 - `audit_logs`。

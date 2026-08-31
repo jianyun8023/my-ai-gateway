@@ -428,6 +428,12 @@ pub struct ModelPresetRecord {
     pub updated_at: DateTime<Utc>,
 }
 
+impl ModelPresetRecord {
+    pub fn catalog_metadata(&self) -> Result<CatalogMetadata, CatalogError> {
+        CatalogMetadata::from_json(self.metadata.clone(), self.field_sources.clone())
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct SourceModelRefresh {
     pub source_id: String,
@@ -462,6 +468,126 @@ impl SourceModelRecord {
     pub fn catalog_metadata(&self) -> Result<CatalogMetadata, CatalogError> {
         CatalogMetadata::from_json(self.metadata.clone(), self.field_sources.clone())
     }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct DiscoveryDiffEntry {
+    pub upstream_model_id: String,
+    pub changed_fields: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+pub struct DiscoveryDiff {
+    pub added: Vec<DiscoveryDiffEntry>,
+    pub changed: Vec<DiscoveryDiffEntry>,
+    pub missing: Vec<DiscoveryDiffEntry>,
+}
+
+#[derive(Clone, Debug)]
+pub struct DiscoveryApplyInput {
+    pub source_id: String,
+    pub account_id: Option<String>,
+    pub raw_snapshot: Value,
+    pub models: Vec<SourceModelRefresh>,
+    pub http_status: i32,
+    pub latency_ms: i64,
+    pub requested_by: String,
+    pub started_at: DateTime<Utc>,
+    pub completed_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, Serialize, sqlx::FromRow)]
+pub struct DiscoveryRunRecord {
+    pub id: i64,
+    pub source_id: String,
+    pub account_id: Option<String>,
+    pub provider_preset_id: String,
+    pub provider_preset_version: i32,
+    pub status: String,
+    pub raw_snapshot: Option<Value>,
+    pub diff: Value,
+    pub discovered_model_count: i32,
+    pub http_status: Option<i32>,
+    pub latency_ms: i64,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
+    pub requested_by: String,
+    pub started_at: DateTime<Utc>,
+    pub completed_at: DateTime<Utc>,
+}
+
+impl DiscoveryRunRecord {
+    pub fn discovery_diff(&self) -> Result<DiscoveryDiff, CatalogError> {
+        serde_json::from_value(self.diff.clone()).map_err(Into::into)
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct DiscoveryApplyResult {
+    pub run: DiscoveryRunRecord,
+    pub diff: DiscoveryDiff,
+    pub models: Vec<SourceModelRecord>,
+}
+
+#[derive(Clone, Debug)]
+pub struct DiscoveryFailureInput {
+    pub source_id: String,
+    pub account_id: Option<String>,
+    pub status: String,
+    pub http_status: Option<i32>,
+    pub latency_ms: i64,
+    pub error_code: String,
+    pub error_message: String,
+    pub requested_by: String,
+    pub started_at: DateTime<Utc>,
+    pub completed_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug)]
+pub struct ConnectionTestInput {
+    pub source_id: String,
+    pub account_id: Option<String>,
+    pub protocol: Protocol,
+    pub upstream_protocol: Protocol,
+    pub mode: SourceProtocolMode,
+    pub status: String,
+    pub http_status: Option<i32>,
+    pub latency_ms: i64,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
+    pub requested_by: String,
+    pub tested_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, Serialize, sqlx::FromRow)]
+pub struct ConnectionTestRecord {
+    pub id: i64,
+    pub source_id: String,
+    pub account_id: Option<String>,
+    pub protocol: Protocol,
+    pub upstream_protocol: Protocol,
+    pub mode: SourceProtocolMode,
+    pub status: String,
+    pub http_status: Option<i32>,
+    pub latency_ms: i64,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
+    pub requested_by: String,
+    pub tested_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, Serialize, sqlx::FromRow)]
+pub struct AccountCredentialRef {
+    pub id: String,
+    pub source_id: String,
+    pub credential_env: Option<String>,
+    pub has_credential_ciphertext: bool,
+}
+
+#[derive(Clone, Debug)]
+pub struct SourceModelConfirmation {
+    pub upstream_model_id: String,
+    pub user_overrides: MetadataValues,
 }
 
 #[derive(Clone, Debug)]
@@ -628,6 +754,39 @@ impl ModelCatalogRepository {
         Self { pool }
     }
 
+    pub async fn list_provider_presets(&self) -> Result<Vec<ProviderPresetRecord>, CatalogError> {
+        sqlx::query_as::<_, ProviderPresetRecord>(
+            "SELECT id,version,display_name,definition,created_at FROM provider_presets ORDER BY id,version DESC",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(Into::into)
+    }
+
+    pub async fn get_provider_preset(
+        &self,
+        id: &str,
+        version: i32,
+    ) -> Result<ProviderPresetRecord, CatalogError> {
+        sqlx::query_as::<_, ProviderPresetRecord>("SELECT id,version,display_name,definition,created_at FROM provider_presets WHERE id=$1 AND version=$2")
+            .bind(id)
+            .bind(version)
+            .fetch_optional(&self.pool)
+            .await?
+            .ok_or_else(|| CatalogError::NotFound(format!("provider preset {id} version {version} not found")))
+    }
+
+    pub async fn latest_provider_preset(
+        &self,
+        id: &str,
+    ) -> Result<ProviderPresetRecord, CatalogError> {
+        sqlx::query_as::<_, ProviderPresetRecord>("SELECT id,version,display_name,definition,created_at FROM provider_presets WHERE id=$1 ORDER BY version DESC LIMIT 1")
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await?
+            .ok_or_else(|| CatalogError::NotFound(format!("provider preset {id} not found")))
+    }
+
     pub async fn insert_provider_preset(
         &self,
         input: &ProviderPresetInput,
@@ -699,6 +858,34 @@ impl ModelCatalogRepository {
             .map_err(Into::into)
     }
 
+    pub async fn get_source(&self, id: &str) -> Result<SourceRecord, CatalogError> {
+        sqlx::query_as::<_, SourceRecord>("SELECT id,display_name,provider_preset_id,provider_preset_version,provider_preset_snapshot,base_url,endpoints,auth_config,protocol_capabilities,enabled,created_at,updated_at FROM sources WHERE id=$1")
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await?
+            .ok_or_else(|| CatalogError::NotFound(format!("source {id} not found")))
+    }
+
+    pub async fn list_sources(&self) -> Result<Vec<SourceRecord>, CatalogError> {
+        sqlx::query_as::<_, SourceRecord>("SELECT id,display_name,provider_preset_id,provider_preset_version,provider_preset_snapshot,base_url,endpoints,auth_config,protocol_capabilities,enabled,created_at,updated_at FROM sources ORDER BY id")
+            .fetch_all(&self.pool)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub async fn get_account_credential_ref(
+        &self,
+        source_id: &str,
+        account_id: &str,
+    ) -> Result<AccountCredentialRef, CatalogError> {
+        sqlx::query_as::<_, AccountCredentialRef>("SELECT id,source_id,credential_env,(credential_ciphertext IS NOT NULL) AS has_credential_ciphertext FROM accounts WHERE id=$1 AND source_id=$2 AND enabled")
+            .bind(account_id)
+            .bind(source_id)
+            .fetch_optional(&self.pool)
+            .await?
+            .ok_or_else(|| CatalogError::NotFound(format!("enabled account {account_id} for source {source_id} not found")))
+    }
+
     pub async fn insert_model_preset(
         &self,
         input: &ModelPresetInput,
@@ -747,75 +934,62 @@ impl ModelCatalogRepository {
         Ok(record)
     }
 
+    pub async fn match_model_preset(
+        &self,
+        upstream_model_id: &str,
+    ) -> Result<Option<ModelPresetRecord>, CatalogError> {
+        sqlx::query_as::<_, ModelPresetRecord>("SELECT id,version,canonical_model_id,aliases,metadata,field_sources,created_at,updated_at FROM model_presets WHERE canonical_model_id=$1 OR aliases ? $1 ORDER BY version DESC,id LIMIT 1")
+            .bind(upstream_model_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(Into::into)
+    }
+
     pub async fn refresh_source_model(
         &self,
         refresh: &SourceModelRefresh,
     ) -> Result<SourceModelRecord, CatalogError> {
-        if !refresh.raw_snapshot.is_object() {
-            return Err(CatalogError::InvalidMetadata(
-                "source model raw snapshot must be an object".to_owned(),
-            ));
-        }
-        if refresh.matched_preset.is_some() != refresh.preset_metadata.is_some() {
-            return Err(CatalogError::InvalidMetadata(
-                "matched model preset reference and metadata must be provided together".to_owned(),
-            ));
-        }
-        let discovered =
-            CatalogMetadata::resolve(&refresh.upstream_metadata, refresh.preset_metadata.as_ref())?;
-        let (metadata, field_sources) = discovered.to_json()?;
-        let (preset_id, preset_version) = preset_parts(refresh.matched_preset.as_ref());
+        validate_source_model_refresh(refresh)?;
         let mut tx = self.pool.begin().await?;
-        let inserted = sqlx::query("INSERT INTO source_models (source_id,upstream_model_id,confirmation_status,availability_status,raw_snapshot,metadata,field_sources,matched_model_preset_id,matched_model_preset_version,first_discovered_at,last_discovered_at) VALUES ($1,$2,'pending','available',$3,$4,$5,$6,$7,$8,$8) ON CONFLICT (source_id,upstream_model_id) DO NOTHING")
-            .bind(&refresh.source_id)
-            .bind(&refresh.upstream_model_id)
-            .bind(&refresh.raw_snapshot)
-            .bind(&metadata)
-            .bind(&field_sources)
-            .bind(preset_id)
-            .bind(preset_version)
-            .bind(refresh.discovered_at)
+        let record = refresh_source_model_tx(&mut tx, refresh).await?;
+        tx.commit().await?;
+        Ok(record)
+    }
+
+    pub async fn list_source_models(
+        &self,
+        source_id: &str,
+        confirmation_status: Option<CatalogStatus>,
+        availability_status: Option<CatalogAvailability>,
+    ) -> Result<Vec<SourceModelRecord>, CatalogError> {
+        sqlx::query_as::<_, SourceModelRecord>("SELECT source_id,upstream_model_id,confirmation_status,availability_status,raw_snapshot,metadata,field_sources,matched_model_preset_id,matched_model_preset_version,first_discovered_at,last_discovered_at,confirmed_at,unavailable_at,created_at,updated_at FROM source_models WHERE source_id=$1 AND ($2::catalog_status IS NULL OR confirmation_status=$2) AND ($3::catalog_availability IS NULL OR availability_status=$3) ORDER BY upstream_model_id")
+            .bind(source_id)
+            .bind(confirmation_status)
+            .bind(availability_status)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub async fn update_source_model_user_overrides(
+        &self,
+        source_id: &str,
+        upstream_model_id: &str,
+        user_overrides: &MetadataValues,
+    ) -> Result<SourceModelRecord, CatalogError> {
+        let mut tx = self.pool.begin().await?;
+        let existing = fetch_source_model_for_update(&mut tx, source_id, upstream_model_id).await?;
+        let mut metadata = existing.catalog_metadata()?;
+        metadata.apply_user_overrides(user_overrides)?;
+        let (values, sources) = metadata.to_json()?;
+        sqlx::query("UPDATE source_models SET metadata=$3,field_sources=$4,updated_at=NOW() WHERE source_id=$1 AND upstream_model_id=$2")
+            .bind(source_id)
+            .bind(upstream_model_id)
+            .bind(values)
+            .bind(sources)
             .execute(&mut *tx)
-            .await?
-            .rows_affected()
-            > 0;
-        if !inserted {
-            let existing = fetch_source_model_for_update(
-                &mut tx,
-                &refresh.source_id,
-                &refresh.upstream_model_id,
-            )
             .await?;
-            let existing_metadata = existing.catalog_metadata()?;
-            let refreshed = existing_metadata.refreshed_preserving_user_fields(
-                existing.confirmation_status == CatalogStatus::Confirmed,
-                &refresh.upstream_metadata,
-                refresh.preset_metadata.as_ref(),
-            )?;
-            let (metadata, field_sources) = refreshed.to_json()?;
-            let (update_preset_id, update_preset_version) =
-                if existing.confirmation_status == CatalogStatus::Confirmed {
-                    (
-                        existing.matched_model_preset_id.as_deref(),
-                        existing.matched_model_preset_version,
-                    )
-                } else {
-                    (preset_id, preset_version)
-                };
-            sqlx::query("UPDATE source_models SET availability_status='available',raw_snapshot=$3,metadata=$4,field_sources=$5,matched_model_preset_id=$6,matched_model_preset_version=$7,last_discovered_at=$8,unavailable_at=NULL,updated_at=NOW() WHERE source_id=$1 AND upstream_model_id=$2")
-                .bind(&refresh.source_id)
-                .bind(&refresh.upstream_model_id)
-                .bind(&refresh.raw_snapshot)
-                .bind(metadata)
-                .bind(field_sources)
-                .bind(update_preset_id)
-                .bind(update_preset_version)
-                .bind(refresh.discovered_at)
-                .execute(&mut *tx)
-                .await?;
-        }
-        let record =
-            fetch_source_model(&mut tx, &refresh.source_id, &refresh.upstream_model_id).await?;
+        let record = fetch_source_model(&mut tx, source_id, upstream_model_id).await?;
         tx.commit().await?;
         Ok(record)
     }
@@ -826,26 +1000,68 @@ impl ModelCatalogRepository {
         upstream_model_id: &str,
         user_overrides: &MetadataValues,
     ) -> Result<SourceModelRecord, CatalogError> {
-        let mut tx = self.pool.begin().await?;
-        let existing = fetch_source_model_for_update(&mut tx, source_id, upstream_model_id).await?;
-        if existing.availability_status != CatalogAvailability::Available {
+        self.confirm_source_models(
+            source_id,
+            &[SourceModelConfirmation {
+                upstream_model_id: upstream_model_id.to_owned(),
+                user_overrides: user_overrides.clone(),
+            }],
+        )
+        .await?
+        .into_iter()
+        .next()
+        .ok_or_else(|| CatalogError::InvalidState("confirmation set cannot be empty".into()))
+    }
+
+    pub async fn confirm_source_models(
+        &self,
+        source_id: &str,
+        confirmations: &[SourceModelConfirmation],
+    ) -> Result<Vec<SourceModelRecord>, CatalogError> {
+        if confirmations.is_empty() {
             return Err(CatalogError::InvalidState(
-                "only an available source model can be confirmed".to_owned(),
+                "at least one source model confirmation is required".into(),
             ));
         }
-        let mut metadata = existing.catalog_metadata()?;
-        metadata.apply_user_overrides(user_overrides)?;
-        let (values, sources) = metadata.to_json()?;
-        sqlx::query("UPDATE source_models SET confirmation_status='confirmed',metadata=$3,field_sources=$4,confirmed_at=COALESCE(confirmed_at,NOW()),updated_at=NOW() WHERE source_id=$1 AND upstream_model_id=$2")
-            .bind(source_id)
-            .bind(upstream_model_id)
-            .bind(values)
-            .bind(sources)
-            .execute(&mut *tx)
-            .await?;
-        let record = fetch_source_model(&mut tx, source_id, upstream_model_id).await?;
+        let mut ordered = confirmations.iter().collect::<Vec<_>>();
+        ordered.sort_by(|left, right| left.upstream_model_id.cmp(&right.upstream_model_id));
+        if ordered
+            .windows(2)
+            .any(|items| items[0].upstream_model_id == items[1].upstream_model_id)
+        {
+            return Err(CatalogError::InvalidState(
+                "source model confirmation IDs must be unique".into(),
+            ));
+        }
+        let mut tx = self.pool.begin().await?;
+        lock_source(&mut tx, source_id).await?;
+        let mut records = Vec::with_capacity(ordered.len());
+        for confirmation in ordered {
+            let existing =
+                fetch_source_model_for_update(&mut tx, source_id, &confirmation.upstream_model_id)
+                    .await?;
+            if existing.availability_status != CatalogAvailability::Available {
+                return Err(CatalogError::InvalidState(format!(
+                    "only an available source model can be confirmed: {}",
+                    confirmation.upstream_model_id
+                )));
+            }
+            let mut metadata = existing.catalog_metadata()?;
+            metadata.apply_user_overrides(&confirmation.user_overrides)?;
+            let (values, sources) = metadata.to_json()?;
+            sqlx::query("UPDATE source_models SET confirmation_status='confirmed',metadata=$3,field_sources=$4,confirmed_at=COALESCE(confirmed_at,NOW()),updated_at=NOW() WHERE source_id=$1 AND upstream_model_id=$2")
+                .bind(source_id)
+                .bind(&confirmation.upstream_model_id)
+                .bind(values)
+                .bind(sources)
+                .execute(&mut *tx)
+                .await?;
+            records.push(
+                fetch_source_model(&mut tx, source_id, &confirmation.upstream_model_id).await?,
+            );
+        }
         tx.commit().await?;
-        Ok(record)
+        Ok(records)
     }
 
     pub async fn mark_source_model_unavailable(
@@ -861,6 +1077,222 @@ impl ModelCatalogRepository {
             .fetch_optional(&self.pool)
             .await?
             .ok_or_else(|| CatalogError::NotFound(format!("source model {source_id}/{upstream_model_id} not found")))
+    }
+
+    pub async fn apply_discovery(
+        &self,
+        input: &DiscoveryApplyInput,
+    ) -> Result<DiscoveryApplyResult, CatalogError> {
+        if input.http_status < 200 || input.http_status > 299 {
+            return Err(CatalogError::InvalidState(
+                "successful discovery requires a 2xx HTTP status".into(),
+            ));
+        }
+        if input.latency_ms < 0 || input.completed_at < input.started_at {
+            return Err(CatalogError::InvalidState(
+                "discovery timing metadata is invalid".into(),
+            ));
+        }
+        if input.raw_snapshot.is_null() {
+            return Err(CatalogError::InvalidMetadata(
+                "discovery raw snapshot cannot be null".into(),
+            ));
+        }
+        let mut discovered = input.models.iter().collect::<Vec<_>>();
+        discovered.sort_by(|left, right| left.upstream_model_id.cmp(&right.upstream_model_id));
+        if discovered
+            .windows(2)
+            .any(|items| items[0].upstream_model_id == items[1].upstream_model_id)
+        {
+            return Err(CatalogError::InvalidMetadata(
+                "discovery result contains duplicate model IDs".into(),
+            ));
+        }
+        for refresh in &discovered {
+            validate_source_model_refresh(refresh)?;
+            if refresh.source_id != input.source_id {
+                return Err(CatalogError::InvalidState(
+                    "discovery models must belong to the requested source".into(),
+                ));
+            }
+        }
+
+        let mut tx = self.pool.begin().await?;
+        lock_source(&mut tx, &input.source_id).await?;
+        let source: (String, i32) = sqlx::query_as(
+            "SELECT provider_preset_id,provider_preset_version FROM sources WHERE id=$1 FOR UPDATE",
+        )
+        .bind(&input.source_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| CatalogError::NotFound(format!("source {} not found", input.source_id)))?;
+        validate_account_for_source(&mut tx, &input.source_id, input.account_id.as_deref()).await?;
+        let before = sqlx::query_as::<_, SourceModelRecord>("SELECT source_id,upstream_model_id,confirmation_status,availability_status,raw_snapshot,metadata,field_sources,matched_model_preset_id,matched_model_preset_version,first_discovered_at,last_discovered_at,confirmed_at,unavailable_at,created_at,updated_at FROM source_models WHERE source_id=$1 ORDER BY upstream_model_id FOR UPDATE")
+            .bind(&input.source_id)
+            .fetch_all(&mut *tx)
+            .await?;
+        let mut before_by_id = before
+            .into_iter()
+            .map(|record| (record.upstream_model_id.clone(), record))
+            .collect::<BTreeMap<_, _>>();
+        let mut diff = DiscoveryDiff::default();
+        let mut records = Vec::new();
+        for refresh in discovered {
+            let previous = before_by_id.remove(&refresh.upstream_model_id);
+            let current = refresh_source_model_tx(&mut tx, refresh).await?;
+            match previous.as_ref() {
+                None => diff.added.push(DiscoveryDiffEntry {
+                    upstream_model_id: current.upstream_model_id.clone(),
+                    changed_fields: vec!["source_model".into()],
+                }),
+                Some(previous) => {
+                    let changed_fields = changed_source_model_fields(previous, &current);
+                    if !changed_fields.is_empty() {
+                        diff.changed.push(DiscoveryDiffEntry {
+                            upstream_model_id: current.upstream_model_id.clone(),
+                            changed_fields,
+                        });
+                    }
+                }
+            }
+            records.push(current);
+        }
+        for (_, previous) in before_by_id {
+            if previous.availability_status == CatalogAvailability::Unavailable {
+                continue;
+            }
+            let current = sqlx::query_as::<_, SourceModelRecord>("UPDATE source_models SET availability_status='unavailable',unavailable_at=$3,updated_at=NOW() WHERE source_id=$1 AND upstream_model_id=$2 RETURNING source_id,upstream_model_id,confirmation_status,availability_status,raw_snapshot,metadata,field_sources,matched_model_preset_id,matched_model_preset_version,first_discovered_at,last_discovered_at,confirmed_at,unavailable_at,created_at,updated_at")
+                .bind(&input.source_id)
+                .bind(&previous.upstream_model_id)
+                .bind(input.completed_at)
+                .fetch_one(&mut *tx)
+                .await?;
+            diff.missing.push(DiscoveryDiffEntry {
+                upstream_model_id: current.upstream_model_id.clone(),
+                changed_fields: vec!["availability_status".into()],
+            });
+            records.push(current);
+        }
+        sort_discovery_diff(&mut diff);
+        records.sort_by(|left, right| left.upstream_model_id.cmp(&right.upstream_model_id));
+        let diff_value = serde_json::to_value(&diff)?;
+        let discovered_model_count = i32::try_from(input.models.len()).map_err(|_| {
+            CatalogError::InvalidState("discovery result contains too many models".into())
+        })?;
+        let run = sqlx::query_as::<_, DiscoveryRunRecord>("INSERT INTO source_discovery_runs (source_id,account_id,provider_preset_id,provider_preset_version,status,raw_snapshot,diff,discovered_model_count,http_status,latency_ms,requested_by,started_at,completed_at) VALUES ($1,$2,$3,$4,'succeeded',$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id,source_id,account_id,provider_preset_id,provider_preset_version,status,raw_snapshot,diff,discovered_model_count,http_status,latency_ms,error_code,error_message,requested_by,started_at,completed_at")
+            .bind(&input.source_id)
+            .bind(&input.account_id)
+            .bind(&source.0)
+            .bind(source.1)
+            .bind(&input.raw_snapshot)
+            .bind(&diff_value)
+            .bind(discovered_model_count)
+            .bind(input.http_status)
+            .bind(input.latency_ms)
+            .bind(&input.requested_by)
+            .bind(input.started_at)
+            .bind(input.completed_at)
+            .fetch_one(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(DiscoveryApplyResult {
+            run,
+            diff,
+            models: records,
+        })
+    }
+
+    pub async fn record_discovery_failure(
+        &self,
+        input: &DiscoveryFailureInput,
+    ) -> Result<DiscoveryRunRecord, CatalogError> {
+        if !matches!(input.status.as_str(), "failed" | "unsupported")
+            || input.error_code.trim().is_empty()
+            || input.error_message.trim().is_empty()
+            || input.latency_ms < 0
+            || input.completed_at < input.started_at
+        {
+            return Err(CatalogError::InvalidState(
+                "invalid discovery failure audit record".into(),
+            ));
+        }
+        let source = self.get_source(&input.source_id).await?;
+        if let Some(account_id) = input.account_id.as_deref() {
+            self.get_account_credential_ref(&input.source_id, account_id)
+                .await?;
+        }
+        let empty_diff = serde_json::to_value(DiscoveryDiff::default())?;
+        sqlx::query_as::<_, DiscoveryRunRecord>("INSERT INTO source_discovery_runs (source_id,account_id,provider_preset_id,provider_preset_version,status,diff,http_status,latency_ms,error_code,error_message,requested_by,started_at,completed_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id,source_id,account_id,provider_preset_id,provider_preset_version,status,raw_snapshot,diff,discovered_model_count,http_status,latency_ms,error_code,error_message,requested_by,started_at,completed_at")
+            .bind(&input.source_id)
+            .bind(&input.account_id)
+            .bind(&source.provider_preset_id)
+            .bind(source.provider_preset_version)
+            .bind(&input.status)
+            .bind(empty_diff)
+            .bind(input.http_status)
+            .bind(input.latency_ms)
+            .bind(&input.error_code)
+            .bind(&input.error_message)
+            .bind(&input.requested_by)
+            .bind(input.started_at)
+            .bind(input.completed_at)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub async fn latest_discovery_run(
+        &self,
+        source_id: &str,
+    ) -> Result<Option<DiscoveryRunRecord>, CatalogError> {
+        sqlx::query_as::<_, DiscoveryRunRecord>("SELECT id,source_id,account_id,provider_preset_id,provider_preset_version,status,raw_snapshot,diff,discovered_model_count,http_status,latency_ms,error_code,error_message,requested_by,started_at,completed_at FROM source_discovery_runs WHERE source_id=$1 ORDER BY completed_at DESC,id DESC LIMIT 1")
+            .bind(source_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub async fn record_connection_test(
+        &self,
+        input: &ConnectionTestInput,
+    ) -> Result<ConnectionTestRecord, CatalogError> {
+        if !matches!(input.status.as_str(), "succeeded" | "failed")
+            || input.latency_ms < 0
+            || (input.status == "succeeded"
+                && (!input
+                    .http_status
+                    .is_some_and(|status| (200..300).contains(&status))
+                    || input.error_code.is_some()
+                    || input.error_message.is_some()))
+            || (input.status == "failed"
+                && (input.error_code.as_deref().is_none_or(str::is_empty)
+                    || input.error_message.as_deref().is_none_or(str::is_empty)))
+        {
+            return Err(CatalogError::InvalidState(
+                "invalid connection test audit record".into(),
+            ));
+        }
+        self.get_source(&input.source_id).await?;
+        if let Some(account_id) = input.account_id.as_deref() {
+            self.get_account_credential_ref(&input.source_id, account_id)
+                .await?;
+        }
+        sqlx::query_as::<_, ConnectionTestRecord>("INSERT INTO source_connection_tests (source_id,account_id,protocol,upstream_protocol,mode,status,http_status,latency_ms,error_code,error_message,requested_by,tested_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id,source_id,account_id,protocol,upstream_protocol,mode,status,http_status,latency_ms,error_code,error_message,requested_by,tested_at")
+            .bind(&input.source_id)
+            .bind(&input.account_id)
+            .bind(input.protocol)
+            .bind(input.upstream_protocol)
+            .bind(input.mode)
+            .bind(&input.status)
+            .bind(input.http_status)
+            .bind(input.latency_ms)
+            .bind(&input.error_code)
+            .bind(&input.error_message)
+            .bind(&input.requested_by)
+            .bind(input.tested_at)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(Into::into)
     }
 
     pub async fn create_logical_model(
@@ -1035,6 +1467,155 @@ impl ModelCatalogRepository {
             .fetch_all(&self.pool)
             .await
             .map_err(Into::into)
+    }
+}
+
+fn validate_source_model_refresh(refresh: &SourceModelRefresh) -> Result<(), CatalogError> {
+    if refresh.source_id.trim().is_empty() || refresh.upstream_model_id.trim().is_empty() {
+        return Err(CatalogError::InvalidMetadata(
+            "source and upstream model IDs cannot be empty".into(),
+        ));
+    }
+    if !refresh.raw_snapshot.is_object() {
+        return Err(CatalogError::InvalidMetadata(
+            "source model raw snapshot must be an object".to_owned(),
+        ));
+    }
+    if refresh.matched_preset.is_some() != refresh.preset_metadata.is_some() {
+        return Err(CatalogError::InvalidMetadata(
+            "matched model preset reference and metadata must be provided together".to_owned(),
+        ));
+    }
+    refresh.upstream_metadata.validate()?;
+    if let Some(metadata) = refresh.preset_metadata.as_ref() {
+        metadata.validate()?;
+    }
+    Ok(())
+}
+
+async fn refresh_source_model_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    refresh: &SourceModelRefresh,
+) -> Result<SourceModelRecord, CatalogError> {
+    validate_source_model_refresh(refresh)?;
+    let discovered =
+        CatalogMetadata::resolve(&refresh.upstream_metadata, refresh.preset_metadata.as_ref())?;
+    let (metadata, field_sources) = discovered.to_json()?;
+    let (preset_id, preset_version) = preset_parts(refresh.matched_preset.as_ref());
+    let inserted = sqlx::query("INSERT INTO source_models (source_id,upstream_model_id,confirmation_status,availability_status,raw_snapshot,metadata,field_sources,matched_model_preset_id,matched_model_preset_version,first_discovered_at,last_discovered_at) VALUES ($1,$2,'pending','available',$3,$4,$5,$6,$7,$8,$8) ON CONFLICT (source_id,upstream_model_id) DO NOTHING")
+        .bind(&refresh.source_id)
+        .bind(&refresh.upstream_model_id)
+        .bind(&refresh.raw_snapshot)
+        .bind(&metadata)
+        .bind(&field_sources)
+        .bind(preset_id)
+        .bind(preset_version)
+        .bind(refresh.discovered_at)
+        .execute(&mut **tx)
+        .await?
+        .rows_affected()
+        > 0;
+    if !inserted {
+        let existing =
+            fetch_source_model_for_update(tx, &refresh.source_id, &refresh.upstream_model_id)
+                .await?;
+        let existing_metadata = existing.catalog_metadata()?;
+        let refreshed = existing_metadata.refreshed_preserving_user_fields(
+            existing.confirmation_status == CatalogStatus::Confirmed,
+            &refresh.upstream_metadata,
+            refresh.preset_metadata.as_ref(),
+        )?;
+        let (metadata, field_sources) = refreshed.to_json()?;
+        let (update_preset_id, update_preset_version) =
+            if existing.confirmation_status == CatalogStatus::Confirmed {
+                (
+                    existing.matched_model_preset_id.as_deref(),
+                    existing.matched_model_preset_version,
+                )
+            } else {
+                (preset_id, preset_version)
+            };
+        sqlx::query("UPDATE source_models SET availability_status='available',raw_snapshot=$3,metadata=$4,field_sources=$5,matched_model_preset_id=$6,matched_model_preset_version=$7,last_discovered_at=$8,unavailable_at=NULL,updated_at=NOW() WHERE source_id=$1 AND upstream_model_id=$2")
+            .bind(&refresh.source_id)
+            .bind(&refresh.upstream_model_id)
+            .bind(&refresh.raw_snapshot)
+            .bind(metadata)
+            .bind(field_sources)
+            .bind(update_preset_id)
+            .bind(update_preset_version)
+            .bind(refresh.discovered_at)
+            .execute(&mut **tx)
+            .await?;
+    }
+    fetch_source_model(tx, &refresh.source_id, &refresh.upstream_model_id).await
+}
+
+async fn lock_source(
+    tx: &mut Transaction<'_, Postgres>,
+    source_id: &str,
+) -> Result<(), CatalogError> {
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+        .bind(source_id)
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
+}
+
+async fn validate_account_for_source(
+    tx: &mut Transaction<'_, Postgres>,
+    source_id: &str,
+    account_id: Option<&str>,
+) -> Result<(), CatalogError> {
+    let Some(account_id) = account_id else {
+        return Ok(());
+    };
+    let exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM accounts WHERE id=$1 AND source_id=$2 AND enabled)",
+    )
+    .bind(account_id)
+    .bind(source_id)
+    .fetch_one(&mut **tx)
+    .await?;
+    if exists {
+        Ok(())
+    } else {
+        Err(CatalogError::NotFound(format!(
+            "enabled account {account_id} for source {source_id} not found"
+        )))
+    }
+}
+
+fn changed_source_model_fields(
+    before: &SourceModelRecord,
+    after: &SourceModelRecord,
+) -> Vec<String> {
+    let mut fields = Vec::new();
+    if before.raw_snapshot != after.raw_snapshot {
+        fields.push("raw_snapshot".into());
+    }
+    if before.metadata != after.metadata {
+        fields.push("metadata".into());
+    }
+    if before.field_sources != after.field_sources {
+        fields.push("field_sources".into());
+    }
+    if before.matched_model_preset_id != after.matched_model_preset_id
+        || before.matched_model_preset_version != after.matched_model_preset_version
+    {
+        fields.push("matched_model_preset".into());
+    }
+    if before.availability_status != after.availability_status {
+        fields.push("availability_status".into());
+    }
+    fields
+}
+
+fn sort_discovery_diff(diff: &mut DiscoveryDiff) {
+    for entries in [&mut diff.added, &mut diff.changed, &mut diff.missing] {
+        entries.sort_by(|left, right| left.upstream_model_id.cmp(&right.upstream_model_id));
+        for entry in entries {
+            entry.changed_fields.sort();
+        }
     }
 }
 

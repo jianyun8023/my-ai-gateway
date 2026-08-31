@@ -1,8 +1,11 @@
 mod config;
 mod db;
+mod discovery_api;
 mod health;
 mod model_catalog;
+mod model_discovery;
 mod protocol;
+mod provider_preset;
 mod routing;
 mod transport;
 mod usage;
@@ -79,6 +82,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let listen_addr = config.listen_addr.clone();
     let db = db::Database::connect_from_env().await?;
     if let Some(database) = &db {
+        provider_preset::install_builtin_presets(&database.model_catalog()).await?;
         database.sync_control_plane(&config).await?;
     }
     let config = Arc::new(config.as_ref().clone());
@@ -101,6 +105,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn application(state: AppState) -> Router {
+    let discovery_api = discovery_api::router(state.db.clone(), state.http.clone());
     Router::new()
         .route("/healthz", get(healthz))
         .route("/v1/models", get(models))
@@ -146,6 +151,7 @@ fn application(state: AppState) -> Router {
         .route("/admin/routes/{protocol}/{model}", get(resolve_route))
         .nest_service("/admin", ServeDir::new("web/dist"))
         .with_state(state)
+        .merge(discovery_api)
         .layer(TraceLayer::new_for_http())
 }
 
@@ -1858,7 +1864,7 @@ fn supplied_key(headers: &HeaderMap) -> Option<&str> {
         })
 }
 
-fn admin_authorized(headers: &HeaderMap) -> bool {
+pub(crate) fn admin_authorized(headers: &HeaderMap) -> bool {
     let expected = std::env::var("GATEWAY_ADMIN_KEY").or_else(|_| std::env::var("GATEWAY_API_KEY"));
     let Ok(expected) = expected else {
         return true;

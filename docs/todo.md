@@ -12,7 +12,7 @@
 - [x] usage 缺失时使用 tiktoken-rs 估算
 - [x] Provider/Account/Route 配置同步到 PostgreSQL
 - [x] 模型目录领域表与可路由 Binding 仓储基线
-- [ ] ProviderPreset、模型发现差异和用户确认 API（#13）
+- [x] ProviderPreset、模型发现差异和用户确认 API（#13）
 - [ ] PostgreSQL DB-first 控制面加载、事务化运行时 snapshot 与 Binding 路由（#14）
 - [x] Provider/Account/Route CRUD 与数据库持久化（#14）
 - [ ] Virtual Key 轮换与分组权限

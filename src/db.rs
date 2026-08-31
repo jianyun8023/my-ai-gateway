@@ -252,12 +252,20 @@ impl Database {
         sqlx::raw_sql(include_str!("../migrations/0006_control_plane_crud.sql"))
             .execute(&mut *tx)
             .await?;
+        sqlx::raw_sql(include_str!("../migrations/0008_provider_discovery.sql"))
+            .execute(&mut *tx)
+            .await?;
         tx.commit().await
     }
 
     #[allow(dead_code)]
     pub fn model_catalog(&self) -> ModelCatalogRepository {
         ModelCatalogRepository::new(self.pool.clone())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn pool(&self) -> &PgPool {
+        &self.pool
     }
 
     #[allow(dead_code)]
@@ -1256,6 +1264,11 @@ mod tests {
         ));
         assert!(schema.contains("provider_preset_snapshot JSONB NOT NULL"));
         assert!(schema.contains("confirmed model binding is not routable"));
+        let discovery_schema = include_str!("../migrations/0008_provider_discovery.sql");
+        assert!(discovery_schema.contains("CREATE TABLE IF NOT EXISTS source_discovery_runs"));
+        assert!(discovery_schema.contains("CREATE TABLE IF NOT EXISTS source_connection_tests"));
+        assert!(discovery_schema.contains("raw_snapshot JSONB"));
+        assert!(discovery_schema.contains("error_message TEXT"));
     }
 
     /// Set TEST_DATABASE_URL to run the PostgreSQL constraint and repository
