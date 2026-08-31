@@ -1156,6 +1156,7 @@ async fn proxy(
             return error_response(status, &error.code, &error.message);
         }
     };
+    warn_degraded_route(&request_id, &route);
     let Some(provider) = config.provider(&route.provider_id) else {
         return error_response(
             StatusCode::BAD_GATEWAY,
@@ -1197,7 +1198,7 @@ async fn proxy(
                     .get("stream")
                     .and_then(Value::as_bool)
                     .unwrap_or(false);
-                let degraded = !route.degraded_features.is_empty();
+                let degraded = route.is_degraded();
                 let error_summary = if !response.status().is_success() {
                     Some(format!("HTTP {}", response.status().as_u16()))
                 } else {
@@ -1363,15 +1364,7 @@ async fn proxy(
         .get("stream")
         .and_then(Value::as_bool)
         .unwrap_or(false);
-    let degraded = !route.degraded_features.is_empty();
-    if degraded {
-        tracing::warn!(
-            route_id = %route.route_id,
-            model = %model,
-            degraded_features = ?route.degraded_features,
-            "route has degraded features due to adapter conversion"
-        );
-    }
+    let degraded = route.is_degraded();
     let error_summary = if !response.status().is_success() {
         Some(format!("HTTP {}", response.status().as_u16()))
     } else {
@@ -1437,6 +1430,17 @@ async fn proxy(
     response
 }
 
+fn warn_degraded_route(request_id: &str, route: &ResolvedRoute) {
+    if route.is_degraded() {
+        tracing::warn!(
+            request_id = %request_id,
+            route_id = %route.route_id,
+            degraded_features = ?route.degraded_features,
+            "route has degraded features due to adapter conversion"
+        );
+    }
+}
+
 fn is_event_stream(response: &Response<Body>) -> bool {
     response
         .headers()
@@ -1471,22 +1475,17 @@ fn wrap_stream_usage(
                     (upstream, captured, database, event, request_body, attempts),
                 )),
                 None => {
-                    if let Some(usage) =
-                        crate::usage::extract_sse(&String::from_utf8_lossy(&captured))
-                    {
-                        event.input_tokens = usage.input_tokens;
-                        event.output_tokens = usage.output_tokens;
-                        event.reasoning_tokens = usage.reasoning_tokens;
-                        event.cached_tokens = usage.cached_tokens;
-                        event.total_tokens = usage.total_tokens;
-                        event.usage_source = usage.source;
-                    } else if event.success {
-                        let usage = crate::usage::estimate(&request_body, &captured);
-                        event.input_tokens = usage.input_tokens;
-                        event.output_tokens = usage.output_tokens;
-                        event.total_tokens = usage.total_tokens;
-                        event.usage_source = usage.source;
-                    }
+                    let usage = crate::usage::usage_for_sse_response(
+                        event.success,
+                        &request_body,
+                        &captured,
+                    );
+                    event.input_tokens = usage.input_tokens;
+                    event.output_tokens = usage.output_tokens;
+                    event.reasoning_tokens = usage.reasoning_tokens;
+                    event.cached_tokens = usage.cached_tokens;
+                    event.total_tokens = usage.total_tokens;
+                    event.usage_source = usage.source;
                     tokio::spawn(async move {
                         if let Err(error) =
                             database.insert_usage_with_attempts(&event, &attempts).await
@@ -1867,10 +1866,10 @@ fn admin_authorized(headers: &HeaderMap) -> bool {
     supplied_key(headers) == Some(expected.as_str())
 }
 
-fn error_response(status: StatusCode, kind: &str, message: &str) -> Response<Body> {
+fn error_response(status: StatusCode, code: &str, message: &str) -> Response<Body> {
     (
         status,
-        Json(json!({"error":{"type":kind,"message":message}})),
+        Json(json!({"error":{"code":code,"type":code,"message":message}})),
     )
         .into_response()
 }
@@ -1883,7 +1882,9 @@ async fn resolve_route(
     if !admin_authorized(&headers) {
         return (
             StatusCode::UNAUTHORIZED,
-            Json(json!({"error":{"type":"unauthorized","message":"admin key required"}})),
+            Json(
+                json!({"error":{"code":"unauthorized","type":"unauthorized","message":"admin key required"}}),
+            ),
         );
     }
     let Ok(protocol) = protocol.parse::<Protocol>() else {
@@ -1901,6 +1902,338 @@ async fn resolve_route(
                 StatusCode::UNPROCESSABLE_ENTITY
             };
             (status, Json(json!({"error": error})))
+        }
+    }
+}
+
+#[cfg(test)]
+mod audit_closeout_tests {
+    use super::*;
+    use axum::{body::to_bytes, extract::Request, Router};
+    use std::{
+        collections::HashMap,
+        io::Write,
+        sync::{Arc, Mutex as StdMutex},
+    };
+    use tracing_subscriber::fmt::MakeWriter;
+
+    static ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+    struct EnvRestore {
+        name: &'static str,
+        previous: Option<std::ffi::OsString>,
+    }
+
+    impl EnvRestore {
+        fn set(name: &'static str, value: &str) -> Self {
+            let previous = std::env::var_os(name);
+            std::env::set_var(name, value);
+            Self { name, previous }
+        }
+    }
+
+    impl Drop for EnvRestore {
+        fn drop(&mut self) {
+            if let Some(value) = &self.previous {
+                std::env::set_var(self.name, value);
+            } else {
+                std::env::remove_var(self.name);
+            }
+        }
+    }
+
+    #[derive(Clone, Default)]
+    struct CapturedLogs(Arc<StdMutex<Vec<u8>>>);
+
+    struct CapturedLogWriter(Arc<StdMutex<Vec<u8>>>);
+
+    impl Write for CapturedLogWriter {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<'a> MakeWriter<'a> for CapturedLogs {
+        type Writer = CapturedLogWriter;
+
+        fn make_writer(&'a self) -> Self::Writer {
+            CapturedLogWriter(self.0.clone())
+        }
+    }
+
+    impl CapturedLogs {
+        fn content(&self) -> String {
+            String::from_utf8_lossy(&self.0.lock().unwrap()).into_owned()
+        }
+    }
+
+    fn account(id: &str, provider_id: &str) -> config::AccountConfig {
+        config::AccountConfig {
+            id: id.into(),
+            provider_id: provider_id.into(),
+            display_name: id.into(),
+            credential_env: None,
+            credential: None,
+            enabled: true,
+            weight: 100,
+            protocol_capabilities: HashMap::new(),
+            capabilities: None,
+            model_overrides: HashMap::new(),
+            model_map: HashMap::new(),
+        }
+    }
+
+    fn provider(id: &str, base_url: String) -> config::ProviderConfig {
+        config::ProviderConfig {
+            id: id.into(),
+            name: id.into(),
+            base_url,
+            models: vec!["audit-model".into()],
+            native_protocols: vec![
+                Protocol::OpenAiChatCompletions,
+                Protocol::OpenAiResponses,
+                Protocol::AnthropicMessages,
+            ],
+            endpoints: HashMap::from([
+                (
+                    Protocol::OpenAiChatCompletions,
+                    "/v1/chat/completions".into(),
+                ),
+                (Protocol::OpenAiResponses, "/v1/responses".into()),
+                (Protocol::AnthropicMessages, "/v1/messages".into()),
+            ]),
+            capabilities: config::Capabilities::native(),
+            protocol_capabilities: HashMap::new(),
+            model_overrides: HashMap::new(),
+        }
+    }
+
+    fn route(protocol: Protocol, mode: &str) -> config::RouteConfig {
+        config::RouteConfig {
+            id: format!("audit-{mode}-{protocol}"),
+            model: "audit-model".into(),
+            provider_id: "audit-provider".into(),
+            protocols: vec![protocol],
+            primary_account_id: "audit-primary".into(),
+            fallback_accounts: vec![],
+            strategy: "primary_then_weighted_fallback".into(),
+            mode: mode.into(),
+            adapter: None,
+            allow_lossy_conversion: false,
+        }
+    }
+
+    fn state(config: GatewayConfig) -> AppState {
+        let config = Arc::new(config);
+        let live = LiveConfig {
+            resolver: RouteResolver::new(config.clone()),
+            config,
+        };
+        AppState {
+            live: Arc::new(std::sync::RwLock::new(live)),
+            http: transport::client().expect("audit HTTP client"),
+            db: None,
+            health: health::HealthRegistry::new(std::time::Duration::from_secs(30)),
+            listen_addr: "127.0.0.1:0".into(),
+        }
+    }
+
+    fn proxy_request(uri: &str) -> Request<Body> {
+        let mut builder = Request::builder()
+            .method("POST")
+            .uri(uri)
+            .header(CONTENT_TYPE, "application/json");
+        if let Ok(key) = std::env::var("GATEWAY_API_KEY") {
+            builder = builder.header("authorization", format!("Bearer {key}"));
+        }
+        builder
+            .body(Body::from(r#"{"model":"audit-model","input":"hello"}"#))
+            .expect("proxy request")
+    }
+
+    async fn json_body(response: Response<Body>) -> Value {
+        serde_json::from_slice(
+            &to_bytes(response.into_body(), 1024 * 1024)
+                .await
+                .expect("JSON response body"),
+        )
+        .expect("JSON response")
+    }
+
+    #[tokio::test]
+    async fn admin_route_resolution_rejects_unauthenticated_requests_without_topology_leak() {
+        let _environment_lock = ENV_LOCK.lock().await;
+        let _admin_key = EnvRestore::set("GATEWAY_ADMIN_KEY", "configured-admin-secret");
+        let config = GatewayConfig {
+            listen_addr: "127.0.0.1:0".into(),
+            providers: vec![provider(
+                "topology-provider",
+                "https://sensitive-topology.invalid".into(),
+            )],
+            accounts: vec![account("topology-account", "topology-provider")],
+            routes: vec![config::RouteConfig {
+                id: "topology-route".into(),
+                model: "audit-model".into(),
+                provider_id: "topology-provider".into(),
+                protocols: vec![Protocol::OpenAiResponses],
+                primary_account_id: "topology-account".into(),
+                fallback_accounts: vec![],
+                strategy: "primary_then_weighted_fallback".into(),
+                mode: "native".into(),
+                adapter: None,
+                allow_lossy_conversion: false,
+            }],
+        };
+        let response = application(state(config))
+            .oneshot(
+                Request::builder()
+                    .uri("/admin/routes/openai_responses/audit-model")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("admin route response");
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        let body = json_body(response).await;
+        assert_eq!(body["error"]["code"], "unauthorized");
+        let serialized = body.to_string();
+        for secret in [
+            "topology-provider",
+            "topology-account",
+            "topology-route",
+            "sensitive-topology.invalid",
+        ] {
+            assert!(
+                !serialized.contains(secret),
+                "unauthorized response leaked {secret}: {serialized}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn proxy_preserves_structured_unsupported_and_lossy_route_errors() {
+        let unsupported = GatewayConfig {
+            listen_addr: "127.0.0.1:0".into(),
+            providers: vec![provider("audit-provider", "https://unused.invalid".into())],
+            accounts: vec![account("audit-primary", "audit-provider")],
+            routes: vec![route(Protocol::OpenAiResponses, "unsupported")],
+        };
+        let response = application(state(unsupported))
+            .oneshot(proxy_request("/v1/responses"))
+            .await
+            .expect("unsupported proxy response");
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let body = json_body(response).await;
+        assert_eq!(body["error"]["code"], "unsupported_protocol");
+
+        let mut lossy_provider = provider("audit-provider", "https://unused.invalid".into());
+        lossy_provider.native_protocols = vec![Protocol::AnthropicMessages];
+        lossy_provider.protocol_capabilities.insert(
+            Protocol::OpenAiResponses,
+            config::ProtocolCapability::adapter(
+                Protocol::AnthropicMessages,
+                "kimi_responses_adapter",
+            ),
+        );
+        let mut lossy_route = route(Protocol::OpenAiResponses, "adapter");
+        lossy_route.adapter = Some("kimi_responses_adapter".into());
+        let lossy = GatewayConfig {
+            listen_addr: "127.0.0.1:0".into(),
+            providers: vec![lossy_provider],
+            accounts: vec![account("audit-primary", "audit-provider")],
+            routes: vec![lossy_route],
+        };
+        let response = application(state(lossy))
+            .oneshot(proxy_request("/v1/responses"))
+            .await
+            .expect("lossy proxy response");
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let body = json_body(response).await;
+        assert_eq!(body["error"]["code"], "lossy_conversion_not_allowed");
+    }
+
+    async fn spawn_fallback_upstream() -> String {
+        let app = Router::new().fallback(|| async {
+            Response::builder()
+                .status(StatusCode::OK)
+                .header(CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"id":"fallback-response"}"#))
+                .unwrap()
+        });
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind fallback upstream");
+        let address = listener.local_addr().expect("fallback upstream address");
+        tokio::spawn(async move {
+            axum::serve(listener, app)
+                .await
+                .expect("serve fallback upstream")
+        });
+        format!("http://{address}")
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn degraded_warning_covers_primary_unavailable_early_fallback() {
+        let mut fallback_provider = provider("audit-provider", spawn_fallback_upstream().await);
+        fallback_provider.native_protocols = vec![Protocol::AnthropicMessages];
+        fallback_provider.protocol_capabilities.insert(
+            Protocol::OpenAiResponses,
+            config::ProtocolCapability::adapter(
+                Protocol::AnthropicMessages,
+                "kimi_responses_adapter",
+            ),
+        );
+        let mut degraded_route = route(Protocol::OpenAiResponses, "adapter");
+        degraded_route.id = "degraded-fallback-route".into();
+        degraded_route.adapter = Some("kimi_responses_adapter".into());
+        degraded_route.allow_lossy_conversion = true;
+        degraded_route.fallback_accounts = vec!["audit-fallback".into()];
+        let config = GatewayConfig {
+            listen_addr: "127.0.0.1:0".into(),
+            providers: vec![fallback_provider],
+            accounts: vec![
+                account("audit-primary", "audit-provider"),
+                account("audit-fallback", "audit-provider"),
+            ],
+            routes: vec![degraded_route],
+        };
+        let state = state(config);
+        state.health.mark_failure("audit-primary").await;
+
+        let logs = CapturedLogs::default();
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_target(false)
+            .with_ansi(false)
+            .with_writer(logs.clone())
+            .finish();
+        tracing::subscriber::set_global_default(subscriber)
+            .expect("install degraded warning test subscriber");
+        let response = application(state)
+            .oneshot(proxy_request("/v1/responses"))
+            .await
+            .expect("early fallback response");
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let logs = logs.content();
+        assert_eq!(
+            logs.matches("route has degraded features due to adapter conversion")
+                .count(),
+            1,
+            "expected one degraded warning: {logs}"
+        );
+        for field in [
+            "request_id=",
+            "route_id=degraded-fallback-route",
+            "degraded_features=",
+            "file_search",
+        ] {
+            assert!(logs.contains(field), "missing {field} in warning: {logs}");
         }
     }
 }
@@ -1957,6 +2290,11 @@ mod usage_api_tests {
         );
         assert_eq!(parsed.filter.success, Some(false));
         assert_eq!(parsed.breakdown, "protocol_upstream");
+
+        let parsed_source =
+            parse_usage_query(&HashMap::from([("usage_source".into(), "parsed".into())]))
+                .expect("parsed is a supported usage source");
+        assert_eq!(parsed_source.filter.usage_source.as_deref(), Some("parsed"));
 
         let invalid = HashMap::from([
             ("from".into(), "2026-01-02T00:00:00Z".into()),

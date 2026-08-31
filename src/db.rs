@@ -1132,6 +1132,77 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn postgres_parsed_usage_source_is_filterable() {
+        let Some(database) = postgres_test_database().await else {
+            eprintln!("skipping PostgreSQL parsed usage test: TEST_DATABASE_URL is not set");
+            return;
+        };
+        let prefix = format!("usage-parsed-{}-", uuid::Uuid::new_v4());
+        let logical_model = format!("logical-{prefix}");
+        let event = UsageEvent {
+            request_id: format!("{prefix}request"),
+            virtual_key_id: None,
+            provider_id: "provider-parsed".into(),
+            account_id: "account-parsed".into(),
+            model: logical_model.clone(),
+            logical_model: logical_model.clone(),
+            upstream_model_id: Some("upstream-parsed".into()),
+            source: "test".into(),
+            protocol_in: "openai_responses".into(),
+            protocol_upstream: "anthropic_messages".into(),
+            mode: "adapter".into(),
+            status_code: 200,
+            success: true,
+            retry_count: 0,
+            latency_ms: 12,
+            ttft_ms: None,
+            input_tokens: 2,
+            output_tokens: 3,
+            reasoning_tokens: 0,
+            cached_tokens: 0,
+            total_tokens: 5,
+            usage_source: "parsed".into(),
+            degraded: false,
+            route_id: Some("route-parsed".into()),
+            streamed: true,
+            error_summary: None,
+        };
+        database
+            .insert_usage(&event)
+            .await
+            .expect("insert parsed usage fixture");
+
+        let filter = UsageFilter {
+            logical_model: Some(logical_model),
+            usage_source: Some("parsed".into()),
+            ..Default::default()
+        };
+        let page = database
+            .list_usage_events_page(&filter, 10, None)
+            .await
+            .expect("query parsed usage events");
+        assert_eq!(page.data.len(), 1);
+        assert_eq!(page.data[0].usage_source, "parsed");
+        let aggregate = database
+            .usage_aggregate(&filter)
+            .await
+            .expect("aggregate parsed usage events");
+        assert_eq!(aggregate.logical_requests, 1);
+        assert_eq!(aggregate.total_tokens, 5);
+        let breakdown = database
+            .usage_breakdown(&filter, "usage_source")
+            .await
+            .expect("break down parsed usage events");
+        assert_eq!(breakdown.len(), 1);
+        assert_eq!(breakdown[0].key.as_deref(), Some("parsed"));
+
+        database
+            .delete_usage_events_for_test(&prefix)
+            .await
+            .expect("clean parsed usage fixture");
+    }
+
+    #[tokio::test]
     async fn postgres_cursor_handles_large_pages_without_duplicates_or_omissions() {
         let Some(database) = postgres_test_database().await else {
             eprintln!("skipping PostgreSQL pagination test: TEST_DATABASE_URL is not set");

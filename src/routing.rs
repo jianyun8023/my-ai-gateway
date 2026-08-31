@@ -31,6 +31,12 @@ pub struct ResolvedRoute {
     pub allow_lossy_conversion: bool,
 }
 
+impl ResolvedRoute {
+    pub fn is_degraded(&self) -> bool {
+        !self.degraded_features.is_empty()
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct RouteResolutionError {
     pub code: String,
@@ -551,6 +557,95 @@ mod tests {
                 resolved.upstream_endpoint
             );
         }
+    }
+
+    #[test]
+    fn three_protocol_by_native_adapter_unsupported_resolution_matrix() {
+        let protocols = [
+            Protocol::OpenAiChatCompletions,
+            Protocol::OpenAiResponses,
+            Protocol::AnthropicMessages,
+        ];
+
+        for protocol in protocols {
+            for mode in ["native", "adapter", "unsupported"] {
+                let mut p = provider();
+                p.native_protocols = protocols.to_vec();
+                p.endpoints
+                    .insert(Protocol::OpenAiResponses, "/v1/responses".into());
+                p.endpoints
+                    .insert(Protocol::AnthropicMessages, "/v1/messages".into());
+                let mut r = route("matrix", "m", protocol);
+                r.mode = mode.into();
+                if mode == "adapter" {
+                    r.adapter = Some("kimi_responses_adapter".into());
+                    r.allow_lossy_conversion = true;
+                    if protocol == Protocol::OpenAiResponses {
+                        p.protocol_capabilities.insert(
+                            Protocol::OpenAiResponses,
+                            ProtocolCapability::adapter(
+                                Protocol::AnthropicMessages,
+                                "kimi_responses_adapter",
+                            ),
+                        );
+                    }
+                }
+
+                let resolved = RouteResolver::new(Arc::new(config(p, vec![r])))
+                    .resolve_detailed(protocol, "m");
+                match (protocol, mode) {
+                    (_, "native") => {
+                        let route = resolved.expect("native matrix cell must resolve");
+                        assert_eq!(route.mode, "native");
+                        assert_eq!(route.protocol_upstream, protocol);
+                    }
+                    (Protocol::OpenAiResponses, "adapter") => {
+                        let route = resolved.expect("registered adapter matrix cell must resolve");
+                        assert_eq!(route.mode, "adapter");
+                        assert_eq!(route.protocol_upstream, Protocol::AnthropicMessages);
+                    }
+                    (_, "adapter") => {
+                        assert_eq!(resolved.unwrap_err().code, "adapter_direction_mismatch");
+                    }
+                    (_, "unsupported") => {
+                        assert_eq!(resolved.unwrap_err().code, "unsupported_protocol");
+                    }
+                    _ => unreachable!(),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn lossy_adapter_is_rejected_when_conversion_loss_is_not_allowed() {
+        let mut p = provider();
+        p.native_protocols = vec![Protocol::AnthropicMessages];
+        p.endpoints
+            .insert(Protocol::AnthropicMessages, "/v1/messages".into());
+        p.protocol_capabilities.insert(
+            Protocol::OpenAiResponses,
+            ProtocolCapability::adapter(Protocol::AnthropicMessages, "kimi_responses_adapter"),
+        );
+        let mut r = route("lossy", "m", Protocol::OpenAiResponses);
+        r.mode = "adapter".into();
+        r.adapter = Some("kimi_responses_adapter".into());
+
+        let error = RouteResolver::new(Arc::new(config(p, vec![r])))
+            .resolve_detailed(Protocol::OpenAiResponses, "m")
+            .unwrap_err();
+        assert_eq!(error.code, "lossy_conversion_not_allowed");
+        assert_eq!(error.route_id.as_deref(), Some("lossy"));
+    }
+
+    #[test]
+    fn allow_lossy_without_actual_feature_loss_is_not_degraded() {
+        let mut r = route("native-lossy-enabled", "m", Protocol::OpenAiChatCompletions);
+        r.allow_lossy_conversion = true;
+        let resolved = RouteResolver::new(Arc::new(config(provider(), vec![r])))
+            .resolve_detailed(Protocol::OpenAiChatCompletions, "m")
+            .unwrap();
+        assert!(resolved.degraded_features.is_empty());
+        assert!(!resolved.is_degraded());
     }
 
     #[test]
