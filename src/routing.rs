@@ -16,6 +16,7 @@ pub struct RouteResolver {
 #[derive(Clone, Debug)]
 pub struct RuntimeBinding {
     pub binding_id: i64,
+    pub source_id: String,
     pub provider_id: String,
     pub account_id: String,
     pub upstream_model_id: String,
@@ -49,6 +50,7 @@ pub struct ResolvedRoute {
     pub model: String,
     pub requested_model: String,
     pub upstream_model_id: String,
+    pub source_id: String,
     pub provider_id: String,
     pub primary_account_id: String,
     pub fallback_accounts: Vec<String>,
@@ -73,6 +75,7 @@ impl ResolvedRoute {
 #[derive(Clone, Debug, Serialize)]
 pub struct ResolvedBinding {
     pub binding_id: i64,
+    pub source_id: String,
     pub provider_id: String,
     pub account_id: String,
     pub upstream_model_id: String,
@@ -374,6 +377,7 @@ impl RouteResolver {
             model: model.to_owned(),
             requested_model: model.to_owned(),
             upstream_model_id: model.to_owned(),
+            source_id: provider.id.clone(),
             provider_id: provider.id.clone(),
             primary_account_id: account.id.clone(),
             fallback_accounts: route.fallback_accounts.clone(),
@@ -417,6 +421,7 @@ fn resolve_runtime_route(
         .skip(1)
         .map(|binding| ResolvedBinding {
             binding_id: binding.binding_id,
+            source_id: binding.source_id.clone(),
             provider_id: binding.provider_id.clone(),
             account_id: binding.account_id.clone(),
             upstream_model_id: binding.upstream_model_id.clone(),
@@ -436,6 +441,7 @@ fn resolve_runtime_route(
         model: model.to_owned(),
         requested_model: model.to_owned(),
         upstream_model_id: primary.upstream_model_id.clone(),
+        source_id: primary.source_id.clone(),
         provider_id: primary.provider_id.clone(),
         primary_account_id: primary.account_id.clone(),
         fallback_accounts: fallback_bindings

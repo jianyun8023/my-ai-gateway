@@ -167,7 +167,7 @@ fn state(config: GatewayConfig, database: Option<db::Database>) -> AppState {
     let config = Arc::new(config);
     AppState {
         live: Arc::new(std::sync::RwLock::new(LiveConfig::legacy(config))),
-        http: transport::client().expect("runtime HTTP client"),
+        http: transport::test_client().expect("runtime HTTP client"),
         db: database,
         control_plane: None,
         health: health::HealthRegistry::new(Duration::from_secs(1)),
@@ -334,13 +334,13 @@ async fn transport_error_path_uses_fallback_and_records_its_actual_model() {
     let (response, attempts) = try_fallback_error(
         &config,
         &health::HealthRegistry::new(Duration::from_secs(1)),
-        &transport::client().unwrap(),
+        &transport::test_client().unwrap(),
         &resolved,
         "logical-model",
         Protocol::OpenAiChatCompletions,
         &HeaderMap::new(),
         Bytes::from_static(br#"{"model":"logical-model","messages":[]}"#),
-        transport::TransportError::Request("primary transport failed".into()),
+        transport::TransportError::Request,
     )
     .await;
     assert_eq!(response.status(), StatusCode::OK);
@@ -375,13 +375,13 @@ async fn fallback_transport_failure_is_retained_as_the_final_actual_attempt() {
     let (response, attempts) = try_fallback_error(
         &config,
         &health::HealthRegistry::new(Duration::from_secs(1)),
-        &transport::client().unwrap(),
+        &transport::test_client().unwrap(),
         &resolved,
         "logical-model",
         Protocol::OpenAiChatCompletions,
         &HeaderMap::new(),
         Bytes::from_static(br#"{"model":"logical-model","messages":[]}"#),
-        transport::TransportError::Request("primary transport failed".into()),
+        transport::TransportError::Request,
     )
     .await;
     assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
@@ -640,15 +640,40 @@ async fn postgres_db_first_source_attribution_covers_primary_fallback_stream_and
             ),
         ],
     };
-    let control_plane = control_plane::ControlPlane::new(&database, "127.0.0.1:0");
-    let snapshot = control_plane
+    let control_plane = control_plane::ControlPlane::with_url_policy(
+        &database,
+        "127.0.0.1:0",
+        crate::source_url::test_policy(),
+    );
+    provider_preset::install_builtin_presets(&database.model_catalog())
+        .await
+        .expect("install ProviderPreset fixtures");
+    control_plane
         .initialize_from_config(&config, false)
         .await
         .expect("initialize DB-first runtime test control plane")
         .expect("empty isolated control plane publishes a snapshot");
+    for (source_id, provider_preset_id) in [
+        ("source-primary", "deepseek"),
+        ("source-fallback", "deepseek"),
+        ("source-transport-primary", "minimax"),
+        ("source-failed-primary", "deepseek"),
+        ("source-failed-fallback", "minimax"),
+    ] {
+        sqlx::query("UPDATE sources SET provider_preset_id=$2,provider_preset_version=1,provider_preset_snapshot=(SELECT definition FROM provider_presets WHERE id=$2 AND version=1) WHERE id=$1")
+            .bind(source_id)
+            .bind(provider_preset_id)
+            .execute(&runtime_pool)
+            .await
+            .expect("assign stable Provider identity to Source fixture");
+    }
+    let snapshot = control_plane
+        .load_snapshot()
+        .await
+        .expect("reload runtime snapshot with stable Provider identities");
     let state = AppState {
         live: Arc::new(std::sync::RwLock::new(LiveConfig::from_snapshot(snapshot))),
-        http: transport::client().expect("runtime HTTP client"),
+        http: transport::test_client().expect("runtime HTTP client"),
         db: Some(database.clone()),
         control_plane: None,
         health: health::HealthRegistry::new(Duration::from_secs(30)),
@@ -737,11 +762,13 @@ async fn postgres_db_first_source_attribution_covers_primary_fallback_stream_and
         .collect::<HashMap<_, _>>();
 
     let primary = &events["client-primary"];
+    assert_eq!(primary.provider_id, "deepseek");
     assert_eq!(primary.source_id.as_deref(), Some("source-primary"));
     assert_eq!(primary.account_id, "primary-account");
     assert_eq!(primary.retry_count, 0);
 
     let retry = &events["client-retry-stream"];
+    assert_eq!(retry.provider_id, "deepseek");
     assert_eq!(retry.source_id.as_deref(), Some("source-fallback"));
     assert_eq!(retry.account_id, "fallback-account");
     assert_eq!(
@@ -760,6 +787,13 @@ async fn postgres_db_first_source_attribution_covers_primary_fallback_stream_and
     assert_eq!(
         retry_attempts
             .iter()
+            .map(|attempt| attempt.provider_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["deepseek", "deepseek"]
+    );
+    assert_eq!(
+        retry_attempts
+            .iter()
             .map(|attempt| attempt.source_id.as_deref())
             .collect::<Vec<_>>(),
         vec![Some("source-primary"), Some("source-fallback")]
@@ -774,6 +808,7 @@ async fn postgres_db_first_source_attribution_covers_primary_fallback_stream_and
     );
 
     let early = &events["client-early-fallback"];
+    assert_eq!(early.provider_id, "deepseek");
     assert_eq!(early.source_id.as_deref(), Some("source-fallback"));
     assert_eq!(early.account_id, "fallback-account");
     assert_eq!(early.retry_count, 0);
@@ -782,18 +817,27 @@ async fn postgres_db_first_source_attribution_covers_primary_fallback_stream_and
         .await
         .expect("query early fallback attempt");
     assert_eq!(early_attempts.len(), 1);
+    assert_eq!(early_attempts[0].provider_id, "deepseek");
     assert_eq!(
         early_attempts[0].source_id.as_deref(),
         Some("source-fallback")
     );
 
     let transport = &events["client-transport-fallback"];
+    assert_eq!(transport.provider_id, "deepseek");
     assert_eq!(transport.source_id.as_deref(), Some("source-fallback"));
     assert_eq!(transport.retry_count, 1);
     let transport_attempts = database
         .list_attempts_for_event(&transport.request_id)
         .await
         .expect("query transport fallback attempts");
+    assert_eq!(
+        transport_attempts
+            .iter()
+            .map(|attempt| attempt.provider_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["minimax", "deepseek"]
+    );
     assert_eq!(
         transport_attempts
             .iter()
@@ -805,6 +849,7 @@ async fn postgres_db_first_source_attribution_covers_primary_fallback_stream_and
     assert!(transport_attempts[1].success);
 
     let failed = &events["client-all-failed"];
+    assert_eq!(failed.provider_id, "minimax");
     assert_eq!(failed.source_id.as_deref(), Some("source-failed-fallback"));
     assert_eq!(failed.account_id, "failed-fallback-account");
     assert!(!failed.success);
@@ -816,6 +861,13 @@ async fn postgres_db_first_source_attribution_covers_primary_fallback_stream_and
     assert_eq!(
         failed_attempts
             .iter()
+            .map(|attempt| attempt.provider_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["deepseek", "minimax"]
+    );
+    assert_eq!(
+        failed_attempts
+            .iter()
             .map(|attempt| attempt.source_id.as_deref())
             .collect::<Vec<_>>(),
         vec![
@@ -824,6 +876,39 @@ async fn postgres_db_first_source_attribution_covers_primary_fallback_stream_and
         ]
     );
     assert!(failed_attempts.iter().all(|attempt| !attempt.success));
+
+    let provider_breakdown = database
+        .usage_breakdown(&filter, "provider")
+        .await
+        .expect("query Provider breakdown")
+        .into_iter()
+        .map(|row| (row.key.expect("Provider key"), row.logical_requests))
+        .collect::<HashMap<_, _>>();
+    assert_eq!(provider_breakdown.get("deepseek"), Some(&4));
+    assert_eq!(provider_breakdown.get("minimax"), Some(&1));
+    let source_breakdown = database
+        .usage_breakdown(&filter, "source_id")
+        .await
+        .expect("query Source breakdown")
+        .into_iter()
+        .map(|row| (row.key.expect("Source key"), row.logical_requests))
+        .collect::<HashMap<_, _>>();
+    assert_eq!(source_breakdown.get("source-primary"), Some(&1));
+    assert_eq!(source_breakdown.get("source-fallback"), Some(&3));
+    assert_eq!(source_breakdown.get("source-failed-fallback"), Some(&1));
+    let combined = db::UsageFilter {
+        provider_id: Some("deepseek".into()),
+        source_id: Some("source-fallback".into()),
+        ..filter.clone()
+    };
+    assert_eq!(
+        database
+            .usage_aggregate(&combined)
+            .await
+            .expect("query combined Provider and Source filter")
+            .logical_requests,
+        3
+    );
 
     assert_eq!(primary_requests.lock().unwrap().len(), 2);
     assert_eq!(fallback_requests.lock().unwrap().len(), 3);

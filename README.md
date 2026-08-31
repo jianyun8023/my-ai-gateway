@@ -36,14 +36,30 @@ mise run install  # 安装 web/ 前端锁定依赖
 运行（`DATABASE_URL` 是 DB-first 运行时的必填项）：
 
 ```bash
-export DATABASE_URL='postgres://gateway:gateway@127.0.0.1:5432/gateway'
-cargo run
+cp .env.example .env
+# 编辑 .env，至少设置 DATABASE_URL；mise run dev 会加载该文件。
+mise run dev
 curl http://127.0.0.1:8787/healthz
 ```
 
+需要从局域网访问开发环境时，在 `.env` 中设置
+`GATEWAY_LISTEN_ADDR=0.0.0.0:8787` 和 `VITE_DEV_HOST=0.0.0.0`。Rust 网关及其
+`/admin` 静态页面使用 `8787`，Vite 热更新开发页使用 `5173`；客户端访问宿主机的
+局域网 IP，Vite 的 API 代理仍通过 `VITE_API_PROXY_TARGET=http://127.0.0.1:8787`
+连接本机网关。对局域网开放时必须预先设置非空的 `GATEWAY_API_KEY` 和
+`GATEWAY_ADMIN_KEY`，不要复用上游 Provider Key。
+
+需要将真实上游凭据与基础开发配置分离时，可在 `.env` 中设置
+`GATEWAY_ENV_FILE=.env.pre`。`mise run dev` 会在 `.env` 后加载该覆盖文件；该文件
+应保持 Git 忽略并设置为仅当前用户可读，测试任务不会自动加载它。
+
 空控制面首次启动时，可通过 `GATEWAY_CONFIG_JSON` 一次性初始化。控制面已有任意管理数据后，后续启动不会解析或覆盖该 JSON；此时运行时直接加载数据库 snapshot。需要显式替换现有开发控制面时，同时设置 `GATEWAY_CONFIG_IMPORT=true`，该操作会在事务中清理并重新导入 Source/Account/模型/Binding/Route，因此只应在明确需要导入时使用。监听地址独立使用 `GATEWAY_LISTEN_ADDR`。
 
-常用任务：`mise run dev`（网关 + Vite 开发环境）、`mise run build`、`mise run test`、`mise run lint`、`mise run verify`（完整门禁）。
+常用任务：`mise run dev`（加载被 Git 忽略的 `.env`，启动网关 + Vite 开发环境）、`mise run build`、`mise run test`、`mise run test-db`（加载独立 `.env.test`，串行运行真实 PostgreSQL 回归）、`mise run lint`、`mise run verify`（完整门禁）。
+
+真实 Provider 的工具调用、服务端搜索、Kimi Adapter 与 fallback 使用显式 opt-in 的
+`mise run test-live`，默认不会进入 CI 或消耗上游 Token。Case、环境隔离、结果格式和安全
+边界见 [`docs/live-provider-smoke.md`](./docs/live-provider-smoke.md)。
 
 设置 `GATEWAY_ADMIN_KEY` 后可创建下游 Virtual Key，原始 Key 只在创建响应中返回：
 
@@ -54,7 +70,7 @@ curl -X POST http://127.0.0.1:8787/admin/keys \
   -d '{"name":"service-a","allowed_models":["MiniMax-M2.7"]}'
 ```
 
-Usage API 返回显式的 `version: "v1"` 和 `timezone: "UTC"`。所有入口共享 `from`、`to`（RFC3339、半开区间 `[from,to)`）、`logical_model`、`upstream_model`、`provider`、`source_id`、`client_source`、`account`、`protocol_in`、`protocol_upstream`、`virtual_key`、`status=success|failure`、`status_code` 和 `usage_source` 组合筛选。`source_id` 是 DB-first Runtime Binding 最终实际选中的一等 Source；可选下游 `X-Client-Source` 只记录为独立 `client_source`，缺省为 `unknown`。Virtual Key 鉴权的请求会记录 Key ID，静态 `GATEWAY_API_KEY` 请求为 `null`。
+Usage API 返回显式的 `version: "v1"` 和 `timezone: "UTC"`。所有入口共享 `from`、`to`（RFC3339、半开区间 `[from,to)`）、`logical_model`、`upstream_model`、`provider`、`source_id`、`client_source`、`account`、`protocol_in`、`protocol_upstream`、`virtual_key`、`status=success|failure`、`status_code` 和 `usage_source` 组合筛选。`provider`/`provider_id` 来自 Source 创建时固化的 `provider_preset_id`，同一 ProviderPreset 下的多个 Source 会归入同一 Provider；`source_id` 是 DB-first Runtime Binding 最终实际选中的 Source。可选下游 `X-Client-Source` 只记录为独立 `client_source`，缺省为 `unknown`。Virtual Key 鉴权的请求会记录 Key ID，静态 `GATEWAY_API_KEY` 请求为 `null`。
 
 ProviderPreset、连接测试、模型发现和确认接口的完整请求/响应契约见 [`docs/admin-api.md`](./docs/admin-api.md)。最小流程为：创建 Source 快照 → 选择关联且启用的 Account 按协议测试 → 执行 discovery → 查看 diff/待确认模型 → 编辑并批量确认。确认 SourceModel 仍不会自动创建 LogicalModel、Binding 或 Route。
 
@@ -103,8 +119,9 @@ cargo run
 需要执行 PostgreSQL 集成测试时，显式设置专用的 `TEST_DATABASE_URL`；测试为每次运行创建并清理独立 schema，不会复用运行时 `DATABASE_URL`。控制面完整回归是显式 ignored 测试，必须实际运行，不能把缺少数据库导致的跳过作为通过：
 
 ```bash
-TEST_DATABASE_URL='postgres://gateway:gateway@127.0.0.1:5432/gateway_test' \
-  cargo test postgres_db_first_crud_rollback_snapshot_and_models_contract -- --ignored
+cp .env.test.example .env.test
+# 确认 .env.test 指向专用测试库后执行；任务会串行运行并包含 ignored 用例。
+mise run test-db
 ```
 
 设置 `GATEWAY_API_KEY` 后，三类协议入口会要求 `Authorization: Bearer ...` 或 `x-api-key`。Kimi Responses 路由只需配置 `"adapter":"kimi_responses_adapter"`，不需要启动额外服务；账号凭据通过 `credential_env` 注入。之后客户端仍然只需要调用网关：

@@ -9,6 +9,7 @@ mod model_discovery;
 mod protocol;
 mod provider_preset;
 mod routing;
+mod source_url;
 mod transport;
 mod usage;
 
@@ -89,7 +90,7 @@ impl LiveConfig {
 #[derive(Clone)]
 struct AppState {
     live: Arc<std::sync::RwLock<LiveConfig>>,
-    http: reqwest::Client,
+    http: transport::SourceHttpClient,
     db: Option<db::Database>,
     control_plane: Option<control_plane::ControlPlane>,
     health: health::HealthRegistry,
@@ -122,7 +123,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let force_import = std::env::var("GATEWAY_CONFIG_IMPORT")
         .ok()
         .is_some_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes"));
-    let initial_control_plane = control_plane::ControlPlane::new(&database, &listen_addr);
+    let source_url_policy = Arc::new(source_url::SourceUrlPolicy::from_env()?);
+    let initial_control_plane = control_plane::ControlPlane::with_url_policy(
+        &database,
+        &listen_addr,
+        source_url_policy.clone(),
+    );
     let should_import = force_import || initial_control_plane.is_empty().await?;
     let bootstrap = if should_import {
         match std::env::var("GATEWAY_CONFIG_JSON") {
@@ -142,7 +148,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None
     };
     provider_preset::install_builtin_presets(&database.model_catalog()).await?;
-    let control_plane = control_plane::ControlPlane::new(&database, &listen_addr);
+    let control_plane = control_plane::ControlPlane::with_url_policy(
+        &database,
+        &listen_addr,
+        source_url_policy.clone(),
+    );
     let snapshot = match bootstrap {
         Some(config) => match control_plane
             .initialize_from_config(&config, force_import)
@@ -157,7 +167,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let live = LiveConfig::from_snapshot(snapshot);
     let state = AppState {
         live: Arc::new(std::sync::RwLock::new(live)),
-        http: transport::client()?,
+        http: transport::client(source_url_policy.clone())?,
         db: Some(database),
         control_plane: Some(control_plane),
         health: health::HealthRegistry::new(std::time::Duration::from_secs(30)),
@@ -1639,7 +1649,7 @@ async fn proxy(
         }
     };
     warn_degraded_route(&request_id, &route);
-    let Some(provider) = config.provider(&route.provider_id) else {
+    let Some(provider) = config.provider(&route.source_id) else {
         return error_response(
             StatusCode::BAD_GATEWAY,
             "provider_not_found",
@@ -1730,7 +1740,7 @@ async fn proxy(
             let event = db::UsageEvent {
                 request_id,
                 virtual_key_id,
-                provider_id: candidate.provider.id.clone(),
+                provider_id: candidate.provider_id.clone(),
                 account_id: candidate.account.id.clone(),
                 model: model.to_string(),
                 logical_model: model.to_string(),
@@ -1764,7 +1774,7 @@ async fn proxy(
             };
             let attempts = vec![db::UsageAttempt {
                 attempt_no: 0,
-                provider_id: candidate.provider.id.clone(),
+                provider_id: candidate.provider_id.clone(),
                 source_id: candidate.source_id.clone(),
                 account_id: candidate.account.id.clone(),
                 upstream_model_id: Some(prepared.upstream_model_id),
@@ -1815,8 +1825,8 @@ async fn proxy(
         Ok(response) if is_retryable(response.status()) => {
             attempts.push(db::UsageAttempt {
                 attempt_no: 0,
-                provider_id: provider.id.clone(),
-                source_id: route.provider_id.clone(),
+                provider_id: route.provider_id.clone(),
+                source_id: route.source_id.clone(),
                 account_id: account.id.clone(),
                 upstream_model_id: Some(primary_request.upstream_model_id.clone()),
                 status_code: response.status().as_u16() as i32,
@@ -1842,8 +1852,8 @@ async fn proxy(
         Ok(response) => {
             attempts.push(db::UsageAttempt {
                 attempt_no: 0,
-                provider_id: provider.id.clone(),
-                source_id: route.provider_id.clone(),
+                provider_id: route.provider_id.clone(),
+                source_id: route.source_id.clone(),
                 account_id: account.id.clone(),
                 upstream_model_id: Some(primary_request.upstream_model_id.clone()),
                 status_code: response.status().as_u16() as i32,
@@ -1856,8 +1866,8 @@ async fn proxy(
         Err(error) => {
             attempts.push(db::UsageAttempt {
                 attempt_no: 0,
-                provider_id: provider.id.clone(),
-                source_id: route.provider_id.clone(),
+                provider_id: route.provider_id.clone(),
+                source_id: route.source_id.clone(),
                 account_id: account.id.clone(),
                 upstream_model_id: Some(primary_request.upstream_model_id.clone()),
                 status_code: 599,
@@ -1893,7 +1903,7 @@ async fn proxy(
         .or_else(|| attempts.last());
     let final_binding = final_attempt.and_then(|attempt| {
         route.fallback_bindings.iter().find(|binding| {
-            attempt.source_id == binding.provider_id
+            attempt.source_id == binding.source_id
                 && binding.account_id == attempt.account_id
                 && attempt.upstream_model_id.as_deref() == Some(binding.upstream_model_id.as_str())
         })
@@ -1926,7 +1936,7 @@ async fn proxy(
             .unwrap_or_else(|| route.provider_id.clone());
         let final_source_id = final_attempt
             .map(|attempt| attempt.source_id.clone())
-            .unwrap_or_else(|| route.provider_id.clone());
+            .unwrap_or_else(|| route.source_id.clone());
         let final_upstream_model_id = final_attempt
             .and_then(|attempt| attempt.upstream_model_id.clone())
             .or_else(|| Some(route.upstream_model_id.clone()));
@@ -2061,7 +2071,7 @@ fn finalize_stream_usage(
 #[allow(clippy::too_many_arguments)]
 async fn forward_account(
     config: &GatewayConfig,
-    http: &reqwest::Client,
+    http: &transport::SourceHttpClient,
     route: &ResolvedRoute,
     provider: &config::ProviderConfig,
     account: &config::AccountConfig,
@@ -2071,12 +2081,17 @@ async fn forward_account(
     let credential = config.credential_for(account);
     if route.mode == "adapter" {
         if route.adapter.as_deref() == Some("kimi_responses_adapter") {
-            return embedded_kimi_adapter(provider, account, credential.as_deref(), headers, body)
-                .await;
+            return embedded_kimi_adapter(
+                http,
+                provider,
+                account,
+                credential.as_deref(),
+                headers,
+                body,
+            )
+            .await;
         }
-        Err(transport::TransportError::Request(
-            "unknown embedded adapter".into(),
-        ))
+        Err(transport::TransportError::Request)
     } else {
         transport::forward_url(
             http,
@@ -2092,12 +2107,14 @@ async fn forward_account(
 }
 
 async fn embedded_kimi_adapter(
+    http: &transport::SourceHttpClient,
     provider: &config::ProviderConfig,
     _account: &config::AccountConfig,
     credential: Option<&str>,
     headers: &HeaderMap,
     body: Bytes,
 ) -> Result<Response<Body>, transport::TransportError> {
+    http.validate_base_url(&provider.base_url)?;
     let cfg = kimi_responses_adapter::adapter::config::Config {
         listen_addr: String::new(),
         kimi_base_url: provider.base_url.trim_end_matches('/').to_string(),
@@ -2115,12 +2132,13 @@ async fn embedded_kimi_adapter(
         .collect(),
         search_status_prefix: "Search results for query:".into(),
     };
-    let adapter = kimi_responses_adapter::adapter::server::router(cfg);
+    let adapter =
+        kimi_responses_adapter::adapter::server::router_with_client(cfg, http.raw_client());
     let mut request = Request::builder()
         .method("POST")
         .uri("/v1/responses")
         .body(Body::from(body))
-        .map_err(|e| transport::TransportError::Request(e.to_string()))?;
+        .map_err(|_| transport::TransportError::Request)?;
     let request_headers = request.headers_mut();
     for (name, value) in headers {
         if !matches!(
@@ -2142,12 +2160,13 @@ async fn embedded_kimi_adapter(
     adapter
         .oneshot(request)
         .await
-        .map_err(|error| transport::TransportError::Request(error.to_string()))
+        .map_err(|_| transport::TransportError::Request)
 }
 
 struct FallbackCandidate<'a> {
     account: &'a config::AccountConfig,
     provider: &'a config::ProviderConfig,
+    provider_id: String,
     source_id: String,
     upstream_model: String,
     protocol_upstream: Protocol,
@@ -2173,13 +2192,14 @@ async fn select_fallback_candidate<'a>(
             if !account.enabled || !health.is_available(&account.id).await {
                 continue;
             }
-            let Some(provider) = config.provider(&binding.provider_id) else {
+            let Some(provider) = config.provider(&binding.source_id) else {
                 continue;
             };
             available.push(FallbackCandidate {
                 account,
                 provider,
-                source_id: binding.provider_id.clone(),
+                provider_id: binding.provider_id.clone(),
+                source_id: binding.source_id.clone(),
                 upstream_model: binding.upstream_model_id.clone(),
                 protocol_upstream: binding.protocol_upstream,
                 mode: binding.mode.clone(),
@@ -2205,7 +2225,7 @@ async fn select_fallback_candidate<'a>(
             let Some(provider) = config.provider(&account.provider_id) else {
                 continue;
             };
-            if account.provider_id != route.provider_id {
+            if account.provider_id != route.source_id {
                 let cap =
                     config.protocol_capability(&provider.id, Some(&account.id), model, protocol);
                 if cap.mode != config::ProtocolMode::Native {
@@ -2220,6 +2240,7 @@ async fn select_fallback_candidate<'a>(
             available.push(FallbackCandidate {
                 account,
                 provider,
+                provider_id: provider.id.clone(),
                 source_id: provider.id.clone(),
                 upstream_model,
                 protocol_upstream: route.protocol_upstream,
@@ -2255,7 +2276,7 @@ async fn select_fallback_candidate<'a>(
 async fn try_fallback(
     config: &GatewayConfig,
     health: &health::HealthRegistry,
-    http: &reqwest::Client,
+    http: &transport::SourceHttpClient,
     route: &ResolvedRoute,
     model: &str,
     protocol: Protocol,
@@ -2287,7 +2308,7 @@ async fn try_fallback(
         Ok(response) => {
             attempts.push(db::UsageAttempt {
                 attempt_no: 1,
-                provider_id: candidate.provider.id.clone(),
+                provider_id: candidate.provider_id.clone(),
                 source_id: candidate.source_id.clone(),
                 account_id: candidate.account.id.clone(),
                 upstream_model_id: Some(prepared.upstream_model_id),
@@ -2305,7 +2326,7 @@ async fn try_fallback(
         Err(_) => {
             attempts.push(db::UsageAttempt {
                 attempt_no: 1,
-                provider_id: candidate.provider.id.clone(),
+                provider_id: candidate.provider_id.clone(),
                 source_id: candidate.source_id.clone(),
                 account_id: candidate.account.id.clone(),
                 upstream_model_id: Some(prepared.upstream_model_id),
@@ -2323,7 +2344,7 @@ async fn try_fallback(
 async fn try_fallback_error(
     config: &GatewayConfig,
     health: &health::HealthRegistry,
-    http: &reqwest::Client,
+    http: &transport::SourceHttpClient,
     route: &ResolvedRoute,
     model: &str,
     protocol: Protocol,
@@ -2362,7 +2383,7 @@ async fn try_fallback_error(
         Ok(response) => {
             attempts.push(db::UsageAttempt {
                 attempt_no: 1,
-                provider_id: candidate.provider.id.clone(),
+                provider_id: candidate.provider_id.clone(),
                 source_id: candidate.source_id.clone(),
                 account_id: candidate.account.id.clone(),
                 upstream_model_id: Some(prepared.upstream_model_id),
@@ -2380,7 +2401,7 @@ async fn try_fallback_error(
         Err(_) => {
             attempts.push(db::UsageAttempt {
                 attempt_no: 1,
-                provider_id: candidate.provider.id.clone(),
+                provider_id: candidate.provider_id.clone(),
                 source_id: candidate.source_id.clone(),
                 account_id: candidate.account.id.clone(),
                 upstream_model_id: Some(prepared.upstream_model_id),
@@ -2404,7 +2425,7 @@ async fn try_fallback_error(
 #[allow(clippy::too_many_arguments)]
 async fn forward_fallback(
     config: &GatewayConfig,
-    http: &reqwest::Client,
+    http: &transport::SourceHttpClient,
     provider: &config::ProviderConfig,
     account: &config::AccountConfig,
     protocol: Protocol,
@@ -2417,12 +2438,17 @@ async fn forward_fallback(
     let credential = config.credential_for(account);
     if mode == "adapter" {
         if adapter == Some("kimi_responses_adapter") {
-            return embedded_kimi_adapter(provider, account, credential.as_deref(), headers, body)
-                .await;
+            return embedded_kimi_adapter(
+                http,
+                provider,
+                account,
+                credential.as_deref(),
+                headers,
+                body,
+            )
+            .await;
         }
-        return Err(transport::TransportError::Request(
-            "unknown embedded adapter".into(),
-        ));
+        return Err(transport::TransportError::Request);
     }
     if let Some(endpoint) = upstream_endpoint {
         return transport::forward_url(
@@ -2666,7 +2692,7 @@ mod audit_closeout_tests {
         let live = LiveConfig::legacy(config);
         AppState {
             live: Arc::new(std::sync::RwLock::new(live)),
-            http: transport::client().expect("audit HTTP client"),
+            http: transport::test_client().expect("audit HTTP client"),
             db: None,
             control_plane: None,
             health: health::HealthRegistry::new(std::time::Duration::from_secs(30)),
@@ -2897,7 +2923,7 @@ mod usage_api_tests {
         let live = LiveConfig::legacy(config);
         AppState {
             live: Arc::new(std::sync::RwLock::new(live)),
-            http: transport::client().expect("HTTP client"),
+            http: transport::test_client().expect("HTTP client"),
             db: Some(database),
             control_plane: None,
             health: health::HealthRegistry::new(std::time::Duration::from_secs(1)),
@@ -3266,7 +3292,7 @@ mod kimi_adapter_e2e_tests {
         let live = LiveConfig::legacy(config);
         AppState {
             live: Arc::new(std::sync::RwLock::new(live)),
-            http: transport::client().expect("http client"),
+            http: transport::test_client().expect("http client"),
             db: None,
             control_plane: None,
             health: health::HealthRegistry::new(std::time::Duration::from_secs(1)),

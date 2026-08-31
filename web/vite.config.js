@@ -6,7 +6,11 @@ import { fileURLToPath } from 'node:url'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 function getApiProxyTarget() {
-  return process.env.VITE_API_PROXY_TARGET?.trim() || 'http://127.0.0.1:8080'
+  return process.env.VITE_API_PROXY_TARGET?.trim() || 'http://127.0.0.1:8787'
+}
+
+function getDevHost() {
+  return process.env.VITE_DEV_HOST?.trim() || '127.0.0.1'
 }
 
 export default defineConfig(({ command }) => ({
@@ -18,6 +22,7 @@ export default defineConfig(({ command }) => ({
     },
   },
   server: command === 'serve' ? {
+    host: getDevHost(),
     proxy: {
       '/admin': {
         target: getApiProxyTarget(),

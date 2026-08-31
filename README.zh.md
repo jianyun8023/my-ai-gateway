@@ -143,7 +143,7 @@ virtual_key, status, status_code, usage_source
 
 `from` 和 `to` 接受带 offset 的 RFC3339，并按半开区间 `[from,to)` 解释。`events` 固定按 `(created_at DESC, request_id DESC)` 排序，后续页应原样传回不透明的 `page.next_cursor`。
 
-`source_id` 表示 DB-first Runtime Binding 最终实际选中的 Source；可选请求头 `X-Client-Source` 只记录为独立 `client_source`，不参与路由或鉴权。逻辑事件成功时归因最终成功 attempt，全部失败时归因最终实际 attempt。Token 聚合只累计每个逻辑请求的最终 Usage，`upstream_attempts` 单独统计上游尝试。
+`provider_id` 来自 Source 创建时固化的 `provider_preset_id`，因此同一 ProviderPreset 下的多个 Source 会归入同一 Provider；`source_id` 表示 DB-first Runtime Binding 最终实际选中的 Source。可选请求头 `X-Client-Source` 只记录为独立 `client_source`，不参与路由或鉴权。逻辑事件成功时归因最终成功 attempt，全部失败时归因最终实际 attempt。Token 聚合只累计每个逻辑请求的最终 Usage，`upstream_attempts` 单独统计上游尝试。
 
 ```bash
 curl 'http://127.0.0.1:8787/admin/usage/timeseries?granularity=day&logical_model=MiniMax-M2.7' \

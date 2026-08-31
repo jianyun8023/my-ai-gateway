@@ -1,12 +1,18 @@
 import { describe, expect, it } from 'vitest'
 import config from '../vite.config.js'
 
-function resolveConfigWithEnv(value) {
-  const previous = process.env.VITE_API_PROXY_TARGET
-  if (value === undefined) {
+function resolveConfigWithEnv({ proxyTarget, host } = {}) {
+  const previousProxyTarget = process.env.VITE_API_PROXY_TARGET
+  const previousHost = process.env.VITE_DEV_HOST
+  if (proxyTarget === undefined) {
     delete process.env.VITE_API_PROXY_TARGET
   } else {
-    process.env.VITE_API_PROXY_TARGET = value
+    process.env.VITE_API_PROXY_TARGET = proxyTarget
+  }
+  if (host === undefined) {
+    delete process.env.VITE_DEV_HOST
+  } else {
+    process.env.VITE_DEV_HOST = host
   }
 
   try {
@@ -14,10 +20,15 @@ function resolveConfigWithEnv(value) {
       ? config({ command: 'serve', mode: 'development', isSsrBuild: false, isPreview: false })
       : config
   } finally {
-    if (previous === undefined) {
+    if (previousProxyTarget === undefined) {
       delete process.env.VITE_API_PROXY_TARGET
     } else {
-      process.env.VITE_API_PROXY_TARGET = previous
+      process.env.VITE_API_PROXY_TARGET = previousProxyTarget
+    }
+    if (previousHost === undefined) {
+      delete process.env.VITE_DEV_HOST
+    } else {
+      process.env.VITE_DEV_HOST = previousHost
     }
   }
 }
@@ -30,17 +41,24 @@ function resolveBuildConfig() {
 
 describe('vite dev server proxy', () => {
   it('proxies every gateway Admin API request to the local backend by default', () => {
-    const resolved = resolveConfigWithEnv(undefined)
+    const resolved = resolveConfigWithEnv()
 
-    expect(resolved.server?.proxy?.['/admin']?.target).toBe('http://127.0.0.1:8080')
+    expect(resolved.server?.host).toBe('127.0.0.1')
+    expect(resolved.server?.proxy?.['/admin']?.target).toBe('http://127.0.0.1:8787')
     expect(resolved.server?.proxy?.['/admin']?.changeOrigin).toBe(true)
     expect(resolved.server?.proxy?.['/api']).toBeUndefined()
   })
 
   it('allows overriding the backend proxy target', () => {
-    const resolved = resolveConfigWithEnv('http://127.0.0.1:9090')
+    const resolved = resolveConfigWithEnv({ proxyTarget: 'http://127.0.0.1:9090' })
 
     expect(resolved.server?.proxy?.['/admin']?.target).toBe('http://127.0.0.1:9090')
+  })
+
+  it('allows exposing the development server on the LAN', () => {
+    const resolved = resolveConfigWithEnv({ host: '0.0.0.0' })
+
+    expect(resolved.server?.host).toBe('0.0.0.0')
   })
 
   it('does not add the dev proxy to production build config', () => {

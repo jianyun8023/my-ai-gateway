@@ -10,10 +10,12 @@ use crate::{
         CredentialHeaderTemplate, DiscoveryParser, DiscoveryPreset, HttpMethod,
         ProviderPresetDefinition, SourceAuthConfig, SourceProtocolCapability,
     },
+    source_url::{reqwest_error_is_policy_violation, SourceUrlPolicyError},
+    transport::SourceHttpClient,
 };
 use bytes::BytesMut;
 use chrono::{DateTime, Utc};
-use reqwest::{header::HeaderName, Client, StatusCode, Url};
+use reqwest::{header::HeaderName, StatusCode, Url};
 use serde::Serialize;
 use serde_json::Value;
 use std::{collections::BTreeMap, fmt, time::Instant};
@@ -25,6 +27,7 @@ pub enum DiscoveryServiceError {
     Catalog(CatalogError),
     InvalidPreset,
     InvalidSourceUrl,
+    SourceUrlBlocked,
     InvalidHeaderTemplate,
     AccountCredentialUnavailable,
 }
@@ -39,6 +42,7 @@ impl DiscoveryServiceError {
             Self::Catalog(_) => "database_error",
             Self::InvalidPreset => "invalid_provider_preset",
             Self::InvalidSourceUrl => "invalid_source_url",
+            Self::SourceUrlBlocked => "source_url_blocked",
             Self::InvalidHeaderTemplate => "invalid_header_template",
             Self::AccountCredentialUnavailable => "credential_unavailable",
         }
@@ -52,10 +56,21 @@ impl DiscoveryServiceError {
             Self::Catalog(_) => "catalog database operation failed",
             Self::InvalidPreset => "source provider preset snapshot is invalid",
             Self::InvalidSourceUrl => "source base URL or endpoint is invalid",
+            Self::SourceUrlBlocked => "source URL is blocked by server policy",
             Self::InvalidHeaderTemplate => "source header template is invalid",
             Self::AccountCredentialUnavailable => {
                 "account credential environment variable is unavailable"
             }
+        }
+    }
+}
+
+impl From<SourceUrlPolicyError> for DiscoveryServiceError {
+    fn from(error: SourceUrlPolicyError) -> Self {
+        if error == SourceUrlPolicyError::InvalidUrl {
+            Self::InvalidSourceUrl
+        } else {
+            Self::SourceUrlBlocked
         }
     }
 }
@@ -107,7 +122,13 @@ struct SafeFailure {
 
 impl SafeFailure {
     fn transport(error: &reqwest::Error) -> Self {
-        if error.is_timeout() {
+        if reqwest_error_is_policy_violation(error) {
+            Self {
+                code: "source_url_blocked",
+                message: "source URL is blocked by server policy",
+                http_status: None,
+            }
+        } else if error.is_timeout() {
             Self {
                 code: "upstream_timeout",
                 message: "upstream request timed out",
@@ -140,11 +161,11 @@ impl SafeFailure {
 #[derive(Clone)]
 pub struct ModelDiscoveryService {
     repository: ModelCatalogRepository,
-    http: Client,
+    http: SourceHttpClient,
 }
 
 impl ModelDiscoveryService {
-    pub fn new(repository: ModelCatalogRepository, http: Client) -> Self {
+    pub fn new(repository: ModelCatalogRepository, http: SourceHttpClient) -> Self {
         Self { repository, http }
     }
 
@@ -658,7 +679,7 @@ fn source_url(base_url: &str, endpoint: &str) -> Result<Url, DiscoveryServiceErr
 }
 
 fn request_builder<'a>(
-    client: &Client,
+    client: &SourceHttpClient,
     method: HttpMethod,
     url: Url,
     credential_header: &CredentialHeaderTemplate,
@@ -669,7 +690,9 @@ fn request_builder<'a>(
         HttpMethod::Get => reqwest::Method::GET,
         HttpMethod::Post => reqwest::Method::POST,
     };
-    let mut request = client.request(method, url);
+    let mut request = client
+        .request(method, url)
+        .map_err(DiscoveryServiceError::from)?;
     for (name, value) in headers {
         let name = HeaderName::from_bytes(name.as_bytes())
             .map_err(|_| DiscoveryServiceError::InvalidHeaderTemplate)?;
@@ -1073,7 +1096,7 @@ mod tests {
         let repository = database.model_catalog();
         let service = ModelDiscoveryService::new(
             repository.clone(),
-            transport::client().expect("discovery client"),
+            transport::test_client().expect("discovery client"),
         );
 
         let initial = service
@@ -1259,7 +1282,7 @@ mod tests {
         let fixture = create_fixture(&database, "minimax", base_url).await;
         let service = ModelDiscoveryService::new(
             database.model_catalog(),
-            transport::client().expect("discovery client"),
+            transport::test_client().expect("discovery client"),
         );
         let first = service
             .discover(&fixture.source_id, &fixture.account_id, "integration-test")
@@ -1340,7 +1363,7 @@ mod tests {
         let fixture = create_fixture(&database, "kimi_code", format!("{base_url}/coding")).await;
         let service = ModelDiscoveryService::new(
             database.model_catalog(),
-            transport::client().expect("discovery client"),
+            transport::test_client().expect("discovery client"),
         );
 
         let unsupported = service
