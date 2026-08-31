@@ -27,6 +27,7 @@ use axum::{
         header::{CONTENT_DISPOSITION, CONTENT_TYPE},
         HeaderMap, HeaderValue, Request, Response, StatusCode,
     },
+    middleware::{self, Next},
     response::IntoResponse,
     routing::{get, post, put},
     Json, Router,
@@ -36,6 +37,8 @@ use protocol::Protocol;
 use routing::{ResolvedRoute, RouteResolver};
 use serde::Deserialize;
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
+use subtle::ConstantTimeEq;
 use tower::ServiceExt;
 use tower_http::{services::ServeDir, trace::TraceLayer};
 use uuid::Uuid;
@@ -94,7 +97,57 @@ struct AppState {
     db: Option<db::Database>,
     control_plane: Option<control_plane::ControlPlane>,
     health: health::HealthRegistry,
+    admin_auth: AdminAuth,
 }
+
+#[derive(Clone)]
+pub(crate) struct AdminAuth {
+    key_digest: Option<[u8; 32]>,
+}
+
+impl AdminAuth {
+    fn from_env() -> Self {
+        Self::from_key(
+            std::env::var("GATEWAY_ADMIN_KEY")
+                .ok()
+                .filter(|key| !key.is_empty())
+                .as_deref(),
+        )
+    }
+
+    fn from_key(key: Option<&str>) -> Self {
+        Self {
+            key_digest: key.map(key_digest),
+        }
+    }
+
+    fn is_configured(&self) -> bool {
+        self.key_digest.is_some()
+    }
+
+    fn authorized(&self, headers: &HeaderMap) -> bool {
+        let (Some(expected), Some(supplied)) = (self.key_digest, supplied_key(headers)) else {
+            return false;
+        };
+        key_matches_digest(&expected, supplied)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test() -> Self {
+        Self::from_key(Some(TEST_ADMIN_KEY))
+    }
+}
+
+fn key_digest(key: &str) -> [u8; 32] {
+    Sha256::digest(key.as_bytes()).into()
+}
+
+fn key_matches_digest(expected: &[u8; 32], supplied: &str) -> bool {
+    bool::from(expected.ct_eq(&key_digest(supplied)))
+}
+
+#[cfg(test)]
+pub(crate) const TEST_ADMIN_KEY: &str = "test-admin-key";
 
 impl AppState {
     fn snapshot(&self) -> LiveConfig {
@@ -165,12 +218,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let addr: SocketAddr = listen_addr.parse()?;
     let live = LiveConfig::from_snapshot(snapshot);
+    let admin_auth = AdminAuth::from_env();
+    if !admin_auth.is_configured() {
+        tracing::warn!("GATEWAY_ADMIN_KEY is not configured; Admin API requests will be rejected");
+    }
     let state = AppState {
         live: Arc::new(std::sync::RwLock::new(live)),
         http: transport::client(source_url_policy.clone())?,
         db: Some(database),
         control_plane: Some(control_plane),
         health: health::HealthRegistry::new(std::time::Duration::from_secs(30)),
+        admin_auth,
     };
     let app = application(state);
     let listener = tokio::net::TcpListener::bind(addr).await?;
@@ -180,13 +238,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn application(state: AppState) -> Router {
-    let discovery_api = discovery_api::auxiliary_router(state.db.clone(), state.http.clone());
-    Router::new()
-        .route("/healthz", get(healthz))
-        .route("/v1/models", get(models))
-        .route("/v1/chat/completions", post(chat_completions))
-        .route("/v1/responses", post(responses))
-        .route("/v1/messages", post(messages))
+    let discovery_api = discovery_api::auxiliary_router(
+        state.db.clone(),
+        state.http.clone(),
+        state.admin_auth.clone(),
+    );
+    let admin_api = Router::new()
         .route("/admin/keys", get(list_keys).post(create_key))
         .route("/admin/keys/{id}/revoke", post(revoke_key))
         .route("/admin/usage/summary", get(usage_summary))
@@ -246,10 +303,37 @@ fn application(state: AppState) -> Router {
         .route("/admin/capabilities", get(admin_capabilities))
         .route("/admin/health", get(admin_health))
         .route("/admin/routes/{protocol}/{model}", get(resolve_route))
+        .with_state(state.clone())
+        .merge(discovery_api)
+        .route_layer(middleware::from_fn_with_state(
+            state.admin_auth.clone(),
+            require_admin_auth,
+        ));
+    Router::new()
+        .route("/healthz", get(healthz))
+        .route("/v1/models", get(models))
+        .route("/v1/chat/completions", post(chat_completions))
+        .route("/v1/responses", post(responses))
+        .route("/v1/messages", post(messages))
         .nest_service("/admin", ServeDir::new("web/dist"))
         .with_state(state)
-        .merge(discovery_api)
+        .merge(admin_api)
         .layer(TraceLayer::new_for_http())
+}
+
+async fn require_admin_auth(
+    State(auth): State<AdminAuth>,
+    request: Request<Body>,
+    next: Next,
+) -> Response<Body> {
+    if !auth.authorized(request.headers()) {
+        return error_response(
+            StatusCode::UNAUTHORIZED,
+            "unauthorized",
+            "admin key required",
+        );
+    }
+    next.run(request).await
 }
 
 async fn healthz(State(state): State<AppState>) -> Json<Value> {
@@ -311,7 +395,7 @@ async fn create_key(
     headers: HeaderMap,
     Json(request): Json<CreateKeyRequest>,
 ) -> Response<Body> {
-    if !admin_authorized(&headers) {
+    if !state.admin_auth.authorized(&headers) {
         return error_response(
             StatusCode::UNAUTHORIZED,
             "unauthorized",
@@ -332,7 +416,7 @@ async fn create_key(
 }
 
 async fn list_keys(State(state): State<AppState>, headers: HeaderMap) -> Response<Body> {
-    if !admin_authorized(&headers) {
+    if !state.admin_auth.authorized(&headers) {
         return error_response(
             StatusCode::UNAUTHORIZED,
             "unauthorized",
@@ -361,7 +445,7 @@ async fn revoke_key(
     headers: HeaderMap,
     Path(id): Path<i64>,
 ) -> Response<Body> {
-    if !admin_authorized(&headers) {
+    if !state.admin_auth.authorized(&headers) {
         return error_response(
             StatusCode::UNAUTHORIZED,
             "unauthorized",
@@ -546,7 +630,7 @@ async fn usage_summary(
     headers: HeaderMap,
     query: axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> Response<Body> {
-    if !admin_authorized(&headers) {
+    if !state.admin_auth.authorized(&headers) {
         return error_response(
             StatusCode::UNAUTHORIZED,
             "unauthorized",
@@ -575,7 +659,7 @@ async fn usage_timeseries(
     headers: HeaderMap,
     query: axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> Response<Body> {
-    if !admin_authorized(&headers) {
+    if !state.admin_auth.authorized(&headers) {
         return error_response(
             StatusCode::UNAUTHORIZED,
             "unauthorized",
@@ -604,7 +688,7 @@ async fn usage_breakdown(
     headers: HeaderMap,
     query: axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> Response<Body> {
-    if !admin_authorized(&headers) {
+    if !state.admin_auth.authorized(&headers) {
         return error_response(
             StatusCode::UNAUTHORIZED,
             "unauthorized",
@@ -633,7 +717,7 @@ async fn usage_events(
     headers: HeaderMap,
     query: axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> Response<Body> {
-    if !admin_authorized(&headers) {
+    if !state.admin_auth.authorized(&headers) {
         return error_response(
             StatusCode::UNAUTHORIZED,
             "unauthorized",
@@ -669,7 +753,7 @@ async fn usage_aggregate(
     headers: HeaderMap,
     query: axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> Response<Body> {
-    if !admin_authorized(&headers) {
+    if !state.admin_auth.authorized(&headers) {
         return error_response(
             StatusCode::UNAUTHORIZED,
             "unauthorized",
@@ -731,7 +815,7 @@ async fn usage_export(
     headers: HeaderMap,
     query: axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> Response<Body> {
-    if !admin_authorized(&headers) {
+    if !state.admin_auth.authorized(&headers) {
         return error_response(
             StatusCode::UNAUTHORIZED,
             "unauthorized",
@@ -854,7 +938,7 @@ async fn usage_event_detail(
     headers: HeaderMap,
     Path(request_id): Path<String>,
 ) -> Response<Body> {
-    if !admin_authorized(&headers) {
+    if !state.admin_auth.authorized(&headers) {
         return error_response(
             StatusCode::UNAUTHORIZED,
             "unauthorized",
@@ -907,7 +991,7 @@ fn admin_control_plane<'a>(
     state: &'a AppState,
     headers: &HeaderMap,
 ) -> Result<&'a control_plane::ControlPlane, Response<Body>> {
-    if !admin_authorized(headers) {
+    if !state.admin_auth.authorized(headers) {
         return Err(error_response(
             StatusCode::UNAUTHORIZED,
             "unauthorized",
@@ -1458,7 +1542,7 @@ async fn delete_route(
 }
 
 async fn admin_health(State(state): State<AppState>, headers: HeaderMap) -> Response<Body> {
-    if !admin_authorized(&headers) {
+    if !state.admin_auth.authorized(&headers) {
         return error_response(
             StatusCode::UNAUTHORIZED,
             "unauthorized",
@@ -1490,7 +1574,7 @@ async fn admin_health(State(state): State<AppState>, headers: HeaderMap) -> Resp
 
 async fn admin_capabilities(State(state): State<AppState>, headers: HeaderMap) -> Response<Body> {
     let live = state.snapshot();
-    admin_capabilities_response(admin_authorized(&headers), &live)
+    admin_capabilities_response(state.admin_auth.authorized(&headers), &live)
 }
 
 fn admin_capabilities_response(authorized: bool, live: &LiveConfig) -> Response<Body> {
@@ -1569,7 +1653,7 @@ mod admin_capabilities_api_tests {
 }
 
 async fn reload_config(State(state): State<AppState>, headers: HeaderMap) -> Response<Body> {
-    if !admin_authorized(&headers) {
+    if !state.admin_auth.authorized(&headers) {
         return error_response(
             StatusCode::UNAUTHORIZED,
             "unauthorized",
@@ -2486,7 +2570,9 @@ async fn authorized_with_db(
     model: &str,
 ) -> Option<Option<i64>> {
     if let Ok(expected) = std::env::var("GATEWAY_API_KEY") {
-        if supplied_key(headers) == Some(expected.as_str()) {
+        if supplied_key(headers)
+            .is_some_and(|supplied| key_matches_digest(&key_digest(&expected), supplied))
+        {
             return Some(None);
         }
     }
@@ -2514,14 +2600,6 @@ fn supplied_key(headers: &HeaderMap) -> Option<&str> {
         })
 }
 
-pub(crate) fn admin_authorized(headers: &HeaderMap) -> bool {
-    let expected = std::env::var("GATEWAY_ADMIN_KEY").or_else(|_| std::env::var("GATEWAY_API_KEY"));
-    let Ok(expected) = expected else {
-        return true;
-    };
-    supplied_key(headers) == Some(expected.as_str())
-}
-
 fn error_response(status: StatusCode, code: &str, message: &str) -> Response<Body> {
     (
         status,
@@ -2535,7 +2613,7 @@ async fn resolve_route(
     headers: HeaderMap,
     Path((protocol, model)): Path<(String, String)>,
 ) -> impl IntoResponse {
-    if !admin_authorized(&headers) {
+    if !state.admin_auth.authorized(&headers) {
         return (
             StatusCode::UNAUTHORIZED,
             Json(
@@ -2566,6 +2644,217 @@ async fn resolve_route(
 mod runtime_usage_tests;
 
 #[cfg(test)]
+static ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+#[cfg(test)]
+struct EnvRestore {
+    name: &'static str,
+    previous: Option<std::ffi::OsString>,
+}
+
+#[cfg(test)]
+impl EnvRestore {
+    fn set(name: &'static str, value: &str) -> Self {
+        let previous = std::env::var_os(name);
+        std::env::set_var(name, value);
+        Self { name, previous }
+    }
+}
+
+#[cfg(test)]
+impl Drop for EnvRestore {
+    fn drop(&mut self) {
+        if let Some(value) = &self.previous {
+            std::env::set_var(self.name, value);
+        } else {
+            std::env::remove_var(self.name);
+        }
+    }
+}
+
+#[cfg(test)]
+mod admin_auth_tests {
+    use super::*;
+    use axum::{body::to_bytes, http::header};
+
+    const ADMIN_API_ROUTES: &[(&str, &str)] = &[
+        ("GET", "/admin/keys"),
+        ("POST", "/admin/keys"),
+        ("POST", "/admin/keys/1/revoke"),
+        ("GET", "/admin/usage/summary"),
+        ("GET", "/admin/usage/timeseries"),
+        ("GET", "/admin/usage/breakdown"),
+        ("GET", "/admin/usage/events"),
+        ("GET", "/admin/usage/export"),
+        ("GET", "/admin/usage/aggregate"),
+        ("GET", "/admin/usage/events/request-id"),
+        ("GET", "/admin/sources"),
+        ("POST", "/admin/sources"),
+        ("GET", "/admin/sources/source-id"),
+        ("PUT", "/admin/sources/source-id"),
+        ("DELETE", "/admin/sources/source-id"),
+        ("PUT", "/admin/sources/source-id/enabled"),
+        ("GET", "/admin/accounts"),
+        ("POST", "/admin/accounts"),
+        ("GET", "/admin/accounts/account-id"),
+        ("PUT", "/admin/accounts/account-id"),
+        ("DELETE", "/admin/accounts/account-id"),
+        ("PUT", "/admin/accounts/account-id/enabled"),
+        ("GET", "/admin/logical-models"),
+        ("POST", "/admin/logical-models"),
+        ("GET", "/admin/logical-models/model-id"),
+        ("PUT", "/admin/logical-models/model-id"),
+        ("DELETE", "/admin/logical-models/model-id"),
+        ("PUT", "/admin/logical-models/model-id/enabled"),
+        ("GET", "/admin/model-bindings"),
+        ("POST", "/admin/model-bindings"),
+        ("GET", "/admin/model-bindings/1"),
+        ("PUT", "/admin/model-bindings/1"),
+        ("DELETE", "/admin/model-bindings/1"),
+        ("PUT", "/admin/model-bindings/1/enabled"),
+        ("GET", "/admin/routes"),
+        ("POST", "/admin/routes"),
+        ("GET", "/admin/routes/route-id"),
+        ("PUT", "/admin/routes/route-id"),
+        ("DELETE", "/admin/routes/route-id"),
+        ("PUT", "/admin/routes/route-id/enabled"),
+        ("POST", "/admin/config/reload"),
+        ("GET", "/admin/capabilities"),
+        ("GET", "/admin/health"),
+        ("GET", "/admin/routes/openai_responses/model-id"),
+        ("GET", "/admin/provider-presets"),
+        ("GET", "/admin/sources/source-id/preset-diff"),
+        ("POST", "/admin/sources/source-id/connection-tests"),
+        ("POST", "/admin/sources/source-id/discoveries"),
+        ("GET", "/admin/sources/source-id/discoveries/latest"),
+        ("GET", "/admin/sources/source-id/models"),
+        ("PATCH", "/admin/sources/source-id/models"),
+        ("POST", "/admin/sources/source-id/models/confirm"),
+    ];
+
+    fn state(admin_auth: AdminAuth) -> AppState {
+        let config = Arc::new(GatewayConfig {
+            listen_addr: "127.0.0.1:0".into(),
+            providers: Vec::new(),
+            accounts: Vec::new(),
+            routes: Vec::new(),
+        });
+        AppState {
+            live: Arc::new(std::sync::RwLock::new(LiveConfig::legacy(config))),
+            http: transport::test_client().expect("admin auth HTTP client"),
+            db: None,
+            control_plane: None,
+            health: health::HealthRegistry::new(std::time::Duration::from_secs(1)),
+            admin_auth,
+        }
+    }
+
+    fn request(method: &str, uri: &str, key: Option<&str>) -> Request<Body> {
+        let mut request = Request::builder()
+            .method(method)
+            .uri(uri)
+            .header(CONTENT_TYPE, "application/json");
+        if let Some(key) = key {
+            request = request.header(header::AUTHORIZATION, format!("Bearer {key}"));
+        }
+        request.body(Body::from("{}")).expect("admin request")
+    }
+
+    async fn assert_unauthorized(response: Response<Body>) {
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        let body = to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .expect("read unauthorized response");
+        let body: Value = serde_json::from_slice(&body).expect("unauthorized JSON");
+        assert_eq!(body["error"]["code"], "unauthorized");
+        let serialized = body.to_string();
+        for secret in [TEST_ADMIN_KEY, "data-plane-only", "GATEWAY_ADMIN_KEY"] {
+            assert!(!serialized.contains(secret));
+        }
+    }
+
+    #[test]
+    fn admin_auth_is_fail_closed_and_accepts_both_supported_headers() {
+        let unconfigured = AdminAuth::from_key(None);
+        assert!(!unconfigured.is_configured());
+        assert!(!unconfigured.authorized(&HeaderMap::new()));
+
+        let auth = AdminAuth::test();
+        let mut authorization = HeaderMap::new();
+        authorization.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_str(&format!("Bearer {TEST_ADMIN_KEY}")).unwrap(),
+        );
+        assert!(auth.authorized(&authorization));
+
+        let mut x_api_key = HeaderMap::new();
+        x_api_key.insert("x-api-key", HeaderValue::from_static(TEST_ADMIN_KEY));
+        assert!(auth.authorized(&x_api_key));
+
+        let mut wrong = HeaderMap::new();
+        wrong.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_static("Bearer data-plane-only"),
+        );
+        assert!(!auth.authorized(&wrong));
+    }
+
+    #[tokio::test]
+    async fn every_admin_api_route_rejects_missing_and_data_plane_keys_before_parsing() {
+        let app = application(state(AdminAuth::test()));
+        for (method, uri) in ADMIN_API_ROUTES {
+            let response = app
+                .clone()
+                .oneshot(request(method, uri, None))
+                .await
+                .unwrap_or_else(|error| panic!("{method} {uri}: {error}"));
+            assert_unauthorized(response).await;
+
+            let response = app
+                .clone()
+                .oneshot(request(method, uri, Some("data-plane-only")))
+                .await
+                .unwrap_or_else(|error| panic!("{method} {uri}: {error}"));
+            assert_unauthorized(response).await;
+
+            let response = app
+                .clone()
+                .oneshot(request(method, uri, Some(TEST_ADMIN_KEY)))
+                .await
+                .unwrap_or_else(|error| panic!("{method} {uri}: {error}"));
+            assert_ne!(
+                response.status(),
+                StatusCode::UNAUTHORIZED,
+                "{method} {uri}"
+            );
+        }
+    }
+
+    #[test]
+    fn admin_key_does_not_match_the_data_plane_key() {
+        let mut admin_headers = HeaderMap::new();
+        admin_headers.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_str(&format!("Bearer {TEST_ADMIN_KEY}")).unwrap(),
+        );
+        assert!(!key_matches_digest(
+            &key_digest("data-plane-only"),
+            supplied_key(&admin_headers).unwrap()
+        ));
+
+        let mut data_headers = HeaderMap::new();
+        data_headers.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_static("Bearer data-plane-only"),
+        );
+        assert!(key_matches_digest(
+            &key_digest("data-plane-only"),
+            supplied_key(&data_headers).unwrap()
+        ));
+    }
+}
+
+#[cfg(test)]
 mod audit_closeout_tests {
     use super::*;
     use axum::{body::to_bytes, extract::Request, Router};
@@ -2575,31 +2864,6 @@ mod audit_closeout_tests {
         sync::{Arc, Mutex as StdMutex},
     };
     use tracing_subscriber::fmt::MakeWriter;
-
-    static ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-
-    struct EnvRestore {
-        name: &'static str,
-        previous: Option<std::ffi::OsString>,
-    }
-
-    impl EnvRestore {
-        fn set(name: &'static str, value: &str) -> Self {
-            let previous = std::env::var_os(name);
-            std::env::set_var(name, value);
-            Self { name, previous }
-        }
-    }
-
-    impl Drop for EnvRestore {
-        fn drop(&mut self) {
-            if let Some(value) = &self.previous {
-                std::env::set_var(self.name, value);
-            } else {
-                std::env::remove_var(self.name);
-            }
-        }
-    }
 
     #[derive(Clone, Default)]
     struct CapturedLogs(Arc<StdMutex<Vec<u8>>>);
@@ -2696,6 +2960,7 @@ mod audit_closeout_tests {
             db: None,
             control_plane: None,
             health: health::HealthRegistry::new(std::time::Duration::from_secs(30)),
+            admin_auth: AdminAuth::test(),
         }
     }
 
@@ -2904,13 +3169,11 @@ mod usage_api_tests {
     use std::collections::HashMap;
 
     fn admin_request(uri: &str) -> Request<Body> {
-        let mut builder = Request::builder().uri(uri);
-        if let Ok(key) =
-            std::env::var("GATEWAY_ADMIN_KEY").or_else(|_| std::env::var("GATEWAY_API_KEY"))
-        {
-            builder = builder.header("authorization", format!("Bearer {key}"));
-        }
-        builder.body(Body::empty()).expect("admin request")
+        Request::builder()
+            .uri(uri)
+            .header("authorization", format!("Bearer {TEST_ADMIN_KEY}"))
+            .body(Body::empty())
+            .expect("admin request")
     }
 
     fn usage_test_state(database: db::Database) -> AppState {
@@ -2927,6 +3190,7 @@ mod usage_api_tests {
             db: Some(database),
             control_plane: None,
             health: health::HealthRegistry::new(std::time::Duration::from_secs(1)),
+            admin_auth: AdminAuth::test(),
         }
     }
 
@@ -3296,6 +3560,7 @@ mod kimi_adapter_e2e_tests {
             db: None,
             control_plane: None,
             health: health::HealthRegistry::new(std::time::Duration::from_secs(1)),
+            admin_auth: AdminAuth::test(),
         }
     }
 

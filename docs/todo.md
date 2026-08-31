@@ -37,7 +37,7 @@
 
 ### 安全、质量与运维
 
-- [ ] Admin API fail closed，并与下游鉴权完全分离（#44）
+- [x] Admin API fail closed，并与下游鉴权完全分离（#44）
 - [x] Provider URL allowlist 与 SSRF 防护（#46）
 - [ ] 统一 Secret Resolver 与凭据信封加密（#47）
 - [ ] Admin 写操作审计日志（#48）
