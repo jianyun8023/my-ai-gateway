@@ -30,6 +30,8 @@ export interface GatewayConsoleNavItem {
 
 export interface GatewayConsoleContentContext {
   getAdminKey: () => string;
+  adminKeyConfigured: boolean;
+  clearAdminKey: () => void;
   refreshRevision: number;
   setRefreshing: (refreshing: boolean) => void;
 }
@@ -82,8 +84,9 @@ export function GatewayConsoleShell({
   refreshable = false,
   children,
 }: GatewayConsoleShellProps) {
-  const [adminKeyDraft, setAdminKeyDraft] = useState(safeSessionRead);
-  const appliedAdminKeyRef = useRef(adminKeyDraft);
+  const appliedAdminKeyRef = useRef(safeSessionRead());
+  const [adminKeyDraft, setAdminKeyDraft] = useState('');
+  const [adminKeyConfigured, setAdminKeyConfigured] = useState(Boolean(appliedAdminKeyRef.current));
   const [refreshRevision, setRefreshRevision] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -94,6 +97,13 @@ export function GatewayConsoleShell({
   const localTimeZone = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone, []);
 
   const getAdminKey = useCallback(() => appliedAdminKeyRef.current, []);
+  const clearAdminKey = useCallback(() => {
+    appliedAdminKeyRef.current = '';
+    setAdminKeyDraft('');
+    setAdminKeyConfigured(false);
+    persistAdminKey('');
+    setRefreshRevision((current) => current + 1);
+  }, []);
   const closeMobileNav = useCallback((restoreFocus = false) => {
     setMobileNavOpen(false);
     if (restoreFocus) window.setTimeout(() => menuButtonRef.current?.focus(), 0);
@@ -132,7 +142,8 @@ export function GatewayConsoleShell({
   const applyAdminKey = () => {
     const nextAdminKey = adminKeyDraft.trim();
     appliedAdminKeyRef.current = nextAdminKey;
-    setAdminKeyDraft(nextAdminKey);
+    setAdminKeyDraft('');
+    setAdminKeyConfigured(Boolean(nextAdminKey));
     persistAdminKey(nextAdminKey);
     setRefreshRevision((current) => current + 1);
   };
@@ -149,9 +160,11 @@ export function GatewayConsoleShell({
 
   const contentContext = useMemo<GatewayConsoleContentContext>(() => ({
     getAdminKey,
+    adminKeyConfigured,
+    clearAdminKey,
     refreshRevision,
     setRefreshing,
-  }), [getAdminKey, refreshRevision]);
+  }), [adminKeyConfigured, clearAdminKey, getAdminKey, refreshRevision]);
 
   return (
     <div className={styles.shell} data-space={space} data-od-id={`console-${space}`}>
@@ -185,7 +198,7 @@ export function GatewayConsoleShell({
           <button ref={menuButtonRef} type="button" className={styles.mobileMenuButton} aria-label="打开导航" aria-controls="gateway-navigation" aria-expanded={mobileNavOpen} onClick={() => setMobileNavOpen(true)}><IconMenu size={20} /></button>
           <div className={styles.topbarTitle}><strong>{title}</strong><small>{shortTitle}</small></div>
           <div className={styles.headerActions}>
-            <label className={styles.keyInput}><span>Admin Key</span><input aria-label="Admin Key" autoComplete="off" type="password" required value={adminKeyDraft} onChange={(event) => setAdminKeyDraft(event.target.value)} placeholder="输入 GATEWAY_ADMIN_KEY" /><Button size="sm" variant="secondary" onClick={applyAdminKey}>应用</Button></label>
+            <label className={styles.keyInput}><span>Admin Key</span><input aria-label="Admin Key" autoComplete="off" spellCheck={false} type="password" required value={adminKeyDraft} onChange={(event) => setAdminKeyDraft(event.target.value)} placeholder="输入 GATEWAY_ADMIN_KEY" /><Button size="sm" variant="secondary" onClick={applyAdminKey}>应用</Button></label>
             <Button size="sm" variant="ghost" onClick={() => setTheme(theme === 'dark' ? 'white' : 'dark')}>{theme === 'dark' ? '浅色' : '深色'}</Button>
             {refreshable && <Button size="sm" variant="secondary" onClick={() => setRefreshRevision((current) => current + 1)} loading={refreshing}><IconRefreshCw size={14} />刷新</Button>}
           </div>

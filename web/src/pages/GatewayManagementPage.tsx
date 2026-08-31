@@ -1,20 +1,44 @@
-import { EmptyState } from '@/components/ui/EmptyState';
+import { useMemo } from 'react';
+import { GatewayAdminResources } from '@/admin-api';
+import { CapabilitiesPage } from '@/features/control-plane/CapabilitiesPage';
+import { ModelDiscoveryPage } from '@/features/control-plane/ModelDiscoveryPage';
+import { ModelsRoutesPage } from '@/features/control-plane/ModelsRoutesPage';
+import { SettingsPage } from '@/features/control-plane/SettingsPage';
+import { SourcesPage } from '@/features/control-plane/SourcesPage';
+import { ControlPlaneClient } from '@/control-plane/client';
 import type { GatewayManagementPage } from '@/lib/consoleNavigation';
-import styles from './GatewayManagementPage.module.scss';
 
-const PAGE_LABELS: Record<GatewayManagementPage, string> = {
-  sources: 'Sources',
-  'model-discovery': 'Model Discovery',
-  capabilities: 'Effective Capabilities',
-};
+interface GatewayManagementPageProps {
+  page: GatewayManagementPage;
+  getAdminKey: () => string;
+  adminKeyConfigured: boolean;
+  clearAdminKey: () => void;
+  refreshRevision: number;
+  onLoadingChange: (loading: boolean) => void;
+}
 
-export function GatewayManagementPage({ page }: { page: GatewayManagementPage }) {
+export function GatewayManagementPage({
+  page,
+  getAdminKey,
+  adminKeyConfigured,
+  clearAdminKey,
+  refreshRevision,
+  onLoadingChange,
+}: GatewayManagementPageProps) {
+  const api = useMemo(() => new GatewayAdminResources(
+    new ControlPlaneClient({ getAdminKey }),
+  ), [getAdminKey]);
+  const shared = { api, refreshRevision, onBusyChange: onLoadingChange };
+
+  if (page === 'sources') return <SourcesPage {...shared} />;
+  if (page === 'model-discovery') return <ModelDiscoveryPage {...shared} />;
+  if (page === 'capabilities') return <CapabilitiesPage {...shared} />;
+  if (page === 'models-routes') return <ModelsRoutesPage {...shared} />;
   return (
-    <section className={styles.empty} aria-label={`${PAGE_LABELS[page]} 管理页`}>
-      <EmptyState
-        title="功能尚未接入"
-        description={`${PAGE_LABELS[page]} 将在对应管理任务中接入真实 Admin API。`}
-      />
-    </section>
+    <SettingsPage
+      {...shared}
+      adminKeyConfigured={adminKeyConfigured}
+      onClearAdminKey={clearAdminKey}
+    />
   );
 }

@@ -9,8 +9,8 @@ import {
   type PropsWithChildren,
   type ReactNode,
 } from 'react';
+import i18n from 'i18next';
 import { createPortal } from 'react-dom';
-import { useTranslation } from 'react-i18next';
 import { IconX } from './icons';
 
 interface ModalProps {
@@ -110,7 +110,6 @@ export function Modal({
   variant = 'dialog',
   children,
 }: PropsWithChildren<ModalProps>) {
-  const { t } = useTranslation();
   const titleId = useId();
   const [isVisible, setIsVisible] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
@@ -312,6 +311,10 @@ export function Modal({
   const renderedFooter = activeSnapshot.footer;
   const renderedClassName = activeSnapshot.className;
   const renderedVariant = activeSnapshot.variant;
+  const translatedCloseLabel = i18n.isInitialized ? i18n.t('common.close') : '';
+  const closeLabel = translatedCloseLabel && translatedCloseLabel !== 'common.close'
+    ? translatedCloseLabel
+    : '关闭';
   const overlayClass = `modal-overlay ${renderedVariant === 'drawer' ? 'modal-overlay-drawer ' : ''}${isClosing ? 'modal-overlay-closing' : 'modal-overlay-entering'}`;
   const modalClass = `modal ${renderedVariant === 'drawer' ? 'modal-drawer ' : ''}${isClosing ? 'modal-closing' : 'modal-entering'}${renderedClassName ? ` ${renderedClassName}` : ''}`;
 
@@ -331,7 +334,7 @@ export function Modal({
           type="button"
           className="modal-close-floating"
           onClick={closeDisabled ? undefined : handleClose}
-          aria-label={t('common.close')}
+          aria-label={closeLabel}
           disabled={closeDisabled}
         >
           <IconX size={20} />

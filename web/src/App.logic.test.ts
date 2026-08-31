@@ -7,7 +7,7 @@ const shellSource = readFileSync(new URL('./components/gateway/GatewayConsoleShe
 
 describe('gateway-native App shell', () => {
   it('composes the gateway Usage and Management spaces without legacy Keeper routes', () => {
-    expect(appSource).toContain("import { GatewayUsagePage } from './pages/GatewayUsagePage';");
+    expect(appSource).toContain("import('./pages/GatewayUsagePage')");
     expect(appSource).toContain('<GatewayConsoleShell');
     expect(appSource).toContain('<GatewayUsagePage');
     expect(appSource).toContain('<GatewayManagementPage');

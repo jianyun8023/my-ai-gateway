@@ -24,7 +24,7 @@ export default defineConfig(({ command }) => ({
   server: command === 'serve' ? {
     host: getDevHost(),
     proxy: {
-      '/admin/usage': {
+      '/admin': {
         target: getApiProxyTarget(),
         changeOrigin: true,
       },

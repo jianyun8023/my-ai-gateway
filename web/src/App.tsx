@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import './index.css';
 import './App.css';
 import {
@@ -9,7 +9,9 @@ import {
   IconChartLine,
   IconFileText,
   IconFilterAll,
+  IconGitBranch,
   IconSearch,
+  IconSettings,
   IconShield,
   IconSidebarProviders,
 } from './components/ui/icons';
@@ -24,8 +26,15 @@ import {
   type GatewayManagementPage as GatewayManagementPageId,
   type GatewayUsageTab,
 } from './lib/consoleNavigation';
-import { GatewayManagementPage } from './pages/GatewayManagementPage';
-import { GatewayUsagePage } from './pages/GatewayUsagePage';
+const GatewayManagementPage = lazy(async () => {
+  const module = await import('./pages/GatewayManagementPage');
+  return { default: module.GatewayManagementPage };
+});
+
+const GatewayUsagePage = lazy(async () => {
+  const module = await import('./pages/GatewayUsagePage');
+  return { default: module.GatewayUsagePage };
+});
 
 interface PageMeta {
   title: string;
@@ -44,6 +53,8 @@ const MANAGEMENT_META: Record<GatewayManagementPageId, PageMeta> = {
   sources: { title: 'Sources', shortTitle: '来源管理', eyebrow: 'Control Plane', description: 'Source 与 Account 管理空间' },
   'model-discovery': { title: 'Model Discovery', shortTitle: '模型发现', eyebrow: 'Control Plane', description: '模型发现、差异与确认空间' },
   capabilities: { title: 'Effective Capabilities', shortTitle: '有效能力', eyebrow: 'Control Plane', description: 'DB-first 三协议有效能力空间' },
+  'models-routes': { title: 'Models & Routes', shortTitle: '模型与路由', eyebrow: 'Control Plane', description: 'LogicalModel、ModelBinding 与 Route 生命周期' },
+  settings: { title: 'Settings', shortTitle: '系统设置', eyebrow: 'Admin Resources', description: 'Admin Key 会话、Virtual Key 与 runtime snapshot' },
 };
 
 const USAGE_NAVIGATION: readonly GatewayConsoleNavItem[] = [
@@ -56,6 +67,8 @@ const MANAGEMENT_NAVIGATION: readonly GatewayConsoleNavItem[] = [
   { id: 'sources', label: 'Sources', shortLabel: '来源与账号', icon: <IconSidebarProviders size={18} /> },
   { id: 'model-discovery', label: 'Model Discovery', shortLabel: '发现与确认', icon: <IconSearch size={18} /> },
   { id: 'capabilities', label: 'Effective Capabilities', shortLabel: '三协议矩阵', icon: <IconShield size={18} /> },
+  { id: 'models-routes', label: 'Models & Routes', shortLabel: '模型与路由', icon: <IconGitBranch size={18} /> },
+  { id: 'settings', label: 'Settings', shortLabel: '系统设置', icon: <IconSettings size={18} /> },
 ];
 
 function App() {
@@ -118,18 +131,31 @@ function App() {
           shortTitle={meta.shortTitle}
           eyebrow={meta.eyebrow}
           description={meta.description}
-          refreshable={route.space === 'usage'}
+          refreshable
         >
-          {({ getAdminKey, refreshRevision, setRefreshing }) => route.space === 'usage'
-            ? (
-                <GatewayUsagePage
-                  activeTab={route.page}
-                  getAdminKey={getAdminKey}
-                  refreshRevision={refreshRevision}
-                  onLoadingChange={setRefreshing}
-                />
-              )
-            : <GatewayManagementPage page={route.page} />}
+          {({ getAdminKey, adminKeyConfigured, clearAdminKey, refreshRevision, setRefreshing }) => (
+            <Suspense fallback={<div className="app-route-loading" role="status" aria-busy="true">正在加载页面…</div>}>
+              {route.space === 'usage'
+                ? (
+                    <GatewayUsagePage
+                      activeTab={route.page}
+                      getAdminKey={getAdminKey}
+                      refreshRevision={refreshRevision}
+                      onLoadingChange={setRefreshing}
+                    />
+                  )
+                : (
+                    <GatewayManagementPage
+                      page={route.page}
+                      getAdminKey={getAdminKey}
+                      adminKeyConfigured={adminKeyConfigured}
+                      clearAdminKey={clearAdminKey}
+                      refreshRevision={refreshRevision}
+                      onLoadingChange={setRefreshing}
+                    />
+                  )}
+            </Suspense>
+          )}
         </GatewayConsoleShell>
       </main>
     </div>

@@ -19,7 +19,7 @@ describe('gateway usage navigation', () => {
   });
 
   it('keeps Management in an independent hash namespace', () => {
-    expect(GATEWAY_MANAGEMENT_PAGES).toEqual(['sources', 'model-discovery', 'capabilities']);
+    expect(GATEWAY_MANAGEMENT_PAGES).toEqual(['sources', 'model-discovery', 'capabilities', 'models-routes', 'settings']);
     expect(resolveConsoleRoute('#management/capabilities')).toEqual({ space: 'management', page: 'capabilities' });
     expect(consoleRouteHash({ space: 'management', page: 'sources' })).toBe('#management/sources');
   });

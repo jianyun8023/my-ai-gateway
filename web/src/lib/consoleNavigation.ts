@@ -1,5 +1,5 @@
 export const GATEWAY_USAGE_TABS = ['overview', 'analysis', 'events'] as const;
-export const GATEWAY_MANAGEMENT_PAGES = ['sources', 'model-discovery', 'capabilities'] as const;
+export const GATEWAY_MANAGEMENT_PAGES = ['sources', 'model-discovery', 'capabilities', 'models-routes', 'settings'] as const;
 
 export type GatewayUsageTab = typeof GATEWAY_USAGE_TABS[number];
 export type GatewayManagementPage = typeof GATEWAY_MANAGEMENT_PAGES[number];

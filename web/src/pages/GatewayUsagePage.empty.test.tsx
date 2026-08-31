@@ -1,12 +1,16 @@
 // @vitest-environment happy-dom
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from '@/App';
 
 describe('GatewayUsagePage empty state', () => {
   let container: HTMLDivElement;
   let root: ReturnType<typeof createRoot>;
+
+  beforeAll(async () => {
+    await import('@/pages/GatewayUsagePage');
+  });
 
   beforeEach(() => {
     globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -32,7 +36,7 @@ describe('GatewayUsagePage empty state', () => {
   it('renders a token-first empty state without pricing or CPA product surfaces', async () => {
     await act(async () => {
       root.render(<App />);
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      await new Promise((resolve) => setTimeout(resolve, 100));
     });
     expect(container.textContent).toContain('当前范围暂无用量');
     expect(container.textContent).toContain('Token 统计不依赖价格配置');

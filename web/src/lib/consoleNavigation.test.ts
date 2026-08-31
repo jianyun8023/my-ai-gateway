@@ -15,12 +15,14 @@ describe('console navigation', () => {
   });
 
   it('provides an independent Management namespace', () => {
-    expect(GATEWAY_MANAGEMENT_PAGES).toEqual(['sources', 'model-discovery', 'capabilities']);
+    expect(GATEWAY_MANAGEMENT_PAGES).toEqual(['sources', 'model-discovery', 'capabilities', 'models-routes', 'settings']);
     expect(resolveConsoleRoute('#management/model-discovery')).toEqual({
       space: 'management',
       page: 'model-discovery',
     });
     expect(consoleRouteHash({ space: 'management', page: 'capabilities' })).toBe('#management/capabilities');
+    expect(resolveConsoleRoute('#management/models-routes')).toEqual({ space: 'management', page: 'models-routes' });
+    expect(resolveConsoleRoute('#management/settings')).toEqual({ space: 'management', page: 'settings' });
   });
 
   it('falls unknown and legacy CPA routes back to Usage Overview', () => {
