@@ -22,8 +22,8 @@ use std::{
 };
 use uuid::Uuid;
 
-pub const CURRENT_SCHEMA_VERSION: i32 = 11;
-pub const CURRENT_MIGRATION_VERSION: i32 = 11;
+pub const CURRENT_SCHEMA_VERSION: i32 = 12;
+pub const CURRENT_MIGRATION_VERSION: i32 = 12;
 pub const DEFAULT_BATCH_SIZE: i32 = 500;
 pub const DEFAULT_MAX_BATCHES: i32 = 1_000;
 pub const MAX_BATCH_SIZE: i32 = 10_000;
@@ -743,7 +743,13 @@ impl OpsRepository {
             .bind(policy.cutoff)
             .fetch_one(&self.pool)
             .await?;
-            counts.audit = logs + tests;
+            let health: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*)::BIGINT FROM account_health_events WHERE created_at < $1",
+            )
+            .bind(policy.cutoff)
+            .fetch_one(&self.pool)
+            .await?;
+            counts.audit = logs + tests + health;
         }
         if let Some(policy) = policies.get("discovery").filter(|p| p.enabled) {
             counts.discovery = sqlx::query_scalar(
@@ -1531,7 +1537,15 @@ async fn delete_audit_batch(
     .execute(&mut **tx)
     .await?
     .rows_affected() as i64;
-    Ok(logs + tests)
+    let health = sqlx::query(
+        "DELETE FROM account_health_events WHERE id IN (SELECT id FROM account_health_events WHERE created_at < $1 ORDER BY id LIMIT $2)",
+    )
+    .bind(cutoff)
+    .bind(batch_size)
+    .execute(&mut **tx)
+    .await?
+    .rows_affected() as i64;
+    Ok(logs + tests + health)
 }
 
 async fn delete_discovery_batch(

@@ -246,7 +246,7 @@ ProviderPreset 与发现确认阶段不改变 Route，也不把发现结果自�
 
 当前规则：
 
-- 首选 Binding 固定优先；HTTP 408、429、5xx、传输错误，以及首选账号禁用或处于内存冷却时，才进入 fallback 候选池。
+- 首选 Binding 固定优先；HTTP 408、429、5xx、传输错误，以及首选账号禁用或处于 PostgreSQL 冷却时，才进入 fallback 候选池。
 - fallback 候选统一执行 enabled、健康状态和权重过滤；HTTP 响应错误与传输错误使用同一选择规则。
 - 当前最多执行一次 fallback 请求（首选 1 次 + fallback 1 次），不会形成无界重试。
 - 候选请求使用自己的 Source Base URL、协议 endpoint 和 Account 凭据；请求体顶层 `model` 按实际 Binding 的 `upstream_model_id` 重写。开发期初始化配置中的账号 `model_map` 也会在三类协议主路径和 fallback 路径生效。
@@ -254,7 +254,7 @@ ProviderPreset 与发现确认阶段不改变 Route，也不把发现结果自�
 - 响应已经开始向下游发送后不能再切换账号。
 - 每次上游尝试写入独立 UsageAttempt；逻辑 UsageEvent 成功时归因最终成功 attempt，全部失败时归因最后一次实际 attempt，并保留固化的 `provider_preset_id` 作为 `provider_id`，以及实际 `source_id`、`account_id` 和 `upstream_model_id`。
 
-已知限制：账号健康状态仍只保存在内存中，持久化与主动探测由 #52 跟踪。Provider 与 Source 已独立归因：同一 ProviderPreset 的多个 Source 使用相同 `provider_id`，但各自保留实际 `source_id`。具体 Source 与 Binding 初始化示例见 [`config.example.json`](../config.example.json)，凭据只允许通过服务端 Secret 配置。
+账号健康状态以 PostgreSQL `accounts` 行为事实来源，并在 `account_health_events` 保存无正文的转换历史。被动失败和 ProviderPreset 连接探测使用指数退避；成功会清零连续失败和 cooldown。`health_updated_at` 超过 stale 阈值时状态转为 `stale`，旧 cooldown 不会永久屏蔽账号；人工启停会在同一控制面事务中重置健康状态。Provider 与 Source 已独立归因：同一 ProviderPreset 的多个 Source 使用相同 `provider_id`，但各自保留实际 `source_id`。具体 Source 与 Binding 初始化示例见 [`config.example.json`](../config.example.json)，凭据只允许通过服务端 Secret 配置。
 
 ## 4. 请求处理流程
 
@@ -290,7 +290,7 @@ ProviderPreset 与发现确认阶段不改变 Route，也不把发现结果自�
 - 响应已经开始流式输出后不能切换账号；
 - HTTP 408、429、5xx 与网络错误使用同一加权候选选择；其他 4xx 不触发 fallback；
 - 请求模型按候选 Binding/账号映射改写，attempt 记录实际 Source、账号和上游模型；
-- 当前最多执行一次 fallback；账号失败会进入内存冷却窗口，服务重启后健康状态会丢失。
+- 当前最多执行一次 fallback；账号失败会进入持久化指数冷却窗口，服务重启后从 PostgreSQL 恢复绝对 UTC 时间戳。
 
 ## 5. 当前配置模型
 
@@ -490,11 +490,11 @@ PostgreSQL 回归测试只连接显式的 `TEST_DATABASE_URL`，不会复用运�
 
 ProviderPreset/模型发现回归使用真实 PostgreSQL 与 mock 上游，覆盖 DeepSeek、MiniMax、Kimi Code 的成功、失败、空列表、重复刷新、模型消失、confirmed/user 覆盖保留、批量确认和日志脱敏。
 
-账号健康持久化/探测记录（#52）和统一 Admin 写操作审计日志（#48）仍由独立 Issue 负责；#53 已补齐运维操作自身的审计记录，不把普通应用日志当作审计事实。
+账号健康持久化、主动探测和无正文转换历史已由 #52 完成；统一 Admin 写操作审计日志（#48）仍需独立实现。#53 已补齐运维操作自身的审计记录，不把普通应用日志当作审计事实。
 
 ### 7.2.1 数据保留、清理、备份与恢复（#53）
 
-`migrations/0011_retention_backup.sql` 新增 `retention_policies`、`retention_cleanup_runs`、`audit_logs`、`backup_runs`、`gateway_schema_migrations` 和 `gateway_schema_metadata`。四类历史（logical UsageEvent、UsageAttempt、连接测试/运维 audit、discovery run）分别按 UTC `retention_days` 管理。`POST /admin/retention/cleanup` 在运行开始时固定策略和 cut-off，每个批次独立提交并记录 scanned/deleted/progress；同一 `operation_id` 可重复提交、取消和 retry。逻辑事件只有在不会级联删除仍在保留期内的 attempt 时才删除。
+`migrations/0011_retention_backup.sql` 新增 `retention_policies`、`retention_cleanup_runs`、`audit_logs`、`backup_runs`、`gateway_schema_migrations` 和 `gateway_schema_metadata`；`migrations/0012_health_persistence.sql` 追加健康状态字段、`account_health_events` 和迁移版本 12。四类历史（logical UsageEvent、UsageAttempt、连接测试/健康/运维 audit、discovery run）分别按 UTC `retention_days` 管理。`POST /admin/retention/cleanup` 在运行开始时固定策略和 cut-off，每个批次独立提交并记录 scanned/deleted/progress；同一 `operation_id` 可重复提交、取消和 retry。逻辑事件只有在不会级联删除仍在保留期内的 attempt 时才删除。
 
 控制面可通过 `GET /admin/control-plane/export` 导出脱敏 JSON，包含恢复路由所需的 Source/Account/模型/Binding/Route、schema/migration 版本和 runtime fingerprint，不包含 usage 正文、Authorization、API Key、Virtual Key hash 或凭据 ciphertext。`POST /admin/control-plane/import` 在显式 `replace=true` 时按 FK 顺序恢复到新库，重置序列并重新构建 snapshot；fingerprint 不一致时标记恢复失败。完整 pg_dump、Compose 和本地 CLI 步骤见 [`operations.md`](operations.md)。
 
@@ -518,12 +518,22 @@ CPA Usage Keeper 只复用 React 页面和交互，不复用其 Go 后端、SQLi
 
 ### 7.5 账号健康和生产化
 
-已完成账号健康的内存冷却、连续失败计数、首选账号固定优先，以及 HTTP/传输错误共用的加权 fallback 选择。当前运行路径能在首选账号禁用或冷却时直接选择可用 fallback，但服务重启会丢失健康状态。
+账号健康状态由 PostgreSQL `accounts` 行提供事实来源，`account_health_events` 保存不含请求/响应正文的审计历史。状态机明确区分：
+
+- `unknown`：没有观测或人工重新启用；
+- `healthy`：路由请求或 ProviderPreset 连接探测成功；
+- `cooling_down`：408、429、5xx 或传输错误触发指数退避；
+- `unhealthy`：cooldown 到期但尚未成功恢复；
+- `stale`：`health_updated_at` 达到阈值，旧 cooldown 只作提示而不会永久屏蔽账号；
+- `disabled`：Account 或 Source 被人工停用。
+
+所有转换以 UTC 观测时间写入，行级锁保证并发失败计数不丢失；成功会清零连续失败和 cooldown，新的 `HealthRegistry` 直接读取数据库恢复重启前状态。固定首选保持优先，只有失败、不可用或人工停用才进入 fallback。`POST /admin/accounts/:account_id/probe`、`POST /admin/health/probe` 和批量接口复用 ProviderPreset 最小连接测试，不调用 discovery；探测沿用 Source URL allowlist、DNS、重定向和凭据策略。周期任务默认每 60 秒运行，可由环境变量关闭或调整。
 
 生产化剩余范围均有独立 Issue：
 
 - 健康状态持久化与主动探测（#52）；
 - SSE 心跳、取消和流式超时契约（#54）已完成：三协议原生与 Kimi Adapter 共享可配置心跳、连接/首事件/空闲/总时限和取消清理；
+- 健康状态持久化与主动探测（#52）已完成；
 - Prometheus/OpenTelemetry（#50）；
 - Secret Resolver 与凭据信封加密（#47）；
 - Admin 写操作审计日志（#48）；
@@ -561,6 +571,7 @@ comment，单独作为下游 Body chunk 发送，不进入 Provider 事件、序
 - 已覆盖失败请求 `missing/0`、真实 upstream model、逻辑事件/attempt 归因及跨 Source fallback；
 - 已增加隔离 PostgreSQL schema 的控制面集成测试，覆盖 DB-first 一次性导入、全资源 CRUD/启停、事务回滚、native/adapter Binding 解析、并发 snapshot 切换、刷新失败保留旧 snapshot、凭据脱敏和 `/v1/models` 健康过滤。
 - 已增加隔离 PostgreSQL schema 的 #53 运维回归，覆盖 UTC 保留 cut-off、dry-run、分批续跑、attempt/logical event 引用保护、audit/discovery 清理、脱敏控制面导出和新库 snapshot fingerprint 校验；HTTP 运维入口同步覆盖策略、版本、导出和恢复契约。
+- 已增加健康状态单元、HTTP/Admin 和 PostgreSQL 回归，覆盖指数退避、并发计数、成功恢复、stale/过期放行、重启恢复、Source/Account 人工启停、ProviderPreset 探测复用、发现失败隔离和凭据/正文不泄露。
 
 ### 7.7 真实联调基线（2026-08-31）
 
@@ -618,5 +629,5 @@ Usage 的 `provider_id` 与 `source_id` 已在 DB-first snapshot、主路径、e
 1. 在已完成自动验证门禁、Admin Key 分离和 URL/SSRF 防护（#49、#44、#46）的基础上，继续收口 Secret 和审计安全基线（#47、#48）。
 2. 在已完成独立 Management 外壳（#42）的基础上，并行接入有效能力矩阵（#43）和 Source/模型发现确认流（#45）。
 3. 完成 #8 用量分析 Epic 的最终验收并关闭。
-4. 完成 Virtual Key 生命周期、健康持久化/主动探测和 SSE 生命周期契约（#51、#52、#54）。
-5. 接入 Prometheus/OpenTelemetry，并根据 #53 的运行反馈继续加固数据保留、备份与恢复流程（#50）。
+4. 完成 Virtual Key 生命周期和 SSE 生命周期契约（#51、#54）；健康持久化/主动探测（#52）已完成。
+5. 接入 Prometheus/OpenTelemetry，并建立数据保留、备份与恢复流程（#50、#53）。

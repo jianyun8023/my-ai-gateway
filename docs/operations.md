@@ -10,7 +10,7 @@
 | --- | --- | --- | --- |
 | `usage_events` | `usage_events` | `created_at` | 90 天 |
 | `usage_attempts` | `usage_event_attempts` | `created_at` | 90 天 |
-| `audit` | `audit_logs`、`source_connection_tests` | `created_at`/`tested_at` | 365 天 |
+| `audit` | `audit_logs`、`source_connection_tests`、`account_health_events` | `created_at`/`tested_at` | 365 天 |
 | `discovery` | `source_discovery_runs` | `completed_at` | 365 天 |
 
 策略使用 UTC 的 `retention_days`。`enabled=false` 表示该类不自动删除；`retention_days=0` 只适合明确的测试或紧急清理。清理先删过期 attempt，再删过期 logical event。若 logical event 仍有未到期 attempt，事件会延后删除，避免 `ON DELETE CASCADE` 破坏引用完整性。删除 logical event 时数据库级 cascade 会同时移除已经符合 attempt 策略的子记录。

@@ -1,6 +1,6 @@
 # 实施 TODO
 
-> 状态基线：`main@bd4d689`（2026-08-31，已包含 PR #64）。实现事实以当前代码和已合并 PR 为准；开放任务以 GitHub Issue 为准。
+> 状态基线：`origin/main@b159105`（2026-09-01）。实现事实以当前代码和已合并 PR 为准；开放任务以 GitHub Issue 为准。
 
 ## 已完成
 
@@ -18,7 +18,7 @@
 - [x] Usage 记录 `route_id`、`streamed`、脱敏 `error_summary`、真实 `upstream_model_id` 和流式 `ttft_ms`（#26）
 - [x] 运行时 `source_id` 与客户端自报 `client_source` 分离，跨 Source fallback 可逐 attempt 审计（#30）
 - [x] 网关原生 Overview、Analysis、Request Events 用量控制台及响应式基线（#16、#29、#33）
-- [x] 首选账号固定优先、账号级模型重写、跨 Source/Provider native fallback、统一加权选择和内存健康冷却
+- [x] 首选账号固定优先、账号级模型重写、跨 Source/Provider native fallback、统一加权选择和持久化健康冷却/探测
 
 ## 当前开放任务
 
@@ -32,7 +32,7 @@
 
 - [x] 将 Usage 的 Provider 归因与 Source 维度真正解耦（#56；ProviderPreset 与 Source 分列）
 - [ ] Virtual Key 轮换、权限更新和静态 Key 迁移（#51）
-- [ ] 健康状态持久化与主动探测（#52）
+- [x] 健康状态持久化与主动探测（#52）
 - [x] SSE 心跳、取消和流式超时契约（#54）
 
 ### 安全、质量与运维

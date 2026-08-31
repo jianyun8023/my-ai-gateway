@@ -228,14 +228,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if !admin_auth.is_configured() {
         tracing::warn!("GATEWAY_ADMIN_KEY is not configured; Admin API requests will be rejected");
     }
+    let health = health::HealthRegistry::with_database_config(
+        database.clone(),
+        health::HealthConfig::from_env(),
+    );
+    health.restore().await?;
     let state = AppState {
         live: Arc::new(std::sync::RwLock::new(live)),
         http: transport::client(source_url_policy.clone())?,
-        db: Some(database),
+        db: Some(database.clone()),
         control_plane: Some(control_plane),
-        health: health::HealthRegistry::new(std::time::Duration::from_secs(30)),
+        health,
         admin_auth,
     };
+    spawn_health_probe_loop(state.clone());
     let app = application(state);
     let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::info!(%addr, "AI gateway listening");
@@ -427,11 +433,85 @@ fn ops_cli_usage() -> &'static str {
     "usage: cargo run -- ops <retention-cleanup|retention-cancel|retention-retry|retention-policies|retention-policy-set|control-plane-export|control-plane-import>"
 }
 
+fn spawn_health_probe_loop(state: AppState) {
+    let enabled = std::env::var("GATEWAY_HEALTH_PROBE_ENABLED")
+        .ok()
+        .map(|value| !matches!(value.as_str(), "0" | "false" | "FALSE" | "no"))
+        .unwrap_or(true);
+    if !enabled || state.health.database().is_none() {
+        return;
+    }
+    let interval = state.health.config().probe_interval;
+    let on_startup = std::env::var("GATEWAY_HEALTH_PROBE_ON_STARTUP")
+        .ok()
+        .is_some_and(|value| !matches!(value.as_str(), "0" | "false" | "FALSE" | "no"));
+    tokio::spawn(async move {
+        if on_startup {
+            run_health_probes_once(&state).await;
+        }
+        loop {
+            tokio::time::sleep(interval).await;
+            run_health_probes_once(&state).await;
+        }
+    });
+}
+
+async fn run_health_probes_once(state: &AppState) {
+    let Some(database) = state.health.database() else {
+        return;
+    };
+    let targets = match database.health_probe_targets().await {
+        Ok(targets) => targets,
+        Err(error) => {
+            tracing::warn!(%error, "failed to enumerate periodic health probes");
+            return;
+        }
+    };
+    let now = state.health.now();
+    for (account_id, _source_id, protocol) in targets {
+        let current = state.health.get_health(&account_id).await;
+        let due = current.last_probe_at.is_none_or(|last| {
+            now.signed_duration_since(last)
+                .to_std()
+                .map(|elapsed| elapsed >= state.health.config().probe_interval)
+                .unwrap_or(true)
+        });
+        if !due || (current.cooldown_remaining_ms > 0 && !current.stale) {
+            continue;
+        }
+        match state
+            .health
+            .probe_account(
+                &state.http,
+                &account_id,
+                protocol,
+                None,
+                "periodic_health_probe",
+            )
+            .await
+        {
+            Ok(outcome) => tracing::info!(
+                account_id = %outcome.account_id,
+                %protocol,
+                status = %outcome.connection_test.status,
+                "periodic account health probe completed"
+            ),
+            Err(error) => tracing::warn!(
+                account_id = %account_id,
+                %protocol,
+                code = error.code(),
+                "periodic account health probe failed"
+            ),
+        }
+    }
+}
+
 fn application(state: AppState) -> Router {
-    let discovery_api = discovery_api::auxiliary_router(
+    let discovery_api = discovery_api::auxiliary_router_with_health(
         state.db.clone(),
         state.http.clone(),
         state.admin_auth.clone(),
+        state.health.clone(),
     );
     let admin_api = Router::new()
         .route("/admin/keys", get(list_keys).post(create_key))
@@ -536,6 +616,11 @@ fn application(state: AppState) -> Router {
         .route("/admin/config/reload", post(reload_config))
         .route("/admin/capabilities", get(admin_capabilities))
         .route("/admin/health", get(admin_health))
+        .route("/admin/health/probe", post(admin_health_probe))
+        .route("/admin/health/probes", post(admin_health_probes))
+        .route("/admin/health/{id}", get(admin_account_health))
+        .route("/admin/health/{id}/probe", post(admin_account_probe))
+        .route("/admin/accounts/{id}/probe", post(admin_account_probe))
         .route("/admin/routes/{protocol}/{model}", get(resolve_route))
         .with_state(state.clone())
         .merge(discovery_api)
@@ -583,7 +668,11 @@ async fn models(State(state): State<AppState>) -> Json<Value> {
     for model in live.models.iter() {
         let mut healthy = false;
         for account_id in &model.account_ids {
-            if state.health.is_available(account_id).await {
+            let enabled = live
+                .config
+                .account(account_id)
+                .is_some_and(|account| account.enabled);
+            if enabled && state.health.is_available(account_id).await {
                 healthy = true;
                 break;
             }
@@ -2334,25 +2423,369 @@ async fn admin_health(State(state): State<AppState>, headers: HeaderMap) -> Resp
     }
     let health_map = state.health.all_health().await;
     let live = state.snapshot();
+    let accounts = if let Some(control_plane) = &state.control_plane {
+        match control_plane.list_accounts().await {
+            Ok(accounts) => accounts
+                .into_iter()
+                .map(|account| {
+                    (
+                        account.id,
+                        account.source_id,
+                        account.display_name,
+                        account.enabled,
+                    )
+                })
+                .collect::<Vec<_>>(),
+            Err(error) => return control_plane_error(error),
+        }
+    } else if let Some(database) = &state.db {
+        match sqlx::query_as::<_, (String, String, String, bool)>(
+            "SELECT id,source_id,display_name,enabled FROM accounts ORDER BY id",
+        )
+        .fetch_all(database.pool())
+        .await
+        {
+            Ok(accounts) => accounts,
+            Err(error) => {
+                tracing::warn!(%error, "failed to list accounts for health API");
+                return error_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "database_error",
+                    "failed to list accounts for health API",
+                );
+            }
+        }
+    } else {
+        live.config
+            .accounts
+            .iter()
+            .map(|account| {
+                (
+                    account.id.clone(),
+                    account.provider_id.clone(),
+                    account.display_name.clone(),
+                    account.enabled,
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    let database_configured = state.health.database().is_some();
     let mut data = Vec::new();
-    for account in &live.config.accounts {
-        let health = match health_map.get(&account.id) {
-            Some(h) => h.clone(),
-            None => health::AccountHealth {
-                available: account.enabled,
-                consecutive_failures: 0,
-                cooldown_remaining_ms: 0,
-            },
-        };
+    for (account_id, source_id, display_name, enabled) in accounts {
+        let health =
+            health_map
+                .get(&account_id)
+                .cloned()
+                .unwrap_or_else(|| health::AccountHealth {
+                    available: enabled && !database_configured,
+                    source_enabled: true,
+                    consecutive_failures: 0,
+                    cooldown_remaining_ms: 0,
+                    status: if enabled { "unknown" } else { "disabled" }.into(),
+                    source: "unknown".into(),
+                    stale: true,
+                    updated_at: None,
+                    cooldown_until: None,
+                    last_error: None,
+                    last_success_at: None,
+                    last_probe_at: None,
+                    last_probe_status: None,
+                    last_probe_error: None,
+                });
         data.push(json!({
-            "account_id": account.id,
-            "provider_id": account.provider_id,
-            "display_name": account.display_name,
-            "enabled": account.enabled,
+            "account_id": account_id,
+            "provider_id": source_id.clone(),
+            "source_id": source_id.clone(),
+            "source": health.source.clone(),
+            "display_name": display_name,
+            "enabled": enabled,
+            "health_status": health.status.clone(),
+            "health_source": health.source.clone(),
+            "health_updated_at": health.updated_at.clone(),
+            "updated_at": health.updated_at.clone(),
+            "stale": health.stale,
+            "cooldown_until": health.cooldown_until,
+            "consecutive_failures": health.consecutive_failures,
             "health": health,
         }));
     }
+    (
+        StatusCode::OK,
+        Json(json!({
+            "fact_source": if database_configured { "postgresql" } else { "memory" },
+            "stale_after_secs": state.health.config().stale_after.as_secs(),
+            "data": data
+        })),
+    )
+        .into_response()
+}
+
+async fn admin_account_health(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(account_id): Path<String>,
+) -> Response<Body> {
+    if !state.admin_auth.authorized(&headers) {
+        return error_response(
+            StatusCode::UNAUTHORIZED,
+            "unauthorized",
+            "admin key required",
+        );
+    }
+    let health = state.health.get_health(&account_id).await;
+    let metadata = if let Some(control_plane) = &state.control_plane {
+        match control_plane.get_account(&account_id).await {
+            Ok(account) => json!({
+                "account_id": account.id,
+                "source_id": account.source_id,
+                "display_name": account.display_name,
+                "enabled": account.enabled,
+            }),
+            Err(control_plane::ControlPlaneError::NotFound(_)) => {
+                return error_response(StatusCode::NOT_FOUND, "not_found", "account not found")
+            }
+            Err(error) => return control_plane_error(error),
+        }
+    } else if let Some(database) = &state.db {
+        match sqlx::query_as::<_, (String, String, String, bool)>(
+            "SELECT id,source_id,display_name,enabled FROM accounts WHERE id=$1",
+        )
+        .bind(&account_id)
+        .fetch_optional(database.pool())
+        .await
+        {
+            Ok(Some((id, source_id, display_name, enabled))) => json!({
+                "account_id": id,
+                "source_id": source_id,
+                "display_name": display_name,
+                "enabled": enabled,
+            }),
+            Ok(None) => {
+                return error_response(StatusCode::NOT_FOUND, "not_found", "account not found")
+            }
+            Err(error) => {
+                tracing::warn!(%error, "failed to read account for health API");
+                return error_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "database_error",
+                    "failed to read account for health API",
+                );
+            }
+        }
+    } else {
+        let live = state.snapshot();
+        let Some(account) = live.config.account(&account_id) else {
+            return error_response(StatusCode::NOT_FOUND, "not_found", "account not found");
+        };
+        json!({
+            "account_id": account.id,
+            "source_id": account.provider_id,
+            "display_name": account.display_name,
+            "enabled": account.enabled,
+        })
+    };
+    let mut data = metadata;
+    if let Some(object) = data.as_object_mut() {
+        object.insert(
+            "health".into(),
+            serde_json::to_value(&health).unwrap_or(Value::Null),
+        );
+        object.insert("stale".into(), json!(health.stale));
+        object.insert("source".into(), json!(health.source.clone()));
+        object.insert("updated_at".into(), json!(health.updated_at.clone()));
+    }
     (StatusCode::OK, Json(json!({"data": data}))).into_response()
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct HealthProbeRequest {
+    account_id: Option<String>,
+    protocol: Option<Protocol>,
+    model: Option<String>,
+    #[serde(default = "default_probe_actor")]
+    requested_by: String,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct HealthProbesRequest {
+    account_ids: Option<Vec<String>>,
+    protocol: Option<Protocol>,
+    model: Option<String>,
+    #[serde(default = "default_probe_actor")]
+    requested_by: String,
+}
+
+fn default_probe_actor() -> String {
+    "admin_health_probe".into()
+}
+
+async fn admin_health_probe(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    payload: Result<Json<HealthProbeRequest>, JsonRejection>,
+) -> Response<Body> {
+    if !state.admin_auth.authorized(&headers) {
+        return error_response(
+            StatusCode::UNAUTHORIZED,
+            "unauthorized",
+            "admin key required",
+        );
+    }
+    let request = match json_payload(payload) {
+        Ok(request) => request,
+        Err(response) => return response,
+    };
+    let Some(account_id) = request
+        .account_id
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    else {
+        return error_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "account_required",
+            "account_id is required for a health probe",
+        );
+    };
+    let protocol = match request.protocol {
+        Some(protocol) => protocol,
+        None => match state.health.database() {
+            Some(database) => match database.health_probe_protocol(account_id).await {
+                Ok(Some(protocol)) => protocol,
+                Ok(None) => Protocol::OpenAiChatCompletions,
+                Err(error) => {
+                    tracing::warn!(%error, "failed to determine health probe protocol");
+                    return error_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "database_error",
+                        "failed to determine health probe protocol",
+                    );
+                }
+            },
+            None => Protocol::OpenAiChatCompletions,
+        },
+    };
+    match state
+        .health
+        .probe_account(
+            &state.http,
+            account_id,
+            protocol,
+            request.model.as_deref(),
+            &request.requested_by,
+        )
+        .await
+    {
+        Ok(outcome) => (StatusCode::OK, Json(json!({"data": outcome}))).into_response(),
+        Err(error) => probe_error_response(error),
+    }
+}
+
+async fn admin_account_probe(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(account_id): Path<String>,
+    payload: Result<Json<HealthProbeRequest>, JsonRejection>,
+) -> Response<Body> {
+    let payload = match payload {
+        Ok(Json(mut request)) => {
+            request.account_id = Some(account_id);
+            Ok(Json(request))
+        }
+        Err(error) => Err(error),
+    };
+    admin_health_probe(State(state), headers, payload).await
+}
+
+async fn admin_health_probes(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    payload: Result<Json<HealthProbesRequest>, JsonRejection>,
+) -> Response<Body> {
+    if !state.admin_auth.authorized(&headers) {
+        return error_response(
+            StatusCode::UNAUTHORIZED,
+            "unauthorized",
+            "admin key required",
+        );
+    }
+    let request = match json_payload(payload) {
+        Ok(request) => request,
+        Err(response) => return response,
+    };
+    let Some(database) = state.health.database() else {
+        return error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "database_unavailable",
+            "health probes require PostgreSQL",
+        );
+    };
+    let requested_protocol = request.protocol;
+    let account_ids = match request.account_ids {
+        Some(ids) if !ids.is_empty() => ids,
+        _ => match database.health_probe_targets().await {
+            Ok(targets) => targets.into_iter().map(|target| target.0).collect(),
+            Err(error) => {
+                tracing::warn!(%error, "failed to list health probe targets");
+                return error_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "database_error",
+                    "failed to list health probe targets",
+                );
+            }
+        },
+    };
+    let mut outcomes = Vec::with_capacity(account_ids.len());
+    let mut errors = Vec::new();
+    for account_id in account_ids {
+        let protocol = match requested_protocol {
+            Some(protocol) => protocol,
+            None => database
+                .health_probe_protocol(&account_id)
+                .await
+                .ok()
+                .flatten()
+                .unwrap_or(Protocol::OpenAiChatCompletions),
+        };
+        match state
+            .health
+            .probe_account(
+                &state.http,
+                &account_id,
+                protocol,
+                request.model.as_deref(),
+                &request.requested_by,
+            )
+            .await
+        {
+            Ok(outcome) => outcomes.push(outcome),
+            Err(error) => errors.push(json!({
+                "account_id": account_id,
+                "code": error.code(),
+                "message": error.message()
+            })),
+        }
+    }
+    (
+        StatusCode::OK,
+        Json(json!({"data": outcomes, "errors": errors})),
+    )
+        .into_response()
+}
+
+fn probe_error_response(error: health::ProbeError) -> Response<Body> {
+    let status = match error.code() {
+        "not_found" => StatusCode::NOT_FOUND,
+        "database_unavailable" => StatusCode::SERVICE_UNAVAILABLE,
+        "database_error" => StatusCode::INTERNAL_SERVER_ERROR,
+        "source_url_blocked"
+        | "invalid_source_url"
+        | "invalid_provider_preset"
+        | "invalid_header_template"
+        | "credential_unavailable"
+        | "protocol_unsupported" => StatusCode::UNPROCESSABLE_ENTITY,
+        _ => StatusCode::BAD_GATEWAY,
+    };
+    error_response(status, error.code(), &error.message())
 }
 
 async fn admin_capabilities(State(state): State<AppState>, headers: HeaderMap) -> Response<Body> {
@@ -2570,15 +3003,19 @@ async fn proxy(
         {
             Ok(response) => {
                 let status = response.status();
-                if is_retryable(status) {
-                    state.health.mark_failure(&candidate.account.id).await;
-                } else {
-                    state.health.mark_success(&candidate.account.id).await;
-                }
+                record_response_health(&state.health, &candidate.account.id, status).await;
                 (response, status.as_u16() as i32, status.is_success())
             }
             Err(error) => {
-                state.health.mark_failure(&candidate.account.id).await;
+                state
+                    .health
+                    .mark_failure_with_details(
+                        &candidate.account.id,
+                        "passive",
+                        Some("upstream_transport_error"),
+                        Some("upstream request failed"),
+                    )
+                    .await;
                 let (status, code, message) =
                     if matches!(&error, transport::TransportError::Timeout(_)) {
                         (
@@ -2670,6 +3107,7 @@ async fn proxy(
                     usage_request_body,
                     attempts,
                     started,
+                    state.health.clone(),
                 );
             }
             if let Err(error) = database.insert_usage_with_attempts(&event, &attempts).await {
@@ -2715,7 +3153,7 @@ async fn proxy(
                 success: false,
                 latency_ms: result_started.elapsed().as_millis() as i64,
             });
-            state.health.mark_failure(&account.id).await;
+            record_response_health(&state.health, &account.id, response.status()).await;
             let (response, mut fallback_attempts) = try_fallback(
                 &config,
                 &state.health,
@@ -2744,7 +3182,7 @@ async fn proxy(
                 success: response.status().is_success(),
                 latency_ms: result_started.elapsed().as_millis() as i64,
             });
-            state.health.mark_success(&account.id).await;
+            record_response_health(&state.health, &account.id, response.status()).await;
             response
         }
         Err(error) => {
@@ -2758,7 +3196,15 @@ async fn proxy(
                 success: false,
                 latency_ms: result_started.elapsed().as_millis() as i64,
             });
-            state.health.mark_failure(&account.id).await;
+            state
+                .health
+                .mark_failure_with_details(
+                    &account.id,
+                    "passive",
+                    Some("upstream_transport_error"),
+                    Some("upstream request failed"),
+                )
+                .await;
             let (response, mut fallback_attempts) = try_fallback_error(
                 &config,
                 &state.health,
@@ -2866,6 +3312,7 @@ async fn proxy(
                 usage_request_body,
                 attempts,
                 started,
+                state.health.clone(),
             );
         }
         if let Err(error) = database.insert_usage_with_attempts(&event, &attempts).await {
@@ -2916,11 +3363,27 @@ fn wrap_stream_usage(
     request_body: Bytes,
     mut attempts: Vec<db::UsageAttempt>,
     request_started: Instant,
+    health: health::HealthRegistry,
 ) -> Response<Body> {
     let (parts, body) = response.into_parts();
     let body = usage::observe_stream_body(body, request_started, move |observation| {
         event.latency_ms = request_started.elapsed().as_millis() as i64;
+        let account_id = attempts.last().map(|attempt| attempt.account_id.clone());
         finalize_stream_usage(&mut event, &mut attempts, &request_body, observation);
+        if event.error_summary.as_deref() == Some("upstream stream error") {
+            if let Some(account_id) = account_id {
+                tokio::spawn(async move {
+                    health
+                        .mark_failure_with_details(
+                            &account_id,
+                            "passive",
+                            Some("upstream_stream_error"),
+                            Some("upstream stream failed"),
+                        )
+                        .await;
+                });
+            }
+        }
         tokio::spawn(async move {
             if let Err(error) = database.insert_usage_with_attempts(&event, &attempts).await {
                 tracing::warn!(%error, "failed to persist streaming usage event");
@@ -3120,6 +3583,9 @@ async fn select_fallback_candidate<'a>(
     let mut available = Vec::new();
     if !route.fallback_bindings.is_empty() {
         for binding in &route.fallback_bindings {
+            if binding.account_id == route.primary_account_id {
+                continue;
+            }
             let Some(account) = config.account(&binding.account_id) else {
                 continue;
             };
@@ -3147,6 +3613,9 @@ async fn select_fallback_candidate<'a>(
         }
     } else {
         for id in &route.fallback_accounts {
+            if id == &route.primary_account_id {
+                continue;
+            }
             let Some(account) = config.account(id) else {
                 continue;
             };
@@ -3254,11 +3723,7 @@ async fn try_fallback(
                 success: response.status().is_success(),
                 latency_ms: started.elapsed().as_millis() as i64,
             });
-            if is_retryable(response.status()) {
-                health.mark_failure(&candidate.account.id).await;
-            } else {
-                health.mark_success(&candidate.account.id).await;
-            }
+            record_response_health(health, &candidate.account.id, response.status()).await;
             (response, attempts)
         }
         Err(error) => {
@@ -3272,7 +3737,14 @@ async fn try_fallback(
                 success: false,
                 latency_ms: started.elapsed().as_millis() as i64,
             });
-            health.mark_failure(&candidate.account.id).await;
+            health
+                .mark_failure_with_details(
+                    &candidate.account.id,
+                    "passive",
+                    Some("upstream_transport_error"),
+                    Some("upstream request failed"),
+                )
+                .await;
             (first, attempts)
         }
     }
@@ -3333,11 +3805,7 @@ async fn try_fallback_error(
                 success: response.status().is_success(),
                 latency_ms: started.elapsed().as_millis() as i64,
             });
-            if is_retryable(response.status()) {
-                health.mark_failure(&candidate.account.id).await;
-            } else {
-                health.mark_success(&candidate.account.id).await;
-            }
+            record_response_health(health, &candidate.account.id, response.status()).await;
             (response, attempts)
         }
         Err(error) => {
@@ -3351,7 +3819,14 @@ async fn try_fallback_error(
                 success: false,
                 latency_ms: started.elapsed().as_millis() as i64,
             });
-            health.mark_failure(&candidate.account.id).await;
+            health
+                .mark_failure_with_details(
+                    &candidate.account.id,
+                    "passive",
+                    Some("upstream_transport_error"),
+                    Some("upstream request failed"),
+                )
+                .await;
             (
                 error_response(
                     transport_error_status(&error),
@@ -3435,6 +3910,26 @@ fn transport_error_status(error: &transport::TransportError) -> StatusCode {
         StatusCode::GATEWAY_TIMEOUT
     } else {
         StatusCode::BAD_GATEWAY
+    }
+}
+
+async fn record_response_health(
+    health: &health::HealthRegistry,
+    account_id: &str,
+    status: StatusCode,
+) {
+    if is_retryable(status) {
+        let code = format!("upstream_http_{}", status.as_u16());
+        health
+            .mark_failure_with_details(
+                account_id,
+                "passive",
+                Some(code.as_str()),
+                Some("retryable upstream response"),
+            )
+            .await;
+    } else if status.is_success() {
+        health.mark_success(account_id).await;
     }
 }
 
@@ -3619,6 +4114,11 @@ mod admin_auth_tests {
         ("POST", "/admin/config/reload"),
         ("GET", "/admin/capabilities"),
         ("GET", "/admin/health"),
+        ("GET", "/admin/health/account-id"),
+        ("POST", "/admin/health/probe"),
+        ("POST", "/admin/health/probes"),
+        ("POST", "/admin/health/account-id/probe"),
+        ("POST", "/admin/accounts/account-id/probe"),
         ("GET", "/admin/routes/openai_responses/model-id"),
         ("GET", "/admin/provider-presets"),
         ("GET", "/admin/sources/source-id/preset-diff"),
@@ -3749,6 +4249,102 @@ mod admin_auth_tests {
             &key_digest("data-plane-only"),
             supplied_key(&data_headers).unwrap()
         ));
+    }
+}
+
+#[cfg(test)]
+mod health_api_tests {
+    use super::*;
+    use std::collections::HashMap;
+    use std::time::Duration;
+
+    fn health_state() -> AppState {
+        let provider = config::ProviderConfig {
+            id: "health-provider".into(),
+            name: "Health Provider".into(),
+            base_url: "https://health.example".into(),
+            models: vec!["health-model".into()],
+            native_protocols: vec![Protocol::OpenAiChatCompletions],
+            endpoints: HashMap::from([(
+                Protocol::OpenAiChatCompletions,
+                "/v1/chat/completions".into(),
+            )]),
+            capabilities: config::Capabilities::native(),
+            protocol_capabilities: HashMap::new(),
+            model_overrides: HashMap::new(),
+        };
+        let account = config::AccountConfig {
+            id: "health-account".into(),
+            provider_id: "health-provider".into(),
+            display_name: "Health Account".into(),
+            credential_env: None,
+            credential: None,
+            enabled: true,
+            weight: 100,
+            protocol_capabilities: HashMap::new(),
+            capabilities: None,
+            model_overrides: HashMap::new(),
+            model_map: HashMap::new(),
+        };
+        let config = Arc::new(GatewayConfig {
+            listen_addr: "127.0.0.1:0".into(),
+            providers: vec![provider],
+            accounts: vec![account],
+            routes: vec![],
+        });
+        AppState {
+            live: Arc::new(std::sync::RwLock::new(LiveConfig::legacy(config))),
+            http: transport::test_client().expect("health API HTTP client"),
+            db: None,
+            control_plane: None,
+            health: health::HealthRegistry::new(Duration::from_secs(1)),
+            admin_auth: AdminAuth::test(),
+        }
+    }
+
+    #[tokio::test]
+    async fn health_api_exposes_transition_source_timestamp_and_stale() {
+        let state = health_state();
+        state.health.mark_failure("health-account").await;
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            axum::http::header::AUTHORIZATION,
+            HeaderValue::from_static("Bearer test-admin-key"),
+        );
+        let response = admin_health(State(state), headers).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .expect("health API body");
+        let body: Value = serde_json::from_slice(&body).expect("health API JSON");
+        let account = &body["data"][0];
+        assert_eq!(account["health"]["source"], "passive");
+        assert!(account["health"]["updated_at"].is_string());
+        assert!(account["health"].get("stale").is_some());
+        assert_eq!(account["health_source"], "passive");
+        assert!(account.get("health_updated_at").is_some());
+    }
+
+    #[tokio::test]
+    async fn health_api_is_reached_through_admin_http_route() {
+        let state = health_state();
+        let response = application(state)
+            .oneshot(
+                Request::builder()
+                    .uri("/admin/health")
+                    .header(axum::http::header::AUTHORIZATION, "Bearer test-admin-key")
+                    .body(Body::empty())
+                    .expect("health HTTP request"),
+            )
+            .await
+            .expect("health HTTP response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .expect("read health HTTP body");
+        let body: Value = serde_json::from_slice(&body).expect("health HTTP JSON");
+        assert_eq!(body["fact_source"], "memory");
+        assert_eq!(body["data"].as_array().unwrap().len(), 1);
     }
 }
 
@@ -4664,8 +5260,8 @@ mod ops_api_tests {
             .await
             .expect("schema response");
         let schema_response = response_json(schema_response).await;
-        assert_eq!(schema_response["data"]["schema_version"], 11);
-        assert_eq!(schema_response["data"]["migration_version"], 11);
+        assert_eq!(schema_response["data"]["schema_version"], 12);
+        assert_eq!(schema_response["data"]["migration_version"], 12);
 
         let export_response = app
             .clone()

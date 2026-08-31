@@ -227,13 +227,10 @@ impl RouteResolver {
                 Some(&route.id),
             ));
         }
-        if !account.enabled {
-            return Err(RouteResolutionError::new(
-                "account_disabled",
-                format!("primary account '{}' is disabled", account.id),
-                Some(&route.id),
-            ));
-        }
+        // Keep a disabled primary in the resolved route. The data plane owns
+        // the primary-then-fallback decision and must not silently promote a
+        // fallback to primary merely because an operator disabled this
+        // account.
         for fallback in &route.fallback_accounts {
             let Some(account) = self.config.account(fallback) else {
                 return Err(RouteResolutionError::new(
@@ -832,6 +829,34 @@ mod tests {
             .unwrap();
         assert_eq!(resolved.route_id, "wild");
         assert_eq!(resolved.requested_model, "gpt-4o");
+    }
+
+    #[test]
+    fn disabled_primary_remains_primary_for_data_plane_fallback() {
+        let mut config = config(
+            provider(),
+            vec![route("fixed-primary", "m", Protocol::OpenAiChatCompletions)],
+        );
+        config.accounts[0].enabled = false;
+        config.accounts.push(AccountConfig {
+            id: "fallback".into(),
+            provider_id: "p".into(),
+            display_name: "fallback".into(),
+            credential_env: None,
+            credential: None,
+            enabled: true,
+            weight: 100,
+            protocol_capabilities: HashMap::new(),
+            capabilities: Some(Capabilities::native()),
+            model_overrides: HashMap::new(),
+            model_map: HashMap::new(),
+        });
+        config.routes[0].fallback_accounts = vec!["fallback".into()];
+        let resolved = RouteResolver::new(Arc::new(config))
+            .resolve_detailed(Protocol::OpenAiChatCompletions, "m")
+            .expect("disabled primary should still resolve");
+        assert_eq!(resolved.primary_account_id, "a");
+        assert_eq!(resolved.fallback_accounts, vec!["fallback"]);
     }
 
     #[test]
