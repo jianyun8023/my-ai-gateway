@@ -1,12 +1,19 @@
 // @vitest-environment happy-dom
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
 
 describe('App console routing', () => {
   let container: HTMLDivElement;
   let root: ReturnType<typeof createRoot>;
+
+  beforeAll(async () => {
+    await Promise.all([
+      import('./pages/GatewayManagementPage'),
+      import('./pages/GatewayUsagePage'),
+    ]);
+  });
 
   beforeEach(() => {
     globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -14,7 +21,15 @@ describe('App console routing', () => {
     sessionStorage.clear();
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url === '/admin/capabilities') return new Response(JSON.stringify({
+        version: 'v1',
+        fact_source: 'runtime_snapshot',
+        snapshot_revision: 1,
+        snapshot_generated_at: '2026-08-31T00:00:00Z',
+        data: [],
+      }), { status: 200 });
       if (url.includes('/summary')) return new Response(JSON.stringify({ logical_requests: { total: 0, successes: 0 }, tokens: {} }), { status: 200 });
+      if (url.startsWith('/admin/')) return new Response(JSON.stringify({ data: [] }), { status: 200 });
       return new Response(JSON.stringify({ items: [], has_more: false }), { status: 200 });
     }));
     container = document.createElement('div');
@@ -32,17 +47,18 @@ describe('App console routing', () => {
     window.location.hash = '#management/capabilities';
     await act(async () => {
       root.render(<App />);
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      await new Promise((resolve) => setTimeout(resolve, 500));
     });
 
     expect(container.querySelector('nav[aria-label="管理导航"]')).not.toBeNull();
-    expect(container.textContent).toContain('功能尚未接入');
+    await vi.waitFor(() => expect(container.querySelector('[data-od-id="page-capabilities"]')).not.toBeNull(), { timeout: 3000 });
+    expect(container.textContent).toContain('runtime snapshot');
     expect(container.textContent).not.toMatch(/Ranking|Auth Files|充值|配额/);
 
     const usageButton = Array.from(container.querySelectorAll<HTMLButtonElement>('[role="group"][aria-label="工作空间"] button'))
       .find((button) => button.textContent?.includes('Usage'));
     act(() => usageButton?.click());
-    await act(async () => new Promise((resolve) => setTimeout(resolve, 20)));
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 500)));
 
     const usageButtons = container.querySelectorAll('nav[aria-label="主导航"] button');
     expect(usageButtons).toHaveLength(3);
@@ -57,7 +73,7 @@ describe('App console routing', () => {
     window.location.hash = '#ranking';
     await act(async () => {
       root.render(<App />);
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      await new Promise((resolve) => setTimeout(resolve, 500));
     });
     expect(window.location.hash).toBe('#overview');
 
@@ -66,7 +82,7 @@ describe('App console routing', () => {
       window.dispatchEvent(new HashChangeEvent('hashchange'));
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
-    expect(container.querySelector('nav[aria-label="管理导航"]')).not.toBeNull();
+    await vi.waitFor(() => expect(container.querySelector('nav[aria-label="管理导航"]')).not.toBeNull(), { timeout: 3000 });
     expect(container.textContent).toContain('Model Discovery');
   });
 });

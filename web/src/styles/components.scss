@@ -836,6 +836,13 @@ textarea {
     padding-right: 52px;
   }
 
+  .modal-close-floating {
+    top: 8px;
+    right: 8px;
+    width: 44px;
+    height: 44px;
+  }
+
   .modal-body {
     padding: $spacing-md;
     max-height: min(60vh, calc(100vh - 180px));

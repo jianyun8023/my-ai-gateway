@@ -67,6 +67,7 @@ describe('GatewayConsoleShell Admin key boundary', () => {
     expect(readAdminKey()).toBe('top-secret-value');
     expect(refreshRevision).toBe(1);
     expect(sessionStorage.getItem(GATEWAY_ADMIN_KEY_STORAGE_KEY)).toBe('top-secret-value');
+    expect(input.value).toBe('');
     expect(localStorage.getItem(GATEWAY_ADMIN_KEY_STORAGE_KEY)).toBeNull();
     expect(container.textContent).not.toContain('top-secret-value');
     expect(window.location.href).not.toContain('top-secret-value');

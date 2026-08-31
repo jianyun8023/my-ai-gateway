@@ -19,7 +19,7 @@ export default defineConfig(({ command }) => ({
   },
   server: command === 'serve' ? {
     proxy: {
-      '/admin/usage': {
+      '/admin': {
         target: getApiProxyTarget(),
         changeOrigin: true,
       },

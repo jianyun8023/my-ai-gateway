@@ -312,6 +312,8 @@ export function Modal({
   const renderedFooter = activeSnapshot.footer;
   const renderedClassName = activeSnapshot.className;
   const renderedVariant = activeSnapshot.variant;
+  const translatedCloseLabel = t('common.close');
+  const closeLabel = translatedCloseLabel === 'common.close' ? '关闭' : translatedCloseLabel;
   const overlayClass = `modal-overlay ${renderedVariant === 'drawer' ? 'modal-overlay-drawer ' : ''}${isClosing ? 'modal-overlay-closing' : 'modal-overlay-entering'}`;
   const modalClass = `modal ${renderedVariant === 'drawer' ? 'modal-drawer ' : ''}${isClosing ? 'modal-closing' : 'modal-entering'}${renderedClassName ? ` ${renderedClassName}` : ''}`;
 
@@ -331,7 +333,7 @@ export function Modal({
           type="button"
           className="modal-close-floating"
           onClick={closeDisabled ? undefined : handleClose}
-          aria-label={t('common.close')}
+          aria-label={closeLabel}
           disabled={closeDisabled}
         >
           <IconX size={20} />

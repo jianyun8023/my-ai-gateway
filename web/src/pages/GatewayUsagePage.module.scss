@@ -259,6 +259,7 @@
   .overviewLowerGrid,
   .analysisGrid { grid-template-columns: 1fr; }
   .drawer { width: min(520px, 76vw); min-width: 0; }
+  .granularityBar > button { min-width: 44px; min-height: 44px; }
 }
 
 @media (max-width: 600px) {
@@ -272,7 +273,7 @@
 
   .filters { grid-template-columns: 1fr; padding: 12px; }
   .filters input,
-  .filters select { height: 40px; font-size: 11px; }
+  .filters select { height: 44px; font-size: 11px; }
   .filterPresets { flex-wrap: wrap; }
   .applyFilters { width: 100%; }
 
