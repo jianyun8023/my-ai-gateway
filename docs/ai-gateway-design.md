@@ -186,7 +186,7 @@ UI 流程为：
 
 字段优先级为：用户覆盖 > 模型预设 > 上游发现 > unknown。刷新模型时不得覆盖用户已经确认的字段；新发现的模型先进入待确认列表，不自动改变现有路由。
 
-当前实现内置 `deepseek@1`、`minimax@1`、`kimi_code@1` 三个版本化 ProviderPreset，以及首批 DeepSeek V4、MiniMax M3/M2.7、Kimi K3/K2.7 Code ModelPreset。ProviderPreset 完整声明默认 Base URL、三协议 endpoint/模式、认证和 Header 模板、最小连接测试请求、默认能力及发现规则；Kimi Code 因官方未提供已认证模型列表 endpoint，明确声明 `discovery.support=unsupported`，不会猜测接口。
+当前实现内置版本化 ProviderPreset：`deepseek@1`、`minimax@1`、`kimi_code@1` 保留为历史不可变快照，`@2` 是最新内置版本。`@2` 只记录已验证的能力事实：DeepSeek/MiniMax Responses 的 `web_search`，以及 Kimi Responses Adapter 的 `tool_streaming`；启动注册新版本不会改写已经创建的 Source 快照。ProviderPreset 完整声明默认 Base URL、三协议 endpoint/模式、认证和 Header 模板、最小连接测试请求、默认能力及发现规则；Kimi Code 因官方未提供已认证模型列表 endpoint，明确声明 `discovery.support=unsupported`，不会猜测接口。首批 ModelPreset 包括 DeepSeek V4、MiniMax M3/M2.7、Kimi K3/K2.7 Code Model。
 
 管理 API 流程为：
 
@@ -488,7 +488,7 @@ Admin 资源为 `/admin/sources`、`/admin/accounts`、`/admin/logical-models`�
 
 PostgreSQL 回归测试只连接显式的 `TEST_DATABASE_URL`，不会复用运行时 `DATABASE_URL`。完整控制面测试为 ignored test，并在实际执行时创建/清理独立 schema；验收必须显式运行，不能把缺少数据库导致的跳过作为通过。
 
-ProviderPreset/模型发现回归使用真实 PostgreSQL 与 mock 上游，覆盖 DeepSeek、MiniMax、Kimi Code 的成功、失败、空列表、重复刷新、模型消失、confirmed/user 覆盖保留、批量确认和日志脱敏。
+ProviderPreset/模型发现回归使用真实 PostgreSQL 与 mock 上游，覆盖 DeepSeek、MiniMax、Kimi Code 的成功、失败、空列表、重复刷新、模型消失、confirmed/user 覆盖保留、批量确认、版本差异和日志脱敏。内嵌 Kimi Responses Adapter 的非流式 JSON 响应与流式 SSE 都必须把上游 usage 映射到统一 `UsageReport`；缺失 usage 才按既有 `estimated/missing` 规则处理。
 
 账号健康持久化、主动探测和无正文转换历史已由 #52 完成；统一 Admin 写操作审计日志（#48）仍需独立实现。#53 已补齐运维操作自身的审计记录，不把普通应用日志当作审计事实。
 
