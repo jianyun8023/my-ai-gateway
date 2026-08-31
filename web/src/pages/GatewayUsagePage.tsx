@@ -1,44 +1,14 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Bar, Doughnut, Line } from 'react-chartjs-2';
 import '@/lib/chartjs';
-import gatewayIcon from '@/assets/gateway-icon.svg';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { EmptyState } from '@/components/ui/EmptyState';
-import { IconChartLine, IconFileText, IconFilterAll, IconMenu, IconRefreshCw, IconX } from '@/components/ui/icons';
 import { GatewayUsageClient, type GatewayUsageFilters, type UsageBreakdownDimension, type UsageBreakdownItem, type UsageEventViewModel, type UsageOverviewViewModel, type UsageSummaryViewModel } from '@/gateway-usage';
-import { useThemeStore } from '@/stores/useThemeStore';
+import type { GatewayUsageTab } from '@/lib/consoleNavigation';
 import styles from './GatewayUsagePage.module.scss';
 
-export const GATEWAY_USAGE_TABS = ['overview', 'analysis', 'events'] as const;
-export type GatewayUsageTab = typeof GATEWAY_USAGE_TABS[number];
-
-const TAB_LABELS: Record<GatewayUsageTab, string> = {
-  overview: 'Overview',
-  analysis: 'Analysis',
-  events: 'Request Events',
-};
-
-const TAB_META: Record<GatewayUsageTab, { description: string; shortLabel: string; icon: ReactNode }> = {
-  overview: {
-    description: 'Token 总览、时间趋势与最近请求活动',
-    shortLabel: '总览',
-    icon: <IconFilterAll size={18} />,
-  },
-  analysis: {
-    description: '模型、Provider、Source、协议与延迟分布',
-    shortLabel: '用量分析',
-    icon: <IconChartLine size={18} />,
-  },
-  events: {
-    description: '请求元数据、fallback、attempt 与 Token 明细',
-    shortLabel: '请求事件',
-    icon: <IconFileText size={18} />,
-  },
-};
-
-const ADMIN_KEY_STORAGE_KEY = 'my-ai-gateway-admin-key-v1';
 const FILTER_STORAGE_KEY = 'my-ai-gateway-usage-filters-v2';
 const COLUMNS_STORAGE_KEY = 'my-ai-gateway-usage-event-columns-v2';
 
@@ -97,14 +67,6 @@ const defaultFilters = (): GatewayUsageFilters => {
   return { from: from.toISOString(), to: to.toISOString() };
 };
 
-const safeSessionRead = (key: string): string => {
-  try {
-    return sessionStorage.getItem(key) ?? '';
-  } catch {
-    return '';
-  }
-};
-
 const safeLocalRead = (key: string): string => {
   try {
     return localStorage.getItem(key) ?? '';
@@ -138,11 +100,6 @@ const loadVisibleColumns = (): EventColumn[] => {
   } catch {
     return DEFAULT_VISIBLE_COLUMNS;
   }
-};
-
-export const resolveGatewayUsageTab = (hash: string): GatewayUsageTab => {
-  const value = hash.replace(/^#\/?/, '');
-  return GATEWAY_USAGE_TABS.includes(value as GatewayUsageTab) ? value as GatewayUsageTab : 'overview';
 };
 
 export const appendStableEventPage = (
@@ -580,12 +537,22 @@ function EventsTable({ events, hasMore, loadingMore, onLoadMore, visibleColumns,
   );
 }
 
-export function GatewayUsagePage() {
-  const [activeTab, setActiveTab] = useState<GatewayUsageTab>(() => resolveGatewayUsageTab(window.location.hash));
-  const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const [adminKey, setAdminKey] = useState(() => safeSessionRead(ADMIN_KEY_STORAGE_KEY));
-  const adminKeyRef = useRef(adminKey);
-  const clientRef = useRef(new GatewayUsageClient({ getAdminKey: () => adminKeyRef.current }));
+interface GatewayUsagePageProps {
+  activeTab: GatewayUsageTab;
+  getAdminKey: () => string;
+  refreshRevision: number;
+  onLoadingChange?: (loading: boolean) => void;
+}
+
+export function GatewayUsagePage({
+  activeTab,
+  getAdminKey,
+  refreshRevision,
+  onLoadingChange,
+}: GatewayUsagePageProps) {
+  const getAdminKeyRef = useRef(getAdminKey);
+  getAdminKeyRef.current = getAdminKey;
+  const [client] = useState(() => new GatewayUsageClient({ getAdminKey: () => getAdminKeyRef.current() }));
   const [draftFilters, setDraftFilters] = useState<GatewayUsageFilters>(safeParseFilters);
   const [filters, setFilters] = useState<GatewayUsageFilters>(draftFilters);
   const [overview, setOverview] = useState<UsageOverviewViewModel>();
@@ -600,28 +567,27 @@ export function GatewayUsagePage() {
   const [visibleColumns, setVisibleColumns] = useState<EventColumn[]>(loadVisibleColumns);
   const [trendMetric, setTrendMetric] = useState<TrendMetric>('total');
   const [granularity, setGranularity] = useState<'auto' | 'hour' | 'day'>('auto');
-  const theme = useThemeStore((state) => state.theme);
-  const setTheme = useThemeStore((state) => state.setTheme);
 
   const loadActiveTab = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
+    onLoadingChange?.(true);
     setError('');
     try {
       if (activeTab === 'overview') {
         const granularityParam = granularity === 'auto' ? undefined : granularity;
-        setOverview(await clientRef.current.overview(filters, granularityParam, signal));
+        setOverview(await client.overview(filters, granularityParam, signal));
       } else if (activeTab === 'analysis') {
         const [summary, results] = await Promise.all([
-          clientRef.current.summary(filters, signal),
+          client.summary(filters, signal),
           Promise.all(ANALYSIS_DIMENSIONS.map(async ({ dimension }) => [
             dimension,
-            await clientRef.current.breakdown(filters, dimension, signal),
+            await client.breakdown(filters, dimension, signal),
           ] as const)),
         ]);
         setAnalysisSummary(summary);
         setBreakdowns(Object.fromEntries(results));
       } else {
-        const page = await clientRef.current.events({ filters, limit: 100 }, signal);
+        const page = await client.events({ filters, limit: 100 }, signal);
         setEvents(page.events);
         setNextCursor(page.nextCursor);
         setHasMore(page.hasMore);
@@ -630,57 +596,20 @@ export function GatewayUsagePage() {
       if (signal?.aborted) return;
       setError(loadError instanceof Error ? loadError.message : '加载用量数据失败');
     } finally {
-      if (!signal?.aborted) setLoading(false);
+      if (!signal?.aborted) {
+        setLoading(false);
+        onLoadingChange?.(false);
+      }
     }
-  }, [activeTab, filters, granularity]);
-
-  useEffect(() => {
-    const onHashChange = () => {
-      setActiveTab(resolveGatewayUsageTab(window.location.hash));
-      setMobileNavOpen(false);
-    };
-    window.addEventListener('hashchange', onHashChange);
-    return () => window.removeEventListener('hashchange', onHashChange);
-  }, []);
-
-  useEffect(() => {
-    if (!mobileNavOpen) {
-      document.body.style.overflow = '';
-      return;
-    }
-    const previousOverflow = document.body.style.overflow;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setMobileNavOpen(false);
-    };
-    document.body.style.overflow = 'hidden';
-    window.addEventListener('keydown', onKeyDown);
-    return () => {
-      window.removeEventListener('keydown', onKeyDown);
-      document.body.style.overflow = previousOverflow;
-    };
-  }, [mobileNavOpen]);
-
-  useEffect(() => {
-    const media = window.matchMedia?.('(max-width: 920px)');
-    if (!media) return;
-    const closeOnDesktop = () => {
-      if (!media.matches) setMobileNavOpen(false);
-    };
-    media.addEventListener('change', closeOnDesktop);
-    return () => media.removeEventListener('change', closeOnDesktop);
-  }, []);
+  }, [activeTab, client, filters, granularity, onLoadingChange]);
 
   useEffect(() => {
     const controller = new AbortController();
     void loadActiveTab(controller.signal);
     return () => controller.abort();
-  }, [loadActiveTab]);
+  }, [loadActiveTab, refreshRevision]);
 
-  const navigate = (tab: GatewayUsageTab) => {
-    window.location.hash = tab;
-    setActiveTab(tab);
-    setMobileNavOpen(false);
-  };
+  useEffect(() => () => onLoadingChange?.(false), [onLoadingChange]);
 
   const applyFilters = () => {
     if (new Date(draftFilters.from) >= new Date(draftFilters.to)) {
@@ -691,18 +620,11 @@ export function GatewayUsagePage() {
     setFilters({ ...draftFilters });
   };
 
-  const saveAdminKey = () => {
-    adminKeyRef.current = adminKey;
-    if (adminKey) sessionStorage.setItem(ADMIN_KEY_STORAGE_KEY, adminKey);
-    else sessionStorage.removeItem(ADMIN_KEY_STORAGE_KEY);
-    void loadActiveTab();
-  };
-
   const loadMore = useCallback(async () => {
     if (!nextCursor || !hasMore || loadingMore) return;
     setLoadingMore(true);
     try {
-      const page = await clientRef.current.events({ filters, cursor: nextCursor, limit: 100 });
+      const page = await client.events({ filters, cursor: nextCursor, limit: 100 });
       setEvents((current) => appendStableEventPage(current, page.events));
       setNextCursor(page.nextCursor);
       setHasMore(page.hasMore);
@@ -711,7 +633,7 @@ export function GatewayUsagePage() {
     } finally {
       setLoadingMore(false);
     }
-  }, [filters, hasMore, loadingMore, nextCursor]);
+  }, [client, filters, hasMore, loadingMore, nextCursor]);
 
   const changeVisibleColumns = (columns: EventColumn[]) => {
     const normalized = normalizeVisibleEventColumns(columns);
@@ -721,7 +643,7 @@ export function GatewayUsagePage() {
 
   const exportEvents = async (format: 'csv' | 'json') => {
     try {
-      const blob = await clientRef.current.exportEvents(filters, format);
+      const blob = await client.exportEvents(filters, format);
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement('a');
       anchor.href = url;
@@ -733,66 +655,27 @@ export function GatewayUsagePage() {
     }
   };
 
-  const localTimeZone = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone, []);
-
   return (
-    <div className={styles.page} data-od-id={`page-${activeTab}`}>
-      <aside id="gateway-navigation" className={styles.sidebar} data-open={mobileNavOpen} data-od-id="sidebar" aria-label="控制台侧栏">
-        <div className={styles.brand}>
-          <img src={gatewayIcon} alt="" />
-          <div><strong>AI Gateway</strong><small>my-ai-gateway</small></div>
-          <button type="button" className={styles.sidebarClose} aria-label="关闭导航" onClick={() => setMobileNavOpen(false)}><IconX size={18} /></button>
-        </div>
-        <nav aria-label="主导航">
-          <span className={styles.navSection}>监控</span>
-          {GATEWAY_USAGE_TABS.map((tab) => (
-            <button key={tab} type="button" data-active={activeTab === tab} aria-current={activeTab === tab ? 'page' : undefined} onClick={() => navigate(tab)}>
-              <span className={styles.navIcon}>{TAB_META[tab].icon}</span>
-              <span><strong>{TAB_LABELS[tab]}</strong><small>{TAB_META[tab].shortLabel}</small></span>
+    <section className={styles.content} data-od-id={`page-${activeTab}`}>
+      <FilterBar draft={draftFilters} onChange={setDraftFilters} onApply={applyFilters} loading={loading} />
+      {activeTab === 'overview' && (
+        <div className={styles.granularityBar}>
+          <span>时间粒度</span>
+          {(['auto', 'hour', 'day'] as const).map((g) => (
+            <button key={g} data-active={granularity === g} onClick={() => setGranularity(g)}>
+              {g === 'auto' ? '自动' : g === 'hour' ? '小时' : '天'}
             </button>
           ))}
-        </nav>
-        <div className={styles.sidebarFooter}><strong>UTC</strong><span>PostgreSQL 存储边界</span><small>{localTimeZone} 展示</small></div>
-      </aside>
-      <button type="button" className={styles.mobileOverlay} data-open={mobileNavOpen} aria-label="关闭导航遮罩" tabIndex={mobileNavOpen ? 0 : -1} onClick={() => setMobileNavOpen(false)} />
-
-      <section className={styles.workspace}>
-        <header className={styles.topbar} data-od-id="topbar">
-          <button type="button" className={styles.mobileMenuButton} aria-label="打开导航" aria-controls="gateway-navigation" aria-expanded={mobileNavOpen} onClick={() => setMobileNavOpen(true)}><IconMenu size={20} /></button>
-          <div className={styles.topbarTitle}><strong>{TAB_LABELS[activeTab]}</strong><small>{TAB_META[activeTab].shortLabel}</small></div>
-          <div className={styles.headerActions}>
-            <label className={styles.keyInput}><span>Admin Key</span><input type="password" value={adminKey} onChange={(event) => setAdminKey(event.target.value)} placeholder="可留空" /><Button size="sm" variant="secondary" onClick={saveAdminKey}>应用</Button></label>
-            <Button size="sm" variant="ghost" onClick={() => setTheme(theme === 'dark' ? 'white' : 'dark')}>{theme === 'dark' ? '浅色' : '深色'}</Button>
-            <Button size="sm" variant="secondary" onClick={() => void loadActiveTab()} loading={loading}><IconRefreshCw size={14} />刷新</Button>
-          </div>
-        </header>
-
-        <main className={styles.main}>
-          <section className={styles.pageHeading}>
-            <div><span>PostgreSQL Usage Events</span><h1>{TAB_LABELS[activeTab]}</h1><p>{TAB_META[activeTab].description} · 本地时区：{localTimeZone}</p></div>
-          </section>
-          <FilterBar draft={draftFilters} onChange={setDraftFilters} onApply={applyFilters} loading={loading} />
-          {activeTab === 'overview' && (
-            <div className={styles.granularityBar}>
-              <span>时间粒度</span>
-              {(['auto', 'hour', 'day'] as const).map((g) => (
-                <button key={g} data-active={granularity === g} onClick={() => setGranularity(g)}>
-                  {g === 'auto' ? '自动' : g === 'hour' ? '小时' : '天'}
-                </button>
-              ))}
-            </div>
-          )}
-          {error && <div className={styles.errorBanner} role="alert"><span>{error}</span><Button size="sm" variant="secondary" onClick={() => void loadActiveTab()}>重试</Button></div>}
-          {loading && !error ? <div className={styles.loadingState} aria-busy="true">正在加载网关用量…</div> : (
-            activeTab === 'overview'
-              ? overview && <Overview data={overview} metric={trendMetric} onMetricChange={setTrendMetric} />
-              : activeTab === 'analysis'
-                ? analysisSummary && <Analysis breakdowns={breakdowns} summary={analysisSummary} />
-                : <EventsTable events={events} hasMore={hasMore} loadingMore={loadingMore} onLoadMore={() => void loadMore()} visibleColumns={visibleColumns} onVisibleColumnsChange={changeVisibleColumns} onExport={(format) => void exportEvents(format)} client={clientRef.current} />
-          )}
-        </main>
-        <footer className={styles.footer}>my-ai-gateway · UI interactions adapted from CPA Usage Keeper under the MIT License</footer>
-      </section>
-    </div>
+        </div>
+      )}
+      {error && <div className={styles.errorBanner} role="alert"><span>{error}</span><Button size="sm" variant="secondary" onClick={() => void loadActiveTab()}>重试</Button></div>}
+      {loading && !error ? <div className={styles.loadingState} aria-busy="true">正在加载网关用量…</div> : (
+        activeTab === 'overview'
+          ? overview && <Overview data={overview} metric={trendMetric} onMetricChange={setTrendMetric} />
+          : activeTab === 'analysis'
+            ? analysisSummary && <Analysis breakdowns={breakdowns} summary={analysisSummary} />
+            : <EventsTable events={events} hasMore={hasMore} loadingMore={loadingMore} onLoadMore={() => void loadMore()} visibleColumns={visibleColumns} onVisibleColumnsChange={changeVisibleColumns} onExport={(format) => void exportEvents(format)} client={client} />
+      )}
+    </section>
   );
 }

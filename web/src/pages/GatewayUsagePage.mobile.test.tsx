@@ -2,7 +2,7 @@
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { GatewayUsagePage } from './GatewayUsagePage';
+import App from '@/App';
 
 describe('GatewayUsagePage mobile navigation', () => {
   let container: HTMLDivElement;
@@ -33,7 +33,7 @@ describe('GatewayUsagePage mobile navigation', () => {
 
   it('locks background scrolling and closes on Escape', async () => {
     await act(async () => {
-      root.render(<GatewayUsagePage />);
+      root.render(<App />);
       await new Promise((resolve) => setTimeout(resolve, 20));
     });
 
@@ -45,15 +45,19 @@ describe('GatewayUsagePage mobile navigation', () => {
     act(() => openButton?.click());
     expect(sidebar?.dataset.open).toBe('true');
     expect(document.body.style.overflow).toBe('hidden');
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+    expect(document.activeElement?.getAttribute('aria-label')).toBe('关闭导航');
 
     act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })));
     expect(sidebar?.dataset.open).toBe('false');
     expect(document.body.style.overflow).toBe('');
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+    expect(document.activeElement).toBe(openButton);
   });
 
   it('closes the drawer after navigation', async () => {
     await act(async () => {
-      root.render(<GatewayUsagePage />);
+      root.render(<App />);
       await new Promise((resolve) => setTimeout(resolve, 20));
     });
 
@@ -64,5 +68,21 @@ describe('GatewayUsagePage mobile navigation', () => {
 
     expect(container.querySelector<HTMLElement>('[data-od-id="sidebar"]')?.dataset.open).toBe('false');
     expect(document.body.style.overflow).toBe('');
+  });
+
+  it('closes the drawer when switching into the Management space', async () => {
+    await act(async () => {
+      root.render(<App />);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+
+    act(() => container.querySelector<HTMLButtonElement>('button[aria-label="打开导航"]')?.click());
+    const managementButton = Array.from(container.querySelectorAll<HTMLButtonElement>('[role="group"][aria-label="工作空间"] button'))
+      .find((button) => button.textContent?.includes('Management'));
+    act(() => managementButton?.click());
+
+    expect(window.location.hash).toBe('#management/sources');
+    expect(container.querySelector('nav[aria-label="管理导航"]')).not.toBeNull();
+    expect(container.querySelector<HTMLElement>('[data-od-id="sidebar"]')?.dataset.open).toBe('false');
   });
 });
