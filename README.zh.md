@@ -28,6 +28,8 @@ MiniMax、DeepSeek 等原生支持三协议的 Provider 不进入转换器。Kim
 
 完整设计和当前进度见 [`docs/ai-gateway-design.md`](docs/ai-gateway-design.md) 与 [`docs/todo.md`](docs/todo.md)。管理 API 契约见 [`docs/admin-api.md`](docs/admin-api.md)。
 
+Issue #53 的数据保留、dry-run/分批清理、脱敏控制面导出、PostgreSQL 备份恢复和新库校验步骤见 [`docs/operations.md`](docs/operations.md)。构建后的二进制提供 `my-ai-gateway ops retention-cleanup --dry-run`、`my-ai-gateway ops control-plane-export --output control-plane.json` 等运维命令。
+
 ## 快速开始
 
 ### 前置条件

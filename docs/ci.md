@@ -20,7 +20,7 @@
 | `test` | Rust workspace 测试和 Web Vitest 测试 |
 | `test-postgres` | 显式运行 `#[ignore]` 的 DB-first PostgreSQL 集成测试 |
 
-CI 始终设置 `TEST_DATABASE_URL`。因此常规 Rust 测试中的 PostgreSQL migration、Usage、模型目录、模型发现和 API 回归不会走“未配置数据库”的跳过分支；随后 `test-postgres` 再运行唯一显式忽略的控制面测试。Rust 测试使用单线程执行，避免进程级环境变量和共享测试数据库造成不稳定竞争。
+CI 始终设置 `TEST_DATABASE_URL`。因此常规 Rust 测试中的 PostgreSQL migration、Usage、模型目录、模型发现和 API 回归不会走“未配置数据库”的跳过分支；随后 `test-postgres` 再运行显式忽略的控制面和 #53 运维清理/导出恢复测试。Rust 测试使用单线程执行，避免进程级环境变量和共享测试数据库造成不稳定竞争。
 
 ## 本地复现
 

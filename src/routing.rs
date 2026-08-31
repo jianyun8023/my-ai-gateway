@@ -143,6 +143,10 @@ impl RouteResolver {
         self.runtime_routes.is_some()
     }
 
+    pub(crate) fn runtime_routes(&self) -> Option<&[RuntimeRoute]> {
+        self.runtime_routes.as_deref().map(Vec::as_slice)
+    }
+
     fn resolve_selected(
         &self,
         protocol: Protocol,

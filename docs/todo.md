@@ -1,6 +1,6 @@
 # 实施 TODO
 
-> 状态基线：`main@b989eae`（2026-08-31）。实现事实以当前代码和已合并 PR 为准；开放任务以 GitHub Issue 为准。
+> 状态基线：`main@bd4d689`（2026-08-31，已包含 PR #64）。实现事实以当前代码和已合并 PR 为准；开放任务以 GitHub Issue 为准。
 
 ## 已完成
 
@@ -43,7 +43,7 @@
 - [ ] Admin 写操作审计日志（#48）
 - [x] GitHub Actions 全量验证门禁（#49）
 - [ ] Prometheus 与 OpenTelemetry（#50）
-- [ ] 数据保留、清理、备份与恢复（#53）
+- [x] 数据保留、清理、备份与恢复（#53；运维审计、脱敏控制面导出和 PostgreSQL Runbook）
 
 ## Epic 状态
 

@@ -3,4 +3,6 @@ target
 web/node_modules
 web/dist
 *.log
+backups
+control-plane*.json
 .env
