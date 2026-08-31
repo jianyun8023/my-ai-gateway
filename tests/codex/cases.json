@@ -1,0 +1,14 @@
+[
+  {
+    "id": "codex.tool",
+    "kind": "tool",
+    "cost": "low",
+    "description": "Codex CLI calls the local shell, reads a canary, and returns its exact value."
+  },
+  {
+    "id": "codex.web_search",
+    "kind": "search",
+    "cost": "high",
+    "description": "Codex CLI uses live web search and returns an official Rust Blog source."
+  }
+]

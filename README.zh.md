@@ -99,6 +99,11 @@ curl http://127.0.0.1:8787/v1/responses \
 
 Kimi Responses 路由在进程内完成 Responses 与 Anthropic Messages 的转换，并保留 thinking/signature、tool call、web search、usage 和 SSE 事件顺序。
 
+Codex CLI 到 Gateway 的工具调用与网络搜索 E2E 使用显式 opt-in 的
+`mise run test-codex-e2e`。默认回归只执行本地契约单测；真实运行需要隔离的
+`CODEX_HOME`、Gateway Key 和 Admin Key。详细配置、case 维护、Usage 校验和安全边界见
+[`docs/codex-e2e.md`](docs/codex-e2e.md)。
+
 ## 控制面
 
 主要资源路径如下。集合路径支持 `GET`、`POST`，单资源路径支持 `GET`、`PUT`、`DELETE`，启停使用 `PUT .../{id}/enabled`：

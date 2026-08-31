@@ -65,6 +65,11 @@ Admin API 请求都会 fail closed 并返回 `401`。两个 Key 应使用不同�
 `mise run test-live`，默认不会进入 CI 或消耗上游 Token。Case、环境隔离、结果格式和安全
 边界见 [`docs/live-provider-smoke.md`](./docs/live-provider-smoke.md)。
 
+Codex CLI 到 Gateway 的工具调用与网络搜索 E2E 使用显式 opt-in 的
+`mise run test-codex-e2e`，默认只执行本地契约单测；真实运行需要隔离的 `CODEX_HOME`、
+Gateway Key 和 Admin Key。配置、搜索 case、Usage 校验与安全边界见
+[`docs/codex-e2e.md`](./docs/codex-e2e.md)。
+
 使用 `GATEWAY_ADMIN_KEY` 可创建下游 Virtual Key，原始 Key 只在创建响应中返回：
 
 ```bash

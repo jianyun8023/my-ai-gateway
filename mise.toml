@@ -8,7 +8,7 @@ run = "npm --prefix web ci"
 
 [tasks.config-check]
 description = "校验仓库 JSON 配置示例"
-run = "node -e \"const fs=require('node:fs'); for (const file of ['config.example.json','tests/live/provider-smoke.cases.json']) JSON.parse(fs.readFileSync(file, 'utf8'))\""
+run = "node -e \"const fs=require('node:fs'); for (const file of ['config.example.json','tests/live/provider-smoke.cases.json','tests/codex/cases.json']) JSON.parse(fs.readFileSync(file, 'utf8'))\""
 
 [tasks.dev]
 description = "启动 Rust 网关与前端开发环境"
@@ -42,11 +42,15 @@ run = "npm --prefix web run build && cargo build"
 
 [tasks.test]
 description = "运行 Rust 与前端单元测试"
-run = "cargo test --workspace -- --test-threads=1 && npm --prefix web test && node --test scripts/live-provider-smoke.test.mjs"
+run = "cargo test --workspace -- --test-threads=1 && npm --prefix web test && node --test scripts/live-provider-smoke.test.mjs scripts/codex-e2e-smoke.test.mjs"
 
 [tasks.test-live]
 description = "显式运行真实 Provider 工具、搜索与 fallback smoke 测试"
 run = "cargo build && node scripts/live-provider-smoke.mjs"
+
+[tasks.test-codex-e2e]
+description = "显式运行 Codex CLI 到 Gateway 的工具/搜索 E2E 测试"
+run = "node scripts/codex-e2e-smoke.mjs"
 
 [tasks.test-postgres]
 description = "运行显式忽略的 PostgreSQL 集成测试"

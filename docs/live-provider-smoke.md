@@ -92,3 +92,6 @@ mise run test-live -- --include-high-cost
 禁止写入 Authorization、API Key、完整 prompt/response、搜索正文、thinking 或 signature。Runner 失败信息也只保留结构化错误码和状态码。
 
 Live 结果应在对应 Issue/PR 留下 run ID、commit、Provider、case、结果摘要和未覆盖项，不能只保存在本机 artifact。若未来接入 GitHub Actions，只允许手工触发并使用受保护 environment；不得把 Provider Secret 加入普通 PR CI。
+
+需要验证真实 Codex CLI 的固定 `CODEX_HOME`、工具调用、网络搜索和 Gateway Usage 时，使用独立的
+[`docs/codex-e2e.md`](./codex-e2e.md) runner；它与本文件的 Provider HTTP smoke 分层，默认同样不访问外部服务。
