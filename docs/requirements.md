@@ -43,7 +43,7 @@ OpenAI Chat 与 Responses 的输入/输出模型并不等价，因此转换层�
 
 ## 5. Token 统计
 
-建议 `usage_events` 字段：`request_id`、`virtual_key_id`、`account_id`、`provider_id`、`source_id`、`client_source`、`model`、`protocol_in`、`protocol_out`、`status_code`、`retry_count`、`ttft_ms`、`latency_ms`、`input_tokens`、`output_tokens`、`reasoning_tokens`、`cached_tokens`、`total_tokens`、`usage_source`（upstream/parsed/estimated）、`created_at`。其中 `source_id` 是运行时实际 Source，`client_source` 才对应可选的 `X-Client-Source`。
+建议 `usage_events` 字段：`request_id`、`virtual_key_id`、`account_id`、`provider_id`、`source_id`、`client_source`、`model`、`protocol_in`、`protocol_out`、`status_code`、`retry_count`、`ttft_ms`、`latency_ms`、`input_tokens`、`output_tokens`、`reasoning_tokens`、`cached_tokens`、`total_tokens`、`usage_source`（upstream/parsed/estimated）、`created_at`。其中 `provider_id` 是 Source 固化的 ProviderPreset ID，`source_id` 是运行时实际 Source，`client_source` 才对应可选的 `X-Client-Source`。
 
 统计页面先提供：按时间、Key、账号、provider、模型、协议筛选；请求数、成功率、平均/TP95 延迟、Token 总量和最近错误。默认不保存 prompt/response 正文，必要时通过受控开关和脱敏策略开启。
 
