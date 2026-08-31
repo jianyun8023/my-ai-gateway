@@ -19,9 +19,11 @@ Rust AI 网关 MVP，目标是将多个上游账号统一为一个入口，并�
 - Provider、Account、Route 配置抽象。
 - 精确路由优先：为协议+模型绑定的账号优先于默认启用账号。
 - Kimi Responses 适配器已作为 workspace crate 内置，路由使用 `kimi_responses_adapter` 时直接在进程内转换。
-- 设置 `DATABASE_URL` 后自动初始化 PostgreSQL 的用量、控制面、模型目录表和 Usage 查询索引；模型目录目前是仓储基线，尚未替换现有运行时 Route。
+- 设置 `DATABASE_URL` 后自动初始化 PostgreSQL 的用量、控制面、模型目录、连接测试和发现审计表；发现结果不会自动创建 LogicalModel、Binding 或 Route。
 - PostgreSQL-backed Virtual Key：创建、列表、撤销、模型白名单鉴权。
-- 管理接口：`/admin/keys`、`/admin/keys/:id/revoke`，以及 `/admin/usage/summary|timeseries|breakdown|events|export`；`/admin/usage/aggregate` 保留为一次获取三类聚合的组合入口。
+- 内置、版本化的 DeepSeek、MiniMax、Kimi Code ProviderPreset 和 ModelPreset；Source 创建时复制不可变快照，预设升级只展示差异。
+- 按协议连接测试、模型发现、稳定 `added/changed/missing` 差异、待确认列表、用户编辑和批量确认 API；失败信息和日志均不包含凭据或完整响应正文。
+- 管理接口：`/admin/keys`、`/admin/keys/:id/revoke`、`/admin/provider-presets`、`/admin/sources/*`，以及 `/admin/usage/summary|timeseries|breakdown|events|export`；`/admin/usage/aggregate` 保留为一次获取三类聚合的组合入口。
 
 工具链由 [Mise](https://mise.jdx.dev/) 管理（Rust 1.97.1 + Node 24，见 [`mise.toml`](./mise.toml)）：
 
@@ -49,6 +51,8 @@ curl -X POST http://127.0.0.1:8787/admin/keys \
 ```
 
 Usage API 返回显式的 `version: "v1"` 和 `timezone: "UTC"`。所有入口共享 `from`、`to`（RFC3339、半开区间 `[from,to)`）、`logical_model`、`upstream_model`、`provider`、`source`、`account`、`protocol_in`、`protocol_upstream`、`virtual_key`、`status=success|failure`、`status_code` 和 `usage_source` 组合筛选。`source` 当前对应下游 `X-Client-Source`；Virtual Key 鉴权的请求会记录 Key ID，静态 `GATEWAY_API_KEY` 请求为 `null`。
+
+ProviderPreset、连接测试、模型发现和确认接口的完整请求/响应契约见 [`docs/admin-api.md`](./docs/admin-api.md)。最小流程为：创建 Source 快照 → 选择关联且启用的 Account 按协议测试 → 执行 discovery → 查看 diff/待确认模型 → 编辑并批量确认。确认 SourceModel 仍不会自动创建 LogicalModel、Binding 或 Route。
 
 ```bash
 curl 'http://127.0.0.1:8787/admin/usage/timeseries?from=2026-08-01T00:00:00Z&to=2026-09-01T00:00:00Z&granularity=day&logical_model=MiniMax-M2.7' \
