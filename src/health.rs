@@ -706,6 +706,8 @@ fn unknown_health(available: bool, source: &str) -> AccountHealth {
 mod tests {
     use super::*;
     use chrono::TimeZone;
+    use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
+    use std::{str::FromStr, sync::Arc};
 
     fn clock() -> ManualHealthClock {
         ManualHealthClock::new(Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap())
@@ -760,5 +762,138 @@ mod tests {
             exponential_backoff(Duration::from_secs(1), Duration::from_secs(5), 4),
             Duration::from_secs(5)
         );
+    }
+
+    #[tokio::test]
+    #[ignore = "requires TEST_DATABASE_URL and runs against an isolated PostgreSQL schema"]
+    async fn postgres_health_survives_restart_concurrency_expiry_and_manual_toggle() {
+        let url = std::env::var("TEST_DATABASE_URL")
+            .expect("TEST_DATABASE_URL must be set for PostgreSQL health regression");
+        let admin = PgPoolOptions::new()
+            .max_connections(2)
+            .connect(&url)
+            .await
+            .expect("connect PostgreSQL health admin pool");
+        let schema = format!("health_{}", uuid::Uuid::new_v4().simple());
+        sqlx::query(&format!("CREATE SCHEMA \"{schema}\""))
+            .execute(&admin)
+            .await
+            .expect("create isolated health schema");
+        let options = PgConnectOptions::from_str(&url)
+            .expect("parse TEST_DATABASE_URL")
+            .options([("search_path", schema.as_str())]);
+        let pool = PgPoolOptions::new()
+            .max_connections(8)
+            .connect_with(options)
+            .await
+            .expect("connect isolated health schema");
+        let database = Database::from_test_pool(pool.clone())
+            .await
+            .expect("migrate isolated health schema");
+        sqlx::query("INSERT INTO sources (id,display_name,provider_preset_id,provider_preset_version,provider_preset_snapshot,base_url,endpoints,auth_config,protocol_capabilities) VALUES ('health-source','Health Source','custom',1,'{}'::jsonb,'https://health.example','{\"openai_chat_completions\":\"/chat/completions\"}'::jsonb,'{}'::jsonb,'{}'::jsonb)")
+            .execute(&pool)
+            .await
+            .expect("seed health source");
+        sqlx::query("INSERT INTO accounts (id,source_id,display_name,enabled,weight) VALUES ('health-account','health-source','Health Account',TRUE,100)")
+            .execute(&pool)
+            .await
+            .expect("seed health account");
+
+        let clock = clock();
+        let config = HealthConfig {
+            cooldown: Duration::from_secs(1),
+            max_cooldown: Duration::from_secs(8),
+            stale_after: Duration::from_secs(3),
+            probe_interval: Duration::from_secs(60),
+        };
+        let registry = HealthRegistry::with_database_config_and_clock(
+            database.clone(),
+            config,
+            Arc::new(clock.clone()),
+        );
+        let mut tasks = Vec::new();
+        for _ in 0..3 {
+            let registry = registry.clone();
+            tasks.push(tokio::spawn(async move {
+                registry
+                    .mark_failure_with_details(
+                        "health-account",
+                        "passive",
+                        Some("upstream_http_503"),
+                        Some("retryable upstream response"),
+                    )
+                    .await;
+            }));
+        }
+        for task in tasks {
+            task.await.expect("concurrent health transition");
+        }
+        let persisted: (i32, String, DateTime<Utc>) = sqlx::query_as(
+            "SELECT consecutive_failures,health_source,cooldown_until FROM accounts WHERE id='health-account'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("read persisted health state");
+        assert_eq!(persisted.0, 3);
+        assert_eq!(persisted.1, "passive");
+        assert_eq!(
+            persisted.2,
+            clock.now() + ChronoDuration::from_std(Duration::from_secs(4)).unwrap()
+        );
+
+        // A new registry instance reads the same row, proving restart recovery.
+        let restarted = HealthRegistry::with_database_config_and_clock(
+            database.clone(),
+            config,
+            Arc::new(clock.clone()),
+        );
+        let cooling = restarted.get_health("health-account").await;
+        assert!(!cooling.available);
+        assert_eq!(cooling.status, "cooling_down");
+        assert_eq!(cooling.source, "passive");
+
+        clock.advance(Duration::from_secs(5));
+        let expired = restarted.get_health("health-account").await;
+        assert!(expired.available);
+        assert!(expired.stale);
+        restarted.mark_success("health-account").await;
+        let recovered = restarted.get_health("health-account").await;
+        assert!(recovered.available);
+        assert_eq!(recovered.status, "healthy");
+        assert_eq!(recovered.consecutive_failures, 0);
+
+        let control_plane = crate::control_plane::ControlPlane::new(&database, "127.0.0.1:0");
+        control_plane
+            .set_account_enabled("health-account", false)
+            .await
+            .expect("manual disable account");
+        let disabled = restarted.get_health("health-account").await;
+        assert!(!disabled.available);
+        assert_eq!(disabled.status, "disabled");
+        assert_eq!(disabled.source, "manual");
+        control_plane
+            .set_account_enabled("health-account", true)
+            .await
+            .expect("manual enable account");
+        let enabled = restarted.get_health("health-account").await;
+        assert!(enabled.available);
+        assert_eq!(enabled.status, "unknown");
+        assert_eq!(enabled.source, "manual");
+
+        let events: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM account_health_events WHERE account_id='health-account'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("count health events");
+        assert!(events >= 5);
+
+        drop(database);
+        pool.close().await;
+        sqlx::query(&format!("DROP SCHEMA \"{schema}\" CASCADE"))
+            .execute(&admin)
+            .await
+            .expect("drop isolated health schema");
+        admin.close().await;
     }
 }
