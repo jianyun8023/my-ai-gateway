@@ -19,9 +19,9 @@ Rust AI 网关 MVP，目标是将多个上游账号统一为一个入口，并�
 - Provider、Account、Route 配置抽象。
 - 精确路由优先：为协议+模型绑定的账号优先于默认启用账号。
 - Kimi Responses 适配器已作为 workspace crate 内置，路由使用 `kimi_responses_adapter` 时直接在进程内转换。
-- 设置 `DATABASE_URL` 后自动初始化 PostgreSQL 的用量、控制面和模型目录表；模型目录目前是仓储基线，尚未替换现有运行时 Route。
+- 设置 `DATABASE_URL` 后自动初始化 PostgreSQL 的用量、控制面、模型目录表和 Usage 查询索引；模型目录目前是仓储基线，尚未替换现有运行时 Route。
 - PostgreSQL-backed Virtual Key：创建、列表、撤销、模型白名单鉴权。
-- 管理接口：`/admin/keys`、`/admin/keys/:id/revoke`、`/admin/usage/summary`、`/admin/usage/events`、`/admin/usage/aggregate`。
+- 管理接口：`/admin/keys`、`/admin/keys/:id/revoke`，以及 `/admin/usage/summary|timeseries|breakdown|events|export`；`/admin/usage/aggregate` 保留为一次获取三类聚合的组合入口。
 
 运行：
 
@@ -38,6 +38,21 @@ curl -X POST http://127.0.0.1:8787/admin/keys \
   -H "Content-Type: application/json" \
   -d '{"name":"service-a","allowed_models":["MiniMax-M2.7"]}'
 ```
+
+Usage API 返回显式的 `version: "v1"` 和 `timezone: "UTC"`。所有入口共享 `from`、`to`（RFC3339、半开区间 `[from,to)`）、`logical_model`、`upstream_model`、`provider`、`source`、`account`、`protocol_in`、`protocol_upstream`、`virtual_key`、`status=success|failure`、`status_code` 和 `usage_source` 组合筛选。`source` 当前对应下游 `X-Client-Source`；Virtual Key 鉴权的请求会记录 Key ID，静态 `GATEWAY_API_KEY` 请求为 `null`。
+
+```bash
+curl 'http://127.0.0.1:8787/admin/usage/timeseries?from=2026-08-01T00:00:00Z&to=2026-09-01T00:00:00Z&granularity=day&logical_model=MiniMax-M2.7' \
+  -H "Authorization: Bearer $GATEWAY_ADMIN_KEY"
+
+curl 'http://127.0.0.1:8787/admin/usage/breakdown?breakdown=provider&usage_source=upstream' \
+  -H "Authorization: Bearer $GATEWAY_ADMIN_KEY"
+
+curl 'http://127.0.0.1:8787/admin/usage/export?format=csv&status=failure' \
+  -H "Authorization: Bearer $GATEWAY_ADMIN_KEY" -o usage-events.csv
+```
+
+`events` 固定按 `(created_at DESC, request_id DESC)` 排序，`limit` 为 `1..500`；后续页应原样传回响应中的 `page.next_cursor`。Summary、timeseries 和 breakdown 的 Token 只累计每个逻辑请求的最终 Usage，不会因 fallback 重复；`upstream_attempts` 单独统计关联的上游尝试。CSV/JSON 导出复用完全相同的筛选与排序，且事件契约不包含 prompt/response 正文。
 
 可通过 `GATEWAY_CONFIG_JSON` 配置多个 provider、账号和固定路由（示例）：
 

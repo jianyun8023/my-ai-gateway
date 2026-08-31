@@ -8,6 +8,7 @@ mod transport;
 mod usage;
 
 use std::{
+    fmt::Write as _,
     net::SocketAddr,
     sync::Arc,
     time::{Instant, SystemTime, UNIX_EPOCH},
@@ -16,7 +17,10 @@ use std::{
 use axum::{
     body::{Body, Bytes},
     extract::{Path, State},
-    http::{HeaderMap, HeaderValue, Request, Response, StatusCode},
+    http::{
+        header::{CONTENT_DISPOSITION, CONTENT_TYPE},
+        HeaderMap, HeaderValue, Request, Response, StatusCode,
+    },
     response::IntoResponse,
     routing::{get, post},
     Json, Router,
@@ -62,28 +66,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         db,
         health: health::HealthRegistry::new(std::time::Duration::from_secs(30)),
     };
-    let app = Router::new()
+    let app = application(state);
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    tracing::info!(%addr, "AI gateway listening");
+    axum::serve(listener, app).await?;
+    Ok(())
+}
+
+fn application(state: AppState) -> Router {
+    Router::new()
         .route("/healthz", get(healthz))
         .route("/v1/models", get(models))
         .route("/v1/chat/completions", post(chat_completions))
         .route("/v1/responses", post(responses))
         .route("/v1/messages", post(messages))
         .route("/admin/keys", get(list_keys).post(create_key))
-        .route("/admin/keys/:id/revoke", post(revoke_key))
+        .route("/admin/keys/{id}/revoke", post(revoke_key))
         .route("/admin/usage/summary", get(usage_summary))
+        .route("/admin/usage/timeseries", get(usage_timeseries))
+        .route("/admin/usage/breakdown", get(usage_breakdown))
         .route("/admin/usage/events", get(usage_events))
+        .route("/admin/usage/export", get(usage_export))
         .route("/admin/usage/aggregate", get(usage_aggregate))
         .route("/admin/providers", get(admin_providers))
         .route("/admin/accounts", get(admin_accounts))
         .route("/admin/routes", get(admin_routes))
-        .route("/admin/routes/:protocol/:model", get(resolve_route))
+        .route("/admin/routes/{protocol}/{model}", get(resolve_route))
         .nest_service("/admin", ServeDir::new("web/dist"))
         .with_state(state)
-        .layer(TraceLayer::new_for_http());
-    let listener = tokio::net::TcpListener::bind(addr).await?;
-    tracing::info!(%addr, "AI gateway listening");
-    axum::serve(listener, app).await?;
-    Ok(())
+        .layer(TraceLayer::new_for_http())
 }
 
 async fn healthz(State(state): State<AppState>) -> Json<Value> {
@@ -215,7 +226,157 @@ async fn revoke_key(
     }
 }
 
-async fn usage_summary(State(state): State<AppState>, headers: HeaderMap) -> Response<Body> {
+#[derive(Debug)]
+struct UsageQuery {
+    filter: db::UsageFilter,
+    granularity: String,
+    breakdown: String,
+    limit: i64,
+    cursor: Option<db::UsageCursor>,
+    format: String,
+}
+
+fn parse_usage_query(
+    query: &std::collections::HashMap<String, String>,
+) -> Result<UsageQuery, String> {
+    let parse_time = |name: &str| -> Result<Option<chrono::DateTime<chrono::Utc>>, String> {
+        query
+            .get(name)
+            .map(|value| {
+                chrono::DateTime::parse_from_rfc3339(value)
+                    .map(|time| time.with_timezone(&chrono::Utc))
+                    .map_err(|_| format!("{name} must be an RFC3339 timestamp"))
+            })
+            .transpose()
+    };
+    let from = parse_time("from")?;
+    let to = parse_time("to")?;
+    if from.zip(to).is_some_and(|(from, to)| from >= to) {
+        return Err("from must be earlier than to".into());
+    }
+    let virtual_key_id = query
+        .get("virtual_key")
+        .map(|value| {
+            value
+                .parse::<i64>()
+                .ok()
+                .filter(|id| *id > 0)
+                .ok_or_else(|| "virtual_key must be a positive integer".to_string())
+        })
+        .transpose()?;
+    let status_code = query
+        .get("status_code")
+        .map(|value| {
+            value
+                .parse::<i32>()
+                .ok()
+                .filter(|code| (100..=599).contains(code))
+                .ok_or_else(|| "status_code must be between 100 and 599".to_string())
+        })
+        .transpose()?;
+    let success = match query.get("status").map(String::as_str) {
+        None => None,
+        Some("success") => Some(true),
+        Some("failure") => Some(false),
+        Some(_) => return Err("status must be success or failure".into()),
+    };
+    if let Some(value) = query.get("usage_source") {
+        if !matches!(
+            value.as_str(),
+            "upstream" | "parsed" | "estimated" | "missing"
+        ) {
+            return Err("usage_source must be upstream, parsed, estimated, or missing".into());
+        }
+    }
+    let granularity = query
+        .get("granularity")
+        .cloned()
+        .unwrap_or_else(|| "hour".into());
+    if !matches!(granularity.as_str(), "hour" | "day") {
+        return Err("granularity must be hour or day".into());
+    }
+    let breakdown = query
+        .get("breakdown")
+        .cloned()
+        .unwrap_or_else(|| "logical_model".into());
+    if !matches!(
+        breakdown.as_str(),
+        "logical_model"
+            | "upstream_model"
+            | "provider"
+            | "source"
+            | "account"
+            | "protocol_in"
+            | "protocol_upstream"
+            | "virtual_key"
+            | "status"
+            | "usage_source"
+    ) {
+        return Err("unsupported breakdown dimension".into());
+    }
+    let limit = query
+        .get("limit")
+        .map(|value| {
+            value
+                .parse::<i64>()
+                .ok()
+                .filter(|limit| (1..=500).contains(limit))
+                .ok_or_else(|| "limit must be between 1 and 500".to_string())
+        })
+        .transpose()?
+        .unwrap_or(100);
+    let cursor = query
+        .get("cursor")
+        .map(|value| db::UsageCursor::decode(value).ok_or_else(|| "cursor is invalid".to_string()))
+        .transpose()?;
+    let format = query
+        .get("format")
+        .cloned()
+        .unwrap_or_else(|| "json".into());
+    if !matches!(format.as_str(), "json" | "csv") {
+        return Err("format must be json or csv".into());
+    }
+    Ok(UsageQuery {
+        filter: db::UsageFilter {
+            from,
+            to,
+            logical_model: query.get("logical_model").cloned(),
+            upstream_model_id: query.get("upstream_model").cloned(),
+            provider_id: query.get("provider").cloned(),
+            source: query.get("source").cloned(),
+            account_id: query.get("account").cloned(),
+            protocol_in: query.get("protocol_in").cloned(),
+            protocol_upstream: query.get("protocol_upstream").cloned(),
+            virtual_key_id,
+            success,
+            status_code,
+            usage_source: query.get("usage_source").cloned(),
+        },
+        granularity,
+        breakdown,
+        limit,
+        cursor,
+        format,
+    })
+}
+
+fn usage_range(filter: &db::UsageFilter) -> Value {
+    json!({
+        "from": filter.from.as_ref().map(chrono::DateTime::to_rfc3339),
+        "to": filter.to.as_ref().map(chrono::DateTime::to_rfc3339),
+        "boundary": "[from,to)"
+    })
+}
+
+fn invalid_usage_query(message: &str) -> Response<Body> {
+    error_response(StatusCode::BAD_REQUEST, "invalid_usage_query", message)
+}
+
+async fn usage_summary(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    query: axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Response<Body> {
     if !admin_authorized(&headers) {
         return error_response(
             StatusCode::UNAUTHORIZED,
@@ -230,9 +391,71 @@ async fn usage_summary(State(state): State<AppState>, headers: HeaderMap) -> Res
             "DATABASE_URL is not configured",
         );
     };
-    match database.usage_summary().await {
-        Ok((requests, successes, input_tokens, output_tokens)) => (StatusCode::OK, Json(json!({"requests":requests,"successes":successes,"failures":requests-successes,"input_tokens":input_tokens,"output_tokens":output_tokens,"total_tokens":input_tokens+output_tokens}))).into_response(),
+    let query = match parse_usage_query(&query) {
+        Ok(query) => query,
+        Err(message) => return invalid_usage_query(&message),
+    };
+    match database.usage_aggregate(&query.filter).await {
+        Ok(data) => (StatusCode::OK, Json(json!({"version":"v1","timezone":"UTC","range":usage_range(&query.filter),"data":data}))).into_response(),
         Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, "usage_summary_failed", &error.to_string()),
+    }
+}
+
+async fn usage_timeseries(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    query: axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Response<Body> {
+    if !admin_authorized(&headers) {
+        return error_response(
+            StatusCode::UNAUTHORIZED,
+            "unauthorized",
+            "admin key required",
+        );
+    }
+    let Some(database) = &state.db else {
+        return error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "database_unavailable",
+            "DATABASE_URL is not configured",
+        );
+    };
+    let query = match parse_usage_query(&query) {
+        Ok(query) => query,
+        Err(message) => return invalid_usage_query(&message),
+    };
+    match database.usage_timeseries(&query.filter, &query.granularity).await {
+        Ok(data) => (StatusCode::OK, Json(json!({"version":"v1","timezone":"UTC","range":usage_range(&query.filter),"granularity":query.granularity,"data":data}))).into_response(),
+        Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, "usage_timeseries_failed", &error.to_string()),
+    }
+}
+
+async fn usage_breakdown(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    query: axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Response<Body> {
+    if !admin_authorized(&headers) {
+        return error_response(
+            StatusCode::UNAUTHORIZED,
+            "unauthorized",
+            "admin key required",
+        );
+    }
+    let Some(database) = &state.db else {
+        return error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "database_unavailable",
+            "DATABASE_URL is not configured",
+        );
+    };
+    let query = match parse_usage_query(&query) {
+        Ok(query) => query,
+        Err(message) => return invalid_usage_query(&message),
+    };
+    match database.usage_breakdown(&query.filter, &query.breakdown).await {
+        Ok(data) => (StatusCode::OK, Json(json!({"version":"v1","timezone":"UTC","range":usage_range(&query.filter),"dimension":query.breakdown,"data":data}))).into_response(),
+        Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, "usage_breakdown_failed", &error.to_string()),
     }
 }
 
@@ -255,16 +478,15 @@ async fn usage_events(
             "DATABASE_URL is not configured",
         );
     };
-    let limit = query
-        .get("limit")
-        .and_then(|value| value.parse::<i64>().ok())
-        .unwrap_or(100);
-    match database.list_usage_events(limit).await {
-        Ok(events) => (
-            StatusCode::OK,
-            Json(json!({"data":events,"limit":limit.clamp(1,500)})),
-        )
-            .into_response(),
+    let query = match parse_usage_query(&query) {
+        Ok(query) => query,
+        Err(message) => return invalid_usage_query(&message),
+    };
+    match database
+        .list_usage_events_page(&query.filter, query.limit, query.cursor.as_ref())
+        .await
+    {
+        Ok(page) => (StatusCode::OK, Json(json!({"version":"v1","timezone":"UTC","range":usage_range(&query.filter),"data":page.data,"page":{"limit":query.limit,"has_more":page.has_more,"next_cursor":page.next_cursor}}))).into_response(),
         Err(error) => error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
             "usage_events_failed",
@@ -292,30 +514,11 @@ async fn usage_aggregate(
             "DATABASE_URL is not configured",
         );
     };
-    let filter = db::UsageFilter {
-        from: query
-            .get("from")
-            .and_then(|v| chrono::DateTime::parse_from_rfc3339(v).ok())
-            .map(|v| v.with_timezone(&chrono::Utc)),
-        to: query
-            .get("to")
-            .and_then(|v| chrono::DateTime::parse_from_rfc3339(v).ok())
-            .map(|v| v.with_timezone(&chrono::Utc)),
-        model: query.get("model").cloned(),
-        provider_id: query.get("provider").cloned(),
-        account_id: query.get("account").cloned(),
-        protocol: query.get("protocol").cloned(),
-        source: query.get("source").cloned(),
+    let query = match parse_usage_query(&query) {
+        Ok(query) => query,
+        Err(message) => return invalid_usage_query(&message),
     };
-    let granularity = query
-        .get("granularity")
-        .map(String::as_str)
-        .unwrap_or("hour");
-    let dimension = query
-        .get("breakdown")
-        .map(String::as_str)
-        .unwrap_or("model");
-    let aggregate = match database.usage_aggregate(&filter).await {
+    let aggregate = match database.usage_aggregate(&query.filter).await {
         Ok(value) => value,
         Err(error) => {
             return error_response(
@@ -325,7 +528,10 @@ async fn usage_aggregate(
             )
         }
     };
-    let timeseries = match database.usage_timeseries(&filter, granularity).await {
+    let timeseries = match database
+        .usage_timeseries(&query.filter, &query.granularity)
+        .await
+    {
         Ok(value) => value,
         Err(error) => {
             return error_response(
@@ -335,7 +541,10 @@ async fn usage_aggregate(
             )
         }
     };
-    let breakdown = match database.usage_breakdown(&filter, dimension).await {
+    let breakdown = match database
+        .usage_breakdown(&query.filter, &query.breakdown)
+        .await
+    {
         Ok(value) => value,
         Err(error) => {
             return error_response(
@@ -345,7 +554,115 @@ async fn usage_aggregate(
             )
         }
     };
-    (StatusCode::OK, Json(json!({"timezone":"UTC","aggregate":aggregate,"timeseries":timeseries,"breakdown_dimension":dimension,"breakdown":breakdown}))).into_response()
+    (StatusCode::OK, Json(json!({"version":"v1","timezone":"UTC","range":usage_range(&query.filter),"granularity":query.granularity,"breakdown_dimension":query.breakdown,"aggregate":aggregate,"timeseries":timeseries,"breakdown":breakdown}))).into_response()
+}
+
+async fn usage_export(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    query: axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Response<Body> {
+    if !admin_authorized(&headers) {
+        return error_response(
+            StatusCode::UNAUTHORIZED,
+            "unauthorized",
+            "admin key required",
+        );
+    }
+    let Some(database) = &state.db else {
+        return error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "database_unavailable",
+            "DATABASE_URL is not configured",
+        );
+    };
+    let query = match parse_usage_query(&query) {
+        Ok(query) => query,
+        Err(message) => return invalid_usage_query(&message),
+    };
+    let events = match database.export_usage_events(&query.filter).await {
+        Ok(events) => events,
+        Err(error) => {
+            return error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "usage_export_failed",
+                &error.to_string(),
+            )
+        }
+    };
+    if query.format == "csv" {
+        Response::builder()
+            .status(StatusCode::OK)
+            .header(CONTENT_TYPE, "text/csv; charset=utf-8")
+            .header(CONTENT_DISPOSITION, "attachment; filename=usage-events.csv")
+            .body(Body::from(usage_events_csv(&events)))
+            .expect("valid CSV export response")
+    } else {
+        let payload = json!({"version":"v1","timezone":"UTC","range":usage_range(&query.filter),"data":events});
+        Response::builder()
+            .status(StatusCode::OK)
+            .header(CONTENT_TYPE, "application/json")
+            .header(
+                CONTENT_DISPOSITION,
+                "attachment; filename=usage-events.json",
+            )
+            .body(Body::from(
+                serde_json::to_vec(&payload).expect("serializable usage export"),
+            ))
+            .expect("valid JSON export response")
+    }
+}
+
+fn usage_events_csv(events: &[db::UsageEventRecord]) -> String {
+    let mut output = String::from("request_id,created_at,virtual_key_id,logical_model,upstream_model_id,provider_id,source,account_id,protocol_in,protocol_upstream,mode,status_code,success,retry_count,latency_ms,ttft_ms,input_tokens,output_tokens,reasoning_tokens,cached_tokens,total_tokens,usage_source,degraded\n");
+    for event in events {
+        let values = [
+            event.request_id.clone(),
+            event.created_at.to_rfc3339(),
+            event
+                .virtual_key_id
+                .map(|value| value.to_string())
+                .unwrap_or_default(),
+            event.logical_model.clone(),
+            event.upstream_model_id.clone().unwrap_or_default(),
+            event.provider_id.clone(),
+            event.source.clone(),
+            event.account_id.clone(),
+            event.protocol_in.clone(),
+            event.protocol_upstream.clone(),
+            event.mode.clone(),
+            event.status_code.to_string(),
+            event.success.to_string(),
+            event.retry_count.to_string(),
+            event.latency_ms.to_string(),
+            event
+                .ttft_ms
+                .map(|value| value.to_string())
+                .unwrap_or_default(),
+            event.input_tokens.to_string(),
+            event.output_tokens.to_string(),
+            event.reasoning_tokens.to_string(),
+            event.cached_tokens.to_string(),
+            event.total_tokens.to_string(),
+            event.usage_source.clone(),
+            event.degraded.to_string(),
+        ];
+        let line = values
+            .iter()
+            .map(|value| csv_field(value))
+            .collect::<Vec<_>>()
+            .join(",");
+        writeln!(output, "{line}").expect("writing to String cannot fail");
+    }
+    output
+}
+
+fn csv_field(value: &str) -> String {
+    if value.contains(',') || value.contains('"') || value.contains('\n') || value.contains('\r') {
+        format!("\"{}\"", value.replace('"', "\"\""))
+    } else {
+        value.to_string()
+    }
 }
 
 async fn admin_providers(State(state): State<AppState>, headers: HeaderMap) -> Response<Body> {
@@ -392,13 +709,6 @@ async fn proxy(
     body: Bytes,
     protocol: Protocol,
 ) -> Response<Body> {
-    if std::env::var("GATEWAY_API_KEY").is_ok() && !authorized(&headers) && state.db.is_none() {
-        return error_response(
-            StatusCode::UNAUTHORIZED,
-            "unauthorized",
-            "missing or invalid gateway key",
-        );
-    }
     let started = Instant::now();
     let request_id = Uuid::new_v4().to_string();
     let payload: Value = match serde_json::from_slice(&body) {
@@ -415,13 +725,16 @@ async fn proxy(
         .get("model")
         .and_then(Value::as_str)
         .unwrap_or("default");
-    if !authorized_with_db(&state, &headers, model).await {
-        return error_response(
-            StatusCode::UNAUTHORIZED,
-            "unauthorized",
-            "invalid or revoked virtual key",
-        );
-    }
+    let virtual_key_id = match authorized_with_db(&state, &headers, model).await {
+        Some(virtual_key_id) => virtual_key_id,
+        None => {
+            return error_response(
+                StatusCode::UNAUTHORIZED,
+                "unauthorized",
+                "invalid or revoked virtual key",
+            )
+        }
+    };
     let Some(route) = state.resolver.resolve(protocol, model) else {
         return error_response(
             StatusCode::NOT_FOUND,
@@ -533,6 +846,7 @@ async fn proxy(
             .unwrap_or_else(|| account.id.clone());
         let event = db::UsageEvent {
             request_id,
+            virtual_key_id,
             provider_id: route.provider_id.clone(),
             account_id: final_account_id,
             model: model.to_string(),
@@ -865,38 +1179,26 @@ fn is_retryable(status: StatusCode) -> bool {
         || status.is_server_error()
 }
 
-fn authorized(headers: &HeaderMap) -> bool {
-    let Ok(expected) = std::env::var("GATEWAY_API_KEY") else {
-        return true;
-    };
-    let bearer = headers
-        .get("authorization")
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.strip_prefix("Bearer "));
-    let supplied = bearer.or_else(|| {
-        headers
-            .get("x-api-key")
-            .and_then(|value| value.to_str().ok())
-    });
-    supplied == Some(expected.as_str())
-}
-
-async fn authorized_with_db(state: &AppState, headers: &HeaderMap, model: &str) -> bool {
+async fn authorized_with_db(
+    state: &AppState,
+    headers: &HeaderMap,
+    model: &str,
+) -> Option<Option<i64>> {
     if let Ok(expected) = std::env::var("GATEWAY_API_KEY") {
         if supplied_key(headers) == Some(expected.as_str()) {
-            return true;
+            return Some(None);
         }
     }
     let Some(database) = &state.db else {
-        return std::env::var("GATEWAY_API_KEY").is_err();
+        return std::env::var("GATEWAY_API_KEY").is_err().then_some(None);
     };
-    let Some(key) = supplied_key(headers) else {
-        return false;
-    };
+    let key = supplied_key(headers)?;
     database
         .authenticate_virtual_key(key, model)
         .await
-        .unwrap_or(false)
+        .ok()
+        .flatten()
+        .map(Some)
 }
 
 fn supplied_key(headers: &HeaderMap) -> Option<&str> {
@@ -947,6 +1249,192 @@ async fn resolve_route(
             };
             (status, Json(json!({"error": error})))
         }
+    }
+}
+
+#[cfg(test)]
+mod usage_api_tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn admin_request(uri: &str) -> Request<Body> {
+        let mut builder = Request::builder().uri(uri);
+        if let Ok(key) =
+            std::env::var("GATEWAY_ADMIN_KEY").or_else(|_| std::env::var("GATEWAY_API_KEY"))
+        {
+            builder = builder.header("authorization", format!("Bearer {key}"));
+        }
+        builder.body(Body::empty()).expect("admin request")
+    }
+
+    fn usage_test_state(database: db::Database) -> AppState {
+        let config = Arc::new(GatewayConfig {
+            listen_addr: "127.0.0.1:0".into(),
+            providers: vec![],
+            accounts: vec![],
+            routes: vec![],
+        });
+        AppState {
+            resolver: RouteResolver::new(config.clone()),
+            config,
+            http: transport::client().expect("HTTP client"),
+            db: Some(database),
+            health: health::HealthRegistry::new(std::time::Duration::from_secs(1)),
+        }
+    }
+
+    #[test]
+    fn usage_query_validates_utc_boundaries_and_dimensions() {
+        let query = HashMap::from([
+            ("from".into(), "2026-01-01T08:00:00+08:00".into()),
+            ("to".into(), "2026-01-02T00:00:00Z".into()),
+            ("logical_model".into(), "logical-a".into()),
+            ("upstream_model".into(), "upstream-a".into()),
+            ("status".into(), "failure".into()),
+            ("breakdown".into(), "protocol_upstream".into()),
+        ]);
+        let parsed = parse_usage_query(&query).expect("valid usage query");
+        assert_eq!(
+            parsed.filter.from.unwrap().to_rfc3339(),
+            "2026-01-01T00:00:00+00:00"
+        );
+        assert_eq!(parsed.filter.success, Some(false));
+        assert_eq!(parsed.breakdown, "protocol_upstream");
+
+        let invalid = HashMap::from([
+            ("from".into(), "2026-01-02T00:00:00Z".into()),
+            ("to".into(), "2026-01-01T00:00:00Z".into()),
+        ]);
+        assert_eq!(
+            parse_usage_query(&invalid).unwrap_err(),
+            "from must be earlier than to"
+        );
+    }
+
+    #[test]
+    fn csv_export_escapes_fields_and_omits_bodies() {
+        assert_eq!(csv_field("a,b\"c"), "\"a,b\"\"c\"");
+        let header = usage_events_csv(&[]);
+        assert!(header.contains("logical_model,upstream_model_id"));
+        assert!(!header.contains("prompt"));
+        assert!(!header.contains("response_body"));
+    }
+
+    #[tokio::test]
+    async fn postgres_usage_endpoints_share_filters_and_export_contract() {
+        let Ok(url) = std::env::var("TEST_DATABASE_URL") else {
+            eprintln!("skipping PostgreSQL API test: TEST_DATABASE_URL is not set");
+            return;
+        };
+        let database = db::Database::connect(&url)
+            .await
+            .expect("connect PostgreSQL API test database");
+        let prefix = format!("usage-api-{}-", Uuid::new_v4());
+        let logical_model = format!("model-{prefix}");
+        let event = db::UsageEvent {
+            request_id: format!("{prefix}request"),
+            virtual_key_id: None,
+            provider_id: "provider-api".into(),
+            account_id: "account-api".into(),
+            model: logical_model.clone(),
+            logical_model: logical_model.clone(),
+            upstream_model_id: Some("upstream-api".into()),
+            source: "api-test".into(),
+            protocol_in: "openai_responses".into(),
+            protocol_upstream: "anthropic_messages".into(),
+            mode: "adapter".into(),
+            status_code: 200,
+            success: true,
+            retry_count: 1,
+            latency_ms: 42,
+            ttft_ms: None,
+            input_tokens: 10,
+            output_tokens: 5,
+            reasoning_tokens: 2,
+            cached_tokens: 1,
+            total_tokens: 17,
+            usage_source: "upstream".into(),
+            degraded: false,
+        };
+        let attempts = [
+            db::UsageAttempt {
+                attempt_no: 0,
+                provider_id: "provider-api".into(),
+                account_id: "account-api".into(),
+                upstream_model_id: Some("upstream-api".into()),
+                status_code: 429,
+                success: false,
+                latency_ms: 10,
+            },
+            db::UsageAttempt {
+                attempt_no: 1,
+                provider_id: "provider-api".into(),
+                account_id: "account-api".into(),
+                upstream_model_id: Some("upstream-api".into()),
+                status_code: 200,
+                success: true,
+                latency_ms: 32,
+            },
+        ];
+        database
+            .insert_usage_with_attempts(&event, &attempts)
+            .await
+            .expect("insert API fixture");
+        let app = application(usage_test_state(database.clone()));
+
+        let summary = app
+            .clone()
+            .oneshot(admin_request(&format!(
+                "/admin/usage/summary?logical_model={logical_model}"
+            )))
+            .await
+            .expect("summary response");
+        assert_eq!(summary.status(), StatusCode::OK);
+        let summary: Value = serde_json::from_slice(
+            &axum::body::to_bytes(summary.into_body(), 1024 * 1024)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(summary["version"], "v1");
+        assert_eq!(summary["data"]["logical_requests"], 1);
+        assert_eq!(summary["data"]["upstream_attempts"], 2);
+
+        let events = app
+            .clone()
+            .oneshot(admin_request(&format!(
+                "/admin/usage/events?logical_model={logical_model}&limit=1"
+            )))
+            .await
+            .expect("events response");
+        let events: Value = serde_json::from_slice(
+            &axum::body::to_bytes(events.into_body(), 1024 * 1024)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(events["data"][0]["logical_model"], logical_model);
+        assert!(events["data"][0].get("prompt").is_none());
+
+        let export = app
+            .oneshot(admin_request(&format!(
+                "/admin/usage/export?logical_model={logical_model}&format=csv"
+            )))
+            .await
+            .expect("export response");
+        assert_eq!(export.status(), StatusCode::OK);
+        assert_eq!(
+            export.headers().get(CONTENT_TYPE).unwrap(),
+            "text/csv; charset=utf-8"
+        );
+        let export = axum::body::to_bytes(export.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
+        assert!(String::from_utf8_lossy(&export).contains(&event.request_id));
+        database
+            .delete_usage_events_for_test(&prefix)
+            .await
+            .expect("clean API fixture");
     }
 }
 

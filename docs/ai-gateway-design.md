@@ -382,7 +382,7 @@ Kimi Adapter：
 ### PostgreSQL 基础
 
 - `DATABASE_URL` 可选；
-- 启动时自动创建 `usage_events` 表；
+- 启动时按 migration 初始化 `usage_events`、attempt、Virtual Key 和查询索引；
 - 请求结束后写入基础请求事件；
 - `request_id` 唯一防重复。
 
@@ -394,10 +394,18 @@ Kimi Adapter：
 - Key 使用 SHA-256 哈希存储，原始值只在创建时返回；
 - 支持 `allowed_models` 模型白名单；
 - 成功鉴权后更新 `last_used_at`；
-- `GET /admin/usage/summary` 返回基础请求数、成功数和 Token 汇总。
-- `GET /admin/usage/events?limit=100` 返回最近请求事件。
-- `GET /admin/usage/aggregate` 提供 UTC 时间范围聚合：`from`/`to`（RFC3339）、`granularity=hour|day`，以及 `breakdown=model|provider|account|protocol|source` 和组合筛选参数（`model`、`provider`、`account`、`protocol`、`source`）。
-  `source` 来自可选的下游 `X-Client-Source` 请求头，缺省为 `unknown`；该字段仅用于统计维度，不改变路由或认证。
+- `GET /admin/usage/summary` 返回逻辑请求、上游尝试、重试、成功/失败、延迟和 Token 汇总。
+- `GET /admin/usage/timeseries?granularity=hour|day` 返回 UTC 小时/日时间桶。
+- `GET /admin/usage/breakdown?breakdown=...` 支持 `logical_model`、`upstream_model`、`provider`、`source`、`account`、`protocol_in`、`protocol_upstream`、`virtual_key`、`status` 和 `usage_source`。
+- `GET /admin/usage/events?limit=100&cursor=...` 使用 `(created_at DESC, request_id DESC)` 的确定性 keyset 游标，`limit` 范围为 `1..500`。
+- `GET /admin/usage/export?format=csv|json` 按与 events 相同的筛选和排序导出全部匹配事件；不包含 prompt/response 正文。
+- `GET /admin/usage/aggregate` 保留为 summary、timeseries 和单一 breakdown 的组合入口，响应与独立入口共享 `version: v1` 契约。
+
+所有 Usage 查询共享组合筛选参数：`from`、`to`、`logical_model`、`upstream_model`、`provider`、`source`、`account`、`protocol_in`、`protocol_upstream`、`virtual_key`、`status`、`status_code` 和 `usage_source`。`from`/`to` 接受带 offset 的 RFC3339，服务端转换为 UTC，并以半开区间 `[from,to)` 解释；响应桶固定为 UTC，UI 只在展示层换算本地时区。`source` 来自可选的下游 `X-Client-Source` 请求头，缺省为 `unknown`；该字段仅用于统计维度，不改变路由或认证。
+
+v1 响应 envelope 固定如下：summary 为 `{version, timezone, range, data}`；timeseries 额外返回 `granularity`，每个 `data` 元素包含 UTC `bucket`；breakdown 额外返回 `dimension`，每个元素使用可空 `key` 表示分组值；events 返回 `{data, page:{limit, has_more, next_cursor}}`。聚合指标统一包含 `logical_requests`、`upstream_attempts`、`retries`、`successes`、`failures`、`success_rate`、`average_latency_ms`、`p95_latency_ms` 和五类 Token；breakdown 另含 `logical_request_share`、`total_token_share`。客户端应把 `next_cursor` 视作不透明值并原样传回。
+
+聚合中的 `logical_requests`、成功/失败、延迟和 Token 来自筛选后的 `usage_events`，因此每个逻辑请求和最终 Usage 只累计一次。`upstream_attempts` 来自这些逻辑请求关联的 `usage_event_attempts`；`retries` 来自逻辑事件的重试计数。Provider、Source、Account、协议等筛选先选择逻辑请求，再统计其关联 attempt，避免把失败 fallback 的 Token 当成已确认 Usage。`usage_source=missing` 的请求保留请求数但 Token 为零。
 
 ### 部署
 
@@ -418,7 +426,7 @@ Kimi Adapter：
 
 ### 7.2 PostgreSQL 领域表
 
-当前已经创建 `usage_events`、`usage_event_attempts`、`virtual_keys`、`providers`、`accounts`、`routes`，以及 Provider/Model preset、Source、SourceModel、LogicalModel、ModelBinding、SourceModelCapability 模型目录表。现有配置会前进回填为 `custom` ProviderPreset 的独立 Source 快照，但运行时仍继续使用当前配置路径，直到 PostgreSQL-backed 控制面任务完成。`request_id` 表示一次北向逻辑请求并保持唯一；重试尝试写入 `usage_event_attempts(request_id, attempt_no)`，同一尝试幂等。`usage_events.logical_model` 保存客户端模型，`upstream_model_id` 在路由能明确提供时填充，否则为空；时间统一按 PostgreSQL `TIMESTAMPTZ` 以 UTC 存储，展示层负责本地时区转换。
+当前已经创建 `usage_events`、`usage_event_attempts`、`virtual_keys`、`providers`、`accounts`、`routes`，以及 Provider/Model preset、Source、SourceModel、LogicalModel、ModelBinding、SourceModelCapability 模型目录表。现有配置会前进回填为 `custom` ProviderPreset 的独立 Source 快照，但运行时仍继续使用当前配置路径，直到 PostgreSQL-backed 控制面任务完成。`request_id` 表示一次北向逻辑请求并保持唯一；重试尝试写入 `usage_event_attempts(request_id, attempt_no)`，同一尝试幂等。`usage_events.logical_model` 保存客户端模型，`upstream_model_id` 在路由能明确提供时填充，否则为空；Virtual Key 鉴权成功时写入 `virtual_key_id`，静态入口 Key 保持为空。时间统一按 PostgreSQL `TIMESTAMPTZ` 以 UTC 存储，展示层负责本地时区转换。
 
 模型目录数据库回归测试只连接显式的 `TEST_DATABASE_URL`，不会复用运行时 `DATABASE_URL`；未设置时普通单元测试跳过 PostgreSQL 集成部分。
 
@@ -433,12 +441,8 @@ Kimi Adapter：
 
 ### 7.4 统计接口和页面
 
-已完成基础 `/admin/usage/summary`、`/admin/usage/events`、`/admin/usage/aggregate` 查询 API，Provider/Account/Route 管理查询 API，并 vendor Keeper React 前端、构建静态资源（访问 `/admin/`）。仍待完成：
+已完成稳定 v1 `/admin/usage/summary`、`timeseries`、`breakdown`、`events`、`export` 查询契约、组合筛选、确定性游标分页、CSV/JSON 导出，以及 Provider/Account/Route 管理查询 API；同时已 vendor Keeper React 前端、构建静态资源（访问 `/admin/`）。仍待完成：
 
-- Usage Overview API；
-- Analysis API；
-- 时间、模型、Provider、账号、Key 筛选；
-- CSV/JSON 导出；
 - Keeper UI 字段改为网关原生字段；
 - Admin Session 登录。
 
