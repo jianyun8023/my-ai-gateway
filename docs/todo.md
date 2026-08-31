@@ -1,38 +1,56 @@
 # 实施 TODO
 
-- [x] 内置 `kimi-responses-adapter` workspace crate
-- [x] Provider 原生协议透传（Chat/Responses/Anthropic）
-- [x] Virtual Key 创建、列表、撤销、模型白名单
-- [x] 非流式 usage 提取和 PostgreSQL 基础落库
-- [x] Kimi Adapter 非流式/流式 mock 回归测试
-- [x] PostgreSQL 控制面表 migration（providers/accounts/routes）
-- [x] 账号健康冷却的内存实现
-- [x] Usage summary/events 管理 API
-- [x] 流式 SSE 末事件 usage 自动落库
-- [x] usage 缺失时使用 tiktoken-rs 估算
-- [x] Provider/Account/Route 配置同步到 PostgreSQL
-- [x] 模型目录领域表与可路由 Binding 仓储基线
-- [x] ProviderPreset、模型发现差异和用户确认 API（#13）
-- [x] PostgreSQL DB-first 启动、一次性 JSON 初始化/显式导入与一致性 runtime snapshot（#14）
-- [x] Source/Account/LogicalModel/ModelBinding/Route 事务化 CRUD、启停与结构化错误（#14）
-- [x] confirmed/available Binding resolver、完整协议链与 `/v1/models` 可路由/健康过滤（#14）
-- [ ] Virtual Key 轮换与分组权限
-- [x] Keeper React UI vendor 与静态资源构建
-- [x] 网关原生用量控制台（Overview/Analysis/Request Events）对接 Usage API（#16）
-- [x] Usage Analysis 聚合 API（时间、模型、Provider、账号、Key）（#15）
-- [x] Admin 路由调试端点鉴权与 proxy 结构化路由错误（#20、#22）
-- [x] degraded 仅表示实际损失，所有降级路径记录结构化 warning（#21）
-- [x] 三协议 × native/adapter/unsupported 解析矩阵与原生透传测试（#23）
-- [x] DB runtime 有效能力矩阵 API：完整转换链、primary/fallback、degraded 与结构化不可路由状态（#24）
-- [ ] 有效能力矩阵 Web 展示（#24）
-- [x] 失败 usage 不估算与 usage_source 查询契约对齐（#25）
-- [x] usage 记录 route_id、streamed 与脱敏 error_summary（#26，部分）
-- [ ] usage 记录真实 upstream_model_id 与流式 ttft_ms（#26）
-- [x] usage attempt 明细 API 与事件详情端点（#27）
-- [x] usage 导出增加 10000 行上限保护（#28）
-- [x] 用量趋势图支持指标切换与时间粒度手选（#29）
-- [x] usage 事件 Source 维度升级：运行时 `source_id` 与独立 `client_source`（#30）
-- [x] 健康状态指数退避冷却、失败计数和完整加权 fallback
-- [x] 账号健康状态 Admin API（`/admin/health`）
-- [x] 跨 Provider fallback 与 fallback 路径账号级 `model_map` 基线（主路径与 Binding snapshot 仍依赖 #14/#26）
-- [ ] OTel/Prometheus、凭据加密、审计和 SSRF allowlist
+> 状态基线：`main@b989eae`（2026-08-31）。实现事实以当前代码和已合并 PR 为准；开放任务以 GitHub Issue 为准。
+
+## 已完成
+
+- [x] 三类北向协议入口与 Provider 原生 JSON/SSE 透传
+- [x] 内置 `kimi-responses-adapter` 及请求、非流式、流式回归
+- [x] Source/Account/模型级协议能力矩阵、Adapter 注册表和完整路由链（#3、#4、#5）
+- [x] ProviderPreset、ModelPreset、模型发现差异和用户确认 API（#12、#13）
+- [x] PostgreSQL DB-first 启动、一次性 JSON 初始化/显式导入和原子 runtime snapshot（#14）
+- [x] Source、Account、LogicalModel、ModelBinding、Route 事务化 CRUD 与启停（#14）
+- [x] confirmed/available Binding resolver 与 `/v1/models` 可路由/健康过滤（#14）
+- [x] DB runtime 有效能力矩阵 API：完整转换链、primary/fallback、degraded 和结构化不可路由状态（#24 后端范围）
+- [x] PostgreSQL-backed Virtual Key 创建、列表、撤销和模型白名单
+- [x] Usage v1 查询、组合筛选、确定性分页、attempt 明细和受限导出（#15、#27、#28）
+- [x] 失败请求不估算 Token，`usage_source` 契约统一（#25）
+- [x] Usage 记录 `route_id`、`streamed`、脱敏 `error_summary`、真实 `upstream_model_id` 和流式 `ttft_ms`（#26）
+- [x] 运行时 `source_id` 与客户端自报 `client_source` 分离，跨 Source fallback 可逐 attempt 审计（#30）
+- [x] 网关原生 Overview、Analysis、Request Events 用量控制台及响应式基线（#16、#29、#33）
+- [x] 首选账号固定优先、账号级模型重写、跨 Source/Provider native fallback、统一加权选择和内存健康冷却
+
+## 当前开放任务
+
+### 管理端
+
+- [ ] 建立控制面管理 UI 外壳与独立 Management 空间（#42）
+- [ ] 展示 DB-first 三协议有效能力矩阵（#43；#24 的剩余范围）
+- [ ] 完成 Source 接入、模型发现差异和确认流（#45；#6 的剩余范围）
+
+### 用量与运行时
+
+- [ ] 将 Usage 的 Provider 归因与 Source 维度真正解耦（#56；#8 的最后阻塞项）
+- [ ] Virtual Key 轮换、权限更新和静态 Key 迁移（#51）
+- [ ] 健康状态持久化与主动探测（#52）
+- [ ] SSE 心跳、取消和流式超时契约（#54）
+
+### 安全、质量与运维
+
+- [ ] Admin API fail closed，并与下游鉴权完全分离（#44）
+- [ ] Provider URL allowlist 与 SSRF 防护（#46）
+- [ ] 统一 Secret Resolver 与凭据信封加密（#47）
+- [ ] Admin 写操作审计日志（#48）
+- [ ] GitHub Actions 全量验证门禁（#49）
+- [ ] Prometheus 与 OpenTelemetry（#50）
+- [ ] 数据保留、清理、备份与恢复（#53）
+
+## Epic 状态
+
+- #2 继续等待 #24 的 Web 范围（#43）收口。
+- #6 的后端模型目录和发现链已完成，继续等待 #42/#45。
+- #8 除 Provider/Source 独立归因外已完成，继续等待 #56。
+- #24 的后端聚合 API 已完成，继续等待 #42/#43。
+- #1 继续作为产品路线图保留。
+
+本文件的主线状态同步和中文 README 修正由 #55 完成。

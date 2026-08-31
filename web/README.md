@@ -19,16 +19,18 @@ AI Provider credentials, quota, pricing, Management API, or request-log body
 features.
 
 The `src/gateway-usage` boundary isolates the HTTP wire contract from page view
-models. Its client mirrors Issue #15's versioned `data`/`page` envelope,
-combination filters, deterministic cursor, breakdown dimensions, and export
-routes; fixtures keep those semantics testable while the backend PR is still
-being finalized. Usage events distinguish logical requests from upstream
+models. Its client mirrors the versioned `data`/`page` envelope, combination
+filters, deterministic cursor, breakdown dimensions, and export routes provided
+by the current `/admin/usage/*` backend. Fixtures keep those semantics testable
+without a live gateway. Usage events distinguish logical requests from upstream
 attempts, store UTC boundaries, and display timestamps in the browser's local
 timezone.
 
 An Admin key can be entered in the header when `GATEWAY_ADMIN_KEY` (or the
 temporary `GATEWAY_API_KEY` fallback) protects the Admin API. It is kept only in
-`sessionStorage`; no Admin Session login is implemented here.
+`sessionStorage`; no Admin Session login is implemented here. If neither
+environment variable is configured, the current development backend leaves the
+Admin API unprotected; Issue #44 tracks changing that behavior to fail closed.
 
 The information hierarchy is adapted from the reviewed single-file prototype
 archived at `docs/prototypes/ai-gateway-prototype.html`. The executable design

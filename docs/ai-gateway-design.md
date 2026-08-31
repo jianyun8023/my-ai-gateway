@@ -240,64 +240,21 @@ ProviderPreset 与发现确认阶段不改变 Route，也不把发现结果自�
 
 开发期 `GATEWAY_CONFIG_JSON` 只在控制面为空时做一次 `custom@1` 初始化，或在显式设置 `GATEWAY_CONFIG_IMPORT=true` 时事务化替换开发控制面。控制面非空的普通启动不会解析该 JSON，更不会覆盖 Source 快照或用户编辑；启动直接从数据库一致性事务构建 snapshot。
 
-### 3.6 自定义渠道与跨 Provider Fallback（待实施）
+### 3.6 自定义渠道与跨 Source/Provider Fallback
 
-现状：`fallback_accounts` 只允许同 Provider 账号（`src/main.rs` 按 `provider_id` 过滤），请求体 `model` 原样透传，无法把"同一模型的其他渠道"作为备用。目标：fallback 账号可以是任意 Provider 的账号，用于接入 b.ai、硅基流动等 OpenAI 兼容渠道做兜底。
+跨 Source fallback 已接入 DB-first runtime snapshot。Route 只声明逻辑模型、入口协议、策略和是否允许有损转换；实际首选与 fallback 候选来自已确认、可用的 ModelBinding。每个候选 Binding 独立携带 Source、Account、上游模型、endpoint 和协议链，运行时不会再把首选 Source 的连接信息套到 fallback 请求上。
 
-规则：
+当前规则：
 
-- fallback 转发使用候选账号自己 Provider 的 `base_url`/`endpoints`/凭据；attempt 与最终 usage 事件记录实际的 `provider_id`/`source_id`/`account_id`/`upstream_model_id`。
-- 跨 Provider fallback 仅限 `native` 链路：候选 Provider 必须对该入站协议声明 `native` 且配置了非空 endpoint；`adapter` 路由不允许跨 Provider fallback（配置校验拒绝，不做静默降级）。
-- `AccountConfig` 新增可选 `model_map`（逻辑模型 → 上游模型 ID）：转发前重写请求体顶层 `model` 字段；未命中映射则原样透传；重写结果记入 attempt 的 `upstream_model_id`。
-- 配置校验：fallback 账号/Provider 必须存在；跨 Provider 且候选 Provider 未声明该模型时，要求候选账号 `model_map` 存在对应映射；错误信息带配置路径。
-- 首选账号冷却中或被禁用时进入 fallback 候选选择，无可用候选才返回 503（修正现状直接 503 的行为）。
-- 仍为单次 fallback 重试（首选 1 次 + fallback 1 次），不引入多轮循环；fallback 候选选择对 429/5xx/传输错误路径统一执行 enabled + 健康 + 权重过滤（修正传输错误路径不过滤的现状）。
+- 首选 Binding 固定优先；HTTP 408、429、5xx、传输错误，以及首选账号禁用或处于内存冷却时，才进入 fallback 候选池。
+- fallback 候选统一执行 enabled、健康状态和权重过滤；HTTP 响应错误与传输错误使用同一选择规则。
+- 当前最多执行一次 fallback 请求（首选 1 次 + fallback 1 次），不会形成无界重试。
+- 候选请求使用自己的 Source Base URL、协议 endpoint 和 Account 凭据；请求体顶层 `model` 按实际 Binding 的 `upstream_model_id` 重写。开发期初始化配置中的账号 `model_map` 也会在三类协议主路径和 fallback 路径生效。
+- 跨 Source/Provider fallback 只允许原生协议链。Adapter 路由不能跨 Provider fallback；非法方向、多段转换和缺失 endpoint 会在配置或控制面事务中被拒绝。
+- 响应已经开始向下游发送后不能再切换账号。
+- 每次上游尝试写入独立 UsageAttempt；逻辑 UsageEvent 成功时归因最终成功 attempt，全部失败时归因最后一次实际 attempt，并保留实际 `source_id`、`account_id` 和 `upstream_model_id`。
 
-渠道资料（2026-08 确认，凭据只通过环境变量注入，禁止写入配置或文档）：
-
-- **b.ai**：`https://api.b.ai/v1`，OpenAI 兼容（Chat Completions）。免费模型：`deepseek-v4-flash`（tool_use、thinking）、`deepseek-v4-flash-vision-exp`（另含 image_in）、`glm-5.3-flash`（tool_use、always_thinking、image_in、video_in）、`qwen3.8-flash`。凭据环境变量 `B_AI_API_KEY`。
-- **硅基流动（SiliconFlow）**：`https://api.siliconflow.cn`，OpenAI 兼容。凭据环境变量 `SILICONFLOW_API_KEY`。
-- 跨渠道重叠模型（用于 fallback 测试）：`deepseek-v4-flash`（DeepSeek 官方 ↔ b.ai）、MiniMax-M2 系列（MiniMax 官方 ↔ 硅基流动）。
-
-配置示例：
-
-```json
-{
-  "providers": [
-    {
-      "id": "bai",
-      "name": "b.ai",
-      "base_url": "https://api.b.ai/v1",
-      "models": ["deepseek-v4-flash", "glm-5.3-flash"],
-      "native_protocols": ["openai_chat_completions"],
-      "endpoints": {"openai_chat_completions": "/chat/completions"},
-      "capabilities": {"streaming": "native", "tools": "native", "thinking": "native", "usage": "native"},
-      "protocol_capabilities": {
-        "openai_chat_completions": {"mode": "native"},
-        "openai_responses": {"mode": "unsupported"},
-        "anthropic_messages": {"mode": "unsupported"}
-      },
-      "model_overrides": {}
-    }
-  ],
-  "accounts": [
-    {"id": "bai-main", "provider_id": "bai", "display_name": "b.ai 免费渠道",
-     "credential_env": "B_AI_API_KEY", "enabled": true, "weight": 50,
-     "model_map": {"deepseek-chat": "deepseek-v4-flash"}}
-  ],
-  "routes": [
-    {
-      "id": "deepseek-all-native",
-      "model": "deepseek-*",
-      "provider_id": "deepseek",
-      "protocols": ["openai_chat_completions"],
-      "primary_account_id": "deepseek-main",
-      "fallback_accounts": ["bai-main"],
-      "mode": "native"
-    }
-  ]
-}
-```
+已知限制：账号健康状态仍只保存在内存中，持久化与主动探测由 #52 跟踪；当前 DB-first snapshot 仍把 Source ID 同时用作 Usage 的 `provider_id`，Provider 与 Source 的独立归因由 #56 修正。具体 Source 与 Binding 初始化示例见 [`config.example.json`](../config.example.json)，凭据只允许通过服务端 Secret 配置。
 
 ## 4. 请求处理流程
 
@@ -306,7 +263,7 @@ ProviderPreset 与发现确认阶段不改变 Route，也不把发现结果自�
   ↓
 入口协议识别
   ↓
-GATEWAY_API_KEY 鉴权
+静态 GATEWAY_API_KEY 或 PostgreSQL Virtual Key 鉴权
   ↓
 读取 model
   ↓
@@ -322,17 +279,18 @@ GATEWAY_API_KEY 鉴权
   ├─ 成功 → 返回客户端
   └─ 408/429/5xx/网络错误 → fallback
   ↓
-记录 usage_events
+记录 usage_events 与 usage_event_attempts
 ```
 
 当前 fallback 规则：
 
 - 首选账号固定优先；
 - HTTP 408、429、5xx 和网络错误允许 fallback；
-- fallback 账号必须启用且属于同一 Provider；
+- fallback Binding 必须启用、可用且通过账号健康过滤；原生链允许跨 Source/Provider；
 - 响应已经开始流式输出后不能切换账号；
-- 当前实现对 HTTP 响应 fallback 使用权重选择，对网络错误暂按 fallback 列表第一项重试，后续需要统一为完整权重策略。
-- 账号失败会进入 30 秒内存冷却窗口，服务重启后状态会丢失。
+- HTTP 408、429、5xx 与网络错误使用同一加权候选选择；其他 4xx 不触发 fallback；
+- 请求模型按候选 Binding/账号映射改写，attempt 记录实际 Source、账号和上游模型；
+- 当前最多执行一次 fallback；账号失败会进入内存冷却窗口，服务重启后健康状态会丢失。
 
 ## 5. 当前配置模型
 
@@ -447,10 +405,13 @@ Kimi Adapter：
 - Provider、Account、Route 配置模型；
 - 精确模型匹配；
 - `*` 前缀模型匹配；
-- 主账号优先；
-- fallback 账号；
-- 权重选择；
-- Adapter/native 模式区分。
+- DB-first Route + Binding snapshot；
+- 首选 Binding 固定优先；
+- native 链跨 Source/Provider fallback；
+- HTTP/传输错误统一加权候选选择；
+- 三协议请求模型按实际 Binding/账号映射重写；
+- Adapter/native 模式区分和单段转换校验；
+- 逐 attempt 记录实际 Source、账号和上游模型。
 
 ### ProviderPreset 与模型发现
 
@@ -474,8 +435,8 @@ Kimi Adapter：
 
 - `DATABASE_URL` 是 DB-first 运行时必填项；
 - 启动时按 migration 初始化用量、控制面和模型目录表，并在 `REPEATABLE READ READ ONLY` 事务中构建运行时 snapshot；控制面写入在 `SERIALIZABLE` 事务中递增 `snapshot_revision`，内存发布拒绝旧 revision 覆盖新 revision；
-- 请求结束后写入基础请求事件；
-- `request_id` 唯一防重复。
+- 请求结束后写入逻辑 UsageEvent 和逐次 UsageAttempt；
+- `request_id` 与 `(request_id, attempt_no)` 分别保证逻辑请求和上游尝试幂等。
 
 ### Virtual Key 与统计 API
 
@@ -515,9 +476,9 @@ v1 响应 envelope 固定如下：summary 为 `{version, timezone, range, data}`
 - Key 分组和路由白名单；
 - 更完整的 Admin Session 与审计。
 
-### 7.2 PostgreSQL 领域表
+### 7.2 PostgreSQL 持久化剩余项
 
-当前已经创建 `usage_events`、`usage_event_attempts`、`virtual_keys`、`providers`、`accounts`、`routes`，Provider/Model preset、Source、SourceModel、LogicalModel、ModelBinding、SourceModelCapability 模型目录表，以及 `source_connection_tests`、`source_discovery_runs` 审计表。内置预设以不可变 `(id, version)` 启动注册。运行时从 `sources`、`accounts`、`logical_models`、`model_bindings`、`source_models`、`source_model_capabilities` 和 `routes` 构建完整 `protocol_in → protocol_upstream → endpoint/Adapter` 链，旧 `providers` 行不再是运行时事实来源。`request_id` 表示一次北向逻辑请求并保持唯一；重试尝试写入 `usage_event_attempts(request_id, attempt_no)`，同一尝试幂等。`usage_events.logical_model` 保存客户端模型，`upstream_model_id` 保存实际 Binding 的上游模型，`source_id` 保存最终实际 Source，`client_source` 独立保存客户端自报来源；attempt 逐次保存自己的 `source_id`。历史旧 `source` 值迁入 `client_source`，历史 `source_id` 保持 `NULL`；Usage 历史不对控制面 `sources` 设置外键，因此删除 Source 不会删除或抹除历史归因。Virtual Key 鉴权成功时写入 `virtual_key_id`，静态入口 Key 保持为空。时间统一按 PostgreSQL `TIMESTAMPTZ` 以 UTC 存储，展示层负责本地时区转换。
+当前已经创建 `usage_events`、`usage_event_attempts`、`virtual_keys`、`providers`、`accounts`、`routes`，Provider/Model preset、Source、SourceModel、LogicalModel、ModelBinding、SourceModelCapability 模型目录表，以及 `source_connection_tests`、`source_discovery_runs` 记录表。内置预设以不可变 `(id, version)` 启动注册。运行时从 `sources`、`accounts`、`logical_models`、`model_bindings`、`source_models`、`source_model_capabilities` 和 `routes` 构建完整 `protocol_in → protocol_upstream → endpoint/Adapter` 链，旧 `providers` 行不再是运行时事实来源。`request_id` 表示一次北向逻辑请求并保持唯一；重试尝试写入 `usage_event_attempts(request_id, attempt_no)`，同一尝试幂等。`usage_events.logical_model` 保存客户端模型，`upstream_model_id` 保存实际 Binding 的上游模型，`source_id` 保存最终实际 Source，`client_source` 独立保存客户端自报来源；attempt 逐次保存自己的 `source_id`。历史旧 `source` 值迁入 `client_source`，历史 `source_id` 保持 `NULL`；Usage 历史不对控制面 `sources` 设置外键，因此删除 Source 不会删除或抹除历史归因。Virtual Key 鉴权成功时写入 `virtual_key_id`，静态入口 Key 保持为空。时间统一按 PostgreSQL `TIMESTAMPTZ` 以 UTC 存储，展示层负责本地时区转换。
 
 控制面写入采用 `SERIALIZABLE` 事务：先写候选变更，再校验引用、endpoint、Adapter 注册表与方向、单段转换、能力链和 Binding 可路由性，随后在同一事务读取并构建下一版不可变 snapshot；任一步失败都回滚。提交成功后一次写锁替换整个 snapshot，并发请求只会持有旧版或新版的完整 `Arc`。手工 reload 使用一致性只读事务；失败不替换当前有效 snapshot。
 
@@ -529,29 +490,21 @@ PostgreSQL 回归测试只连接显式的 `TEST_DATABASE_URL`，不会复用运�
 
 ProviderPreset/模型发现回归使用真实 PostgreSQL 与 mock 上游，覆盖 DeepSeek、MiniMax、Kimi Code 的成功、失败、空列表、重复刷新、模型消失、confirmed/user 覆盖保留、批量确认和日志脱敏。
 
-- `health_snapshots`；
-- `audit_logs`。
+仍待新增的是账号健康持久化/探测记录（#52）和统一 Admin 写操作审计日志（#48）；它们不能用普通应用日志代替。
 
 ### 7.3 Token 统计
 
-已完成非流式 JSON usage 提取、SSE 末事件解析和异步落库，支持 OpenAI Chat/Responses、Anthropic Messages 字段；usage 缺失时使用 `tiktoken-rs` 的 `cl100k_base` 估算并标记为 `estimated`。仍待完成：
+已完成 OpenAI Chat/Responses、Anthropic Messages 的非流式 JSON usage 提取、SSE 末事件解析、reasoning/cached token 映射和异步落库。成功响应缺少已确认 usage 时可以使用 `tiktoken-rs` 的 `cl100k_base` 估算并标记为 `estimated`；失败 JSON/SSE 不再估算，固定记录 `missing` 和 0 Token。
 
-- TTFT 和真实流式完成时间记录。
+UsageEvent 已记录实际 `upstream_model_id`、`route_id`、`streamed`、脱敏 `error_summary`、最终 `source_id`、独立 `client_source` 和 `ttft_ms`。流式 TTFT 从逻辑请求开始计到首个非空上游 body chunk，不预取、不缓冲，也不改变 SSE 顺序或背压；空流和无法观察首块的失败保持 `NULL`。每个 fallback attempt 另存实际 Source、账号、上游模型、状态和耗时。
 
-2026-08-31 真实联调发现的 usage 提取缺口（并入 #25、#26 处理）：
-
-- Adapter（Responses → Anthropic）非流式响应的 usage 未落库：上游转换后的响应体含 usage，事件却记为 `missing` 且 0/0；
-- Kimi `/v1/messages` 非流式响应只提取到 output_tokens，input_tokens 为 0；
-- MiniMax/Kimi 流式无 usage 末事件时 tiktoken 估算值明显膨胀（如实际短回复估算出上千 output tokens）；
-- `reasoning_tokens` 恒为 0：MiniMax Responses 的 reasoning item、Anthropic thinking 的 token 均未提取；
-- 失败请求（如上游 401）也做了 token 估算并标记 `estimated`，语义待确认。
+当前统计语义的已知缺口不是 Token 提取，而是 Provider 与 Source 归因仍使用同一运行时 ID；多个 Source 无法正确聚合到同一 ProviderPreset。该问题由 #56 跟踪。
 
 ### 7.4 统计接口和页面
 
-已完成稳定 v1 `/admin/usage/summary`、`timeseries`、`breakdown`、`events`、`export` 查询契约、组合筛选、确定性游标分页、CSV/JSON 导出，以及 Source/Account/LogicalModel/ModelBinding/Route 管理 API；同时已 vendor Keeper React 前端、构建静态资源（访问 `/admin/`）。仍待完成：
+已完成稳定 v1 `/admin/usage/summary`、`timeseries`、`breakdown`、`events`、`export` 查询契约、组合筛选、确定性游标分页和 CSV/JSON 导出。活动 Web 应用已经收敛为网关原生 Overview、Analysis、Request Events 三页，只请求 `/admin/usage/*`，不挂载 CPA Session、Ranking、Auth Files、配额、定价或请求正文功能。
 
-- Keeper UI 字段改为网关原生字段；
-- Admin Session 登录。
+管理产品面的剩余工作是可复用控制台外壳与独立 Management 空间（#42）、有效能力矩阵页面（#43），以及 Source 接入和模型发现/确认页面（#45）。Admin API fail-closed 与数据面 Key 分离由 #44 负责；当前不把 CPA 登录或 Admin Session 当作已有能力。
 
 2026-08-31 控制台原型评审后，视觉基线采用 Tech-Utility 设计语言、Signal Green、固定桌面侧栏、紧凑顶部栏、卡片/表格和右侧详情抽屉；正式主导航仍只包含 Overview、Analysis、Request Events。设计 Token 与组件约束维护在 [`brand-spec.md`](brand-spec.md)，原型归档在 [`prototypes/ai-gateway-prototype.html`](prototypes/ai-gateway-prototype.html)，只作为设计参考，不参与构建。Source/Account、LogicalModel/SourceModel/ModelBinding/Route 必须继续按领域职责分离，不能照静态原型合并。响应式按 `<= 920px` overlay 侧栏、`<= 600px` 单列筛选/全宽 drawer、`<= 380px` 紧凑 KPI 渐进降级。实施与验收记录见 GitHub Issue #33。
 
@@ -559,36 +512,40 @@ CPA Usage Keeper 只复用 React 页面和交互，不复用其 Go 后端、SQLi
 
 ### 7.5 账号健康和生产化
 
-- 账号健康状态持久化；
-- 冷却时间；
-- 连续失败计数；
-- 完整 fallback 权重策略；
-- 上游连接池和超时分级；
-- Prometheus/OpenTelemetry；
-- 凭据加密存储；
-- 审计日志；
-- SSRF 防护和 Provider URL allowlist。
+已完成账号健康的内存冷却、连续失败计数、首选账号固定优先，以及 HTTP/传输错误共用的加权 fallback 选择。当前运行路径能在首选账号禁用或冷却时直接选择可用 fallback，但服务重启会丢失健康状态。
 
-已完成账号健康的内存冷却和基础 usage events 查询；仍待持久化健康状态、完整筛选和生产监控。
+生产化剩余范围均有独立 Issue：
+
+- 健康状态持久化与主动探测（#52）；
+- SSE 心跳、取消和流式超时契约（#54）；
+- Prometheus/OpenTelemetry（#50）；
+- Secret Resolver 与凭据信封加密（#47）；
+- Admin 写操作审计日志（#48）；
+- Provider URL allowlist、解析后 IP 校验、重定向限制和 SSRF 防护（#46）；
+- 数据保留、清理、备份和恢复（#53）。
 
 ### 7.6 测试
 
 - 已增加 Kimi 内置 Adapter 的 mock 上游端到端测试；
 - 已覆盖非流式 thinking/web search 转换；
 - 已覆盖流式 Anthropic SSE → Responses SSE；
-- 已增加 OpenAI/Anthropic usage JSON 和 SSE 提取单测。
+- 已增加 OpenAI/Anthropic usage JSON 和 SSE 提取单测；
+- 已覆盖主账号和 fallback 的三协议模型重写、408/429/5xx/传输错误、首选账号不可用、全部失败和流式 TTFT；
+- 已覆盖失败请求 `missing/0`、真实 upstream model、逻辑事件/attempt 归因及跨 Source fallback；
 - 已增加隔离 PostgreSQL schema 的控制面集成测试，覆盖 DB-first 一次性导入、全资源 CRUD/启停、事务回滚、native/adapter Binding 解析、并发 snapshot 切换、刷新失败保留旧 snapshot、凭据脱敏和 `/v1/models` 健康过滤。
 
 ### 7.7 真实联调基线（2026-08-31）
 
-已用真实上游（MiniMax、DeepSeek、Kimi Code）跑通并落库验证：
+历史真实上游联调已验证：
 
 - 三协议原生透传全部可用，包括 MiniMax `/v1/responses`、DeepSeek `/v1/responses` 与 `/anthropic/v1/messages`（两家 Anthropic 兼容端点均为 `{base_url}/anthropic/v1/messages`，`config.example.json` 已修正）；
 - Kimi Responses → Anthropic adapter 非流式/流式可用，SSE 事件序列完整；
-- usage 落库、`/admin/usage/*` 聚合、Admin 控制台 Overview/Analysis 展示与 DB 一致；`protocol_in → protocol_upstream → mode` 链路记录正确；
-- 失败请求（上游 401）透传并记录 `success=false`，且不触发 fallback——符合 `is_retryable` 仅认 408/429/5xx 的语义；429/5xx 触发 fallback 的完整链路尚无真实环境验证手段，需要 mock 级 e2e 补齐；
-- `upstream_model_id` 恒为空、TTFT 未实现、fallback 最多一次重试且首选冷却时直接 503——均属已知缺口；
-- `web/dist` 需随前端源码重建，旧构建仍会调 CPA Keeper 的 `/api/v1/auth/*`（网关无此端点）。
+- usage 落库、`/admin/usage/*` 聚合和 Admin 控制台 Overview/Analysis 展示与数据库一致；`protocol_in → protocol_upstream → mode` 链路记录正确；
+- 上游 401 原样透传并记录 `success=false`，且不触发 fallback，符合仅对 408、429、5xx 和传输错误重试的语义。
+
+上述真实环境基线之后，主线已通过 mock 上游和真实 PostgreSQL 回归补齐实际 `upstream_model_id`、流式 TTFT、首选账号不可用时的 early fallback、HTTP/传输错误统一加权选择、全部失败归因和跨 Source attempt 审计。三家真实 Provider 尚未在这些修复后完整重跑，因此这是待复验项，不再作为“功能未实现”记录。
+
+当前仍确认存在的运行时语义缺口是 Usage 的 `provider_id` 与 `source_id` 尚未真正分离（#56）。另外，活动 Web 源码只请求 `/admin/usage/*`；`web/dist` 是构建产物，必须由当前源码生成，不能复用历史 Keeper 构建。
 
 ## 8. 验收标准
 
@@ -603,7 +560,7 @@ CPA Usage Keeper 只复用 React 页面和交互，不复用其 Go 后端、SQLi
 ### Fallback 渠道
 
 - 429/5xx/传输错误时可 fallback 到不同 Provider 的账号，响应来自候选渠道；
-- 转发 body 的 `model` 按候选账号 `model_map` 重写，attempt 记录实际 provider 与 upstream_model_id；
+- 转发 body 的 `model` 按候选 Binding/账号映射重写，attempt 记录实际 Source、账号与 upstream_model_id；
 - adapter 路由配置跨 Provider fallback 时被校验拒绝；
 - 首选账号冷却/禁用时自动进入 fallback 候选；
 - 上述链路有 mock 级端到端测试（非流式 + 流式）。
@@ -622,16 +579,16 @@ CPA Usage Keeper 只复用 React 页面和交互，不复用其 Go 后端、SQLi
 
 - 每个请求有唯一 request_id；
 - 成功和失败请求都可查询；
-- 能按协议、模型、Provider、账号和 Key 聚合；
+- 能按协议、模型、Source、账号和 Key 聚合；Provider 与 Source 独立归因完成后再关闭 #8；
 - 上游 usage 优先；
 - 缺失 usage 时明确标记估算或缺失。
 
 ## 9. 开发顺序
 
-1. 完成 Virtual Key 轮换、分组和更完整的 Admin API；
-2. 扩展 PostgreSQL providers/accounts/routes 表；
-3. 完成流式 usage 提取、tokenizer 估算和异步落库；
-4. 接入 Keeper React UI；
-5. 扩展 Kimi Adapter 端到端测试矩阵；
-6. 增加账号健康、冷却和完整 fallback；
-7. 增加生产环境安全、监控和备份。
+以下顺序以当前开放 Issue 和依赖关系为准，互不冲突的切片可以并行：
+
+1. 建立自动验证门禁（#49），并收口 Admin Key 分离、URL/SSRF、Secret 和审计安全基线（#44、#46、#47、#48）。
+2. 建立独立 Management 外壳（#42），再并行接入有效能力矩阵（#43）和 Source/模型发现确认流（#45）。
+3. 修正 Provider/Source 独立归因（#56），随后完成 #8 用量分析 Epic 验收。
+4. 完成 Virtual Key 生命周期、健康持久化/主动探测和 SSE 生命周期契约（#51、#52、#54）。
+5. 接入 Prometheus/OpenTelemetry，并建立数据保留、备份与恢复流程（#50、#53）。
