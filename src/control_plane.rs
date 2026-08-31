@@ -404,6 +404,32 @@ async fn apply_manual_health_transition(
     Ok(())
 }
 
+async fn apply_manual_health_transition_for_source(
+    tx: &mut Transaction<'_, Postgres>,
+    source_id: &str,
+    enabled: bool,
+    observed_at: DateTime<Utc>,
+) -> Result<(), ControlPlaneError> {
+    let status = if enabled { "unknown" } else { "disabled" };
+    sqlx::query(
+        "UPDATE accounts SET health_status=$2,cooldown_until=NULL,consecutive_failures=0,last_error=NULL,last_success_at=NULL,health_source='manual',health_updated_at=$3,last_probe_error=NULL WHERE source_id=$1",
+    )
+    .bind(source_id)
+    .bind(status)
+    .bind(observed_at)
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query(
+        "INSERT INTO account_health_events (account_id,status,source,observed_at,cooldown_until,consecutive_failures) SELECT id,$2,'manual',$3,NULL,0 FROM accounts WHERE source_id=$1",
+    )
+    .bind(source_id)
+    .bind(status)
+    .bind(observed_at)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
 fn validate_resource_id(path: &str, body: &str, kind: &str) -> Result<(), ControlPlaneError> {
     if path != body {
         return Err(ControlPlaneError::Validation(vec![format!(
@@ -885,7 +911,7 @@ async fn build_snapshot(
     generated_at: DateTime<Utc>,
 ) -> Result<RuntimeSnapshot, ControlPlaneError> {
     let rows = sqlx::query_as::<_, SnapshotRow>(
-        "SELECT r.id AS route_id,lm.public_name,lm.display_name,r.protocols AS route_protocols,r.allow_lossy_conversion,b.id AS binding_id,b.source_id,s.provider_preset_id,s.display_name AS source_display_name,s.base_url,s.endpoints,b.account_id,a.display_name AS account_display_name,a.credential_env,a.enabled AS account_enabled,s.enabled AS source_enabled,a.weight,b.upstream_model_id,b.protocol,cap.mode,cap.source_protocol,cap.adapter,cap.feature_capabilities FROM routes r JOIN logical_models lm ON lm.id=r.logical_model_id JOIN model_bindings b ON b.logical_model_id=lm.id JOIN sources s ON s.id=b.source_id JOIN accounts a ON a.id=b.account_id AND a.source_id=b.source_id JOIN source_models sm ON sm.source_id=b.source_id AND sm.upstream_model_id=b.upstream_model_id JOIN source_model_capabilities cap ON cap.source_id=b.source_id AND cap.upstream_model_id=b.upstream_model_id AND cap.protocol=b.protocol WHERE r.enabled AND lm.enabled AND lm.status='confirmed' AND b.enabled AND b.status='confirmed' AND sm.confirmation_status='confirmed' AND sm.availability_status='available' AND cap.status='confirmed' AND cap.mode IN ('native','adapter') ORDER BY r.id,b.protocol,CASE cap.mode WHEN 'native' THEN 0 ELSE 1 END,b.priority DESC,b.id",
+        "SELECT r.id AS route_id,lm.public_name,lm.display_name,r.protocols AS route_protocols,r.allow_lossy_conversion,b.id AS binding_id,b.source_id,s.provider_preset_id,s.display_name AS source_display_name,s.base_url,s.endpoints,b.account_id,a.display_name AS account_display_name,a.credential_env,a.enabled AS account_enabled,s.enabled AS source_enabled,a.weight,b.upstream_model_id,b.protocol,cap.mode,cap.source_protocol,cap.adapter,cap.feature_capabilities FROM routes r JOIN logical_models lm ON lm.id=r.logical_model_id JOIN model_bindings b ON b.logical_model_id=lm.id JOIN sources s ON s.id=b.source_id JOIN accounts a ON a.id=b.account_id AND a.source_id=b.source_id JOIN source_models sm ON sm.source_id=b.source_id AND sm.upstream_model_id=b.upstream_model_id JOIN source_model_capabilities cap ON cap.source_id=b.source_id AND cap.upstream_model_id=b.upstream_model_id AND cap.protocol=b.protocol WHERE r.enabled AND lm.enabled AND lm.status='confirmed' AND b.enabled AND b.status='confirmed' AND sm.confirmation_status='confirmed' AND sm.availability_status='available' AND cap.status='confirmed' AND cap.mode IN ('native','adapter') ORDER BY r.id,b.protocol,b.priority DESC,CASE cap.mode WHEN 'native' THEN 0 ELSE 1 END,b.id",
     )
     .fetch_all(&mut **tx)
     .await?;
@@ -1793,8 +1819,8 @@ impl ControlPlane {
         validate_resource_id(id, &input.id, "source")?;
         validate_source_input(input, &self.source_url_policy)?;
         let mut tx = self.begin_write().await?;
-        let preset: Option<(String, i32)> = sqlx::query_as(
-            "SELECT provider_preset_id,provider_preset_version FROM sources WHERE id=$1 FOR UPDATE",
+        let preset: Option<(String, i32, bool)> = sqlx::query_as(
+            "SELECT provider_preset_id,provider_preset_version,enabled FROM sources WHERE id=$1 FOR UPDATE",
         )
         .bind(id)
         .fetch_optional(&mut *tx)
@@ -1804,7 +1830,7 @@ impl ControlPlane {
                 "source '{id}' not found"
             )));
         };
-        if preset
+        if (preset.0.clone(), preset.1)
             != (
                 input.provider_preset_id.clone(),
                 input.provider_preset_version,
@@ -1829,6 +1855,10 @@ impl ControlPlane {
         .bind(input.enabled)
         .fetch_one(&mut *tx)
         .await?;
+        if preset.2 != input.enabled {
+            apply_manual_health_transition_for_source(&mut tx, id, input.enabled, Utc::now())
+                .await?;
+        }
         let snapshot = self.finish_write(tx).await?;
         Ok(Mutation { record, snapshot })
     }
@@ -1839,6 +1869,11 @@ impl ControlPlane {
         enabled: bool,
     ) -> Result<Mutation<SourceView>, ControlPlaneError> {
         let mut tx = self.begin_write().await?;
+        let previous_enabled: Option<bool> =
+            sqlx::query_scalar("SELECT enabled FROM sources WHERE id=$1 FOR UPDATE")
+                .bind(id)
+                .fetch_optional(&mut *tx)
+                .await?;
         let record = sqlx::query_as::<_, SourceView>(
             "UPDATE sources SET enabled=$2,updated_at=NOW() WHERE id=$1 RETURNING id,display_name,provider_preset_id,provider_preset_version,provider_preset_snapshot,base_url,endpoints,auth_config,protocol_capabilities,enabled,created_at,updated_at",
         )
@@ -1847,6 +1882,9 @@ impl ControlPlane {
         .fetch_optional(&mut *tx)
         .await?
         .ok_or_else(|| ControlPlaneError::NotFound(format!("source '{id}' not found")))?;
+        if previous_enabled.is_some_and(|previous| previous != enabled) {
+            apply_manual_health_transition_for_source(&mut tx, id, enabled, Utc::now()).await?;
+        }
         let snapshot = self.finish_write(tx).await?;
         Ok(Mutation { record, snapshot })
     }
@@ -1902,6 +1940,9 @@ impl ControlPlane {
             .bind(input.weight)
             .execute(&mut *tx)
             .await?;
+        if !input.enabled {
+            apply_manual_health_transition(&mut tx, &input.id, false, Utc::now()).await?;
+        }
         let record = fetch_account_tx(&mut tx, &input.id).await?;
         let snapshot = self.finish_write(tx).await?;
         Ok(Mutation { record, snapshot })
@@ -1916,8 +1957,8 @@ impl ControlPlane {
         validate_account_input(input)?;
         let mut tx = self.begin_write().await?;
         ensure_source_exists(&mut tx, &input.source_id).await?;
-        let previous_enabled: Option<bool> =
-            sqlx::query_scalar("SELECT enabled FROM accounts WHERE id=$1 FOR UPDATE")
+        let previous: Option<(String, bool)> =
+            sqlx::query_as("SELECT source_id,enabled FROM accounts WHERE id=$1 FOR UPDATE")
                 .bind(id)
                 .fetch_optional(&mut *tx)
                 .await?;
@@ -1936,7 +1977,9 @@ impl ControlPlane {
                 "account '{id}' not found"
             )));
         }
-        if previous_enabled.is_some_and(|previous| previous != input.enabled) {
+        if previous.is_some_and(|(source_id, enabled)| {
+            source_id != input.source_id || enabled != input.enabled
+        }) {
             apply_manual_health_transition(&mut tx, id, input.enabled, Utc::now()).await?;
         }
         let record = fetch_account_tx(&mut tx, id).await?;

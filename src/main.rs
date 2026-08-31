@@ -442,7 +442,13 @@ fn spawn_health_probe_loop(state: AppState) {
         return;
     }
     let interval = state.health.config().probe_interval;
+    let on_startup = std::env::var("GATEWAY_HEALTH_PROBE_ON_STARTUP")
+        .ok()
+        .is_some_and(|value| !matches!(value.as_str(), "0" | "false" | "FALSE" | "no"));
     tokio::spawn(async move {
+        if on_startup {
+            run_health_probes_once(&state).await;
+        }
         loop {
             tokio::time::sleep(interval).await;
             run_health_probes_once(&state).await;
@@ -470,7 +476,7 @@ async fn run_health_probes_once(state: &AppState) {
                 .map(|elapsed| elapsed >= state.health.config().probe_interval)
                 .unwrap_or(true)
         });
-        if !due || current.cooldown_remaining_ms > 0 {
+        if !due || (current.cooldown_remaining_ms > 0 && !current.stale) {
             continue;
         }
         match state
@@ -2472,6 +2478,7 @@ async fn admin_health(State(state): State<AppState>, headers: HeaderMap) -> Resp
                 .cloned()
                 .unwrap_or_else(|| health::AccountHealth {
                     available: enabled && !database_configured,
+                    source_enabled: true,
                     consecutive_failures: 0,
                     cooldown_remaining_ms: 0,
                     status: if enabled { "unknown" } else { "disabled" }.into(),
@@ -2489,7 +2496,7 @@ async fn admin_health(State(state): State<AppState>, headers: HeaderMap) -> Resp
             "account_id": account_id,
             "provider_id": source_id.clone(),
             "source_id": source_id.clone(),
-            "source": {"source_id": source_id},
+            "source": health.source.clone(),
             "display_name": display_name,
             "enabled": enabled,
             "health_status": health.status.clone(),
@@ -2535,6 +2542,32 @@ async fn admin_account_health(
                 return error_response(StatusCode::NOT_FOUND, "not_found", "account not found")
             }
             Err(error) => return control_plane_error(error),
+        }
+    } else if let Some(database) = &state.db {
+        match sqlx::query_as::<_, (String, String, String, bool)>(
+            "SELECT id,source_id,display_name,enabled FROM accounts WHERE id=$1",
+        )
+        .bind(&account_id)
+        .fetch_optional(database.pool())
+        .await
+        {
+            Ok(Some((id, source_id, display_name, enabled))) => json!({
+                "account_id": id,
+                "source_id": source_id,
+                "display_name": display_name,
+                "enabled": enabled,
+            }),
+            Ok(None) => {
+                return error_response(StatusCode::NOT_FOUND, "not_found", "account not found")
+            }
+            Err(error) => {
+                tracing::warn!(%error, "failed to read account for health API");
+                return error_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "database_error",
+                    "failed to read account for health API",
+                );
+            }
         }
     } else {
         let live = state.snapshot();
@@ -2741,9 +2774,12 @@ fn probe_error_response(error: health::ProbeError) -> Response<Body> {
         "not_found" => StatusCode::NOT_FOUND,
         "database_unavailable" => StatusCode::SERVICE_UNAVAILABLE,
         "database_error" => StatusCode::INTERNAL_SERVER_ERROR,
-        "source_url_blocked" | "invalid_source_url" | "invalid_provider_preset" => {
-            StatusCode::UNPROCESSABLE_ENTITY
-        }
+        "source_url_blocked"
+        | "invalid_source_url"
+        | "invalid_provider_preset"
+        | "invalid_header_template"
+        | "credential_unavailable"
+        | "protocol_unsupported" => StatusCode::UNPROCESSABLE_ENTITY,
         _ => StatusCode::BAD_GATEWAY,
     };
     error_response(status, error.code(), &error.message())
@@ -4210,6 +4246,80 @@ mod admin_auth_tests {
             &key_digest("data-plane-only"),
             supplied_key(&data_headers).unwrap()
         ));
+    }
+}
+
+#[cfg(test)]
+mod health_api_tests {
+    use super::*;
+    use std::collections::HashMap;
+    use std::time::Duration;
+
+    fn health_state() -> AppState {
+        let provider = config::ProviderConfig {
+            id: "health-provider".into(),
+            name: "Health Provider".into(),
+            base_url: "https://health.example".into(),
+            models: vec!["health-model".into()],
+            native_protocols: vec![Protocol::OpenAiChatCompletions],
+            endpoints: HashMap::from([(
+                Protocol::OpenAiChatCompletions,
+                "/v1/chat/completions".into(),
+            )]),
+            capabilities: config::Capabilities::native(),
+            protocol_capabilities: HashMap::new(),
+            model_overrides: HashMap::new(),
+        };
+        let account = config::AccountConfig {
+            id: "health-account".into(),
+            provider_id: "health-provider".into(),
+            display_name: "Health Account".into(),
+            credential_env: None,
+            credential: None,
+            enabled: true,
+            weight: 100,
+            protocol_capabilities: HashMap::new(),
+            capabilities: None,
+            model_overrides: HashMap::new(),
+            model_map: HashMap::new(),
+        };
+        let config = Arc::new(GatewayConfig {
+            listen_addr: "127.0.0.1:0".into(),
+            providers: vec![provider],
+            accounts: vec![account],
+            routes: vec![],
+        });
+        AppState {
+            live: Arc::new(std::sync::RwLock::new(LiveConfig::legacy(config))),
+            http: transport::test_client().expect("health API HTTP client"),
+            db: None,
+            control_plane: None,
+            health: health::HealthRegistry::new(Duration::from_secs(1)),
+            admin_auth: AdminAuth::test(),
+        }
+    }
+
+    #[tokio::test]
+    async fn health_api_exposes_transition_source_timestamp_and_stale() {
+        let state = health_state();
+        state.health.mark_failure("health-account").await;
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            axum::http::header::AUTHORIZATION,
+            HeaderValue::from_static("Bearer test-admin-key"),
+        );
+        let response = admin_health(State(state), headers).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .expect("health API body");
+        let body: Value = serde_json::from_slice(&body).expect("health API JSON");
+        let account = &body["data"][0];
+        assert_eq!(account["health"]["source"], "passive");
+        assert!(account["health"]["updated_at"].is_string());
+        assert!(account["health"].get("stale").is_some());
+        assert_eq!(account["health_source"], "passive");
+        assert!(account.get("health_updated_at").is_some());
     }
 }
 

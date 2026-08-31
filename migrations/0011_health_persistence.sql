@@ -3,7 +3,7 @@
 -- observation clock used for cooldown expiry and stale reporting.
 ALTER TABLE accounts
   ADD COLUMN IF NOT EXISTS health_source TEXT NOT NULL DEFAULT 'unknown',
-  ADD COLUMN IF NOT EXISTS health_updated_at TIMESTAMPTZ DEFAULT NOW(),
+  ADD COLUMN IF NOT EXISTS health_updated_at TIMESTAMPTZ,
   ADD COLUMN IF NOT EXISTS consecutive_failures INTEGER NOT NULL DEFAULT 0,
   ADD COLUMN IF NOT EXISTS last_probe_at TIMESTAMPTZ,
   ADD COLUMN IF NOT EXISTS last_probe_status TEXT,
@@ -21,6 +21,14 @@ WHERE health_updated_at IS NULL
    OR health_source IS NULL
    OR btrim(health_source) = '';
 
+ALTER TABLE accounts
+  ALTER COLUMN health_updated_at SET DEFAULT NOW();
+
+UPDATE accounts
+SET health_status = 'unknown'
+WHERE health_status IS NULL
+   OR health_status NOT IN ('unknown', 'healthy', 'cooling_down', 'unhealthy', 'disabled');
+
 DO $$ BEGIN
   ALTER TABLE accounts
     ADD CONSTRAINT accounts_health_source_check
@@ -37,16 +45,25 @@ EXCEPTION
   WHEN duplicate_object THEN NULL;
 END $$;
 
+DO $$ BEGIN
+  ALTER TABLE accounts
+    ADD CONSTRAINT accounts_health_status_check
+    CHECK (health_status IN ('unknown', 'healthy', 'cooling_down', 'unhealthy', 'stale', 'disabled'));
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
+
 CREATE INDEX IF NOT EXISTS idx_accounts_health_runtime
   ON accounts (enabled, health_status, cooldown_until, health_updated_at);
 
--- Keep a bounded, body-free transition history for operations and debugging.
--- The account row remains the current source of truth; routing does not read
+-- Keep an append-only, body-free transition history for operations and
+-- debugging. Retention/cleanup is owned by the data-retention work; the
+-- account row remains the current source of truth and routing does not read
 -- this history table.
 CREATE TABLE IF NOT EXISTS account_health_events (
   id BIGSERIAL PRIMARY KEY,
   account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-  status TEXT NOT NULL CHECK (status IN ('unknown', 'healthy', 'cooling_down', 'unhealthy', 'disabled')),
+  status TEXT NOT NULL CHECK (status IN ('unknown', 'healthy', 'cooling_down', 'unhealthy', 'stale', 'disabled')),
   source TEXT NOT NULL CHECK (source IN ('unknown', 'passive', 'probe', 'manual', 'startup')),
   observed_at TIMESTAMPTZ NOT NULL,
   cooldown_until TIMESTAMPTZ,

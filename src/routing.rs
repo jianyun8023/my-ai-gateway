@@ -832,6 +832,34 @@ mod tests {
     }
 
     #[test]
+    fn disabled_primary_remains_primary_for_data_plane_fallback() {
+        let mut config = config(
+            provider(),
+            vec![route("fixed-primary", "m", Protocol::OpenAiChatCompletions)],
+        );
+        config.accounts[0].enabled = false;
+        config.accounts.push(AccountConfig {
+            id: "fallback".into(),
+            provider_id: "p".into(),
+            display_name: "fallback".into(),
+            credential_env: None,
+            credential: None,
+            enabled: true,
+            weight: 100,
+            protocol_capabilities: HashMap::new(),
+            capabilities: Some(Capabilities::native()),
+            model_overrides: HashMap::new(),
+            model_map: HashMap::new(),
+        });
+        config.routes[0].fallback_accounts = vec!["fallback".into()];
+        let resolved = RouteResolver::new(Arc::new(config))
+            .resolve_detailed(Protocol::OpenAiChatCompletions, "m")
+            .expect("disabled primary should still resolve");
+        assert_eq!(resolved.primary_account_id, "a");
+        assert_eq!(resolved.fallback_accounts, vec!["fallback"]);
+    }
+
+    #[test]
     fn multi_protocol_route_matches_each_protocol() {
         let mut p = provider();
         p.native_protocols = vec![Protocol::OpenAiChatCompletions, Protocol::AnthropicMessages];

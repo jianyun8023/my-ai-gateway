@@ -125,6 +125,7 @@ impl HealthClock for ManualHealthClock {
 #[derive(Clone, Debug, Serialize)]
 pub struct AccountHealth {
     pub available: bool,
+    pub source_enabled: bool,
     pub consecutive_failures: u32,
     pub cooldown_remaining_ms: u64,
     pub status: String,
@@ -544,19 +545,7 @@ impl HealthRegistry {
             .await
         {
             Ok(record) => record,
-            Err(error) => {
-                if !matches!(&error, DiscoveryServiceError::Catalog(_)) {
-                    self.mark_probe_failure(
-                        account_id,
-                        None,
-                        Some(error.code()),
-                        Some(error.public_message()),
-                        None,
-                    )
-                    .await;
-                }
-                return Err(ProbeError::Discovery(error));
-            }
+            Err(error) => return Err(ProbeError::Discovery(error)),
         };
         self.apply_connection_test(&record).await;
         let health = self.get_health(account_id).await;
@@ -668,9 +657,12 @@ fn health_from_row(
     stale_after: Duration,
 ) -> AccountHealth {
     let updated_at = row.health_updated_at.or(Some(row.account_updated_at));
+    let is_stale = stale(now, updated_at, stale_after);
     let cooldown_active = row.cooldown_until.is_some_and(|until| until > now);
-    let status = if !row.enabled {
+    let status = if !row.enabled || !row.source_enabled {
         "disabled"
+    } else if is_stale {
+        "stale"
     } else if cooldown_active {
         "cooling_down"
     } else {
@@ -682,19 +674,26 @@ fn health_from_row(
         }
     };
     AccountHealth {
-        available: row.enabled && !cooldown_active && status != "disabled",
+        // A stale persisted observation is advisory only. It cannot keep an
+        // account out of routing forever, even if an old cooldown timestamp
+        // lies in the future due to a clock change or interrupted shutdown.
+        available: row.enabled
+            && row.source_enabled
+            && (!cooldown_active || is_stale)
+            && status != "disabled",
+        source_enabled: row.source_enabled,
         consecutive_failures: row.consecutive_failures.max(0) as u32,
         cooldown_remaining_ms: cooldown_remaining(now, row.cooldown_until),
         status: status.into(),
         source: normalize_source(&row.health_source).into(),
-        stale: stale(now, updated_at, stale_after),
+        stale: is_stale,
         updated_at,
         cooldown_until: row.cooldown_until,
-        last_error: row.last_error.clone(),
+        last_error: sanitize_error(row.last_error.as_deref()),
         last_success_at: row.last_success_at,
         last_probe_at: row.last_probe_at,
         last_probe_status: row.last_probe_status.clone(),
-        last_probe_error: row.last_probe_error.clone(),
+        last_probe_error: sanitize_error(row.last_probe_error.as_deref()),
     }
 }
 
@@ -703,9 +702,12 @@ fn memory_health(
     now: DateTime<Utc>,
     stale_after: Duration,
 ) -> AccountHealth {
+    let is_stale = stale(now, state.updated_at, stale_after);
     let cooldown_active = state.cooldown_until.is_some_and(|until| until > now);
     let status = if !state.enabled {
         "disabled"
+    } else if is_stale {
+        "stale"
     } else if cooldown_active {
         "cooling_down"
     } else {
@@ -717,12 +719,13 @@ fn memory_health(
         }
     };
     AccountHealth {
-        available: state.enabled && !cooldown_active && status != "disabled",
+        available: state.enabled && (!cooldown_active || is_stale) && status != "disabled",
+        source_enabled: true,
         consecutive_failures: state.consecutive_failures,
         cooldown_remaining_ms: cooldown_remaining(now, state.cooldown_until),
         status: status.into(),
         source: normalize_source(&state.source).into(),
-        stale: stale(now, state.updated_at, stale_after),
+        stale: is_stale,
         updated_at: state.updated_at,
         cooldown_until: state.cooldown_until,
         last_error: state.last_error.clone(),
@@ -736,6 +739,7 @@ fn memory_health(
 fn unknown_health(available: bool, source: &str) -> AccountHealth {
     AccountHealth {
         available,
+        source_enabled: true,
         consecutive_failures: 0,
         cooldown_remaining_ms: 0,
         status: "unknown".into(),
@@ -754,9 +758,25 @@ fn unknown_health(available: bool, source: &str) -> AccountHealth {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        model_catalog::SourceInput,
+        provider_preset::{
+            builtin_provider_presets, install_builtin_presets, ProviderPresetDefinition,
+        },
+        transport,
+    };
+    use axum::{
+        body::{to_bytes, Body},
+        extract::Request,
+        http::{header, HeaderMap, Response, StatusCode},
+        Router,
+    };
     use chrono::TimeZone;
     use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
-    use std::{str::FromStr, sync::Arc};
+    use std::{
+        str::FromStr,
+        sync::{Arc, Mutex as StdMutex},
+    };
 
     fn clock() -> ManualHealthClock {
         ManualHealthClock::new(Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap())
@@ -788,15 +808,18 @@ mod tests {
         let config = HealthConfig {
             cooldown: Duration::from_secs(5),
             max_cooldown: Duration::from_secs(20),
-            stale_after: Duration::from_secs(10),
+            stale_after: Duration::from_secs(3),
             ..HealthConfig::default()
         };
         let registry = HealthRegistry::with_config_and_clock(config, Arc::new(clock.clone()));
         registry.mark_failure("a").await;
-        clock.advance(Duration::from_secs(11));
+        registry.mark_failure("a").await;
+        clock.advance(Duration::from_secs(6));
         let health = registry.get_health("a").await;
         assert!(health.stale);
+        assert_eq!(health.status, "stale");
         assert!(health.available);
+        assert!(health.cooldown_remaining_ms > 0);
     }
 
     #[test]
@@ -903,7 +926,12 @@ mod tests {
         assert_eq!(cooling.status, "cooling_down");
         assert_eq!(cooling.source, "passive");
 
-        clock.advance(Duration::from_secs(5));
+        clock.advance(Duration::from_secs(3));
+        let stale = restarted.get_health("health-account").await;
+        assert!(stale.available);
+        assert!(stale.stale);
+        assert!(stale.cooldown_remaining_ms > 0);
+        clock.advance(Duration::from_secs(2));
         let expired = restarted.get_health("health-account").await;
         assert!(expired.available);
         assert!(expired.stale);
@@ -931,6 +959,23 @@ mod tests {
         assert_eq!(enabled.status, "unknown");
         assert_eq!(enabled.source, "manual");
 
+        control_plane
+            .set_source_enabled("health-source", false)
+            .await
+            .expect("manual disable source");
+        let source_disabled = restarted.get_health("health-account").await;
+        assert!(!source_disabled.available);
+        assert_eq!(source_disabled.status, "disabled");
+        assert!(!source_disabled.source_enabled);
+        assert_eq!(source_disabled.source, "manual");
+        control_plane
+            .set_source_enabled("health-source", true)
+            .await
+            .expect("manual enable source");
+        let source_enabled = restarted.get_health("health-account").await;
+        assert!(source_enabled.source_enabled);
+        assert!(source_enabled.available);
+
         let events: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM account_health_events WHERE account_id='health-account'",
         )
@@ -945,6 +990,156 @@ mod tests {
             .execute(&admin)
             .await
             .expect("drop isolated health schema");
+        admin.close().await;
+    }
+
+    #[tokio::test]
+    #[ignore = "requires TEST_DATABASE_URL and runs against an isolated PostgreSQL schema"]
+    async fn postgres_probe_reuses_provider_preset_connection_test_without_discovery() {
+        let url = std::env::var("TEST_DATABASE_URL")
+            .expect("TEST_DATABASE_URL must be set for PostgreSQL probe regression");
+        let admin = PgPoolOptions::new()
+            .max_connections(2)
+            .connect(&url)
+            .await
+            .expect("connect PostgreSQL probe admin pool");
+        let schema = format!("probe_{}", uuid::Uuid::new_v4().simple());
+        sqlx::query(&format!("CREATE SCHEMA \"{schema}\""))
+            .execute(&admin)
+            .await
+            .expect("create isolated probe schema");
+        let options = PgConnectOptions::from_str(&url)
+            .expect("parse TEST_DATABASE_URL")
+            .options([("search_path", schema.as_str())]);
+        let pool = PgPoolOptions::new()
+            .max_connections(8)
+            .connect_with(options)
+            .await
+            .expect("connect isolated probe schema");
+        let database = Database::from_test_pool(pool.clone())
+            .await
+            .expect("migrate isolated probe schema");
+        install_builtin_presets(&database.model_catalog())
+            .await
+            .expect("install provider presets");
+
+        let requests = Arc::new(StdMutex::new(Vec::<(String, HeaderMap, Vec<u8>)>::new()));
+        let requests_for_server = requests.clone();
+        let app = Router::new().fallback(move |request: Request| {
+            let requests = requests_for_server.clone();
+            async move {
+                let (parts, body) = request.into_parts();
+                let body = to_bytes(body, 1024 * 1024).await.expect("read probe body");
+                requests.lock().expect("probe request lock").push((
+                    parts.uri.path().to_owned(),
+                    parts.headers,
+                    body.to_vec(),
+                ));
+                Response::builder()
+                    .status(StatusCode::OK)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{}"#))
+                    .expect("probe response")
+            }
+        });
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind probe upstream");
+        let address = listener.local_addr().expect("probe upstream address");
+        tokio::spawn(async move {
+            axum::serve(listener, app)
+                .await
+                .expect("serve probe upstream");
+        });
+        let base_url = format!("http://{address}");
+        let preset = builtin_provider_presets()
+            .expect("built-in provider presets")
+            .into_iter()
+            .find(|preset| preset.id == "deepseek")
+            .expect("DeepSeek preset");
+        let definition: ProviderPresetDefinition =
+            serde_json::from_value(preset.definition.clone()).expect("preset definition");
+        let endpoints = definition
+            .protocols
+            .iter()
+            .map(|(protocol, value)| (*protocol, value.endpoint.clone()))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        database
+            .model_catalog()
+            .create_source(&SourceInput {
+                id: "probe-source".into(),
+                display_name: "Probe Source".into(),
+                provider_preset_id: preset.id,
+                provider_preset_version: preset.version,
+                base_url,
+                endpoints: serde_json::to_value(endpoints).expect("probe endpoints"),
+                auth_config: definition.auth_snapshot(),
+                protocol_capabilities: definition.protocol_capabilities_snapshot(),
+            })
+            .await
+            .expect("create probe source");
+        sqlx::query("INSERT INTO accounts (id,source_id,display_name,credential_env,enabled,weight) VALUES ('probe-account','probe-source','Probe Account','HEALTH_PROBE_TEST_KEY',TRUE,100)")
+            .execute(&pool)
+            .await
+            .expect("create probe account");
+
+        let _environment_lock = crate::ENV_LOCK.lock().await;
+        let previous = std::env::var_os("HEALTH_PROBE_TEST_KEY");
+        std::env::set_var("HEALTH_PROBE_TEST_KEY", "probe-secret");
+        let registry = HealthRegistry::with_database_config(
+            database.clone(),
+            HealthConfig {
+                cooldown: Duration::from_secs(1),
+                ..HealthConfig::default()
+            },
+        );
+        let outcome = registry
+            .probe_account(
+                &transport::test_client().expect("probe HTTP client"),
+                "probe-account",
+                Protocol::OpenAiChatCompletions,
+                None,
+                "probe-test",
+            )
+            .await
+            .expect("successful provider preset probe");
+        if let Some(value) = previous {
+            std::env::set_var("HEALTH_PROBE_TEST_KEY", value);
+        } else {
+            std::env::remove_var("HEALTH_PROBE_TEST_KEY");
+        }
+        assert_eq!(outcome.connection_test.status, "succeeded");
+        assert_eq!(outcome.health.source, "probe");
+        assert_eq!(outcome.health.status, "healthy");
+        {
+            let requests = requests.lock().expect("probe requests lock");
+            assert_eq!(requests.len(), 1);
+            assert!(requests[0].0.ends_with("/chat/completions"));
+            assert_eq!(
+                requests[0]
+                    .1
+                    .get(header::AUTHORIZATION)
+                    .and_then(|value| value.to_str().ok()),
+                Some("Bearer probe-secret")
+            );
+            let body = String::from_utf8_lossy(&requests[0].2);
+            assert!(!body.contains("probe-secret"));
+        }
+        let discovery_runs: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM source_discovery_runs WHERE source_id='probe-source'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("count discovery runs");
+        assert_eq!(discovery_runs, 0);
+
+        drop(_environment_lock);
+        drop(database);
+        pool.close().await;
+        sqlx::query(&format!("DROP SCHEMA \"{schema}\" CASCADE"))
+            .execute(&admin)
+            .await
+            .expect("drop isolated probe schema");
         admin.close().await;
     }
 }

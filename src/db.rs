@@ -18,6 +18,7 @@ pub struct Database {
 pub struct AccountHealthRow {
     pub account_id: String,
     pub enabled: bool,
+    pub source_enabled: bool,
     pub health_status: String,
     pub health_source: String,
     pub cooldown_until: Option<DateTime<Utc>>,
@@ -234,9 +235,9 @@ pub struct UsageEventPage {
     pub has_more: bool,
 }
 
-const HEALTH_SELECT_ONE: &str = "SELECT id AS account_id,enabled,health_status,health_source,cooldown_until,consecutive_failures,last_error,last_success_at,health_updated_at,last_probe_at,last_probe_status,last_probe_error,updated_at AS account_updated_at FROM accounts WHERE id=$1";
-const HEALTH_SELECT_ONE_FOR_UPDATE: &str = "SELECT id AS account_id,enabled,health_status,health_source,cooldown_until,consecutive_failures,last_error,last_success_at,health_updated_at,last_probe_at,last_probe_status,last_probe_error,updated_at AS account_updated_at FROM accounts WHERE id=$1 FOR UPDATE";
-const HEALTH_SELECT_ALL: &str = "SELECT id AS account_id,enabled,health_status,health_source,cooldown_until,consecutive_failures,last_error,last_success_at,health_updated_at,last_probe_at,last_probe_status,last_probe_error,updated_at AS account_updated_at FROM accounts ORDER BY id";
+const HEALTH_SELECT_ONE: &str = "SELECT a.id AS account_id,a.enabled,s.enabled AS source_enabled,a.health_status,a.health_source,a.cooldown_until,a.consecutive_failures,a.last_error,a.last_success_at,a.health_updated_at,a.last_probe_at,a.last_probe_status,a.last_probe_error,a.updated_at AS account_updated_at FROM accounts a JOIN sources s ON s.id=a.source_id WHERE a.id=$1";
+const HEALTH_SELECT_ONE_FOR_UPDATE: &str = "SELECT a.id AS account_id,a.enabled,s.enabled AS source_enabled,a.health_status,a.health_source,a.cooldown_until,a.consecutive_failures,a.last_error,a.last_success_at,a.health_updated_at,a.last_probe_at,a.last_probe_status,a.last_probe_error,a.updated_at AS account_updated_at FROM accounts a JOIN sources s ON s.id=a.source_id WHERE a.id=$1 FOR UPDATE OF a";
+const HEALTH_SELECT_ALL: &str = "SELECT a.id AS account_id,a.enabled,s.enabled AS source_enabled,a.health_status,a.health_source,a.cooldown_until,a.consecutive_failures,a.last_error,a.last_success_at,a.health_updated_at,a.last_probe_at,a.last_probe_status,a.last_probe_error,a.updated_at AS account_updated_at FROM accounts a JOIN sources s ON s.id=a.source_id ORDER BY a.id";
 
 fn normalize_health_source(source: &str) -> &str {
     match source {
@@ -400,7 +401,7 @@ impl Database {
         &self,
     ) -> Result<Vec<(String, String, Protocol)>, sqlx::Error> {
         let rows: Vec<(String, String, Value, Value)> = sqlx::query_as(
-            "SELECT a.id,a.source_id,s.endpoints,s.protocol_capabilities FROM accounts a JOIN sources s ON s.id=a.source_id WHERE a.enabled AND s.enabled ORDER BY a.id",
+            "SELECT a.id,a.source_id,s.endpoints,s.protocol_capabilities FROM accounts a JOIN sources s ON s.id=a.source_id WHERE a.enabled AND s.enabled AND s.provider_preset_id <> 'custom' ORDER BY a.id",
         )
         .fetch_all(&self.pool)
         .await?;
@@ -465,6 +466,10 @@ impl Database {
             .fetch_optional(&mut *tx)
             .await?
             .ok_or(sqlx::Error::RowNotFound)?;
+        if !current.enabled || !current.source_enabled {
+            tx.commit().await?;
+            return Ok(current);
+        }
         let failures = current.consecutive_failures.max(0) as u32 + 1;
         let delay = exponential_backoff(base_cooldown, max_cooldown, failures);
         let cooldown_until = observed_at
@@ -522,6 +527,10 @@ impl Database {
             .fetch_optional(&mut *tx)
             .await?
             .ok_or(sqlx::Error::RowNotFound)?;
+        if !current.enabled || !current.source_enabled {
+            tx.commit().await?;
+            return Ok(current);
+        }
         let status = if current.enabled {
             "healthy"
         } else {
