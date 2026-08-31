@@ -10,6 +10,7 @@ use axum::{
 use bytes::Bytes;
 use futures_util::TryStreamExt;
 use reqwest::Client;
+use serde_json::Value;
 use std::time::Duration;
 
 #[derive(Debug)]
@@ -24,6 +25,54 @@ impl TransportError {
             Self::MissingEndpoint => "provider endpoint is not configured",
             Self::Request(message) => message,
         }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct PreparedModelRequest {
+    pub body: Bytes,
+    pub upstream_model_id: String,
+}
+
+/// Prepare the JSON body for one concrete upstream attempt.
+///
+/// The resolved Binding or account-level mapping only replaces the top-level
+/// `model` field. Unmapped requests retain their original bytes exactly, and a
+/// malformed or non-object body is left untouched so the recorded model always
+/// matches what was actually sent.
+pub fn prepare_model_request(
+    body: &Bytes,
+    requested_model: &str,
+    upstream_model_id: &str,
+) -> PreparedModelRequest {
+    if upstream_model_id == requested_model {
+        return PreparedModelRequest {
+            body: body.clone(),
+            upstream_model_id: requested_model.to_owned(),
+        };
+    }
+    let Ok(mut payload) = serde_json::from_slice::<Value>(body) else {
+        return PreparedModelRequest {
+            body: body.clone(),
+            upstream_model_id: requested_model.to_owned(),
+        };
+    };
+    let Some(object) = payload.as_object_mut() else {
+        return PreparedModelRequest {
+            body: body.clone(),
+            upstream_model_id: requested_model.to_owned(),
+        };
+    };
+    object.insert("model".into(), Value::String(upstream_model_id.to_owned()));
+    let Ok(serialized_body) = serde_json::to_vec(&payload) else {
+        return PreparedModelRequest {
+            body: body.clone(),
+            upstream_model_id: requested_model.to_owned(),
+        };
+    };
+    PreparedModelRequest {
+        body: Bytes::from(serialized_body),
+        upstream_model_id: upstream_model_id.to_owned(),
     }
 }
 
@@ -210,6 +259,53 @@ mod tests {
             model_overrides: HashMap::new(),
             model_map: HashMap::new(),
         }
+    }
+
+    #[test]
+    fn resolved_model_only_rewrites_the_top_level_model_for_all_protocol_shapes() {
+        let payloads = [
+            serde_json::json!({
+                "model": "logical-model",
+                "messages": [{"role": "user", "content": [{"type": "text", "text": "hello"}]}],
+                "tools": [{"type": "function", "function": {"name": "lookup"}}],
+                "stream": true,
+                "provider_extension": {"keep": [1, 2, 3]}
+            }),
+            serde_json::json!({
+                "model": "logical-model",
+                "input": [{"role": "user", "content": [{"type": "input_text", "text": "hello"}]}],
+                "reasoning": {"effort": "high"},
+                "tools": [{"type": "web_search_preview"}],
+                "stream": true
+            }),
+            serde_json::json!({
+                "model": "logical-model",
+                "messages": [{"role": "user", "content": [{"type": "text", "text": "hello"}]}],
+                "max_tokens": 128,
+                "thinking": {"type": "enabled", "budget_tokens": 32},
+                "stream": true
+            }),
+        ];
+
+        for original in payloads {
+            let body = Bytes::from(serde_json::to_vec(&original).unwrap());
+            let prepared = prepare_model_request(&body, "logical-model", "provider-model");
+            assert_eq!(prepared.upstream_model_id, "provider-model");
+            let mut expected = original;
+            expected["model"] = Value::String("provider-model".into());
+            assert_eq!(
+                serde_json::from_slice::<Value>(&prepared.body).unwrap(),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn unchanged_model_preserves_exact_body_bytes() {
+        let body = Bytes::from_static(br#"{ "model": "logical-model", "input": "hello" }"#);
+        let prepared = prepare_model_request(&body, "logical-model", "logical-model");
+        assert_eq!(prepared.upstream_model_id, "logical-model");
+        assert_eq!(prepared.body, body);
     }
 
     #[tokio::test]
