@@ -185,7 +185,7 @@ export function GatewayConsoleShell({
           <button ref={menuButtonRef} type="button" className={styles.mobileMenuButton} aria-label="打开导航" aria-controls="gateway-navigation" aria-expanded={mobileNavOpen} onClick={() => setMobileNavOpen(true)}><IconMenu size={20} /></button>
           <div className={styles.topbarTitle}><strong>{title}</strong><small>{shortTitle}</small></div>
           <div className={styles.headerActions}>
-            <label className={styles.keyInput}><span>Admin Key</span><input aria-label="Admin Key" autoComplete="off" type="password" value={adminKeyDraft} onChange={(event) => setAdminKeyDraft(event.target.value)} placeholder="可留空" /><Button size="sm" variant="secondary" onClick={applyAdminKey}>应用</Button></label>
+            <label className={styles.keyInput}><span>Admin Key</span><input aria-label="Admin Key" autoComplete="off" type="password" required value={adminKeyDraft} onChange={(event) => setAdminKeyDraft(event.target.value)} placeholder="输入 GATEWAY_ADMIN_KEY" /><Button size="sm" variant="secondary" onClick={applyAdminKey}>应用</Button></label>
             <Button size="sm" variant="ghost" onClick={() => setTheme(theme === 'dark' ? 'white' : 'dark')}>{theme === 'dark' ? '浅色' : '深色'}</Button>
             {refreshable && <Button size="sm" variant="secondary" onClick={() => setRefreshRevision((current) => current + 1)} loading={refreshing}><IconRefreshCw size={14} />刷新</Button>}
           </div>

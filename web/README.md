@@ -26,11 +26,10 @@ without a live gateway. Usage events distinguish logical requests from upstream
 attempts, store UTC boundaries, and display timestamps in the browser's local
 timezone.
 
-An Admin key can be entered in the header when `GATEWAY_ADMIN_KEY` (or the
-temporary `GATEWAY_API_KEY` fallback) protects the Admin API. It is kept only in
-`sessionStorage`; no Admin Session login is implemented here. If neither
-environment variable is configured, the current development backend leaves the
-Admin API unprotected; Issue #44 tracks changing that behavior to fail closed.
+The Admin API accepts only the dedicated `GATEWAY_ADMIN_KEY`; it never falls
+back to the data-plane `GATEWAY_API_KEY`. If the Admin key is not configured,
+all Admin API requests fail closed with `401`. The Web console keeps the entered
+Admin key only in `sessionStorage`; no Admin Session login is implemented here.
 
 The information hierarchy is adapted from the reviewed single-file prototype
 archived at `docs/prototypes/ai-gateway-prototype.html`. The executable design

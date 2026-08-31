@@ -2859,6 +2859,7 @@ mod tests {
             db: Some(database.clone()),
             control_plane: Some(control_plane.clone()),
             health: health.clone(),
+            admin_auth: crate::AdminAuth::test(),
         };
         state.reload_snapshot(stable_snapshot.clone());
         assert_eq!(state.snapshot().revision, active_revision);
@@ -2939,6 +2940,7 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .uri("/admin/accounts")
+                    .header("authorization", format!("Bearer {}", crate::TEST_ADMIN_KEY))
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -2955,6 +2957,7 @@ mod tests {
                     .method("POST")
                     .uri("/admin/sources")
                     .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {}", crate::TEST_ADMIN_KEY))
                     .body(Body::from(
                         json!({
                             "id":"source-api",

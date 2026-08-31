@@ -1,5 +1,4 @@
 use crate::{
-    admin_authorized,
     db::Database,
     model_catalog::{
         CatalogAvailability, CatalogError, CatalogStatus, MetadataValues, SourceModelConfirmation,
@@ -9,6 +8,7 @@ use crate::{
     provider_preset::{provider_preset_diff, ProviderPresetDefinition},
     source_url::SourceUrlPolicyError,
     transport::SourceHttpClient,
+    AdminAuth,
 };
 use axum::{
     body::{Body, Bytes},
@@ -28,26 +28,36 @@ const MAX_ADMIN_JSON_BYTES: usize = 1024 * 1024;
 struct DiscoveryApiState {
     database: Option<Database>,
     http: SourceHttpClient,
+    admin_auth: AdminAuth,
 }
 
 #[cfg(test)]
 pub fn router(database: Option<Database>, http: SourceHttpClient) -> Router {
-    router_inner(database, http, true)
+    router_inner(database, http, AdminAuth::test(), true)
 }
 
 /// Discovery endpoints mounted by the gateway application. The Source
 /// collection itself is owned by the DB-first control plane so creation can
 /// publish a validated runtime snapshot in the same operation.
-pub fn auxiliary_router(database: Option<Database>, http: SourceHttpClient) -> Router {
-    router_inner(database, http, false)
+pub fn auxiliary_router(
+    database: Option<Database>,
+    http: SourceHttpClient,
+    admin_auth: AdminAuth,
+) -> Router {
+    router_inner(database, http, admin_auth, false)
 }
 
 fn router_inner(
     database: Option<Database>,
     http: SourceHttpClient,
+    admin_auth: AdminAuth,
     include_source_collection: bool,
 ) -> Router {
-    let state = DiscoveryApiState { database, http };
+    let state = DiscoveryApiState {
+        database,
+        http,
+        admin_auth,
+    };
     let router = Router::new()
         .route("/admin/provider-presets", get(list_provider_presets))
         .route(
@@ -449,7 +459,9 @@ fn parse_json<T: for<'de> Deserialize<'de>>(body: &[u8]) -> Result<T, Box<Respon
 }
 
 fn authorized_database(state: &DiscoveryApiState, headers: &HeaderMap) -> Option<Database> {
-    admin_authorized(headers)
+    state
+        .admin_auth
+        .authorized(headers)
         .then(|| state.database.clone())
         .flatten()
 }
@@ -465,7 +477,7 @@ fn authorization_or_database_error(
     state: &DiscoveryApiState,
     headers: &HeaderMap,
 ) -> Response<Body> {
-    if !admin_authorized(headers) {
+    if !state.admin_auth.authorized(headers) {
         api_error(
             StatusCode::UNAUTHORIZED,
             "unauthorized",
@@ -584,16 +596,11 @@ mod tests {
     }
 
     fn admin_request(method: &str, uri: &str, body: Value) -> Request<Body> {
-        let mut builder = Request::builder()
+        Request::builder()
             .method(method)
             .uri(uri)
-            .header("content-type", "application/json");
-        if let Ok(key) =
-            std::env::var("GATEWAY_ADMIN_KEY").or_else(|_| std::env::var("GATEWAY_API_KEY"))
-        {
-            builder = builder.header("authorization", format!("Bearer {key}"));
-        }
-        builder
+            .header("content-type", "application/json")
+            .header("authorization", format!("Bearer {}", crate::TEST_ADMIN_KEY))
             .body(Body::from(body.to_string()))
             .expect("admin API request")
     }
