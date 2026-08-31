@@ -224,6 +224,63 @@ Content-Type: application/json
 
 `SourceModelCapability` 的 `pending`、`unknown`、`unsupported`、不可用或未确认状态不会进入 runtime snapshot。接口不会把这些缺失事实猜成 `native`、`adapter` 或 `unsupported`，而是保留 `mode=null` 的不可路由单元。缺 endpoint、未知 Adapter、非直接转换链或未经允许的 lossy 能力会在控制面事务构建候选 snapshot 时返回结构化校验错误；失败候选不会替换当前有效 snapshot。
 
+## 数据保留与恢复运维（Issue #53）
+
+以下接口使用与其他 Admin API 相同的 `Authorization: Bearer $GATEWAY_ADMIN_KEY` 鉴权，所有时间和 cut-off 都是 UTC。它们不读取或返回 prompt/response 正文、Authorization、API Key 或凭据值。
+
+### 保留策略
+
+`GET /admin/retention/policies` 返回四个独立策略：`usage_events`（logical UsageEvent）、`usage_attempts`（UsageAttempt）、`audit`（`audit_logs` 与连接测试历史）和 `discovery`（`source_discovery_runs`）。每项包含 `retention_days`、`enabled` 和 `updated_at`。
+
+`PUT /admin/retention/policies` 接受以下任一形式：
+
+```json
+{
+  "policies": [
+    {"policy_key":"usage_events","retention_days":90,"enabled":true},
+    {"policy_key":"usage_attempts","retention_days":90,"enabled":true},
+    {"policy_key":"audit","retention_days":365,"enabled":true},
+    {"policy_key":"discovery","retention_days":365,"enabled":true}
+  ],
+  "requested_by":"admin-ui"
+}
+```
+
+也支持单个 `{ "policy_key": "audit", "retention_days": 365 }` 或按 key 的对象映射。策略更新会写入 `audit_logs`。
+
+### 清理运行
+
+`POST /admin/retention/cleanup` 启动或继续一个清理运行。请求字段：
+
+- `dry_run`（默认 `false`）；
+- `batch_size`（`1..10000`，默认 `500`）；
+- `max_batches`（`1..100000`，默认 `1000`）；
+- `operation_id`（可选但建议由调度器提供，重复提交保持幂等）；
+- `policy_keys`（可选，只运行指定策略）；
+- `requested_by`（可选审计主体）。
+
+dry-run 只统计候选，不删除数据。正式清理按 attempt → logical event → audit → discovery 的顺序分批提交；logical event 若仍有未到期 attempt 会延后删除。响应的 `data` 包含每类 scanned/deleted、`batches_completed`、固定 `cutoff_snapshot` 和 `progress`。`status=running` 表示本次达到 `max_batches`，可用相同 `operation_id` 继续。
+
+`GET /admin/retention/cleanup/{operation_id}` 查询进度；`POST /admin/retention/cleanup/{operation_id}/cancel` 设置取消标志并在当前批次结束后转为 `cancelled`；`POST /admin/retention/cleanup/{operation_id}/retry` 可恢复失败、取消或进程中断的运行。每个生命周期事件都写入 `audit_logs`，重试不会重复删除已提交的行。
+
+`GET /admin/retention/cleanup?limit=100`（`/admin/retention/runs` 同义入口）按创建时间倒序列出最近运行，便于调度器发现仍为 `running` 的任务。
+
+`GET /admin/audit?operation_id=...&limit=100` 返回脱敏运维审计；`GET /admin/backups?limit=100` 列出最近备份/恢复运行，`GET /admin/backups/{backup_id}` 返回单次操作状态、checksum、`schema_version` 和 `migration_version`。
+
+### 控制面导出与恢复
+
+`GET /admin/control-plane/export` 返回可保存为 JSON 的脱敏控制面快照，响应带 `Content-Disposition: attachment` 和对 `data` 载荷计算的 `checksum`。内容包括 Provider/Model preset、Source、Account、SourceModel、能力、LogicalModel、Binding、Route、schema/migration 版本和 runtime snapshot fingerprint，不包括 usage 历史。账号凭据只保留：
+
+- `credential_env` Secret 名称和 `credential: {"kind":"secret_ref","name":"..."}`；
+- 无 Secret 引用但存在加密字段时的 `{"kind":"redacted"}` 占位；
+- Virtual Key 元数据（不含 `key_hash`，恢复时报告 `skipped_virtual_keys`）。
+
+`POST /admin/control-plane/import` 接受导出 JSON，或 `{ "data": <export>, "replace": true, "requested_by": "..." }` 包装。非空目标必须显式 `replace=true`。导入按 FK 顺序恢复并重置 serial sequence；提交后重新构建 snapshot，只有 fingerprint 与导出一致才返回 `verified=true` 和新的 `snapshot_revision`。目标环境必须自行注入导出中列出的 Secret。
+
+`GET /admin/ops/schema`（`/admin/schema` 为同义入口）返回当前 `schema_version`、`migration_version`、应用版本和 UTC 更新时间。网关启动时会自动应用 `migrations/0011_retention_backup.sql`，并在 `gateway_schema_migrations` 中记录 1..11。
+
+完整的 PostgreSQL `pg_dump`、新库恢复、Docker Compose 和本地 CLI 步骤见 [`docs/operations.md`](./operations.md)。物理 dump 可能包含数据库内的加密凭据和全部历史，必须按高敏感备份保护；脱敏迁移请使用控制面 JSON 导出。
+
 矩阵聚合直接复用真实 `RouteResolver`，不复制选择算法。Adapter 翻译或显式允许的能力损失会列入 `degraded_features`，`degraded` 只在实际发生翻译或损失时为 `true`。响应不包含 `credential_env`、加密/明文凭据、Authorization、API Key 或请求/响应正文。Web UI 展示仍是后续工作。
 
 ## 错误与安全

@@ -78,6 +78,8 @@ Usage API 返回显式的 `version: "v1"` 和 `timezone: "UTC"`。所有入口�
 
 ProviderPreset、连接测试、模型发现和确认接口的完整请求/响应契约见 [`docs/admin-api.md`](./docs/admin-api.md)。最小流程为：创建 Source 快照 → 选择关联且启用的 Account 按协议测试 → 执行 discovery → 查看 diff/待确认模型 → 编辑并批量确认。确认 SourceModel 仍不会自动创建 LogicalModel、Binding 或 Route。
 
+Issue #53 的数据保留、dry-run/分批清理、脱敏控制面导出、PostgreSQL 备份恢复和新库校验步骤见 [`docs/operations.md`](./docs/operations.md)。构建后的二进制提供 `my-ai-gateway ops retention-cleanup --dry-run`、`my-ai-gateway ops control-plane-export --output control-plane.json` 等运维命令。
+
 ```bash
 curl 'http://127.0.0.1:8787/admin/usage/timeseries?from=2026-08-01T00:00:00Z&to=2026-09-01T00:00:00Z&granularity=day&logical_model=MiniMax-M2.7' \
   -H "Authorization: Bearer $GATEWAY_ADMIN_KEY"

@@ -187,6 +187,23 @@ impl ControlPlane {
         Ok(snapshot)
     }
 
+    /// Build a candidate snapshot from an already-open transaction. Operations
+    /// that import/restore the control plane use this before commit so a
+    /// fingerprint mismatch can roll the entire restore back atomically.
+    pub(crate) async fn load_snapshot_in_transaction(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+    ) -> Result<RuntimeSnapshot, ControlPlaneError> {
+        validate_persisted_source_urls(tx, &self.source_url_policy).await?;
+        validate_capability_chains(tx).await?;
+        let (revision, generated_at): (i64, DateTime<Utc>) = sqlx::query_as(
+            "SELECT revision,updated_at FROM runtime_snapshot_state WHERE singleton=TRUE",
+        )
+        .fetch_one(&mut **tx)
+        .await?;
+        build_snapshot(tx, &self.listen_addr, revision, generated_at).await
+    }
+
     pub async fn is_empty(&self) -> Result<bool, ControlPlaneError> {
         let row_count: i64 = sqlx::query_scalar(
             "SELECT (SELECT COUNT(*) FROM sources) + (SELECT COUNT(*) FROM accounts) + \

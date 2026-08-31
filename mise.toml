@@ -71,6 +71,14 @@ set +a
 cargo test --workspace -- --include-ignored --test-threads=1
 '''
 
+[tasks.ops-retention-dry-run]
+description = "预览四类历史数据的保留清理候选"
+run = "cargo run -- ops retention-cleanup --dry-run"
+
+[tasks.ops-control-plane-export]
+description = "导出脱敏控制面 JSON（需要 DATABASE_URL）"
+run = "cargo run -- ops control-plane-export --output control-plane.json"
+
 [tasks.lint]
 description = "运行 Rust 与前端静态检查"
 run = "cargo fmt --all -- --check && cargo check --workspace && cargo clippy --all-targets -- -D warnings && npm --prefix web run lint && npm --prefix web run typecheck"

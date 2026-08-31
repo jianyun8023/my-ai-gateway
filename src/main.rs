@@ -6,6 +6,7 @@ mod discovery_api;
 mod health;
 mod model_catalog;
 mod model_discovery;
+mod ops;
 mod protocol;
 mod provider_preset;
 mod routing;
@@ -22,7 +23,7 @@ use std::{
 
 use axum::{
     body::{Body, Bytes},
-    extract::{rejection::JsonRejection, Path, State},
+    extract::{rejection::JsonRejection, Path, Query, State},
     http::{
         header::{CONTENT_DISPOSITION, CONTENT_TYPE},
         HeaderMap, HeaderValue, Request, Response, StatusCode,
@@ -165,6 +166,10 @@ impl AppState {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let command_line = std::env::args().skip(1).collect::<Vec<_>>();
+    if command_line.first().is_some_and(|value| value == "ops") {
+        return run_ops_cli(&command_line[1..]).await;
+    }
     tracing_subscriber::fmt::init();
     let database = db::Database::connect_from_env()
         .await?
@@ -237,6 +242,190 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+async fn run_ops_cli(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    let Some(command) = args.first().map(String::as_str) else {
+        return Err(ops_cli_usage().into());
+    };
+    let database = db::Database::connect_from_env()
+        .await?
+        .ok_or("DATABASE_URL is required for gateway ops")?;
+    let repository = ops::OpsRepository::from_database(&database);
+    match command {
+        "retention-cleanup" => {
+            let mut request = ops::CleanupRequest::default();
+            let mut index = 1;
+            while index < args.len() {
+                match args[index].as_str() {
+                    "--dry-run" => request.dry_run = true,
+                    "--batch-size" => {
+                        index += 1;
+                        request.batch_size = args
+                            .get(index)
+                            .ok_or("--batch-size requires a value")?
+                            .parse()?;
+                    }
+                    "--max-batches" => {
+                        index += 1;
+                        request.max_batches = args
+                            .get(index)
+                            .ok_or("--max-batches requires a value")?
+                            .parse()?;
+                    }
+                    "--operation-id" => {
+                        index += 1;
+                        request.operation_id = Some(
+                            args.get(index)
+                                .ok_or("--operation-id requires a value")?
+                                .clone(),
+                        );
+                    }
+                    "--requested-by" => {
+                        index += 1;
+                        request.requested_by = Some(
+                            args.get(index)
+                                .ok_or("--requested-by requires a value")?
+                                .clone(),
+                        );
+                    }
+                    value => {
+                        return Err(format!("unknown retention-cleanup option '{value}'").into())
+                    }
+                }
+                index += 1;
+            }
+            let run = repository.start_cleanup(&request).await?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(
+                    &json!({"version":"v1","timezone":"UTC","operation_id":run.id,"data":run})
+                )?
+            );
+        }
+        "retention-cancel" | "retention-retry" => {
+            let id = args.get(1).ok_or("operation id is required")?;
+            let run = if command == "retention-cancel" {
+                repository.cancel_cleanup(id, "cli").await?
+            } else {
+                repository.retry_cleanup(id, "cli").await?
+            };
+            println!(
+                "{}",
+                serde_json::to_string_pretty(
+                    &json!({"version":"v1","timezone":"UTC","operation_id":run.id,"data":run})
+                )?
+            );
+        }
+        "retention-policies" => {
+            let policies = repository.list_retention_policies().await?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(
+                    &json!({"version":"v1","timezone":"UTC","data":policies})
+                )?
+            );
+        }
+        "retention-policy-set" => {
+            let key = args.get(1).ok_or("policy key is required")?.clone();
+            let days = args.get(2).ok_or("retention days are required")?.parse()?;
+            let enabled = !args.iter().any(|value| value == "--disabled");
+            let policies = repository
+                .update_retention_policies(
+                    &[ops::RetentionPolicyWrite {
+                        policy_key: key,
+                        retention_days: days,
+                        enabled,
+                    }],
+                    "cli",
+                )
+                .await?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(
+                    &json!({"version":"v1","timezone":"UTC","data":policies})
+                )?
+            );
+        }
+        "control-plane-export" => {
+            let output = cli_option(args, "--output");
+            let policy = Arc::new(source_url::SourceUrlPolicy::from_env()?);
+            let listen_addr =
+                std::env::var("GATEWAY_LISTEN_ADDR").unwrap_or_else(|_| "127.0.0.1:8787".into());
+            let control_plane =
+                control_plane::ControlPlane::with_url_policy(&database, listen_addr, policy);
+            let result = repository
+                .export_control_plane(&control_plane, "cli")
+                .await?;
+            let payload = json!({
+                "version":"v1",
+                "timezone":"UTC",
+                "backup_id":result.backup_id,
+                "checksum":result.checksum,
+                "data":result.export,
+            });
+            let bytes = serde_json::to_vec_pretty(&payload)?;
+            if let Some(path) = output {
+                std::fs::write(path, bytes)?;
+                println!("control-plane export written");
+            } else {
+                println!("{}", String::from_utf8(bytes)?);
+            }
+        }
+        "control-plane-import" => {
+            let path = cli_option(args, "--input").ok_or("--input is required")?;
+            let bytes = std::fs::read(path)?;
+            let payload: Value = serde_json::from_slice(&bytes)?;
+            let replace = payload
+                .get("replace")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+                || args.iter().any(|value| value == "--replace");
+            let requested_by = payload
+                .get("requested_by")
+                .and_then(Value::as_str)
+                .unwrap_or("cli")
+                .to_owned();
+            let expected_checksum = payload
+                .get("checksum")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            let export_value = payload.get("data").cloned().unwrap_or(payload);
+            let export: ops::ControlPlaneExport = serde_json::from_value(export_value)?;
+            if let Some(expected) = expected_checksum {
+                let actual = ops::control_plane_export_checksum(&export)?;
+                if actual != expected {
+                    return Err("control-plane export checksum does not match".into());
+                }
+            }
+            let policy = Arc::new(source_url::SourceUrlPolicy::from_env()?);
+            let listen_addr =
+                std::env::var("GATEWAY_LISTEN_ADDR").unwrap_or_else(|_| "127.0.0.1:8787".into());
+            let control_plane =
+                control_plane::ControlPlane::with_url_policy(&database, listen_addr, policy);
+            let result = repository
+                .restore_control_plane(&control_plane, &export, replace, &requested_by)
+                .await?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(
+                    &json!({"version":"v1","timezone":"UTC","backup_id":result.backup_id,"verified":result.verified,"snapshot_revision":result.snapshot.revision,"snapshot_generated_at":result.snapshot.generated_at,"skipped_virtual_keys":result.skipped_virtual_keys})
+                )?
+            );
+        }
+        _ => return Err(ops_cli_usage().into()),
+    }
+    Ok(())
+}
+
+fn cli_option<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
+    args.windows(2)
+        .find(|values| values[0] == name)
+        .map(|values| values[1].as_str())
+}
+
+fn ops_cli_usage() -> &'static str {
+    "usage: cargo run -- ops <retention-cleanup|retention-cancel|retention-retry|retention-policies|retention-policy-set|control-plane-export|control-plane-import>"
+}
+
 fn application(state: AppState) -> Router {
     let discovery_api = discovery_api::auxiliary_router(
         state.db.clone(),
@@ -253,6 +442,50 @@ fn application(state: AppState) -> Router {
         .route("/admin/usage/export", get(usage_export))
         .route("/admin/usage/aggregate", get(usage_aggregate))
         .route("/admin/usage/events/{request_id}", get(usage_event_detail))
+        .route(
+            "/admin/retention/policies",
+            get(list_retention_policies).put(update_retention_policies),
+        )
+        .route(
+            "/admin/retention",
+            get(list_retention_policies).put(update_retention_policies),
+        )
+        .route(
+            "/admin/retention/cleanup",
+            get(list_retention_cleanups).post(start_retention_cleanup),
+        )
+        .route(
+            "/admin/retention/runs",
+            get(list_retention_cleanups).post(start_retention_cleanup),
+        )
+        .route("/admin/retention/cleanup/{id}", get(get_retention_cleanup))
+        .route("/admin/retention/runs/{id}", get(get_retention_cleanup))
+        .route(
+            "/admin/retention/cleanup/{id}/cancel",
+            post(cancel_retention_cleanup),
+        )
+        .route(
+            "/admin/retention/cleanup/{id}/retry",
+            post(retry_retention_cleanup),
+        )
+        .route(
+            "/admin/retention/runs/{id}/cancel",
+            post(cancel_retention_cleanup),
+        )
+        .route(
+            "/admin/retention/runs/{id}/retry",
+            post(retry_retention_cleanup),
+        )
+        .route("/admin/control-plane/export", get(export_control_plane))
+        .route("/admin/control-plane/import", post(import_control_plane))
+        .route("/admin/backup/export", get(export_control_plane))
+        .route("/admin/backup/import", post(import_control_plane))
+        .route("/admin/audit", get(list_audit_logs))
+        .route("/admin/backups/{id}", get(get_backup_run))
+        .route("/admin/backups", get(list_backup_runs))
+        .route("/admin/backup/{id}", get(get_backup_run))
+        .route("/admin/ops/schema", get(ops_schema_metadata))
+        .route("/admin/schema", get(ops_schema_metadata))
         .route("/admin/sources", get(list_sources).post(create_source))
         .route(
             "/admin/sources/{id}",
@@ -984,6 +1217,555 @@ async fn usage_event_detail(
         Json(json!({"version":"v1","data":event,"attempts":attempts})),
     )
         .into_response()
+}
+
+#[allow(clippy::result_large_err)]
+fn ops_repository(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<ops::OpsRepository, Response<Body>> {
+    if !state.admin_auth.authorized(headers) {
+        return Err(error_response(
+            StatusCode::UNAUTHORIZED,
+            "unauthorized",
+            "admin key required",
+        ));
+    }
+    let Some(database) = &state.db else {
+        return Err(error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "database_unavailable",
+            "DATABASE_URL is not configured",
+        ));
+    };
+    Ok(ops::OpsRepository::from_database(database))
+}
+
+fn ops_error_response(error: ops::OpsError) -> Response<Body> {
+    let status = match &error {
+        ops::OpsError::NotFound(_) => StatusCode::NOT_FOUND,
+        ops::OpsError::Conflict(_) => StatusCode::CONFLICT,
+        ops::OpsError::Validation(_) | ops::OpsError::Json(_) | ops::OpsError::Snapshot(_) => {
+            StatusCode::UNPROCESSABLE_ENTITY
+        }
+        ops::OpsError::Database(_) => StatusCode::INTERNAL_SERVER_ERROR,
+    };
+    let code = match &error {
+        ops::OpsError::NotFound(_) => "not_found",
+        ops::OpsError::Conflict(_) => "operation_conflict",
+        ops::OpsError::Validation(_) | ops::OpsError::Json(_) => "invalid_operation",
+        ops::OpsError::Snapshot(_) => "snapshot_verification_failed",
+        ops::OpsError::Database(_) => "operation_failed",
+    };
+    let message = match error {
+        ops::OpsError::Database(_) => "database operation failed".to_owned(),
+        other => other.to_string(),
+    };
+    error_response(status, code, &message)
+}
+
+async fn list_retention_policies(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Response<Body> {
+    let repository = match ops_repository(&state, &headers) {
+        Ok(repository) => repository,
+        Err(response) => return response,
+    };
+    match repository.list_retention_policies().await {
+        Ok(data) => (
+            StatusCode::OK,
+            Json(json!({"version":"v1","timezone":"UTC","data":data})),
+        )
+            .into_response(),
+        Err(error) => ops_error_response(error),
+    }
+}
+
+async fn update_retention_policies(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response<Body> {
+    let repository = match ops_repository(&state, &headers) {
+        Ok(repository) => repository,
+        Err(response) => return response,
+    };
+    if body.len() > 1024 * 1024 {
+        return error_response(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "payload_too_large",
+            "request body exceeds 1 MiB",
+        );
+    }
+    let payload: Value = match serde_json::from_slice(&body) {
+        Ok(payload) => payload,
+        Err(_) => {
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                "invalid_json",
+                "request body is not valid JSON",
+            )
+        }
+    };
+    let actor = payload
+        .get("requested_by")
+        .and_then(Value::as_str)
+        .unwrap_or("admin_api");
+    let policies = if let Some(values) = payload.get("policies") {
+        match serde_json::from_value::<Vec<ops::RetentionPolicyWrite>>(values.clone()) {
+            Ok(values) => values,
+            Err(_) => {
+                return error_response(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "invalid_operation",
+                    "policies must be an array of retention policy objects",
+                )
+            }
+        }
+    } else if payload.get("policy_key").is_some() {
+        match serde_json::from_value::<ops::RetentionPolicyWrite>(payload.clone()) {
+            Ok(value) => vec![value],
+            Err(_) => {
+                return error_response(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "invalid_operation",
+                    "retention policy object is invalid",
+                )
+            }
+        }
+    } else {
+        // Also accept a compact map: {"usage_events":{"retention_days":90}}
+        let Some(object) = payload.as_object() else {
+            return error_response(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "invalid_operation",
+                "retention policy payload is invalid",
+            );
+        };
+        let mut values = Vec::new();
+        for (key, value) in object {
+            if key == "requested_by" {
+                continue;
+            }
+            let Some(policy) = value.as_object() else {
+                return error_response(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "invalid_operation",
+                    "retention policy map values must be objects",
+                );
+            };
+            let mut policy = policy.clone();
+            policy.insert("policy_key".into(), Value::String(key.clone()));
+            match serde_json::from_value::<ops::RetentionPolicyWrite>(Value::Object(policy)) {
+                Ok(value) => values.push(value),
+                Err(_) => {
+                    return error_response(
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        "invalid_operation",
+                        "retention policy map value is invalid",
+                    )
+                }
+            }
+        }
+        values
+    };
+    match repository.update_retention_policies(&policies, actor).await {
+        Ok(data) => (
+            StatusCode::OK,
+            Json(json!({"version":"v1","timezone":"UTC","data":data})),
+        )
+            .into_response(),
+        Err(error) => ops_error_response(error),
+    }
+}
+
+async fn start_retention_cleanup(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response<Body> {
+    let repository = match ops_repository(&state, &headers) {
+        Ok(repository) => repository,
+        Err(response) => return response,
+    };
+    if body.len() > 1024 * 1024 {
+        return error_response(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "payload_too_large",
+            "request body exceeds 1 MiB",
+        );
+    }
+    let request = if body.is_empty() {
+        ops::CleanupRequest::default()
+    } else {
+        match serde_json::from_slice::<ops::CleanupRequest>(&body) {
+            Ok(request) => request,
+            Err(_) => {
+                return error_response(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_json",
+                    "cleanup request is invalid",
+                )
+            }
+        }
+    };
+    match repository.start_cleanup(&request).await {
+        Ok(run) => (
+            if run.status == "running" {
+                StatusCode::ACCEPTED
+            } else {
+                StatusCode::OK
+            },
+            Json(json!({"version":"v1","timezone":"UTC","operation_id":run.id,"data":run})),
+        )
+            .into_response(),
+        Err(error) => ops_error_response(error),
+    }
+}
+
+async fn list_retention_cleanups(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<std::collections::HashMap<String, String>>,
+) -> Response<Body> {
+    let repository = match ops_repository(&state, &headers) {
+        Ok(repository) => repository,
+        Err(response) => return response,
+    };
+    let limit = match query.get("limit") {
+        Some(value) => match value.parse::<i64>() {
+            Ok(value) if (1..=500).contains(&value) => value,
+            _ => {
+                return error_response(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_operation",
+                    "limit must be between 1 and 500",
+                )
+            }
+        },
+        None => 100,
+    };
+    match repository.list_cleanups(limit).await {
+        Ok(data) => (
+            StatusCode::OK,
+            Json(json!({"version":"v1","timezone":"UTC","data":data})),
+        )
+            .into_response(),
+        Err(error) => ops_error_response(error),
+    }
+}
+
+async fn get_retention_cleanup(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Response<Body> {
+    let repository = match ops_repository(&state, &headers) {
+        Ok(repository) => repository,
+        Err(response) => return response,
+    };
+    match repository.get_cleanup(&id).await {
+        Ok(Some(run)) => (
+            StatusCode::OK,
+            Json(json!({"version":"v1","timezone":"UTC","operation_id":run.id,"data":run})),
+        )
+            .into_response(),
+        Ok(None) => error_response(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            "cleanup operation not found",
+        ),
+        Err(error) => ops_error_response(error),
+    }
+}
+
+async fn cancel_retention_cleanup(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Response<Body> {
+    let repository = match ops_repository(&state, &headers) {
+        Ok(repository) => repository,
+        Err(response) => return response,
+    };
+    match repository.cancel_cleanup(&id, "admin_api").await {
+        Ok(run) => (
+            StatusCode::OK,
+            Json(json!({"version":"v1","timezone":"UTC","operation_id":run.id,"data":run})),
+        )
+            .into_response(),
+        Err(error) => ops_error_response(error),
+    }
+}
+
+async fn retry_retention_cleanup(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Response<Body> {
+    let repository = match ops_repository(&state, &headers) {
+        Ok(repository) => repository,
+        Err(response) => return response,
+    };
+    match repository.retry_cleanup(&id, "admin_api").await {
+        Ok(run) => (
+            if run.status == "running" {
+                StatusCode::ACCEPTED
+            } else {
+                StatusCode::OK
+            },
+            Json(json!({"version":"v1","timezone":"UTC","operation_id":run.id,"data":run})),
+        )
+            .into_response(),
+        Err(error) => ops_error_response(error),
+    }
+}
+
+async fn export_control_plane(State(state): State<AppState>, headers: HeaderMap) -> Response<Body> {
+    let repository = match ops_repository(&state, &headers) {
+        Ok(repository) => repository,
+        Err(response) => return response,
+    };
+    let Some(control_plane) = state.control_plane.as_ref() else {
+        return error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "database_unavailable",
+            "DATABASE_URL is not configured",
+        );
+    };
+    match repository
+        .export_control_plane(control_plane, "admin_api")
+        .await
+    {
+        Ok(result) => {
+            let payload = json!({
+                "version":"v1",
+                "timezone":"UTC",
+                "backup_id":result.backup_id,
+                "checksum":result.checksum,
+                "data":result.export,
+            });
+            Response::builder()
+                .status(StatusCode::OK)
+                .header(CONTENT_TYPE, "application/json")
+                .header(
+                    CONTENT_DISPOSITION,
+                    "attachment; filename=control-plane.json",
+                )
+                .body(Body::from(
+                    serde_json::to_vec(&payload).expect("serializable control-plane export"),
+                ))
+                .expect("valid control-plane export response")
+        }
+        Err(error) => ops_error_response(error),
+    }
+}
+
+async fn import_control_plane(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response<Body> {
+    let repository = match ops_repository(&state, &headers) {
+        Ok(repository) => repository,
+        Err(response) => return response,
+    };
+    if body.len() > 16 * 1024 * 1024 {
+        return error_response(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "payload_too_large",
+            "control-plane export exceeds 16 MiB",
+        );
+    }
+    let payload: Value = match serde_json::from_slice(&body) {
+        Ok(payload) => payload,
+        Err(_) => {
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                "invalid_json",
+                "control-plane export is not valid JSON",
+            )
+        }
+    };
+    let replace = payload
+        .get("replace")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let requested_by = payload
+        .get("requested_by")
+        .and_then(Value::as_str)
+        .unwrap_or("admin_api");
+    let export_value = payload
+        .get("data")
+        .cloned()
+        .unwrap_or_else(|| payload.clone());
+    let export: ops::ControlPlaneExport = match serde_json::from_value(export_value) {
+        Ok(export) => export,
+        Err(_) => {
+            return error_response(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "invalid_operation",
+                "control-plane export shape is invalid",
+            )
+        }
+    };
+    if let Some(expected) = payload.get("checksum").and_then(Value::as_str) {
+        match ops::control_plane_export_checksum(&export) {
+            Ok(actual) if actual == expected => {}
+            Ok(_) => {
+                return error_response(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "checksum_mismatch",
+                    "control-plane export checksum does not match",
+                )
+            }
+            Err(_) => {
+                return error_response(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "invalid_operation",
+                    "control-plane export checksum cannot be computed",
+                )
+            }
+        }
+    }
+    let Some(control_plane) = state.control_plane.as_ref() else {
+        return error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "database_unavailable",
+            "DATABASE_URL is not configured",
+        );
+    };
+    match repository
+        .restore_control_plane(control_plane, &export, replace, requested_by)
+        .await
+    {
+        Ok(result) => {
+            let revision = result.snapshot.revision;
+            let generated_at = result.snapshot.generated_at;
+            state.reload_snapshot(result.snapshot);
+            (
+                StatusCode::OK,
+                Json(json!({
+                    "version":"v1",
+                    "timezone":"UTC",
+                    "backup_id":result.backup_id,
+                    "verified":result.verified,
+                    "snapshot_revision":revision,
+                    "snapshot_generated_at":generated_at,
+                    "skipped_virtual_keys":result.skipped_virtual_keys,
+                })),
+            )
+                .into_response()
+        }
+        Err(error) => ops_error_response(error),
+    }
+}
+
+async fn list_audit_logs(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<std::collections::HashMap<String, String>>,
+) -> Response<Body> {
+    let repository = match ops_repository(&state, &headers) {
+        Ok(repository) => repository,
+        Err(response) => return response,
+    };
+    let limit = match query.get("limit") {
+        Some(value) => match value.parse::<i64>() {
+            Ok(value) if (1..=500).contains(&value) => value,
+            _ => {
+                return error_response(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_operation",
+                    "limit must be between 1 and 500",
+                )
+            }
+        },
+        None => 100,
+    };
+    match repository
+        .list_audit_logs(query.get("operation_id").map(String::as_str), limit)
+        .await
+    {
+        Ok(data) => (
+            StatusCode::OK,
+            Json(json!({"version":"v1","timezone":"UTC","data":data})),
+        )
+            .into_response(),
+        Err(error) => ops_error_response(error),
+    }
+}
+
+async fn get_backup_run(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Response<Body> {
+    let repository = match ops_repository(&state, &headers) {
+        Ok(repository) => repository,
+        Err(response) => return response,
+    };
+    match repository.get_backup_run(&id).await {
+        Ok(Some(data)) => (
+            StatusCode::OK,
+            Json(json!({"version":"v1","timezone":"UTC","data":data})),
+        )
+            .into_response(),
+        Ok(None) => error_response(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            "backup operation not found",
+        ),
+        Err(error) => ops_error_response(error),
+    }
+}
+
+async fn list_backup_runs(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<std::collections::HashMap<String, String>>,
+) -> Response<Body> {
+    let repository = match ops_repository(&state, &headers) {
+        Ok(repository) => repository,
+        Err(response) => return response,
+    };
+    let limit = match query.get("limit") {
+        Some(value) => match value.parse::<i64>() {
+            Ok(value) if (1..=500).contains(&value) => value,
+            _ => {
+                return error_response(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_operation",
+                    "limit must be between 1 and 500",
+                )
+            }
+        },
+        None => 100,
+    };
+    match repository.list_backup_runs(limit).await {
+        Ok(data) => (
+            StatusCode::OK,
+            Json(json!({"version":"v1","timezone":"UTC","data":data})),
+        )
+            .into_response(),
+        Err(error) => ops_error_response(error),
+    }
+}
+
+async fn ops_schema_metadata(State(state): State<AppState>, headers: HeaderMap) -> Response<Body> {
+    let repository = match ops_repository(&state, &headers) {
+        Ok(repository) => repository,
+        Err(response) => return response,
+    };
+    match repository.schema_metadata().await {
+        Ok(data) => (
+            StatusCode::OK,
+            Json(json!({"version":"v1","timezone":"UTC","data":data})),
+        )
+            .into_response(),
+        Err(error) => ops_error_response(error),
+    }
 }
 
 #[allow(clippy::result_large_err)]
@@ -2688,6 +3470,30 @@ mod admin_auth_tests {
         ("GET", "/admin/usage/export"),
         ("GET", "/admin/usage/aggregate"),
         ("GET", "/admin/usage/events/request-id"),
+        ("GET", "/admin/retention/policies"),
+        ("PUT", "/admin/retention/policies"),
+        ("GET", "/admin/retention"),
+        ("PUT", "/admin/retention"),
+        ("POST", "/admin/retention/cleanup"),
+        ("GET", "/admin/retention/cleanup"),
+        ("POST", "/admin/retention/runs"),
+        ("GET", "/admin/retention/runs"),
+        ("GET", "/admin/retention/cleanup/operation-id"),
+        ("GET", "/admin/retention/runs/operation-id"),
+        ("POST", "/admin/retention/cleanup/operation-id/cancel"),
+        ("POST", "/admin/retention/cleanup/operation-id/retry"),
+        ("POST", "/admin/retention/runs/operation-id/cancel"),
+        ("POST", "/admin/retention/runs/operation-id/retry"),
+        ("GET", "/admin/control-plane/export"),
+        ("POST", "/admin/control-plane/import"),
+        ("GET", "/admin/backup/export"),
+        ("POST", "/admin/backup/import"),
+        ("GET", "/admin/audit"),
+        ("GET", "/admin/backups/backup-id"),
+        ("GET", "/admin/backups"),
+        ("GET", "/admin/backup/backup-id"),
+        ("GET", "/admin/ops/schema"),
+        ("GET", "/admin/schema"),
         ("GET", "/admin/sources"),
         ("POST", "/admin/sources"),
         ("GET", "/admin/sources/source-id"),
@@ -3652,5 +4458,171 @@ mod kimi_adapter_e2e_tests {
             .lock()
             .expect("recorded body mutex")
             .contains("messages"));
+    }
+}
+
+#[cfg(test)]
+mod ops_api_tests {
+    use super::*;
+    use axum::body::to_bytes;
+    use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
+    use std::str::FromStr;
+
+    async fn isolated_database() -> (db::Database, sqlx::PgPool, sqlx::PgPool, String) {
+        let url = std::env::var("TEST_DATABASE_URL")
+            .expect("TEST_DATABASE_URL must be set for the ops API test");
+        let admin = PgPoolOptions::new()
+            .max_connections(2)
+            .connect(&url)
+            .await
+            .expect("connect ops API test admin database");
+        let schema = format!("ops_api_{}", Uuid::new_v4().simple());
+        sqlx::query(&format!("CREATE SCHEMA \"{schema}\""))
+            .execute(&admin)
+            .await
+            .expect("create ops API schema");
+        let options = PgConnectOptions::from_str(&url)
+            .expect("parse TEST_DATABASE_URL")
+            .options([("search_path", schema.as_str())]);
+        let pool = PgPoolOptions::new()
+            .max_connections(5)
+            .connect_with(options)
+            .await
+            .expect("connect ops API schema");
+        let database = db::Database::from_test_pool(pool.clone())
+            .await
+            .expect("migrate ops API schema");
+        (database, pool, admin, schema)
+    }
+
+    fn admin_request(method: &str, uri: &str, body: Body) -> Request<Body> {
+        Request::builder()
+            .method(method)
+            .uri(uri)
+            .header("authorization", format!("Bearer {TEST_ADMIN_KEY}"))
+            .header(CONTENT_TYPE, "application/json")
+            .body(body)
+            .expect("ops API request")
+    }
+
+    async fn response_json(response: Response<Body>) -> Value {
+        serde_json::from_slice(
+            &to_bytes(response.into_body(), 16 * 1024 * 1024)
+                .await
+                .expect("ops API response body"),
+        )
+        .expect("ops API JSON response")
+    }
+
+    fn db_state(database: db::Database, control_plane: control_plane::ControlPlane) -> AppState {
+        let config = Arc::new(GatewayConfig {
+            listen_addr: "127.0.0.1:0".into(),
+            providers: Vec::new(),
+            accounts: Vec::new(),
+            routes: Vec::new(),
+        });
+        AppState {
+            live: Arc::new(std::sync::RwLock::new(LiveConfig::legacy(config))),
+            http: transport::test_client().expect("ops API HTTP client"),
+            db: Some(database),
+            control_plane: Some(control_plane),
+            health: health::HealthRegistry::new(std::time::Duration::from_secs(1)),
+            admin_auth: AdminAuth::test(),
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "requires TEST_DATABASE_URL; run with the PostgreSQL regression suite"]
+    async fn postgres_ops_api_exposes_progress_versions_and_verified_restore() {
+        let (database, pool, admin, schema) = isolated_database().await;
+        let control_plane = control_plane::ControlPlane::new(&database, "127.0.0.1:0");
+        let app = application(db_state(database.clone(), control_plane));
+
+        let policies = app
+            .clone()
+            .oneshot(admin_request(
+                "GET",
+                "/admin/retention/policies",
+                Body::empty(),
+            ))
+            .await
+            .expect("retention policies response");
+        assert_eq!(policies.status(), StatusCode::OK);
+        let policies = response_json(policies).await;
+        assert_eq!(policies["version"], "v1");
+        assert_eq!(policies["timezone"], "UTC");
+        assert_eq!(policies["data"].as_array().unwrap().len(), 4);
+
+        let dry_run = app
+            .clone()
+            .oneshot(admin_request(
+                "POST",
+                "/admin/retention/cleanup",
+                Body::from(r#"{"dry_run":true,"operation_id":"api-dry-run"}"#),
+            ))
+            .await
+            .expect("dry-run response");
+        assert_eq!(dry_run.status(), StatusCode::OK);
+        let dry_run = response_json(dry_run).await;
+        assert_eq!(dry_run["data"]["dry_run"], true);
+
+        let schema_response = app
+            .clone()
+            .oneshot(admin_request("GET", "/admin/ops/schema", Body::empty()))
+            .await
+            .expect("schema response");
+        let schema_response = response_json(schema_response).await;
+        assert_eq!(schema_response["data"]["schema_version"], 11);
+        assert_eq!(schema_response["data"]["migration_version"], 11);
+
+        let export_response = app
+            .clone()
+            .oneshot(admin_request(
+                "GET",
+                "/admin/control-plane/export",
+                Body::empty(),
+            ))
+            .await
+            .expect("export response");
+        assert_eq!(export_response.status(), StatusCode::OK);
+        let export = response_json(export_response).await;
+        assert_eq!(export["data"]["timezone"], "UTC");
+        assert!(export["data"].get("credential_ciphertext").is_none());
+
+        let import_payload = json!({"data": export["data"].clone(), "checksum": export["checksum"].clone(), "replace": true});
+        let import_response = app
+            .clone()
+            .oneshot(admin_request(
+                "POST",
+                "/admin/control-plane/import",
+                Body::from(serde_json::to_vec(&import_payload).unwrap()),
+            ))
+            .await
+            .expect("import response");
+        assert_eq!(import_response.status(), StatusCode::OK);
+        let import = response_json(import_response).await;
+        assert_eq!(import["verified"], true);
+
+        let audit = app
+            .clone()
+            .oneshot(admin_request(
+                "GET",
+                "/admin/audit?operation_id=api-dry-run",
+                Body::empty(),
+            ))
+            .await
+            .expect("audit response");
+        assert_eq!(audit.status(), StatusCode::OK);
+        let audit = response_json(audit).await;
+        assert!(!audit["data"].as_array().unwrap().is_empty());
+
+        drop(app);
+        drop(database);
+        pool.close().await;
+        sqlx::query(&format!("DROP SCHEMA \"{schema}\" CASCADE"))
+            .execute(&admin)
+            .await
+            .expect("drop ops API schema");
+        admin.close().await;
     }
 }

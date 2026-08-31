@@ -281,6 +281,9 @@ impl Database {
         ))
         .execute(&mut *tx)
         .await?;
+        sqlx::raw_sql(include_str!("../migrations/0011_retention_backup.sql"))
+            .execute(&mut *tx)
+            .await?;
         tx.commit().await
     }
 
@@ -1600,6 +1603,26 @@ mod tests {
         assert!(discovery_schema.contains("CREATE TABLE IF NOT EXISTS source_connection_tests"));
         assert!(discovery_schema.contains("raw_snapshot JSONB"));
         assert!(discovery_schema.contains("error_message TEXT"));
+    }
+
+    #[test]
+    fn retention_schema_declares_independent_policies_and_operation_state() {
+        let schema = include_str!("../migrations/0011_retention_backup.sql");
+        for marker in [
+            "CREATE TABLE IF NOT EXISTS retention_policies",
+            "CREATE TABLE IF NOT EXISTS retention_cleanup_runs",
+            "CREATE TABLE IF NOT EXISTS audit_logs",
+            "CREATE TABLE IF NOT EXISTS backup_runs",
+            "CREATE TABLE IF NOT EXISTS gateway_schema_migrations",
+            "CREATE TABLE IF NOT EXISTS gateway_schema_metadata",
+            "policy_key IN ('usage_events', 'usage_attempts', 'audit', 'discovery')",
+            "progress JSONB",
+        ] {
+            assert!(
+                schema.contains(marker),
+                "missing migration marker: {marker}"
+            );
+        }
     }
 
     /// Set TEST_DATABASE_URL to run the PostgreSQL constraint and repository

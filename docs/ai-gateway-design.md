@@ -490,7 +490,13 @@ PostgreSQL 回归测试只连接显式的 `TEST_DATABASE_URL`，不会复用运�
 
 ProviderPreset/模型发现回归使用真实 PostgreSQL 与 mock 上游，覆盖 DeepSeek、MiniMax、Kimi Code 的成功、失败、空列表、重复刷新、模型消失、confirmed/user 覆盖保留、批量确认和日志脱敏。
 
-仍待新增的是账号健康持久化/探测记录（#52）和统一 Admin 写操作审计日志（#48）；它们不能用普通应用日志代替。
+账号健康持久化/探测记录（#52）和统一 Admin 写操作审计日志（#48）仍由独立 Issue 负责；#53 已补齐运维操作自身的审计记录，不把普通应用日志当作审计事实。
+
+### 7.2.1 数据保留、清理、备份与恢复（#53）
+
+`migrations/0011_retention_backup.sql` 新增 `retention_policies`、`retention_cleanup_runs`、`audit_logs`、`backup_runs`、`gateway_schema_migrations` 和 `gateway_schema_metadata`。四类历史（logical UsageEvent、UsageAttempt、连接测试/运维 audit、discovery run）分别按 UTC `retention_days` 管理。`POST /admin/retention/cleanup` 在运行开始时固定策略和 cut-off，每个批次独立提交并记录 scanned/deleted/progress；同一 `operation_id` 可重复提交、取消和 retry。逻辑事件只有在不会级联删除仍在保留期内的 attempt 时才删除。
+
+控制面可通过 `GET /admin/control-plane/export` 导出脱敏 JSON，包含恢复路由所需的 Source/Account/模型/Binding/Route、schema/migration 版本和 runtime fingerprint，不包含 usage 正文、Authorization、API Key、Virtual Key hash 或凭据 ciphertext。`POST /admin/control-plane/import` 在显式 `replace=true` 时按 FK 顺序恢复到新库，重置序列并重新构建 snapshot；fingerprint 不一致时标记恢复失败。完整 pg_dump、Compose 和本地 CLI 步骤见 [`operations.md`](operations.md)。
 
 ### 7.3 Token 统计
 
@@ -521,7 +527,7 @@ CPA Usage Keeper 只复用 React 页面和交互，不复用其 Go 后端、SQLi
 - Prometheus/OpenTelemetry（#50）；
 - Secret Resolver 与凭据信封加密（#47）；
 - Admin 写操作审计日志（#48）；
-- 数据保留、清理、备份和恢复（#53）。
+- 数据保留、清理、备份和恢复（#53，第一版已完成；后续仅按运行反馈加固）。
 
 Provider URL allowlist、解析后 IP 校验、重定向限制和 SSRF 防护（#46）已经完成。Admin API 只接受独立的 `GATEWAY_ADMIN_KEY`，未配置时请求级 fail closed 返回 `401`，不会回退到数据面 Key。
 
@@ -534,6 +540,7 @@ Provider URL allowlist、解析后 IP 校验、重定向限制和 SSRF 防护（
 - 已覆盖主账号和 fallback 的三协议模型重写、408/429/5xx/传输错误、首选账号不可用、全部失败和流式 TTFT；
 - 已覆盖失败请求 `missing/0`、真实 upstream model、逻辑事件/attempt 归因及跨 Source fallback；
 - 已增加隔离 PostgreSQL schema 的控制面集成测试，覆盖 DB-first 一次性导入、全资源 CRUD/启停、事务回滚、native/adapter Binding 解析、并发 snapshot 切换、刷新失败保留旧 snapshot、凭据脱敏和 `/v1/models` 健康过滤。
+- 已增加隔离 PostgreSQL schema 的 #53 运维回归，覆盖 UTC 保留 cut-off、dry-run、分批续跑、attempt/logical event 引用保护、audit/discovery 清理、脱敏控制面导出和新库 snapshot fingerprint 校验；HTTP 运维入口同步覆盖策略、版本、导出和恢复契约。
 
 ### 7.7 真实联调基线（2026-08-31）
 
@@ -592,4 +599,4 @@ Usage 的 `provider_id` 与 `source_id` 已在 DB-first snapshot、主路径、e
 2. 在已完成独立 Management 外壳（#42）的基础上，并行接入有效能力矩阵（#43）和 Source/模型发现确认流（#45）。
 3. 完成 #8 用量分析 Epic 的最终验收并关闭。
 4. 完成 Virtual Key 生命周期、健康持久化/主动探测和 SSE 生命周期契约（#51、#52、#54）。
-5. 接入 Prometheus/OpenTelemetry，并建立数据保留、备份与恢复流程（#50、#53）。
+5. 接入 Prometheus/OpenTelemetry，并根据 #53 的运行反馈继续加固数据保留、备份与恢复流程（#50）。
