@@ -777,6 +777,7 @@ mod tests {
         str::FromStr,
         sync::{Arc, Mutex as StdMutex},
     };
+    use tower::ServiceExt;
 
     fn clock() -> ManualHealthClock {
         ManualHealthClock::new(Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap())
@@ -864,6 +865,19 @@ mod tests {
         let database = Database::from_test_pool(pool.clone())
             .await
             .expect("migrate isolated health schema");
+        let versions: (i32, i32) = sqlx::query_as(
+            "SELECT schema_version,migration_version FROM gateway_schema_metadata WHERE singleton=TRUE",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("read schema metadata");
+        assert_eq!(versions, (12, 12));
+        let migration_name: String =
+            sqlx::query_scalar("SELECT name FROM gateway_schema_migrations WHERE version=12")
+                .fetch_one(&pool)
+                .await
+                .expect("read health migration metadata");
+        assert_eq!(migration_name, "health_persistence");
         sqlx::query("INSERT INTO sources (id,display_name,provider_preset_id,provider_preset_version,provider_preset_snapshot,base_url,endpoints,auth_config,protocol_capabilities) VALUES ('health-source','Health Source','custom',1,'{}'::jsonb,'https://health.example','{\"openai_chat_completions\":\"/chat/completions\"}'::jsonb,'{}'::jsonb,'{}'::jsonb)")
             .execute(&pool)
             .await
@@ -1093,24 +1107,51 @@ mod tests {
                 ..HealthConfig::default()
             },
         );
-        let outcome = registry
-            .probe_account(
-                &transport::test_client().expect("probe HTTP client"),
-                "probe-account",
-                Protocol::OpenAiChatCompletions,
-                None,
-                "probe-test",
+        let empty_config = crate::config::GatewayConfig {
+            listen_addr: "127.0.0.1:0".into(),
+            providers: Vec::new(),
+            accounts: Vec::new(),
+            routes: Vec::new(),
+        };
+        let app_state = crate::AppState {
+            live: Arc::new(std::sync::RwLock::new(crate::LiveConfig::legacy(Arc::new(
+                empty_config,
+            )))),
+            http: transport::test_client().expect("probe HTTP client"),
+            db: Some(database.clone()),
+            control_plane: None,
+            health: registry.clone(),
+            admin_auth: crate::AdminAuth::test(),
+        };
+        let response = crate::application(app_state)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/admin/accounts/probe-account/probe")
+                    .header(header::AUTHORIZATION, "Bearer test-admin-key")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"protocol":"openai_chat_completions","requested_by":"probe-test"}"#,
+                    ))
+                    .expect("probe HTTP request"),
             )
             .await
-            .expect("successful provider preset probe");
+            .expect("successful provider preset probe HTTP response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let response_body = to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .expect("read probe HTTP response");
+        let response_body: serde_json::Value =
+            serde_json::from_slice(&response_body).expect("probe HTTP JSON");
+        let outcome = &response_body["data"];
         if let Some(value) = previous {
             std::env::set_var("HEALTH_PROBE_TEST_KEY", value);
         } else {
             std::env::remove_var("HEALTH_PROBE_TEST_KEY");
         }
-        assert_eq!(outcome.connection_test.status, "succeeded");
-        assert_eq!(outcome.health.source, "probe");
-        assert_eq!(outcome.health.status, "healthy");
+        assert_eq!(outcome["connection_test"]["status"], "succeeded");
+        assert_eq!(outcome["health"]["source"], "probe");
+        assert_eq!(outcome["health"]["status"], "healthy");
         {
             let requests = requests.lock().expect("probe requests lock");
             assert_eq!(requests.len(), 1);

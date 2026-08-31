@@ -1306,6 +1306,19 @@ mod tests {
         assert!(provider_schema.contains("provider_id = event.source_id"));
         assert!(provider_schema.contains("provider_id = attempt.source_id"));
         assert!(provider_schema.contains("'unknown'"));
+        let health_schema = include_str!("../migrations/0012_health_persistence.sql");
+        for marker in [
+            "health_source TEXT",
+            "health_updated_at TIMESTAMPTZ",
+            "consecutive_failures INTEGER",
+            "CREATE TABLE IF NOT EXISTS account_health_events",
+            "VALUES (12, 'health_persistence')",
+        ] {
+            assert!(
+                health_schema.contains(marker),
+                "missing health marker: {marker}"
+            );
+        }
     }
 
     #[tokio::test]

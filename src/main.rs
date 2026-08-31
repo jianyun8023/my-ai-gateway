@@ -2502,7 +2502,10 @@ async fn admin_health(State(state): State<AppState>, headers: HeaderMap) -> Resp
             "health_status": health.status.clone(),
             "health_source": health.source.clone(),
             "health_updated_at": health.updated_at.clone(),
+            "updated_at": health.updated_at.clone(),
             "stale": health.stale,
+            "cooldown_until": health.cooldown_until,
+            "consecutive_failures": health.consecutive_failures,
             "health": health,
         }));
     }
@@ -4320,6 +4323,28 @@ mod health_api_tests {
         assert!(account["health"].get("stale").is_some());
         assert_eq!(account["health_source"], "passive");
         assert!(account.get("health_updated_at").is_some());
+    }
+
+    #[tokio::test]
+    async fn health_api_is_reached_through_admin_http_route() {
+        let state = health_state();
+        let response = application(state)
+            .oneshot(
+                Request::builder()
+                    .uri("/admin/health")
+                    .header(axum::http::header::AUTHORIZATION, "Bearer test-admin-key")
+                    .body(Body::empty())
+                    .expect("health HTTP request"),
+            )
+            .await
+            .expect("health HTTP response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .expect("read health HTTP body");
+        let body: Value = serde_json::from_slice(&body).expect("health HTTP JSON");
+        assert_eq!(body["fact_source"], "memory");
+        assert_eq!(body["data"].as_array().unwrap().len(), 1);
     }
 }
 
