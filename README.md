@@ -54,7 +54,7 @@ curl -X POST http://127.0.0.1:8787/admin/keys \
   -d '{"name":"service-a","allowed_models":["MiniMax-M2.7"]}'
 ```
 
-Usage API 返回显式的 `version: "v1"` 和 `timezone: "UTC"`。所有入口共享 `from`、`to`（RFC3339、半开区间 `[from,to)`）、`logical_model`、`upstream_model`、`provider`、`source_id`、`client_source`、`account`、`protocol_in`、`protocol_upstream`、`virtual_key`、`status=success|failure`、`status_code` 和 `usage_source` 组合筛选。`source_id` 是 DB-first Runtime Binding 最终实际选中的一等 Source；可选下游 `X-Client-Source` 只记录为独立 `client_source`，缺省为 `unknown`。Virtual Key 鉴权的请求会记录 Key ID，静态 `GATEWAY_API_KEY` 请求为 `null`。
+Usage API 返回显式的 `version: "v1"` 和 `timezone: "UTC"`。所有入口共享 `from`、`to`（RFC3339、半开区间 `[from,to)`）、`logical_model`、`upstream_model`、`provider`、`source_id`、`client_source`、`account`、`protocol_in`、`protocol_upstream`、`virtual_key`、`status=success|failure`、`status_code` 和 `usage_source` 组合筛选。`provider`/`provider_id` 来自 Source 创建时固化的 `provider_preset_id`，同一 ProviderPreset 下的多个 Source 会归入同一 Provider；`source_id` 是 DB-first Runtime Binding 最终实际选中的 Source。可选下游 `X-Client-Source` 只记录为独立 `client_source`，缺省为 `unknown`。Virtual Key 鉴权的请求会记录 Key ID，静态 `GATEWAY_API_KEY` 请求为 `null`。
 
 ProviderPreset、连接测试、模型发现和确认接口的完整请求/响应契约见 [`docs/admin-api.md`](./docs/admin-api.md)。最小流程为：创建 Source 快照 → 选择关联且启用的 Account 按协议测试 → 执行 discovery → 查看 diff/待确认模型 → 编辑并批量确认。确认 SourceModel 仍不会自动创建 LogicalModel、Binding 或 Route。
 

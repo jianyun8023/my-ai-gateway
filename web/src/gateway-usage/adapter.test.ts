@@ -29,11 +29,13 @@ describe('gateway usage adapter', () => {
       usageSource: 'estimated',
       retryCount: 1,
       fallback: true,
+      provider: 'provider-fallback',
       sourceId: 'source-tokyo',
       clientSource: 'codex-desktop',
       account: 'fallback-account',
     });
     expect(page.events[0].attempts.map((attempt) => attempt.sourceId)).toEqual(['source-singapore', 'source-tokyo']);
+    expect(page.events[0].attempts.map((attempt) => attempt.provider)).toEqual(['provider-primary', 'provider-fallback']);
     expect(page.events[0].attempts.map((attempt) => attempt.statusCode)).toEqual([429, 200]);
     expect(page.events[1]).toMatchObject({ usageSource: 'missing', success: false, tokens: { total: 0 } });
   });
@@ -44,6 +46,7 @@ describe('gateway usage adapter', () => {
         request_id: 'r1',
         created_at: '2026-08-30T00:00:00Z',
         logical_model: 'm',
+        provider_id: 'provider-a',
         source_id: 'source-a',
         client_source: 'client-a',
         status_code: 200,
@@ -56,6 +59,7 @@ describe('gateway usage adapter', () => {
     expect(page.events[0]).toMatchObject({
       requestId: 'r1',
       logicalModel: 'm',
+      provider: 'provider-a',
       sourceId: 'source-a',
       clientSource: 'client-a',
       tokens: { input: 2, output: 3, total: 5 },

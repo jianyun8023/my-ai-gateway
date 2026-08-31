@@ -24,13 +24,13 @@
 
 ### 管理端
 
-- [ ] 建立控制面管理 UI 外壳与独立 Management 空间（#42）
+- [x] 建立控制面管理 UI 外壳与独立 Management 空间（#42）
 - [ ] 展示 DB-first 三协议有效能力矩阵（#43；#24 的剩余范围）
 - [ ] 完成 Source 接入、模型发现差异和确认流（#45；#6 的剩余范围）
 
 ### 用量与运行时
 
-- [ ] 将 Usage 的 Provider 归因与 Source 维度真正解耦（#56；#8 的最后阻塞项）
+- [x] 将 Usage 的 Provider 归因与 Source 维度真正解耦（#56；ProviderPreset 与 Source 分列）
 - [ ] Virtual Key 轮换、权限更新和静态 Key 迁移（#51）
 - [ ] 健康状态持久化与主动探测（#52）
 - [ ] SSE 心跳、取消和流式超时契约（#54）
@@ -38,19 +38,19 @@
 ### 安全、质量与运维
 
 - [ ] Admin API fail closed，并与下游鉴权完全分离（#44）
-- [ ] Provider URL allowlist 与 SSRF 防护（#46）
+- [x] Provider URL allowlist 与 SSRF 防护（#46）
 - [ ] 统一 Secret Resolver 与凭据信封加密（#47）
 - [ ] Admin 写操作审计日志（#48）
-- [ ] GitHub Actions 全量验证门禁（#49）
+- [x] GitHub Actions 全量验证门禁（#49）
 - [ ] Prometheus 与 OpenTelemetry（#50）
 - [ ] 数据保留、清理、备份与恢复（#53）
 
 ## Epic 状态
 
 - #2 继续等待 #24 的 Web 范围（#43）收口。
-- #6 的后端模型目录和发现链已完成，继续等待 #42/#45。
-- #8 除 Provider/Source 独立归因外已完成，继续等待 #56。
-- #24 的后端聚合 API 已完成，继续等待 #42/#43。
+- #6 的后端模型目录和发现链已完成，继续等待 #45。
+- #8 的 Provider/Source 独立归因已补齐，等待最终验收关闭。
+- #24 的后端聚合 API 和 Management 外壳已完成，继续等待 #43。
 - #1 继续作为产品路线图保留。
 
 本文件的主线状态同步和中文 README 修正由 #55 完成。
