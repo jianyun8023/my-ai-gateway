@@ -30,7 +30,6 @@ use axum::{
     Json, Router,
 };
 use config::GatewayConfig;
-use futures_util::{stream, StreamExt};
 use protocol::Protocol;
 use routing::{ResolvedRoute, RouteResolver};
 use serde::Deserialize;
@@ -1605,123 +1604,153 @@ async fn proxy(
     };
     let primary_unavailable = !account.enabled || !state.health.is_available(&account.id).await;
     if primary_unavailable {
-        if let Some(candidate) =
+        let Some(candidate) =
             select_fallback_candidate(&config, &state.health, &route, model, protocol).await
-        {
-            if !route.is_degraded() && !candidate.degraded_features.is_empty() {
-                warn_degraded_features(&request_id, &route.route_id, &candidate.degraded_features);
-            }
-            let forwarded_body = if candidate.upstream_model != model {
-                rewrite_model_in_body(&body, &candidate.upstream_model)
-            } else {
-                body.clone()
-            };
-            let started = Instant::now();
-            if let Ok(response) = forward_fallback(
-                &config,
-                &state.http,
-                candidate.provider,
-                candidate.account,
-                candidate.protocol_upstream,
-                &candidate.mode,
-                candidate.adapter.as_deref(),
-                candidate.upstream_endpoint.as_deref(),
-                &headers,
-                forwarded_body,
-            )
-            .await
-            {
-                let usage = transport::usage_from_response(&response);
-                let is_streamed = payload
-                    .get("stream")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false);
-                let degraded = !candidate.degraded_features.is_empty();
-                let error_summary = if !response.status().is_success() {
-                    Some(format!("HTTP {}", response.status().as_u16()))
+        else {
+            return error_response(
+                StatusCode::SERVICE_UNAVAILABLE,
+                if account.enabled {
+                    "account_cooling_down"
                 } else {
-                    None
-                };
-                if let Some(database) = &state.db {
-                    let source = headers
-                        .get("x-client-source")
-                        .and_then(|v| v.to_str().ok())
-                        .filter(|v| !v.is_empty())
-                        .unwrap_or("unknown")
-                        .to_string();
-                    let event = db::UsageEvent {
-                        request_id,
-                        virtual_key_id,
-                        provider_id: candidate.provider.id.clone(),
-                        account_id: candidate.account.id.clone(),
-                        model: model.to_string(),
-                        logical_model: model.to_string(),
-                        upstream_model_id: Some(candidate.upstream_model.clone()),
-                        source,
-                        protocol_in: protocol.to_string(),
-                        protocol_upstream: candidate.protocol_upstream.to_string(),
-                        mode: candidate.mode.clone(),
-                        status_code: response.status().as_u16() as i32,
-                        success: response.status().is_success(),
-                        retry_count: 0,
-                        latency_ms: started.elapsed().as_millis() as i64,
-                        ttft_ms: None,
-                        input_tokens: usage.as_ref().map(|u| u.input_tokens).unwrap_or(0),
-                        output_tokens: usage.as_ref().map(|u| u.output_tokens).unwrap_or(0),
-                        reasoning_tokens: usage.as_ref().map(|u| u.reasoning_tokens).unwrap_or(0),
-                        cached_tokens: usage.as_ref().map(|u| u.cached_tokens).unwrap_or(0),
-                        total_tokens: usage.as_ref().map(|u| u.total_tokens).unwrap_or(0),
-                        usage_source: usage
-                            .as_ref()
-                            .map(|u| u.source.clone())
-                            .unwrap_or_else(|| "missing".into()),
-                        degraded,
-                        route_id: Some(route.route_id.clone()),
-                        streamed: is_streamed,
-                        error_summary,
-                    };
-                    let attempts = vec![db::UsageAttempt {
-                        attempt_no: 0,
-                        provider_id: candidate.provider.id.clone(),
-                        account_id: candidate.account.id.clone(),
-                        upstream_model_id: Some(candidate.upstream_model),
-                        status_code: response.status().as_u16() as i32,
-                        success: response.status().is_success(),
-                        latency_ms: started.elapsed().as_millis() as i64,
-                    }];
-                    if is_event_stream(&response) {
-                        return wrap_stream_usage(
-                            response,
-                            database.clone(),
-                            event,
-                            body,
-                            attempts,
-                        );
-                    }
-                    if let Err(error) = database.insert_usage_with_attempts(&event, &attempts).await
-                    {
-                        tracing::warn!(%error, "failed to persist usage event");
-                    }
+                    "account_disabled"
+                },
+                "primary account is unavailable and no fallback succeeded",
+            );
+        };
+        if !route.is_degraded() && !candidate.degraded_features.is_empty() {
+            warn_degraded_features(&request_id, &route.route_id, &candidate.degraded_features);
+        }
+        let prepared = transport::prepare_model_request(&body, model, &candidate.upstream_model);
+        let usage_request_body = prepared.body.clone();
+        let attempt_started = Instant::now();
+        let (response, attempt_status, attempt_success) = match forward_fallback(
+            &config,
+            &state.http,
+            candidate.provider,
+            candidate.account,
+            candidate.protocol_upstream,
+            &candidate.mode,
+            candidate.adapter.as_deref(),
+            candidate.upstream_endpoint.as_deref(),
+            &headers,
+            prepared.body,
+        )
+        .await
+        {
+            Ok(response) => {
+                let status = response.status();
+                if is_retryable(status) {
+                    state.health.mark_failure(&candidate.account.id).await;
+                } else {
+                    state.health.mark_success(&candidate.account.id).await;
                 }
-                return response;
+                (response, status.as_u16() as i32, status.is_success())
+            }
+            Err(_) => {
+                state.health.mark_failure(&candidate.account.id).await;
+                (
+                    error_response(
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        if account.enabled {
+                            "account_cooling_down"
+                        } else {
+                            "account_disabled"
+                        },
+                        "primary account is unavailable and no fallback succeeded",
+                    ),
+                    599,
+                    false,
+                )
+            }
+        };
+        let usage = transport::usage_from_response(&response);
+        let is_streamed = payload
+            .get("stream")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let degraded = !candidate.degraded_features.is_empty();
+        let error_summary = if !response.status().is_success() {
+            Some(format!("HTTP {}", response.status().as_u16()))
+        } else {
+            None
+        };
+        if let Some(database) = &state.db {
+            let source = headers
+                .get("x-client-source")
+                .and_then(|value| value.to_str().ok())
+                .filter(|value| !value.is_empty())
+                .unwrap_or("unknown")
+                .to_string();
+            let event = db::UsageEvent {
+                request_id,
+                virtual_key_id,
+                provider_id: candidate.provider.id.clone(),
+                account_id: candidate.account.id.clone(),
+                model: model.to_string(),
+                logical_model: model.to_string(),
+                upstream_model_id: Some(prepared.upstream_model_id.clone()),
+                source,
+                protocol_in: protocol.to_string(),
+                protocol_upstream: candidate.protocol_upstream.to_string(),
+                mode: candidate.mode.clone(),
+                status_code: response.status().as_u16() as i32,
+                success: response.status().is_success(),
+                retry_count: 0,
+                latency_ms: started.elapsed().as_millis() as i64,
+                ttft_ms: None,
+                input_tokens: usage.as_ref().map(|value| value.input_tokens).unwrap_or(0),
+                output_tokens: usage.as_ref().map(|value| value.output_tokens).unwrap_or(0),
+                reasoning_tokens: usage
+                    .as_ref()
+                    .map(|value| value.reasoning_tokens)
+                    .unwrap_or(0),
+                cached_tokens: usage.as_ref().map(|value| value.cached_tokens).unwrap_or(0),
+                total_tokens: usage.as_ref().map(|value| value.total_tokens).unwrap_or(0),
+                usage_source: usage
+                    .as_ref()
+                    .map(|value| value.source.clone())
+                    .unwrap_or_else(|| "missing".into()),
+                degraded,
+                route_id: Some(route.route_id.clone()),
+                streamed: is_streamed,
+                error_summary,
+            };
+            let attempts = vec![db::UsageAttempt {
+                attempt_no: 0,
+                provider_id: candidate.provider.id.clone(),
+                account_id: candidate.account.id.clone(),
+                upstream_model_id: Some(prepared.upstream_model_id),
+                status_code: attempt_status,
+                success: attempt_success,
+                latency_ms: attempt_started.elapsed().as_millis() as i64,
+            }];
+            if is_event_stream(&response) {
+                return wrap_stream_usage(
+                    response,
+                    database.clone(),
+                    event,
+                    usage_request_body,
+                    attempts,
+                    started,
+                );
+            }
+            if let Err(error) = database.insert_usage_with_attempts(&event, &attempts).await {
+                tracing::warn!(%error, "failed to persist usage event");
             }
         }
-        return error_response(
-            StatusCode::SERVICE_UNAVAILABLE,
-            if account.enabled {
-                "account_cooling_down"
-            } else {
-                "account_disabled"
-            },
-            "primary account is unavailable and no fallback succeeded",
-        );
+        return response;
     }
-    let usage_request_body = body.clone();
-    let primary_body = if route.upstream_model_id != model {
-        rewrite_model_in_body(&body, &route.upstream_model_id)
+    let primary_upstream_model = if route.binding_id.is_none() {
+        account
+            .model_map
+            .get(model)
+            .cloned()
+            .unwrap_or_else(|| route.upstream_model_id.clone())
     } else {
-        body.clone()
+        route.upstream_model_id.clone()
     };
+    let primary_request = transport::prepare_model_request(&body, model, &primary_upstream_model);
+    let usage_request_body = body.clone();
     let result_started = Instant::now();
     let result = forward_account(
         &config,
@@ -1730,7 +1759,7 @@ async fn proxy(
         provider,
         account,
         &headers,
-        primary_body,
+        primary_request.body,
     )
     .await;
     let mut attempts = Vec::new();
@@ -1740,7 +1769,7 @@ async fn proxy(
                 attempt_no: 0,
                 provider_id: provider.id.clone(),
                 account_id: account.id.clone(),
-                upstream_model_id: Some(route.upstream_model_id.clone()),
+                upstream_model_id: Some(primary_request.upstream_model_id.clone()),
                 status_code: response.status().as_u16() as i32,
                 success: false,
                 latency_ms: result_started.elapsed().as_millis() as i64,
@@ -1766,7 +1795,7 @@ async fn proxy(
                 attempt_no: 0,
                 provider_id: provider.id.clone(),
                 account_id: account.id.clone(),
-                upstream_model_id: Some(route.upstream_model_id.clone()),
+                upstream_model_id: Some(primary_request.upstream_model_id.clone()),
                 status_code: response.status().as_u16() as i32,
                 success: response.status().is_success(),
                 latency_ms: result_started.elapsed().as_millis() as i64,
@@ -1779,7 +1808,7 @@ async fn proxy(
                 attempt_no: 0,
                 provider_id: provider.id.clone(),
                 account_id: account.id.clone(),
-                upstream_model_id: Some(route.upstream_model_id.clone()),
+                upstream_model_id: Some(primary_request.upstream_model_id.clone()),
                 status_code: 599,
                 success: false,
                 latency_ms: result_started.elapsed().as_millis() as i64,
@@ -1889,6 +1918,7 @@ async fn proxy(
                 event,
                 usage_request_body,
                 attempts,
+                started,
             );
         }
         if let Err(error) = database.insert_usage_with_attempts(&event, &attempts).await {
@@ -1925,53 +1955,46 @@ fn is_event_stream(response: &Response<Body>) -> bool {
 fn wrap_stream_usage(
     response: Response<Body>,
     database: db::Database,
-    event: db::UsageEvent,
+    mut event: db::UsageEvent,
     request_body: Bytes,
-    attempts: Vec<db::UsageAttempt>,
+    mut attempts: Vec<db::UsageAttempt>,
+    request_started: Instant,
 ) -> Response<Body> {
     let (parts, body) = response.into_parts();
-    let upstream = body.into_data_stream();
-    let captured = Vec::new();
-    let stream = stream::unfold(
-        (upstream, captured, database, event, request_body, attempts),
-        |(mut upstream, mut captured, database, mut event, request_body, attempts)| async move {
-            match upstream.next().await {
-                Some(Ok(chunk)) => {
-                    captured.extend_from_slice(&chunk);
-                    Some((
-                        Ok::<Bytes, std::io::Error>(chunk),
-                        (upstream, captured, database, event, request_body, attempts),
-                    ))
-                }
-                Some(Err(error)) => Some((
-                    Err(std::io::Error::other(error.to_string())),
-                    (upstream, captured, database, event, request_body, attempts),
-                )),
-                None => {
-                    let usage = crate::usage::usage_for_sse_response(
-                        event.success,
-                        &request_body,
-                        &captured,
-                    );
-                    event.input_tokens = usage.input_tokens;
-                    event.output_tokens = usage.output_tokens;
-                    event.reasoning_tokens = usage.reasoning_tokens;
-                    event.cached_tokens = usage.cached_tokens;
-                    event.total_tokens = usage.total_tokens;
-                    event.usage_source = usage.source;
-                    tokio::spawn(async move {
-                        if let Err(error) =
-                            database.insert_usage_with_attempts(&event, &attempts).await
-                        {
-                            tracing::warn!(%error, "failed to persist streaming usage event");
-                        }
-                    });
-                    None
-                }
+    let body = usage::observe_stream_body(body, request_started, move |observation| {
+        finalize_stream_usage(&mut event, &mut attempts, &request_body, observation);
+        tokio::spawn(async move {
+            if let Err(error) = database.insert_usage_with_attempts(&event, &attempts).await {
+                tracing::warn!(%error, "failed to persist streaming usage event");
             }
-        },
-    );
-    Response::from_parts(parts, Body::from_stream(stream))
+        });
+    });
+    Response::from_parts(parts, body)
+}
+
+fn finalize_stream_usage(
+    event: &mut db::UsageEvent,
+    attempts: &mut [db::UsageAttempt],
+    request_body: &[u8],
+    observation: usage::StreamObservation,
+) {
+    event.ttft_ms = observation.ttft_ms;
+    if observation.failed {
+        event.status_code = 599;
+        event.success = false;
+        event.error_summary = Some("upstream stream error".into());
+        if let Some(attempt) = attempts.last_mut() {
+            attempt.status_code = 599;
+            attempt.success = false;
+        }
+    }
+    let report = usage::usage_for_sse_response(event.success, request_body, &observation.captured);
+    event.input_tokens = report.input_tokens;
+    event.output_tokens = report.output_tokens;
+    event.reasoning_tokens = report.reasoning_tokens;
+    event.cached_tokens = report.cached_tokens;
+    event.total_tokens = report.total_tokens;
+    event.usage_source = report.source;
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2164,17 +2187,6 @@ async fn select_fallback_candidate<'a>(
     Some(available.swap_remove(selected_index))
 }
 
-fn rewrite_model_in_body(body: &Bytes, new_model: &str) -> Bytes {
-    if let Ok(mut payload) = serde_json::from_slice::<Value>(body) {
-        if let Some(obj) = payload.as_object_mut() {
-            obj.insert("model".into(), Value::String(new_model.into()));
-        }
-        Bytes::from(serde_json::to_vec(&payload).unwrap_or_else(|_| body.to_vec()))
-    } else {
-        body.clone()
-    }
-}
-
 #[allow(clippy::too_many_arguments)]
 async fn try_fallback(
     config: &GatewayConfig,
@@ -2192,11 +2204,7 @@ async fn try_fallback(
     else {
         return (first, attempts);
     };
-    let forwarded_body = if candidate.upstream_model != model {
-        rewrite_model_in_body(&body, &candidate.upstream_model)
-    } else {
-        body
-    };
+    let prepared = transport::prepare_model_request(&body, model, &candidate.upstream_model);
     let started = Instant::now();
     match forward_fallback(
         config,
@@ -2208,7 +2216,7 @@ async fn try_fallback(
         candidate.adapter.as_deref(),
         candidate.upstream_endpoint.as_deref(),
         headers,
-        forwarded_body,
+        prepared.body,
     )
     .await
     {
@@ -2217,7 +2225,7 @@ async fn try_fallback(
                 attempt_no: 1,
                 provider_id: candidate.provider.id.clone(),
                 account_id: candidate.account.id.clone(),
-                upstream_model_id: Some(candidate.upstream_model),
+                upstream_model_id: Some(prepared.upstream_model_id),
                 status_code: response.status().as_u16() as i32,
                 success: response.status().is_success(),
                 latency_ms: started.elapsed().as_millis() as i64,
@@ -2234,7 +2242,7 @@ async fn try_fallback(
                 attempt_no: 1,
                 provider_id: candidate.provider.id.clone(),
                 account_id: candidate.account.id.clone(),
-                upstream_model_id: Some(candidate.upstream_model),
+                upstream_model_id: Some(prepared.upstream_model_id),
                 status_code: 599,
                 success: false,
                 latency_ms: started.elapsed().as_millis() as i64,
@@ -2269,11 +2277,7 @@ async fn try_fallback_error(
             attempts,
         );
     };
-    let forwarded_body = if candidate.upstream_model != model {
-        rewrite_model_in_body(&body, &candidate.upstream_model)
-    } else {
-        body
-    };
+    let prepared = transport::prepare_model_request(&body, model, &candidate.upstream_model);
     let started = Instant::now();
     match forward_fallback(
         config,
@@ -2285,7 +2289,7 @@ async fn try_fallback_error(
         candidate.adapter.as_deref(),
         candidate.upstream_endpoint.as_deref(),
         headers,
-        forwarded_body,
+        prepared.body,
     )
     .await
     {
@@ -2294,7 +2298,7 @@ async fn try_fallback_error(
                 attempt_no: 1,
                 provider_id: candidate.provider.id.clone(),
                 account_id: candidate.account.id.clone(),
-                upstream_model_id: Some(candidate.upstream_model),
+                upstream_model_id: Some(prepared.upstream_model_id),
                 status_code: response.status().as_u16() as i32,
                 success: response.status().is_success(),
                 latency_ms: started.elapsed().as_millis() as i64,
@@ -2311,7 +2315,7 @@ async fn try_fallback_error(
                 attempt_no: 1,
                 provider_id: candidate.provider.id.clone(),
                 account_id: candidate.account.id.clone(),
-                upstream_model_id: Some(candidate.upstream_model),
+                upstream_model_id: Some(prepared.upstream_model_id),
                 status_code: 599,
                 success: false,
                 latency_ms: started.elapsed().as_millis() as i64,
@@ -2463,6 +2467,9 @@ async fn resolve_route(
         }
     }
 }
+
+#[cfg(test)]
+mod runtime_usage_tests;
 
 #[cfg(test)]
 mod audit_closeout_tests {

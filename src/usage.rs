@@ -4,7 +4,10 @@
 //! accepts the OpenAI Chat/Responses and Anthropic Messages shapes without
 //! attempting to interpret response content.
 
+use axum::body::{Body, Bytes};
+use futures_util::{stream, StreamExt};
 use serde_json::Value;
+use std::time::Instant;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct UsageReport {
@@ -14,6 +17,69 @@ pub struct UsageReport {
     pub cached_tokens: i64,
     pub total_tokens: i64,
     pub source: String,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct StreamObservation {
+    pub captured: Vec<u8>,
+    pub ttft_ms: Option<i64>,
+    pub failed: bool,
+}
+
+/// Tee a live response body for usage parsing while forwarding every chunk in
+/// the same order. The upstream is polled once per downstream demand, so this
+/// does not prefetch the response or alter backpressure. Completion is reported
+/// on clean EOF or immediately on a body-stream error.
+pub fn observe_stream_body<F>(body: Body, request_started: Instant, on_complete: F) -> Body
+where
+    F: FnOnce(StreamObservation) + Send + 'static,
+{
+    type Completion = Box<dyn FnOnce(StreamObservation) + Send>;
+
+    let upstream = body.into_data_stream();
+    let completion: Option<Completion> = Some(Box::new(on_complete));
+    let stream = stream::unfold(
+        (upstream, Vec::new(), None, completion, request_started),
+        |(mut upstream, mut captured, mut ttft_ms, mut completion, request_started)| async move {
+            completion.as_ref()?;
+            match upstream.next().await {
+                Some(Ok(chunk)) => {
+                    if ttft_ms.is_none() && !chunk.is_empty() {
+                        ttft_ms = Some(request_started.elapsed().as_millis() as i64);
+                    }
+                    captured.extend_from_slice(&chunk);
+                    Some((
+                        Ok::<Bytes, std::io::Error>(chunk),
+                        (upstream, captured, ttft_ms, completion, request_started),
+                    ))
+                }
+                Some(Err(error)) => {
+                    if let Some(complete) = completion.take() {
+                        complete(StreamObservation {
+                            captured: std::mem::take(&mut captured),
+                            ttft_ms,
+                            failed: true,
+                        });
+                    }
+                    Some((
+                        Err(std::io::Error::other(error.to_string())),
+                        (upstream, captured, ttft_ms, completion, request_started),
+                    ))
+                }
+                None => {
+                    if let Some(complete) = completion.take() {
+                        complete(StreamObservation {
+                            captured,
+                            ttft_ms,
+                            failed: false,
+                        });
+                    }
+                    None
+                }
+            }
+        },
+    );
+    Body::from_stream(stream)
 }
 
 /// Conservative fallback estimate used when an upstream omits usage.
@@ -186,7 +252,16 @@ pub fn usage_for_sse_response(success: bool, request: &[u8], captured: &[u8]) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::body::to_bytes;
+    use futures_util::stream;
     use serde_json::json;
+    use std::{
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        },
+        time::Duration,
+    };
 
     #[test]
     fn extracts_openai_chat_usage() {
@@ -293,5 +368,80 @@ mod tests {
         );
         assert_eq!(report.source, "parsed");
         assert_eq!(report.total_tokens, 5);
+    }
+
+    #[tokio::test]
+    async fn stream_observer_is_lazy_and_preserves_chunk_order() {
+        let polls = Arc::new(AtomicUsize::new(0));
+        let source = stream::iter(["first", "second"]).map({
+            let polls = polls.clone();
+            move |chunk| {
+                polls.fetch_add(1, Ordering::SeqCst);
+                Ok::<Bytes, std::io::Error>(Bytes::from_static(chunk.as_bytes()))
+            }
+        });
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let body = observe_stream_body(
+            Body::from_stream(source),
+            Instant::now() - Duration::from_millis(20),
+            move |observation| {
+                tx.send(observation).expect("stream observation receiver");
+            },
+        );
+        assert_eq!(polls.load(Ordering::SeqCst), 0);
+
+        let forwarded = to_bytes(body, 1024).await.expect("forwarded stream");
+        let observation = rx.await.expect("stream observation");
+        assert_eq!(forwarded, Bytes::from_static(b"firstsecond"));
+        assert_eq!(observation.captured, b"firstsecond");
+        assert!(observation.ttft_ms.is_some_and(|value| value >= 20));
+        assert!(!observation.failed);
+        assert_eq!(polls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn empty_stream_completes_without_inventing_ttft() {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let body = observe_stream_body(Body::empty(), Instant::now(), move |observation| {
+            tx.send(observation).expect("stream observation receiver");
+        });
+        assert!(to_bytes(body, 1024).await.expect("empty stream").is_empty());
+        let observation = rx.await.expect("empty stream observation");
+        assert_eq!(observation.ttft_ms, None);
+        assert!(observation.captured.is_empty());
+        assert!(!observation.failed);
+    }
+
+    #[tokio::test]
+    async fn stream_error_completes_immediately_with_only_observed_chunks() {
+        let source = stream::iter([
+            Ok::<Bytes, std::io::Error>(Bytes::from_static(b"first")),
+            Err(std::io::Error::other("upstream body failed")),
+        ]);
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let body = observe_stream_body(Body::from_stream(source), Instant::now(), move |result| {
+            tx.send(result).expect("stream observation receiver");
+        });
+        assert!(to_bytes(body, 1024).await.is_err());
+        let observation = rx.await.expect("failed stream observation");
+        assert_eq!(observation.captured, b"first");
+        assert!(observation.ttft_ms.is_some());
+        assert!(observation.failed);
+    }
+
+    #[tokio::test]
+    async fn stream_error_before_data_keeps_ttft_absent() {
+        let source = stream::iter([Err::<Bytes, _>(std::io::Error::other(
+            "upstream body failed",
+        ))]);
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let body = observe_stream_body(Body::from_stream(source), Instant::now(), move |result| {
+            tx.send(result).expect("stream observation receiver");
+        });
+        assert!(to_bytes(body, 1024).await.is_err());
+        let observation = rx.await.expect("failed stream observation");
+        assert!(observation.captured.is_empty());
+        assert_eq!(observation.ttft_ms, None);
+        assert!(observation.failed);
     }
 }
