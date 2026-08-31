@@ -1,7 +1,7 @@
 use crate::{
     config::{AccountConfig, ProviderConfig},
     protocol::Protocol,
-    usage::{extract_json_bytes, UsageReport},
+    usage::{usage_for_json_response, UsageReport},
 };
 use axum::{
     body::Body,
@@ -98,13 +98,7 @@ pub async fn forward_url(
             .bytes()
             .await
             .map_err(|error| TransportError::Request(error.to_string()))?;
-        let report = extract_json_bytes(&bytes).or_else(|| {
-            if status.is_success() {
-                Some(crate::usage::estimate(&request_payload, &bytes))
-            } else {
-                None
-            }
-        });
+        let report = usage_for_json_response(status.is_success(), &request_payload, &bytes);
         let body = Body::from(bytes);
         let mut response = Response::new(body);
         *response.status_mut() = status;
@@ -116,9 +110,7 @@ pub async fn forward_url(
                 response.headers_mut().insert(name, value.clone());
             }
         }
-        if let Some(report) = report {
-            response.extensions_mut().insert(report);
-        }
+        response.extensions_mut().insert(report);
         return Ok(response);
     }
     let stream = upstream.bytes_stream();
@@ -146,4 +138,162 @@ pub fn client() -> Result<Client, reqwest::Error> {
         .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(300))
         .build()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::{
+        body::to_bytes,
+        extract::Request,
+        http::{header, HeaderValue},
+        Router,
+    };
+    use std::{
+        collections::HashMap,
+        sync::{Arc, Mutex},
+    };
+
+    #[derive(Clone, Debug)]
+    struct RecordedRequest {
+        headers: HeaderMap,
+        body: Vec<u8>,
+    }
+
+    async fn spawn_mock_upstream() -> (String, Arc<Mutex<Vec<RecordedRequest>>>) {
+        let recorded = Arc::new(Mutex::new(Vec::new()));
+        let app = Router::new().fallback({
+            let recorded = recorded.clone();
+            move |request: Request| {
+                let recorded = recorded.clone();
+                async move {
+                    let (parts, body) = request.into_parts();
+                    let body = to_bytes(body, 1024 * 1024).await.unwrap();
+                    recorded.lock().unwrap().push(RecordedRequest {
+                        headers: parts.headers,
+                        body: body.to_vec(),
+                    });
+                    Response::builder()
+                        .status(StatusCode::IM_A_TEAPOT)
+                        .header(header::CONTENT_TYPE, "application/json")
+                        .header("x-upstream-response", "preserved")
+                        .body(Body::from(
+                            r#"{"error":{"message":"upstream rejected the request"}}"#,
+                        ))
+                        .unwrap()
+                }
+            }
+        });
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind native transport mock");
+        let address = listener.local_addr().expect("native transport address");
+        tokio::spawn(async move {
+            axum::serve(listener, app)
+                .await
+                .expect("serve native transport mock")
+        });
+        (format!("http://{address}/native"), recorded)
+    }
+
+    fn account() -> AccountConfig {
+        AccountConfig {
+            id: "account".into(),
+            provider_id: "provider".into(),
+            display_name: "Native account".into(),
+            credential_env: None,
+            credential: None,
+            enabled: true,
+            weight: 100,
+            protocol_capabilities: HashMap::new(),
+            capabilities: None,
+            model_overrides: HashMap::new(),
+            model_map: HashMap::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn native_forward_preserves_http_contract_and_replaces_sensitive_auth_headers() {
+        let (url, recorded) = spawn_mock_upstream().await;
+        let client = client().expect("native transport client");
+        let protocols = [
+            Protocol::OpenAiChatCompletions,
+            Protocol::OpenAiResponses,
+            Protocol::AnthropicMessages,
+        ];
+
+        for protocol in protocols {
+            let body = Bytes::from(format!(r#"{{"protocol":"{protocol}"}}"#));
+            let mut headers = HeaderMap::new();
+            headers.insert(
+                header::AUTHORIZATION,
+                HeaderValue::from_static("Bearer downstream-secret"),
+            );
+            headers.insert("x-api-key", HeaderValue::from_static("downstream-secret"));
+            headers.insert("x-request-id", HeaderValue::from_static("request-header"));
+
+            let response = forward_url(
+                &client,
+                &url,
+                &account(),
+                Some("upstream-secret"),
+                protocol,
+                &headers,
+                body.clone(),
+            )
+            .await
+            .expect("native forward response");
+
+            assert_eq!(response.status(), StatusCode::IM_A_TEAPOT);
+            assert_eq!(
+                response.headers().get("x-upstream-response"),
+                Some(&HeaderValue::from_static("preserved"))
+            );
+            let usage = usage_from_response(&response).expect("explicit missing usage report");
+            assert_eq!(usage, UsageReport::missing());
+            let response_body = to_bytes(response.into_body(), 1024 * 1024)
+                .await
+                .expect("native response body");
+            assert_eq!(
+                response_body.as_ref(),
+                br#"{"error":{"message":"upstream rejected the request"}}"#
+            );
+        }
+
+        let recorded = recorded.lock().unwrap();
+        assert_eq!(recorded.len(), protocols.len());
+        for ((protocol, request), expected_body) in protocols
+            .into_iter()
+            .zip(recorded.iter())
+            .zip(protocols.map(|protocol| format!(r#"{{"protocol":"{protocol}"}}"#)))
+        {
+            assert_eq!(request.body, expected_body.as_bytes());
+            assert_eq!(
+                request
+                    .headers
+                    .get("x-request-id")
+                    .and_then(|value| value.to_str().ok()),
+                Some("request-header")
+            );
+            if protocol == Protocol::AnthropicMessages {
+                assert_eq!(
+                    request
+                        .headers
+                        .get("x-api-key")
+                        .and_then(|value| value.to_str().ok()),
+                    Some("upstream-secret")
+                );
+                assert!(request.headers.get(header::AUTHORIZATION).is_none());
+            } else {
+                assert_eq!(
+                    request
+                        .headers
+                        .get(header::AUTHORIZATION)
+                        .and_then(|value| value.to_str().ok()),
+                    Some("Bearer upstream-secret")
+                );
+                assert!(request.headers.get("x-api-key").is_none());
+            }
+        }
+    }
 }

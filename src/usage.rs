@@ -34,6 +34,13 @@ pub fn estimate(input: &[u8], output: &[u8]) -> UsageReport {
 }
 
 impl UsageReport {
+    pub fn missing() -> Self {
+        Self {
+            source: "missing".into(),
+            ..Default::default()
+        }
+    }
+
     pub fn is_present(&self) -> bool {
         self.input_tokens > 0
             || self.output_tokens > 0
@@ -110,6 +117,18 @@ pub fn extract_json_bytes(bytes: &[u8]) -> Option<UsageReport> {
         .and_then(|value| extract_json(&value))
 }
 
+/// Resolve usage for a completed JSON response. Failed responses without
+/// provider-confirmed usage remain explicitly missing and are never estimated.
+pub fn usage_for_json_response(success: bool, request: &[u8], response: &[u8]) -> UsageReport {
+    extract_json_bytes(response).unwrap_or_else(|| {
+        if success {
+            estimate(request, response)
+        } else {
+            UsageReport::missing()
+        }
+    })
+}
+
 /// Extract the last usage-bearing event from an SSE payload.  This handles
 /// `data: {...}` and ignores comments/keep-alives and `[DONE]`.
 #[allow(dead_code)]
@@ -149,6 +168,18 @@ pub fn extract_sse(text: &str) -> Option<UsageReport> {
     latest.map(|mut report| {
         report.source = "parsed".into();
         report
+    })
+}
+
+/// Resolve usage after an SSE response ends. A failed stream with no
+/// provider-confirmed usage remains missing instead of inventing tokens.
+pub fn usage_for_sse_response(success: bool, request: &[u8], captured: &[u8]) -> UsageReport {
+    extract_sse(&String::from_utf8_lossy(captured)).unwrap_or_else(|| {
+        if success {
+            estimate(request, captured)
+        } else {
+            UsageReport::missing()
+        }
     })
 }
 
@@ -229,5 +260,38 @@ mod tests {
         let report = estimate(b"input", b"output");
         assert_eq!(report.source, "estimated");
         assert!(report.total_tokens >= report.input_tokens + report.output_tokens);
+    }
+
+    #[test]
+    fn failed_json_without_usage_is_missing_and_has_zero_tokens() {
+        let report = usage_for_json_response(
+            false,
+            br#"{"model":"m","input":"must not be estimated"}"#,
+            br#"{"error":{"message":"upstream rejected the request"}}"#,
+        );
+        assert_eq!(report.source, "missing");
+        assert_eq!(report, UsageReport::missing());
+    }
+
+    #[test]
+    fn failed_sse_without_usage_is_missing_and_has_zero_tokens() {
+        let report = usage_for_sse_response(
+            false,
+            br#"{"model":"m","stream":true}"#,
+            b"event: error\ndata: {\"error\":{\"message\":\"failed\"}}\n\n",
+        );
+        assert_eq!(report.source, "missing");
+        assert_eq!(report, UsageReport::missing());
+    }
+
+    #[test]
+    fn parsed_sse_usage_keeps_the_query_contract_source() {
+        let report = usage_for_sse_response(
+            true,
+            br#"{"model":"m","stream":true}"#,
+            b"data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":2,\"output_tokens\":3}}}\n\n",
+        );
+        assert_eq!(report.source, "parsed");
+        assert_eq!(report.total_tokens, 5);
     }
 }
