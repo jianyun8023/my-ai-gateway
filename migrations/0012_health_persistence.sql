@@ -1,4 +1,4 @@
--- Persist account health independently from account configuration updates.
+-- Issue #52: persist account health independently from account configuration updates.
 -- `updated_at` describes control-plane edits; health timestamps below are the
 -- observation clock used for cooldown expiry and stale reporting.
 ALTER TABLE accounts

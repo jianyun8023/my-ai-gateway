@@ -49,7 +49,7 @@ OpenAI Chat 与 Responses 的输入/输出模型并不等价，因此转换层�
 
 ## 6. PostgreSQL 最小表
 
-`providers`、`accounts`、`virtual_keys`、`routes`、`usage_events`、`health_snapshots`、`audit_logs`。凭据使用应用层信封加密；Virtual Key 使用不可逆哈希并加唯一索引；usage 写入可通过异步队列批量提交。
+`providers`、`accounts`、`virtual_keys`、`routes`、`usage_events`、`account_health_events`、`audit_logs`。账号当前健康状态保存在 `accounts.health_status/cooldown_until` 及相关 UTC 观测字段中，`account_health_events` 只保存脱敏状态转换，不保存请求/响应正文。凭据使用应用层信封加密；Virtual Key 使用不可逆哈希并加唯一索引；usage 写入可通过异步队列批量提交。
 
 ## 7. Rust 实现建议
 

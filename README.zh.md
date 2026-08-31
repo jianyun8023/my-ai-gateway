@@ -26,6 +26,7 @@ MiniMax、DeepSeek 等原生支持三协议的 Provider 不进入转换器。Kim
 - 管理端已有 Overview、Analysis、Request Events 三个网关原生用量页面。
 - ProviderPreset、连接测试、模型发现、差异预览、编辑和批量确认 API 已实现。
 - `/admin/capabilities` 从当前 DB runtime snapshot 输出三协议有效能力矩阵和完整转换链。
+- 账号健康状态以 PostgreSQL 为事实来源，支持被动失败冷却、主动连接探测、stale/过期放行、指数退避、重启恢复和人工启停。
 
 完整设计和当前进度见 [`docs/ai-gateway-design.md`](docs/ai-gateway-design.md) 与 [`docs/todo.md`](docs/todo.md)。管理 API 契约见 [`docs/admin-api.md`](docs/admin-api.md)。
 
@@ -142,6 +143,27 @@ Codex CLI 到 Gateway 的工具调用与网络搜索 E2E 使用显式 opt-in 的
 - `/admin/sources/:source_id/models` 与确认接口；
 - `/admin/capabilities`；
 - `/admin/usage/summary|timeseries|breakdown|events|export`。
+
+健康运维接口包括：
+
+```text
+GET  /admin/health
+GET  /admin/health/:account_id
+POST /admin/accounts/:account_id/probe
+POST /admin/health/probe
+POST /admin/health/probes
+```
+
+`/admin/health` 和单账号接口返回健康来源（`passive`、`probe`、`manual`）、UTC 更新时间、
+`stale`、状态、连续失败次数和 cooldown。主动探测复用 ProviderPreset 连接测试，只使用
+数据库中保存的 Source endpoint，并遵守 URL allowlist、DNS、重定向和凭据策略；不会读取或
+记录完整请求/响应正文。模型 discovery 失败只写入 discovery 审计，不会被当作路由失败。
+
+被动失败和探测失败使用指数退避；一次成功会清零连续失败和 cooldown。冷却到期或观测 stale
+后账号重新具备候选资格，陈旧状态不会永久屏蔽账号。固定首选只有在失败、不可用或人工停用
+时才进入 fallback。后台探测默认每 60 秒运行，可用 `GATEWAY_HEALTH_PROBE_INTERVAL_SECS`
+调整；`GATEWAY_HEALTH_PROBE_ENABLED=false` 关闭周期任务，`GATEWAY_HEALTH_PROBE_ON_STARTUP=true`
+在启动时立即执行一次。
 
 创建 Virtual Key 时，原始 Key 只在创建响应中返回：
 

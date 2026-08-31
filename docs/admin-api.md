@@ -79,6 +79,53 @@ Kimi Responses 返回 `protocol=openai_responses`、`upstream_protocol=anthropic
 
 连接测试会产生一个最小的真实模型请求，可能消耗少量上游 Token。
 
+## 账号健康与主动探测
+
+账号健康的当前状态以 PostgreSQL `accounts` 行为事实来源。每次状态变化同时写入
+`account_health_events`，但路由只读取账号当前行，不从事件历史推断状态。状态机如下：
+
+| 状态 | 触发 | 路由资格 |
+| --- | --- | --- |
+| `unknown` | 没有成功或失败观测，或人工重新启用 | 可用（还没有失败冷却） |
+| `healthy` | 路由请求或连接探测成功（2xx） | 可用 |
+| `cooling_down` | 408、429、5xx 或传输错误 | 在 `cooldown_until` 前不可用 |
+| `unhealthy` | 冷却已到期但还没有成功恢复 | 可用，可再次作为候选 |
+| `stale` | `health_updated_at` 达到 `stale_after` | 可用；旧 cooldown 不会永久屏蔽账号 |
+| `disabled` | Account 或 Source 被人工停用 | 不可用 |
+
+被动失败的退避为 `base * 2^(consecutive_failures-1)`，并受最大退避上限约束；一次成功
+会清零连续失败计数和 cooldown。状态行还保存 `health_source`（`passive`、`probe`、
+`manual`、`startup` 或 `unknown`）、`health_updated_at`、最近探测结果和脱敏错误摘要。
+所有时间均为 UTC。进程重启后直接读取这些绝对时间戳，不依赖进程内的 `Instant`。
+
+`GET /admin/health` 返回全部账号的 `source`、`updated_at`、`stale`、状态、cooldown
+剩余时间和最近探测信息；`GET /admin/health/:account_id` 返回单个账号的相同信息。
+两个接口都要求独立的 `GATEWAY_ADMIN_KEY`，不会返回凭据或请求/响应正文。
+
+主动探测复用同一 Source 的 ProviderPreset 最小连接测试，不调用模型 discovery：
+
+```http
+POST /admin/accounts/deepseek-main/probe
+Content-Type: application/json
+
+{
+  "protocol": "openai_responses",
+  "model": "deepseek-v4-flash",
+  "requested_by": "admin-ui"
+}
+```
+
+也可以使用 `POST /admin/health/probe` 并在正文中提供 `account_id`，或使用
+`POST /admin/health/probes` 批量探测（省略 `account_ids` 时探测所有启用且有有效预设的账号）。
+成功或失败的连接测试都会更新账号健康；模型 discovery 的失败只写入
+`source_discovery_runs`，不会改变账号路由健康。探测请求只使用数据库中绑定的 Source
+endpoint，经过同一 URL allowlist、DNS、重定向和凭据策略，客户端不能提交任意上游 URL。
+
+后台探测默认启用，每个账号按 `GATEWAY_HEALTH_PROBE_INTERVAL_SECS` 周期执行；可用
+`GATEWAY_HEALTH_PROBE_ENABLED=false` 关闭，或用 `GATEWAY_HEALTH_PROBE_ON_STARTUP=true`
+在启动时立即执行一次。探测失败使用与被动失败相同的指数退避，不会绕过固定首选：只有
+首选账号失败、冷却或人工停用时才选择 fallback。
+
 ## 模型发现与差异
 
 `POST /admin/sources/:source_id/discoveries`

@@ -24,6 +24,7 @@ Rust AI 网关 MVP，目标是将多个上游账号统一为一个入口，并�
 - 内置、版本化的 DeepSeek、MiniMax、Kimi Code ProviderPreset 和 ModelPreset；Source 创建时复制不可变快照，预设升级只展示差异。
 - 按协议连接测试、模型发现、稳定 `added/changed/missing` 差异、待确认列表、用户编辑和批量确认 API；发现结果不会自动创建 LogicalModel、Binding 或 Route，失败信息和日志均不包含凭据或完整响应正文。
 - Source、Account、LogicalModel、ModelBinding、Route 管理 API 支持创建、查询、更新、启停和删除；有效写入会在同一事务内完成校验与下一版 snapshot 构建，失败不会留下坏行。
+- Account 健康状态以 PostgreSQL 为事实来源，支持被动失败冷却、ProviderPreset 主动连接探测、stale 过期放行、指数退避、重启恢复和人工启停。
 - 管理接口还包括 `/admin/keys`、`/admin/keys/:id/revoke`、`/admin/provider-presets`、`/admin/sources/*`、基于当前 DB runtime snapshot 的有效能力矩阵 `/admin/capabilities`，以及 `/admin/usage/summary|timeseries|breakdown|events|export`；`/admin/usage/aggregate` 保留为一次获取三类聚合的组合入口。
 
 工具链由 [Mise](https://mise.jdx.dev/) 管理（Rust 1.97.1 + Node 24，见 [`mise.toml`](./mise.toml)）：
@@ -71,6 +72,22 @@ For reverse-proxy deployments, disable response buffering (for example,
 Nginx `proxy_buffering off`), preserve `text/event-stream`, and set the proxy
 read timeout above the gateway total timeout. The proxy stream-idle timeout
 should be longer than the heartbeat interval; do not rewrite SSE comment lines.
+健康运维接口由独立 Admin Key 保护：
+
+```text
+GET  /admin/health
+GET  /admin/health/:account_id
+POST /admin/accounts/:account_id/probe
+POST /admin/health/probe
+POST /admin/health/probes
+```
+
+`/admin/health` 返回每个账号的 `source`、`updated_at`、`stale`、状态和 cooldown。探测
+复用 ProviderPreset 连接测试，只访问数据库中保存的 Source endpoint；模型 discovery
+失败不会改变路由健康。408、429、5xx 和传输错误采用指数退避，冷却到期或 stale 后不会
+永久屏蔽账号；固定首选只有在失败、不可用或人工停用时才进入 fallback。默认周期探测间隔
+为 60 秒，可用 `GATEWAY_HEALTH_PROBE_INTERVAL_SECS` 调整；`GATEWAY_HEALTH_PROBE_ENABLED=false`
+可关闭，`GATEWAY_HEALTH_PROBE_ON_STARTUP=true` 可在启动时立即探测一次。
 
 常用任务：`mise run dev`（加载被 Git 忽略的 `.env`，启动网关 + Vite 开发环境）、`mise run build`、`mise run test`、`mise run test-db`（加载独立 `.env.test`，串行运行真实 PostgreSQL 回归）、`mise run lint`、`mise run verify`（完整门禁）。
 

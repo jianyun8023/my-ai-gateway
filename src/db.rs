@@ -360,7 +360,7 @@ impl Database {
         sqlx::raw_sql(include_str!("../migrations/0011_retention_backup.sql"))
             .execute(&mut *tx)
             .await?;
-        sqlx::raw_sql(include_str!("../migrations/0011_health_persistence.sql"))
+        sqlx::raw_sql(include_str!("../migrations/0012_health_persistence.sql"))
             .execute(&mut *tx)
             .await?;
         tx.commit().await
