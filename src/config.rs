@@ -642,72 +642,7 @@ impl GatewayConfig {
         Capabilities::default()
     }
 
-    pub fn from_env() -> Self {
-        if let Ok(raw) = env::var("GATEWAY_CONFIG_JSON") {
-            match serde_json::from_str::<Self>(&raw) {
-                Ok(config) => return config,
-                Err(error) => tracing::warn!(%error, "invalid GATEWAY_CONFIG_JSON; using defaults"),
-            }
-        }
-        let mut endpoints = HashMap::new();
-        endpoints.insert(
-            Protocol::OpenAiChatCompletions,
-            "/v1/chat/completions".into(),
-        );
-        endpoints.insert(Protocol::AnthropicMessages, "/v1/messages".into());
-        let providers = vec![ProviderConfig {
-            id: "kimi".into(),
-            name: "Kimi Code".into(),
-            base_url: env::var("KIMI_BASE_URL")
-                .unwrap_or_else(|_| "https://api.kimi.com/coding".into()),
-            models: vec!["kimi-for-coding-highspeed".into()],
-            native_protocols: vec![Protocol::AnthropicMessages, Protocol::OpenAiChatCompletions],
-            endpoints,
-            capabilities: Capabilities {
-                streaming: CapabilityMode::Native,
-                tools: CapabilityMode::Native,
-                thinking: CapabilityMode::Native,
-                web_search: CapabilityMode::Native,
-                usage: CapabilityMode::Native,
-                ..Default::default()
-            },
-            protocol_capabilities: HashMap::new(),
-            model_overrides: HashMap::new(),
-        }];
-        let accounts = vec![AccountConfig {
-            id: "kimi-01".into(),
-            provider_id: "kimi".into(),
-            display_name: "Kimi primary".into(),
-            credential_env: Some("KIMI_API_KEY".into()),
-            credential: None,
-            enabled: true,
-            weight: 100,
-            protocol_capabilities: HashMap::new(),
-            capabilities: None,
-            model_overrides: HashMap::new(),
-            model_map: HashMap::new(),
-        }];
-        let routes = vec![RouteConfig {
-            id: "kimi-responses-adapter".into(),
-            model: "kimi-for-coding-highspeed".into(),
-            provider_id: "kimi".into(),
-            protocols: vec![Protocol::OpenAiResponses],
-            primary_account_id: "kimi-01".into(),
-            fallback_accounts: vec![],
-            strategy: default_strategy(),
-            mode: "adapter".into(),
-            adapter: Some("kimi_responses_adapter".into()),
-            allow_lossy_conversion: false,
-        }];
-        Self {
-            listen_addr: env::var("GATEWAY_LISTEN_ADDR")
-                .unwrap_or_else(|_| "127.0.0.1:8787".into()),
-            providers,
-            accounts,
-            routes,
-        }
-    }
-
+    #[cfg(test)]
     pub fn models(&self) -> Vec<String> {
         let mut models = Vec::new();
         for model in self

@@ -5,10 +5,11 @@ use serde_json::Value;
 use sqlx::{PgPool, Postgres, Transaction};
 use std::{collections::BTreeMap, error::Error, fmt, str::FromStr};
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, sqlx::Type)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize, sqlx::Type)]
 #[serde(rename_all = "snake_case")]
 #[sqlx(type_name = "catalog_status", rename_all = "snake_case")]
 pub enum CatalogStatus {
+    #[default]
     Pending,
     Confirmed,
     Unavailable,

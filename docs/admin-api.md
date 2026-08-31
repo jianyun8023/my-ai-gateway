@@ -33,9 +33,11 @@
 }
 ```
 
-`provider_preset_version`、`base_url` 和 `endpoint_overrides` 可省略；省略版本时使用当前最新版本。响应中的 `provider_preset_snapshot` 是创建时的完整副本。以后注册新版本不会更新此字段或 Source 的 Base URL、endpoint、认证和协议能力。
+`provider_preset_version`、`base_url` 和 `endpoint_overrides` 可省略；省略版本时使用当前最新版本。响应中的 `provider_preset_snapshot` 是创建时的完整副本。以后注册新版本不会更新此字段或 Source 的 Base URL、endpoint、认证和协议能力。网关应用中的该写入由 DB-first 控制面执行，成功响应同时包含单调 `snapshot_revision` 与 `snapshot_generated_at`；校验或 snapshot 构建失败时整个事务回滚。
 
 `GET /admin/sources` 返回 Source 列表。`GET /admin/sources/:source_id/preset-diff` 将创建时 snapshot 与同 ID 的最新预设比较，按 JSON path 稳定返回 `added/changed/missing` 类型；该操作只读。
+
+Source 生命周期还提供 `GET/PUT/DELETE /admin/sources/:source_id` 和 `PUT /admin/sources/:source_id/enabled`。Account、LogicalModel、ModelBinding 与 Route 使用相同的集合 `GET/POST`、单资源 `GET/PUT/DELETE` 和独立 enabled 路径约定；发现确认只更新 SourceModel，仍不会隐式创建这些运行时资源。
 
 连接测试和发现必须选择一个已经关联到该 Source、处于 enabled 状态且配置了 `credential_env` 的 Account。凭据只在进程内从环境变量读取，不在请求响应、审计表或日志中回显。Account/Source 的完整生命周期由 PostgreSQL 控制面 API 管理。
 
