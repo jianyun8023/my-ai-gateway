@@ -31,7 +31,7 @@
 - [x] usage attempt 明细 API 与事件详情端点（#27）
 - [x] usage 导出增加 10000 行上限保护（#28）
 - [x] 用量趋势图支持指标切换与时间粒度手选（#29）
-- [ ] usage 事件 Source 维度升级（依赖 #14）（#30）
+- [x] usage 事件 Source 维度升级：运行时 `source_id` 与独立 `client_source`（#30）
 - [x] 健康状态指数退避冷却、失败计数和完整加权 fallback
 - [x] 账号健康状态 Admin API（`/admin/health`）
 - [x] 跨 Provider fallback 与 fallback 路径账号级 `model_map` 基线（主路径与 Binding snapshot 仍依赖 #14/#26）

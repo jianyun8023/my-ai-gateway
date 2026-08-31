@@ -8,7 +8,8 @@ export interface GatewayUsageFilters {
   logicalModel?: string;
   upstreamModel?: string;
   provider?: string;
-  source?: string;
+  sourceId?: string;
+  clientSource?: string;
   account?: string;
   protocolIn?: string;
   protocolUpstream?: string;
@@ -50,7 +51,8 @@ export type UsageBreakdownDimension =
   | 'logical_model'
   | 'upstream_model'
   | 'provider'
-  | 'source'
+  | 'source_id'
+  | 'client_source'
   | 'account'
   | 'protocol_in'
   | 'protocol_upstream'
@@ -70,7 +72,7 @@ export interface UsageBreakdownItem {
 export interface UsageAttemptViewModel {
   attemptIndex: number;
   provider: string;
-  source: string;
+  sourceId: string;
   account: string;
   upstreamModel: string;
   protocolUpstream: string;
@@ -86,7 +88,8 @@ export interface UsageEventViewModel {
   logicalModel: string;
   upstreamModel: string;
   provider: string;
-  source: string;
+  sourceId: string;
+  clientSource: string;
   account: string;
   protocolIn: string;
   protocolUpstream: string;

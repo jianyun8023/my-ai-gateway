@@ -9,8 +9,9 @@ CREATE INDEX IF NOT EXISTS idx_usage_events_upstream_model_created_at
   ON usage_events (upstream_model_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_usage_events_provider_created_at
   ON usage_events (provider_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_usage_events_source_created_at
-  ON usage_events (source, created_at DESC);
+-- Source and Client Source indexes are owned by 0009. Keeping them out of this
+-- earlier, repeatedly embedded script lets an already-upgraded database run
+-- the full migration sequence again after the legacy `source` column is gone.
 CREATE INDEX IF NOT EXISTS idx_usage_events_account_created_at
   ON usage_events (account_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_usage_events_protocol_in_created_at

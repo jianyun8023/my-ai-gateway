@@ -1,8 +1,10 @@
 use super::*;
 use axum::{body::to_bytes, extract::Request, http::header, Router};
 use futures_util::stream;
+use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use std::{
     collections::HashMap,
+    str::FromStr,
     sync::{Arc, Mutex},
     time::Duration,
 };
@@ -110,6 +112,50 @@ fn route(protocol: Protocol, fallback: bool) -> config::RouteConfig {
         protocols: vec![protocol],
         primary_account_id: "primary".into(),
         fallback_accounts: fallback.then(|| "fallback".into()).into_iter().collect(),
+        strategy: "primary_then_weighted_fallback".into(),
+        mode: "native".into(),
+        adapter: None,
+        allow_lossy_conversion: false,
+    }
+}
+
+fn named_provider(id: &str, base_url: String, models: &[&str]) -> config::ProviderConfig {
+    let mut provider = provider(base_url);
+    provider.id = id.into();
+    provider.name = id.into();
+    provider.models = models.iter().map(|model| (*model).to_owned()).collect();
+    provider
+}
+
+fn named_account(id: &str, source_id: &str, model_map: &[(&str, &str)]) -> config::AccountConfig {
+    let mut account = account(id, &format!("{id}-secret"), "unused-upstream");
+    account.provider_id = source_id.into();
+    account.credential = None;
+    account.credential_env = Some(format!(
+        "TEST_{}_API_KEY",
+        id.replace('-', "_").to_uppercase()
+    ));
+    account.model_map = model_map
+        .iter()
+        .map(|(logical, upstream)| ((*logical).to_owned(), (*upstream).to_owned()))
+        .collect();
+    account
+}
+
+fn named_route(
+    id: &str,
+    model: &str,
+    source_id: &str,
+    primary_account_id: &str,
+    fallback_account_id: &str,
+) -> config::RouteConfig {
+    config::RouteConfig {
+        id: id.into(),
+        model: model.into(),
+        provider_id: source_id.into(),
+        protocols: vec![Protocol::OpenAiResponses],
+        primary_account_id: primary_account_id.into(),
+        fallback_accounts: vec![fallback_account_id.into()],
         strategy: "primary_then_weighted_fallback".into(),
         mode: "native".into(),
         adapter: None,
@@ -300,6 +346,7 @@ async fn transport_error_path_uses_fallback_and_records_its_actual_model() {
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(attempts.len(), 1);
     assert_eq!(attempts[0].account_id, "fallback");
+    assert_eq!(attempts[0].source_id, "runtime-provider");
     assert_eq!(
         attempts[0].upstream_model_id.as_deref(),
         Some("fallback-upstream")
@@ -342,6 +389,7 @@ async fn fallback_transport_failure_is_retained_as_the_final_actual_attempt() {
     assert_eq!(attempts[0].status_code, 599);
     assert!(!attempts[0].success);
     assert_eq!(attempts[0].account_id, "fallback");
+    assert_eq!(attempts[0].source_id, "runtime-provider");
     assert_eq!(
         attempts[0].upstream_model_id.as_deref(),
         Some("fallback-upstream")
@@ -357,7 +405,8 @@ fn usage_event() -> db::UsageEvent {
         model: "logical-model".into(),
         logical_model: "logical-model".into(),
         upstream_model_id: Some("upstream-model".into()),
-        source: "test".into(),
+        source_id: "runtime-provider".into(),
+        client_source: "test".into(),
         protocol_in: "openai_responses".into(),
         protocol_upstream: "openai_responses".into(),
         mode: "native".into(),
@@ -385,6 +434,7 @@ fn failed_stream_keeps_ttft_absent_and_never_estimates_tokens() {
     let mut attempts = vec![db::UsageAttempt {
         attempt_no: 0,
         provider_id: "provider".into(),
+        source_id: "runtime-provider".into(),
         account_id: "account".into(),
         upstream_model_id: Some("upstream-model".into()),
         status_code: 200,
@@ -410,120 +460,381 @@ fn failed_stream_keeps_ttft_absent_and_never_estimates_tokens() {
     assert_eq!(attempts[0].status_code, 599);
 }
 
+async fn unused_local_url() -> String {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind temporary unused port");
+    let address = listener.local_addr().expect("temporary unused address");
+    drop(listener);
+    format!("http://{address}")
+}
+
+async fn runtime_request(
+    state: &AppState,
+    virtual_key: &str,
+    client_source: &str,
+    payload: Value,
+) -> Response<Body> {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        header::AUTHORIZATION,
+        HeaderValue::from_str(&format!("Bearer {virtual_key}")).unwrap(),
+    );
+    headers.insert(
+        "x-client-source",
+        HeaderValue::from_str(client_source).unwrap(),
+    );
+    proxy(
+        state.clone(),
+        headers,
+        Bytes::from(serde_json::to_vec(&payload).unwrap()),
+        Protocol::OpenAiResponses,
+    )
+    .await
+}
+
 #[tokio::test]
-async fn postgres_stream_ttft_and_fallback_attribution_are_persisted() {
+async fn postgres_db_first_source_attribution_covers_primary_fallback_stream_and_failures() {
     let Ok(url) = std::env::var("TEST_DATABASE_URL") else {
         eprintln!("skipping PostgreSQL runtime usage test: TEST_DATABASE_URL is not set");
         return;
     };
-    let (base_url, _) = spawn_upstream(|request| {
-        if request.authorization.as_deref() == Some("Bearer primary-secret") {
+    let (primary_url, primary_requests) = spawn_upstream(|request| {
+        if request.body["scenario"] == "retry" {
             return Response::builder()
                 .status(StatusCode::SERVICE_UNAVAILABLE)
                 .header(header::CONTENT_TYPE, "application/json")
                 .body(Body::from(r#"{"error":"retry"}"#))
                 .unwrap();
         }
-        let chunks = stream::once(async {
-            tokio::time::sleep(Duration::from_millis(15)).await;
-            Ok::<Bytes, std::io::Error>(Bytes::from_static(
-                b"data: {\"usage\":{\"input_tokens\":2,\"output_tokens\":3}}\n\n",
-            ))
-        });
         Response::builder()
-            .header(header::CONTENT_TYPE, "text/event-stream")
-            .body(Body::from_stream(chunks))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                r#"{"id":"primary","usage":{"input_tokens":1,"output_tokens":1}}"#,
+            ))
             .unwrap()
     })
     .await;
-    let database = db::Database::connect(&url)
+    let (fallback_url, fallback_requests) = spawn_upstream(|request| {
+        if request.body["stream"].as_bool() == Some(true) {
+            let chunks = stream::once(async {
+                tokio::time::sleep(Duration::from_millis(15)).await;
+                Ok::<Bytes, std::io::Error>(Bytes::from_static(
+                    b"data: {\"usage\":{\"input_tokens\":2,\"output_tokens\":3}}\n\n",
+                ))
+            });
+            return Response::builder()
+                .header(header::CONTENT_TYPE, "text/event-stream")
+                .body(Body::from_stream(chunks))
+                .unwrap();
+        }
+        Response::builder()
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                r#"{"id":"fallback","usage":{"input_tokens":2,"output_tokens":2}}"#,
+            ))
+            .unwrap()
+    })
+    .await;
+
+    let admin = PgPoolOptions::new()
+        .max_connections(2)
+        .connect(&url)
         .await
-        .expect("connect PostgreSQL runtime usage database");
+        .expect("connect PostgreSQL runtime test admin database");
+    let schema = format!("runtime_usage_{}", Uuid::new_v4().simple());
+    sqlx::query(&format!("CREATE SCHEMA \"{schema}\""))
+        .execute(&admin)
+        .await
+        .expect("create isolated runtime usage schema");
+    let options = PgConnectOptions::from_str(&url)
+        .expect("parse TEST_DATABASE_URL")
+        .options([("search_path", schema.as_str())]);
+    let runtime_pool = PgPoolOptions::new()
+        .max_connections(5)
+        .connect_with(options)
+        .await
+        .expect("connect isolated runtime usage schema");
+    let database = db::Database::from_test_pool(runtime_pool.clone())
+        .await
+        .expect("migrate isolated runtime usage schema");
+    let transport_primary_url = unused_local_url().await;
+    let failed_primary_url = unused_local_url().await;
+    let failed_fallback_url = unused_local_url().await;
+    let config = GatewayConfig {
+        listen_addr: "127.0.0.1:0".into(),
+        providers: vec![
+            named_provider("source-primary", primary_url, &["logical-model"]),
+            named_provider(
+                "source-fallback",
+                fallback_url,
+                &["logical-model", "transport-model"],
+            ),
+            named_provider(
+                "source-transport-primary",
+                transport_primary_url,
+                &["transport-model"],
+            ),
+            named_provider(
+                "source-failed-primary",
+                failed_primary_url,
+                &["failure-model"],
+            ),
+            named_provider(
+                "source-failed-fallback",
+                failed_fallback_url,
+                &["failure-model"],
+            ),
+        ],
+        accounts: vec![
+            named_account(
+                "primary-account",
+                "source-primary",
+                &[("logical-model", "primary-upstream")],
+            ),
+            named_account(
+                "fallback-account",
+                "source-fallback",
+                &[
+                    ("logical-model", "fallback-upstream"),
+                    ("transport-model", "transport-fallback-upstream"),
+                ],
+            ),
+            named_account(
+                "transport-primary-account",
+                "source-transport-primary",
+                &[("transport-model", "transport-primary-upstream")],
+            ),
+            named_account(
+                "failed-primary-account",
+                "source-failed-primary",
+                &[("failure-model", "failure-primary-upstream")],
+            ),
+            named_account(
+                "failed-fallback-account",
+                "source-failed-fallback",
+                &[("failure-model", "failure-fallback-upstream")],
+            ),
+        ],
+        routes: vec![
+            named_route(
+                "logical-route",
+                "logical-model",
+                "source-primary",
+                "primary-account",
+                "fallback-account",
+            ),
+            named_route(
+                "transport-route",
+                "transport-model",
+                "source-transport-primary",
+                "transport-primary-account",
+                "fallback-account",
+            ),
+            named_route(
+                "failure-route",
+                "failure-model",
+                "source-failed-primary",
+                "failed-primary-account",
+                "failed-fallback-account",
+            ),
+        ],
+    };
+    let control_plane = control_plane::ControlPlane::new(&database, "127.0.0.1:0");
+    let snapshot = control_plane
+        .initialize_from_config(&config, false)
+        .await
+        .expect("initialize DB-first runtime test control plane")
+        .expect("empty isolated control plane publishes a snapshot");
+    let state = AppState {
+        live: Arc::new(std::sync::RwLock::new(LiveConfig::from_snapshot(snapshot))),
+        http: transport::client().expect("runtime HTTP client"),
+        db: Some(database.clone()),
+        control_plane: None,
+        health: health::HealthRegistry::new(Duration::from_secs(30)),
+    };
+
     let suffix = Uuid::new_v4().to_string();
     let (virtual_key_id, virtual_key) = database
         .create_virtual_key(&format!("runtime-{suffix}"), &[])
         .await
         .expect("create runtime virtual key");
-    let config = GatewayConfig {
-        listen_addr: "127.0.0.1:0".into(),
-        providers: vec![provider(base_url)],
-        accounts: vec![
-            account("primary", "primary-secret", "primary-upstream"),
-            account("fallback", "fallback-secret", "fallback-upstream"),
-        ],
-        routes: vec![route(Protocol::OpenAiResponses, true)],
-    };
-    let mut headers = HeaderMap::new();
-    headers.insert(
-        header::AUTHORIZATION,
-        HeaderValue::from_str(&format!("Bearer {virtual_key}")).unwrap(),
-    );
-    let response = proxy(
-        state(config, Some(database.clone())),
-        headers,
-        Bytes::from_static(br#"{"model":"logical-model","input":"hello","stream":true}"#),
-        Protocol::OpenAiResponses,
+
+    let response = runtime_request(
+        &state,
+        &virtual_key,
+        "client-primary",
+        json!({"model":"logical-model","input":"hello","scenario":"primary"}),
     )
     .await;
     assert_eq!(response.status(), StatusCode::OK);
-    let forwarded = drain(response).await;
-    assert!(String::from_utf8_lossy(&forwarded).contains("input_tokens"));
+    drain(response).await;
+
+    let response = runtime_request(
+        &state,
+        &virtual_key,
+        "client-retry-stream",
+        json!({"model":"logical-model","input":"hello","scenario":"retry","stream":true}),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let streamed = drain(response).await;
+    assert!(String::from_utf8_lossy(&streamed).contains("input_tokens"));
+
+    let response = runtime_request(
+        &state,
+        &virtual_key,
+        "client-early-fallback",
+        json!({"model":"logical-model","input":"hello","scenario":"early"}),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    drain(response).await;
+
+    let response = runtime_request(
+        &state,
+        &virtual_key,
+        "client-transport-fallback",
+        json!({"model":"transport-model","input":"hello"}),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    drain(response).await;
+
+    let response = runtime_request(
+        &state,
+        &virtual_key,
+        "client-all-failed",
+        json!({"model":"failure-model","input":"hello"}),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    drain(response).await;
 
     let filter = db::UsageFilter {
-        logical_model: Some("logical-model".into()),
         virtual_key_id: Some(virtual_key_id),
         ..Default::default()
     };
-    let event = {
-        let mut found = None;
+    let events = {
+        let mut found = Vec::new();
         for _ in 0..100 {
             found = database
-                .list_usage_events_page(&filter, 1, None)
+                .list_usage_events_page(&filter, 10, None)
                 .await
-                .expect("query runtime usage event")
-                .data
-                .into_iter()
-                .next();
-            if found.is_some() {
+                .expect("query runtime usage events")
+                .data;
+            if found.len() == 5 {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        found.expect("streaming usage event was persisted")
+        assert_eq!(found.len(), 5, "all runtime usage events were persisted");
+        found
     };
-    assert_eq!(event.account_id, "fallback");
-    assert_eq!(event.provider_id, "runtime-provider");
+    let events = events
+        .into_iter()
+        .map(|event| (event.client_source.clone(), event))
+        .collect::<HashMap<_, _>>();
+
+    let primary = &events["client-primary"];
+    assert_eq!(primary.source_id.as_deref(), Some("source-primary"));
+    assert_eq!(primary.account_id, "primary-account");
+    assert_eq!(primary.retry_count, 0);
+
+    let retry = &events["client-retry-stream"];
+    assert_eq!(retry.source_id.as_deref(), Some("source-fallback"));
+    assert_eq!(retry.account_id, "fallback-account");
     assert_eq!(
-        event.upstream_model_id.as_deref(),
+        retry.upstream_model_id.as_deref(),
         Some("fallback-upstream")
     );
-    assert_eq!(event.retry_count, 1);
-    assert!(event.ttft_ms.is_some_and(|value| value >= 15));
-    assert_eq!(event.usage_source, "parsed");
-    assert_eq!(event.total_tokens, 5);
-    let attempts = database
-        .list_attempts_for_event(&event.request_id)
+    assert_eq!(retry.retry_count, 1);
+    assert!(retry.ttft_ms.is_some_and(|value| value >= 15));
+    assert_eq!(retry.usage_source, "parsed");
+    assert_eq!(retry.total_tokens, 5);
+    let retry_attempts = database
+        .list_attempts_for_event(&retry.request_id)
         .await
-        .expect("query runtime usage attempts");
-    assert_eq!(attempts.len(), 2);
+        .expect("query retry usage attempts");
+    assert_eq!(retry_attempts.len(), 2);
     assert_eq!(
-        attempts[0].upstream_model_id.as_deref(),
+        retry_attempts
+            .iter()
+            .map(|attempt| attempt.source_id.as_deref())
+            .collect::<Vec<_>>(),
+        vec![Some("source-primary"), Some("source-fallback")]
+    );
+    assert_eq!(
+        retry_attempts[0].upstream_model_id.as_deref(),
         Some("primary-upstream")
     );
     assert_eq!(
-        attempts[1].upstream_model_id.as_deref(),
+        retry_attempts[1].upstream_model_id.as_deref(),
         Some("fallback-upstream")
     );
-    assert!(attempts[1].success);
 
-    sqlx::query("DELETE FROM usage_events WHERE request_id=$1")
-        .bind(&event.request_id)
-        .execute(database.pool())
+    let early = &events["client-early-fallback"];
+    assert_eq!(early.source_id.as_deref(), Some("source-fallback"));
+    assert_eq!(early.account_id, "fallback-account");
+    assert_eq!(early.retry_count, 0);
+    let early_attempts = database
+        .list_attempts_for_event(&early.request_id)
         .await
-        .expect("clean runtime usage event");
-    sqlx::query("DELETE FROM virtual_keys WHERE id=$1")
-        .bind(virtual_key_id)
-        .execute(database.pool())
+        .expect("query early fallback attempt");
+    assert_eq!(early_attempts.len(), 1);
+    assert_eq!(
+        early_attempts[0].source_id.as_deref(),
+        Some("source-fallback")
+    );
+
+    let transport = &events["client-transport-fallback"];
+    assert_eq!(transport.source_id.as_deref(), Some("source-fallback"));
+    assert_eq!(transport.retry_count, 1);
+    let transport_attempts = database
+        .list_attempts_for_event(&transport.request_id)
         .await
-        .expect("clean runtime virtual key");
+        .expect("query transport fallback attempts");
+    assert_eq!(
+        transport_attempts
+            .iter()
+            .map(|attempt| attempt.source_id.as_deref())
+            .collect::<Vec<_>>(),
+        vec![Some("source-transport-primary"), Some("source-fallback")]
+    );
+    assert_eq!(transport_attempts[0].status_code, 599);
+    assert!(transport_attempts[1].success);
+
+    let failed = &events["client-all-failed"];
+    assert_eq!(failed.source_id.as_deref(), Some("source-failed-fallback"));
+    assert_eq!(failed.account_id, "failed-fallback-account");
+    assert!(!failed.success);
+    assert_eq!(failed.usage_source, "missing");
+    let failed_attempts = database
+        .list_attempts_for_event(&failed.request_id)
+        .await
+        .expect("query failed fallback attempts");
+    assert_eq!(
+        failed_attempts
+            .iter()
+            .map(|attempt| attempt.source_id.as_deref())
+            .collect::<Vec<_>>(),
+        vec![
+            Some("source-failed-primary"),
+            Some("source-failed-fallback")
+        ]
+    );
+    assert!(failed_attempts.iter().all(|attempt| !attempt.success));
+
+    assert_eq!(primary_requests.lock().unwrap().len(), 2);
+    assert_eq!(fallback_requests.lock().unwrap().len(), 3);
+
+    drop(state);
+    drop(control_plane);
+    drop(database);
+    runtime_pool.close().await;
+    sqlx::query(&format!("DROP SCHEMA \"{schema}\" CASCADE"))
+        .execute(&admin)
+        .await
+        .expect("drop isolated runtime usage schema");
+    admin.close().await;
 }
