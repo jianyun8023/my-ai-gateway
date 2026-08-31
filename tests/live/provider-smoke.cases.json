@@ -1,0 +1,82 @@
+[
+  {
+    "id": "deepseek.function",
+    "provider": "deepseek",
+    "kind": "function_round_trip",
+    "cost": "low",
+    "required_env": ["DEEPSEEK_API_KEY", "DEEPSEEK_BASE_URL"],
+    "description": "Chat function call followed by a tool result."
+  },
+  {
+    "id": "deepseek.web_search",
+    "provider": "deepseek",
+    "kind": "server_search",
+    "cost": "high",
+    "required_env": ["DEEPSEEK_API_KEY", "DEEPSEEK_BASE_URL"],
+    "description": "Native Responses web search with completed search actions and usage."
+  },
+  {
+    "id": "minimax.function",
+    "provider": "minimax",
+    "kind": "function_round_trip",
+    "cost": "low",
+    "required_env": ["MINIMAX_API_KEY", "MINIMAX_BASE_URL"],
+    "description": "Chat function call followed by a tool result."
+  },
+  {
+    "id": "minimax.web_search",
+    "provider": "minimax",
+    "kind": "server_search",
+    "cost": "high",
+    "required_env": ["MINIMAX_API_KEY", "MINIMAX_BASE_URL"],
+    "description": "Native Responses web search with citations and usage."
+  },
+  {
+    "id": "kimi.function",
+    "provider": "kimi",
+    "kind": "adapter_function_round_trip",
+    "cost": "low",
+    "required_env": ["KIMI_API_KEY", "KIMI_BASE_URL"],
+    "description": "Responses function call and function_call_output through the Kimi adapter."
+  },
+  {
+    "id": "kimi.function_stream",
+    "provider": "kimi",
+    "kind": "adapter_function_stream",
+    "cost": "low",
+    "required_env": ["KIMI_API_KEY", "KIMI_BASE_URL"],
+    "description": "Streaming function call argument events through the Kimi adapter."
+  },
+  {
+    "id": "kimi.web_search",
+    "provider": "kimi",
+    "kind": "adapter_server_search",
+    "cost": "high",
+    "required_env": ["KIMI_API_KEY", "KIMI_BASE_URL"],
+    "description": "Non-streaming web search conversion, sources, status suppression, and usage."
+  },
+  {
+    "id": "kimi.web_search_stream",
+    "provider": "kimi",
+    "kind": "adapter_server_search_stream",
+    "cost": "high",
+    "required_env": ["KIMI_API_KEY", "KIMI_BASE_URL"],
+    "description": "Streaming web search event order, sources, status suppression, and usage."
+  },
+  {
+    "id": "kimi.reasoning_signature",
+    "provider": "kimi",
+    "kind": "adapter_reasoning_round_trip",
+    "cost": "high",
+    "required_env": ["KIMI_API_KEY", "KIMI_BASE_URL"],
+    "description": "Reasoning encrypted_content round-trip; may report not_triggered when upstream emits no thinking block."
+  },
+  {
+    "id": "fallback.deepseek_bai",
+    "provider": "fallback",
+    "kind": "retryable_cross_provider_fallback",
+    "cost": "low",
+    "required_env": ["B_AI_API_KEY", "B_AI_BASE_URL"],
+    "description": "Injected DeepSeek 503 followed by a successful b.ai attempt with Usage attribution."
+  }
+]
