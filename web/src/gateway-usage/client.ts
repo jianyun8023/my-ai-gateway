@@ -136,15 +136,23 @@ export class GatewayUsageClient {
     }), signal));
   }
 
-  async overview(filters: GatewayUsageFilters, signal?: AbortSignal): Promise<UsageOverviewViewModel> {
+  async overview(
+    filters: GatewayUsageFilters,
+    granularityOverride?: 'hour' | 'day',
+    signal?: AbortSignal,
+  ): Promise<UsageOverviewViewModel> {
     const durationMs = new Date(filters.to).getTime() - new Date(filters.from).getTime();
-    const granularity = durationMs > 3 * 24 * 60 * 60 * 1000 ? 'day' : 'hour';
+    const granularity = granularityOverride ?? (durationMs > 3 * 24 * 60 * 60 * 1000 ? 'day' : 'hour');
     const [summary, timeseries, recentEvents] = await Promise.all([
       this.summary(filters, signal),
       this.timeseries(filters, granularity, signal),
       this.events({ filters, limit: 8 }, signal),
     ]);
     return { summary, timeseries, recentEvents: recentEvents.events };
+  }
+
+  async eventDetail(requestId: string, signal?: AbortSignal): Promise<unknown> {
+    return this.json(`${USAGE_API_ROOT}/events/${encodeURIComponent(requestId)}`, signal);
   }
 
   async exportEvents(

@@ -12,13 +12,22 @@
 - [x] usage 缺失时使用 tiktoken-rs 估算
 - [x] Provider/Account/Route 配置同步到 PostgreSQL
 - [x] 模型目录领域表与可路由 Binding 仓储基线
-- [ ] ProviderPreset、模型发现差异和用户确认 API
-- [ ] PostgreSQL-backed 模型目录加载与 `/v1/models`/路由切换
-- [ ] Provider/Account/Route CRUD 与数据库加载
+- [ ] ProviderPreset、模型发现差异和用户确认 API（#13）
+- [x] PostgreSQL-backed 配置加载与路由热更新（#14）
+- [x] Provider/Account/Route CRUD 与数据库持久化（#14）
 - [ ] Virtual Key 轮换与分组权限
 - [x] Keeper React UI vendor 与静态资源构建
-- [ ] Keeper UI 对接完整 Usage/Analysis/Events API
-- [ ] Usage Analysis 聚合 API（时间、模型、Provider、账号、Key）
-- [x] 账号健康冷却的内存实现
-- [ ] 健康状态持久化、重试次数统计和完整加权 fallback
+- [x] 网关原生用量控制台（Overview/Analysis/Request Events）对接 Usage API（#16）
+- [x] Usage Analysis 聚合 API（时间、模型、Provider、账号、Key）（#15）
+- [x] Admin 路由调试端点鉴权、结构化路由错误与 degraded 告警修复（#20、#21、#22）
+- [x] 协议 × 模式路由与透传测试矩阵补齐（#23）
+- [x] 有效能力矩阵聚合 API 与展示（#24）
+- [x] usage 记录语义修正与字段补全（#25、#26）
+- [x] usage attempt 明细 API 与事件详情端点（#27）
+- [x] usage 导出增加 10000 行上限保护（#28）
+- [x] 用量趋势图支持指标切换与时间粒度手选（#29）
+- [ ] usage 事件 Source 维度升级（依赖 #14）（#30）
+- [x] 健康状态指数退避冷却、失败计数和完整加权 fallback
+- [x] 账号健康状态 Admin API（`/admin/health`）
+- [x] 跨 Provider 自定义 fallback 渠道与账号级 `model_map`（b.ai/硅基流动，方案见 ai-gateway-design §3.6）
 - [ ] OTel/Prometheus、凭据加密、审计和 SSRF allowlist

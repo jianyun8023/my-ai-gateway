@@ -147,7 +147,7 @@ pub fn extract_sse(text: &str) -> Option<UsageReport> {
         }
     }
     latest.map(|mut report| {
-        report.source = "stream_final_event".into();
+        report.source = "parsed".into();
         report
     })
 }
@@ -189,7 +189,7 @@ mod tests {
     fn extracts_last_sse_usage_event() {
         let report = extract_sse("data: {\"type\":\"response.output_text.delta\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":2,\"output_tokens\":3}}}\n\ndata: [DONE]\n").unwrap();
         assert_eq!(report.total_tokens, 5);
-        assert_eq!(report.source, "stream_final_event");
+        assert_eq!(report.source, "parsed");
     }
 
     #[test]

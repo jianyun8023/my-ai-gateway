@@ -288,6 +288,56 @@
 .attemptList li { display: grid; grid-template-columns: 40px 1fr 1.5fr auto; gap: 9px; padding: 10px 0; border-bottom: 1px solid var(--border-color); font-size: 11px; }
 .errorSummary { margin: 0; color: var(--error-color); font-size: 12px; line-height: 1.6; }
 .noBodyNotice { margin: 0; color: var(--text-secondary); font-size: 10px; line-height: 1.6; }
+.granularityBar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 0;
+  font-size: 12px;
+
+  > span {
+    color: var(--text-secondary);
+    margin-right: 4px;
+  }
+
+  > button {
+    padding: 4px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--floating-surface);
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 11px;
+    transition: all 0.15s;
+
+    &[data-active='true'] {
+      border-color: #5d7cfa;
+      background: rgba(93, 124, 250, 0.14);
+      color: #5d7cfa;
+      font-weight: 600;
+    }
+
+    &:hover:not([data-active='true']) {
+      border-color: var(--text-secondary);
+    }
+  }
+}
+.metricSelect {
+  padding: 4px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--floating-surface);
+  color: var(--text-primary);
+  font-size: 11px;
+  cursor: pointer;
+  outline: none;
+
+  &:focus-visible {
+    border-color: #5d7cfa;
+  }
+}
+.statusSuccess { color: #087c65; }
+.statusFailure { color: var(--error-color); }
 .footer { padding: 24px; color: var(--text-secondary); text-align: center; font-size: 10px; }
 
 @media (max-width: 1180px) {

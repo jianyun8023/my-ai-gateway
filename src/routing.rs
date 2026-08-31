@@ -60,11 +60,6 @@ impl RouteResolver {
         Self { config }
     }
 
-    /// Historical Option API; callers needing diagnostics should use `resolve_detailed`.
-    pub fn resolve(&self, protocol: Protocol, model: &str) -> Option<ResolvedRoute> {
-        self.resolve_detailed(protocol, model).ok()
-    }
-
     pub fn resolve_detailed(
         &self,
         protocol: Protocol,
@@ -404,6 +399,7 @@ mod tests {
                 protocol_capabilities: HashMap::new(),
                 capabilities: Some(Capabilities::native()),
                 model_overrides: HashMap::new(),
+                model_map: HashMap::new(),
             }],
             routes,
         }
@@ -488,5 +484,207 @@ mod tests {
         assert!(resolved
             .degraded_features
             .contains(&"file_search".to_owned()));
+    }
+
+    #[test]
+    fn three_protocols_native_resolve() {
+        let mut p = provider();
+        p.native_protocols = vec![
+            Protocol::OpenAiChatCompletions,
+            Protocol::OpenAiResponses,
+            Protocol::AnthropicMessages,
+        ];
+        p.endpoints
+            .insert(Protocol::OpenAiResponses, "/v1/responses".into());
+        p.endpoints
+            .insert(Protocol::AnthropicMessages, "/v1/messages".into());
+        let routes = vec![
+            RouteConfig {
+                id: "chat".into(),
+                model: "m".into(),
+                provider_id: "p".into(),
+                protocols: vec![Protocol::OpenAiChatCompletions],
+                primary_account_id: "a".into(),
+                fallback_accounts: vec![],
+                strategy: "x".into(),
+                mode: "native".into(),
+                adapter: None,
+                allow_lossy_conversion: false,
+            },
+            RouteConfig {
+                id: "resp".into(),
+                model: "m".into(),
+                provider_id: "p".into(),
+                protocols: vec![Protocol::OpenAiResponses],
+                primary_account_id: "a".into(),
+                fallback_accounts: vec![],
+                strategy: "x".into(),
+                mode: "native".into(),
+                adapter: None,
+                allow_lossy_conversion: false,
+            },
+            RouteConfig {
+                id: "anth".into(),
+                model: "m".into(),
+                provider_id: "p".into(),
+                protocols: vec![Protocol::AnthropicMessages],
+                primary_account_id: "a".into(),
+                fallback_accounts: vec![],
+                strategy: "x".into(),
+                mode: "native".into(),
+                adapter: None,
+                allow_lossy_conversion: false,
+            },
+        ];
+        let resolver = RouteResolver::new(Arc::new(config(p, routes)));
+        for (protocol, expected_id, expected_endpoint) in [
+            (Protocol::OpenAiChatCompletions, "chat", "/v1/chat"),
+            (Protocol::OpenAiResponses, "resp", "/v1/responses"),
+            (Protocol::AnthropicMessages, "anth", "/v1/messages"),
+        ] {
+            let resolved = resolver.resolve_detailed(protocol, "m").unwrap();
+            assert_eq!(resolved.route_id, expected_id);
+            assert_eq!(resolved.protocol_upstream, protocol);
+            assert!(
+                resolved.upstream_endpoint.ends_with(expected_endpoint),
+                "endpoint mismatch for {protocol}: {}",
+                resolved.upstream_endpoint
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_model_returns_route_not_found() {
+        let resolver = RouteResolver::new(Arc::new(config(
+            provider(),
+            vec![route("r1", "m", Protocol::OpenAiChatCompletions)],
+        )));
+        let error = resolver
+            .resolve_detailed(Protocol::OpenAiChatCompletions, "nonexistent")
+            .unwrap_err();
+        assert_eq!(error.code, "route_not_found");
+    }
+
+    #[test]
+    fn unknown_protocol_returns_route_not_found() {
+        let resolver = RouteResolver::new(Arc::new(config(
+            provider(),
+            vec![route("r1", "m", Protocol::OpenAiChatCompletions)],
+        )));
+        let error = resolver
+            .resolve_detailed(Protocol::AnthropicMessages, "m")
+            .unwrap_err();
+        assert_eq!(error.code, "route_not_found");
+    }
+
+    #[test]
+    fn wildcard_model_matches_prefix() {
+        let routes = vec![route("wild", "gpt-*", Protocol::OpenAiChatCompletions)];
+        let resolver = RouteResolver::new(Arc::new(config(provider(), routes)));
+        let resolved = resolver
+            .resolve_detailed(Protocol::OpenAiChatCompletions, "gpt-4o")
+            .unwrap();
+        assert_eq!(resolved.route_id, "wild");
+        assert_eq!(resolved.requested_model, "gpt-4o");
+    }
+
+    #[test]
+    fn multi_protocol_route_matches_each_protocol() {
+        let mut p = provider();
+        p.native_protocols = vec![Protocol::OpenAiChatCompletions, Protocol::AnthropicMessages];
+        p.endpoints
+            .insert(Protocol::AnthropicMessages, "/v1/messages".into());
+        let routes = vec![RouteConfig {
+            id: "multi".into(),
+            model: "m".into(),
+            provider_id: "p".into(),
+            protocols: vec![Protocol::OpenAiChatCompletions, Protocol::AnthropicMessages],
+            primary_account_id: "a".into(),
+            fallback_accounts: vec![],
+            strategy: "x".into(),
+            mode: "native".into(),
+            adapter: None,
+            allow_lossy_conversion: false,
+        }];
+        let resolver = RouteResolver::new(Arc::new(config(p, routes)));
+        assert!(resolver
+            .resolve_detailed(Protocol::OpenAiChatCompletions, "m")
+            .is_ok());
+        assert!(resolver
+            .resolve_detailed(Protocol::AnthropicMessages, "m")
+            .is_ok());
+        assert!(resolver
+            .resolve_detailed(Protocol::OpenAiResponses, "m")
+            .is_err());
+    }
+
+    #[test]
+    fn config_validation_rejects_adapter_cross_provider_fallback() {
+        let mut p = provider();
+        p.id = "p1".into();
+        p.native_protocols = vec![Protocol::OpenAiChatCompletions, Protocol::AnthropicMessages];
+        p.endpoints
+            .insert(Protocol::AnthropicMessages, "/v1/messages".into());
+        p.protocol_capabilities.insert(
+            Protocol::OpenAiResponses,
+            ProtocolCapability::adapter(Protocol::AnthropicMessages, "kimi_responses_adapter"),
+        );
+        let p2 = ProviderConfig {
+            id: "p2".into(),
+            name: "p2".into(),
+            base_url: "https://other.example/".into(),
+            models: vec![],
+            native_protocols: vec![Protocol::OpenAiChatCompletions],
+            endpoints: HashMap::from([(Protocol::OpenAiChatCompletions, "/v1/chat".into())]),
+            capabilities: Capabilities::native(),
+            protocol_capabilities: HashMap::new(),
+            model_overrides: HashMap::new(),
+        };
+        let a2 = AccountConfig {
+            id: "a2".into(),
+            provider_id: "p2".into(),
+            display_name: "a2".into(),
+            credential_env: None,
+            credential: None,
+            enabled: true,
+            weight: 100,
+            protocol_capabilities: HashMap::new(),
+            capabilities: Some(Capabilities::native()),
+            model_overrides: HashMap::new(),
+            model_map: HashMap::new(),
+        };
+        let mut r = route("adapter-route", "m", Protocol::OpenAiResponses);
+        r.provider_id = "p1".into();
+        r.mode = "adapter".into();
+        r.adapter = Some("kimi_responses_adapter".into());
+        r.fallback_accounts = vec!["a2".into()];
+        let cfg = GatewayConfig {
+            listen_addr: "127.0.0.1:1".into(),
+            providers: vec![p, p2],
+            accounts: vec![
+                AccountConfig {
+                    id: "a".into(),
+                    provider_id: "p1".into(),
+                    display_name: "a".into(),
+                    credential_env: None,
+                    credential: None,
+                    enabled: true,
+                    weight: 100,
+                    protocol_capabilities: HashMap::new(),
+                    capabilities: Some(Capabilities::native()),
+                    model_overrides: HashMap::new(),
+                    model_map: HashMap::new(),
+                },
+                a2,
+            ],
+            routes: vec![r],
+        };
+        let errors = cfg.validate().unwrap_err();
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("adapter route cannot have cross-provider fallback")),
+            "expected cross-provider adapter error, got: {errors:?}"
+        );
     }
 }

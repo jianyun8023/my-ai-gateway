@@ -216,18 +216,43 @@ function Stat({ label, value, hint, tone }: { label: string; value: string; hint
   );
 }
 
-function Overview({ data }: { data: UsageOverviewViewModel }) {
+type TrendMetric = 'total' | 'input' | 'output' | 'reasoning' | 'cached' | 'requests';
+
+const TREND_METRICS: Array<{ value: TrendMetric; label: string }> = [
+  { value: 'total', label: 'Total Token' },
+  { value: 'input', label: 'Input Token' },
+  { value: 'output', label: 'Output Token' },
+  { value: 'reasoning', label: 'Reasoning Token' },
+  { value: 'cached', label: 'Cached Token' },
+  { value: 'requests', label: '逻辑请求' },
+];
+
+function extractMetricData(data: UsageOverviewViewModel, metric: TrendMetric): number[] {
+  switch (metric) {
+    case 'total': return data.timeseries.map((p) => p.tokens.total);
+    case 'input': return data.timeseries.map((p) => p.tokens.input);
+    case 'output': return data.timeseries.map((p) => p.tokens.output);
+    case 'reasoning': return data.timeseries.map((p) => p.tokens.reasoning);
+    case 'cached': return data.timeseries.map((p) => p.tokens.cached);
+    case 'requests': return data.timeseries.map((p) => p.logicalRequests);
+  }
+}
+
+function Overview({ data, metric, onMetricChange }: { data: UsageOverviewViewModel; metric: TrendMetric; onMetricChange: (m: TrendMetric) => void }) {
   const { summary } = data;
   const hasData = summary.logicalRequests > 0 || summary.tokens.total > 0;
   if (!hasData) {
     return <EmptyState title="当前范围暂无用量" description="调整时间范围或筛选条件后重试。Token 统计不依赖价格配置。" />;
   }
   const colors = makeChartColors();
+  const metricLabel = TREND_METRICS.find((m) => m.value === metric)?.label ?? 'Total Token';
+  const secondaryMetric = metric === 'requests' ? 'total' : 'requests';
+  const secondaryLabel = secondaryMetric === 'requests' ? '逻辑请求' : 'Total Token';
   const trendData = {
     labels: data.timeseries.map((point) => formatBucket(point.bucket)),
     datasets: [
-      { label: 'Total Token', data: data.timeseries.map((point) => point.tokens.total), borderColor: colors[0], backgroundColor: 'rgba(93,124,250,.14)', fill: true, tension: 0.35 },
-      { label: '逻辑请求', data: data.timeseries.map((point) => point.logicalRequests), borderColor: colors[1], backgroundColor: colors[1], tension: 0.35, yAxisID: 'requests' },
+      { label: metricLabel, data: extractMetricData(data, metric), borderColor: colors[0], backgroundColor: 'rgba(93,124,250,.14)', fill: true, tension: 0.35 },
+      { label: secondaryLabel, data: extractMetricData(data, secondaryMetric), borderColor: colors[1], backgroundColor: colors[1], tension: 0.35, yAxisID: 'secondary' },
     ],
   };
   const compositionData = {
@@ -248,8 +273,12 @@ function Overview({ data }: { data: UsageOverviewViewModel }) {
         <Stat label="Fallback / 重试" value={formatNumber(summary.retries)} hint="不重复累计最终 Token" />
       </div>
       <div className={styles.chartGrid}>
-        <Card title="Token 与请求趋势" subtitle="UTC 存储，按浏览器本地时区展示">
-          <div className={styles.chartLarge}><Line data={trendData} options={{ responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, scales: { requests: { position: 'right', grid: { display: false } } } }} /></div>
+        <Card title="用量趋势" subtitle="UTC 存储，按浏览器本地时区展示" extra={
+          <select value={metric} onChange={(e) => onMetricChange(e.target.value as TrendMetric)} className={styles.metricSelect}>
+            {TREND_METRICS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+          </select>
+        }>
+          <div className={styles.chartLarge}><Line data={trendData} options={{ responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, scales: { secondary: { position: 'right', grid: { display: false } } } }} /></div>
         </Card>
         <Card title="Token 构成" subtitle="无价格配置时仍完整展示">
           <div className={styles.chartSmall}><Doughnut data={compositionData} options={{ responsive: true, maintainAspectRatio: false, cutout: '68%' }} /></div>
@@ -333,7 +362,58 @@ const renderEventCell = (event: UsageEventViewModel, column: EventColumn) => {
   }
 };
 
-function EventDetails({ event, onClose }: { event: UsageEventViewModel; onClose: () => void }) {
+interface UsageAttemptDetail {
+  attemptNo: number;
+  provider: string;
+  account: string;
+  upstreamModel: string;
+  statusCode: number;
+  success: boolean;
+  latencyMs: number;
+}
+
+function EventDetails({ event, onClose, client }: { event: UsageEventViewModel; onClose: () => void; client: GatewayUsageClient }) {
+  const [attempts, setAttempts] = useState<UsageAttemptDetail[]>([]);
+  const [loadingAttempts, setLoadingAttempts] = useState(true);
+  const [loadedRequestId, setLoadedRequestId] = useState(event.requestId);
+  if (loadedRequestId !== event.requestId) {
+    setLoadedRequestId(event.requestId);
+    setAttempts([]);
+    setLoadingAttempts(true);
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+    client.eventDetail(event.requestId).then((data) => {
+      if (cancelled) return;
+      const detail = data as { attempts?: Array<{ attempt_no?: number; provider_id?: string; account_id?: string; upstream_model_id?: string; status_code?: number; success?: boolean; latency_ms?: number }> };
+      setAttempts((detail.attempts ?? []).map((a) => ({
+        attemptNo: a.attempt_no ?? 0,
+        provider: a.provider_id ?? '—',
+        account: a.account_id ?? '—',
+        upstreamModel: a.upstream_model_id ?? '—',
+        statusCode: a.status_code ?? 0,
+        success: a.success ?? false,
+        latencyMs: a.latency_ms ?? 0,
+      })));
+    }).catch(() => {
+      if (!cancelled) setAttempts([]);
+    }).finally(() => {
+      if (!cancelled) setLoadingAttempts(false);
+    });
+    return () => { cancelled = true; };
+  }, [client, event.requestId]);
+
+  const displayAttempts = attempts.length > 0 ? attempts : event.attempts.map((a) => ({
+    attemptNo: a.attemptIndex,
+    provider: a.provider,
+    account: a.account,
+    upstreamModel: a.upstreamModel,
+    statusCode: a.statusCode,
+    success: a.success,
+    latencyMs: a.latencyMs,
+  }));
+
   return (
     <div className={styles.drawerBackdrop} role="presentation" onMouseDown={(mouseEvent) => mouseEvent.target === mouseEvent.currentTarget && onClose()}>
       <aside className={styles.drawer} role="dialog" aria-modal="true" aria-label="请求事件详情">
@@ -354,8 +434,8 @@ function EventDetails({ event, onClose }: { event: UsageEventViewModel; onClose:
           <div className={styles.tokenDetails}><span>Input <strong>{event.tokens.input}</strong></span><span>Output <strong>{event.tokens.output}</strong></span><span>Reasoning <strong>{event.tokens.reasoning}</strong></span><span>Cached <strong>{event.tokens.cached}</strong></span><span>Total <strong>{event.tokens.total}</strong></span></div>
         </Card>
         <Card title="上游尝试" subtitle="失败尝试没有可确认 usage 时不会虚构 Token">
-          {event.attempts.length === 0 ? <EmptyState title="没有独立 attempt 明细" description="事件仍保留最终账号与 retry_count。" /> : (
-            <ol className={styles.attemptList}>{event.attempts.map((attempt) => <li key={attempt.attemptIndex}><span>#{attempt.attemptIndex + 1}</span><strong>{attempt.account}</strong><span>{attempt.provider} · {attempt.source}</span><span>{attempt.statusCode} · {attempt.latencyMs} ms</span></li>)}</ol>
+          {loadingAttempts ? <div style={{ padding: '1rem', opacity: 0.6 }}>加载 attempt 明细…</div> : displayAttempts.length === 0 ? <EmptyState title="没有独立 attempt 明细" description="事件仍保留最终账号与 retry_count。" /> : (
+            <ol className={styles.attemptList}>{displayAttempts.map((attempt) => <li key={attempt.attemptNo}><span>#{attempt.attemptNo + 1}</span><strong>{attempt.account}</strong><span>{attempt.provider} · {attempt.upstreamModel}</span><span className={attempt.success ? styles.statusSuccess : styles.statusFailure}>{attempt.statusCode} · {attempt.latencyMs} ms</span></li>)}</ol>
           )}
         </Card>
         {event.errorSummary && <Card title="脱敏错误摘要"><p className={styles.errorSummary}>{event.errorSummary}</p></Card>}
@@ -373,9 +453,10 @@ interface EventsTableProps {
   visibleColumns: EventColumn[];
   onVisibleColumnsChange: (columns: EventColumn[]) => void;
   onExport: (format: 'csv' | 'json') => void;
+  client: GatewayUsageClient;
 }
 
-function EventsTable({ events, hasMore, loadingMore, onLoadMore, visibleColumns, onVisibleColumnsChange, onExport }: EventsTableProps) {
+function EventsTable({ events, hasMore, loadingMore, onLoadMore, visibleColumns, onVisibleColumnsChange, onExport, client }: EventsTableProps) {
   const parentRef = useRef<HTMLDivElement>(null);
   const [selectedEvent, setSelectedEvent] = useState<UsageEventViewModel>();
   // TanStack Virtual intentionally exposes imperative measurement helpers.
@@ -412,7 +493,7 @@ function EventsTable({ events, hasMore, loadingMore, onLoadMore, visibleColumns,
           {loadingMore && <div className={styles.loadingMore}>加载更多事件…</div>}
         </div>
       </div>
-      {selectedEvent && <EventDetails event={selectedEvent} onClose={() => setSelectedEvent(undefined)} />}
+      {selectedEvent && <EventDetails event={selectedEvent} onClose={() => setSelectedEvent(undefined)} client={client} />}
     </Card>
   );
 }
@@ -433,6 +514,8 @@ export function GatewayUsagePage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState('');
   const [visibleColumns, setVisibleColumns] = useState<EventColumn[]>(loadVisibleColumns);
+  const [trendMetric, setTrendMetric] = useState<TrendMetric>('total');
+  const [granularity, setGranularity] = useState<'auto' | 'hour' | 'day'>('auto');
   const theme = useThemeStore((state) => state.theme);
   const setTheme = useThemeStore((state) => state.setTheme);
 
@@ -441,7 +524,8 @@ export function GatewayUsagePage() {
     setError('');
     try {
       if (activeTab === 'overview') {
-        setOverview(await clientRef.current.overview(filters, signal));
+        const granularityParam = granularity === 'auto' ? undefined : granularity;
+        setOverview(await clientRef.current.overview(filters, granularityParam, signal));
       } else if (activeTab === 'analysis') {
         const results = await Promise.all(ANALYSIS_DIMENSIONS.map(async ({ dimension }) => [
           dimension,
@@ -460,7 +544,7 @@ export function GatewayUsagePage() {
     } finally {
       if (!signal?.aborted) setLoading(false);
     }
-  }, [activeTab, filters]);
+  }, [activeTab, filters, granularity]);
 
   useEffect(() => {
     const onHashChange = () => setActiveTab(resolveGatewayUsageTab(window.location.hash));
@@ -546,13 +630,23 @@ export function GatewayUsagePage() {
       <main className={styles.main}>
         <section className={styles.pageHeading}><div><span>PostgreSQL Usage Events</span><h1>{TAB_LABELS[activeTab]}</h1><p>逻辑请求与上游尝试分开统计 · 本地时区：{localTimeZone}</p></div><aside><strong>UTC</strong><span>存储边界</span></aside></section>
         <FilterBar draft={draftFilters} onChange={setDraftFilters} onApply={applyFilters} loading={loading} />
+        {activeTab === 'overview' && (
+          <div className={styles.granularityBar}>
+            <span>时间粒度</span>
+            {(['auto', 'hour', 'day'] as const).map((g) => (
+              <button key={g} data-active={granularity === g} onClick={() => setGranularity(g)}>
+                {g === 'auto' ? '自动' : g === 'hour' ? '小时' : '天'}
+              </button>
+            ))}
+          </div>
+        )}
         {error && <div className={styles.errorBanner} role="alert"><span>{error}</span><Button size="sm" variant="secondary" onClick={() => void loadActiveTab()}>重试</Button></div>}
         {loading && !error ? <div className={styles.loadingState} aria-busy="true">正在加载网关用量…</div> : (
           activeTab === 'overview'
-            ? overview && <Overview data={overview} />
+            ? overview && <Overview data={overview} metric={trendMetric} onMetricChange={setTrendMetric} />
             : activeTab === 'analysis'
               ? <Analysis breakdowns={breakdowns} />
-              : <EventsTable events={events} hasMore={hasMore} loadingMore={loadingMore} onLoadMore={() => void loadMore()} visibleColumns={visibleColumns} onVisibleColumnsChange={changeVisibleColumns} onExport={(format) => void exportEvents(format)} />
+              : <EventsTable events={events} hasMore={hasMore} loadingMore={loadingMore} onLoadMore={() => void loadMore()} visibleColumns={visibleColumns} onVisibleColumnsChange={changeVisibleColumns} onExport={(format) => void exportEvents(format)} client={clientRef.current} />
         )}
       </main>
       <footer className={styles.footer}>my-ai-gateway · UI interactions adapted from CPA Usage Keeper under the MIT License</footer>

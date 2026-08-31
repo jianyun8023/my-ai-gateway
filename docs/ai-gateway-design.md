@@ -221,6 +221,65 @@ user > preset > upstream > unknown
 
 开发期 `GATEWAY_CONFIG_JSON` 导入会为尚不存在的 Provider ID 创建一次 `custom@1` Source 快照，并让 Account 显式引用该 Source；后续启动同步不会覆盖已经存在的 Source 快照或用户编辑，PostgreSQL 仍是模型目录事实来源。
 
+### 3.6 自定义渠道与跨 Provider Fallback（待实施）
+
+现状：`fallback_accounts` 只允许同 Provider 账号（`src/main.rs` 按 `provider_id` 过滤），请求体 `model` 原样透传，无法把"同一模型的其他渠道"作为备用。目标：fallback 账号可以是任意 Provider 的账号，用于接入 b.ai、硅基流动等 OpenAI 兼容渠道做兜底。
+
+规则：
+
+- fallback 转发使用候选账号自己 Provider 的 `base_url`/`endpoints`/凭据；attempt 与最终 usage 事件记录实际的 `provider_id`/`account_id`/`upstream_model_id`。
+- 跨 Provider fallback 仅限 `native` 链路：候选 Provider 必须对该入站协议声明 `native` 且配置了非空 endpoint；`adapter` 路由不允许跨 Provider fallback（配置校验拒绝，不做静默降级）。
+- `AccountConfig` 新增可选 `model_map`（逻辑模型 → 上游模型 ID）：转发前重写请求体顶层 `model` 字段；未命中映射则原样透传；重写结果记入 attempt 的 `upstream_model_id`。
+- 配置校验：fallback 账号/Provider 必须存在；跨 Provider 且候选 Provider 未声明该模型时，要求候选账号 `model_map` 存在对应映射；错误信息带配置路径。
+- 首选账号冷却中或被禁用时进入 fallback 候选选择，无可用候选才返回 503（修正现状直接 503 的行为）。
+- 仍为单次 fallback 重试（首选 1 次 + fallback 1 次），不引入多轮循环；fallback 候选选择对 429/5xx/传输错误路径统一执行 enabled + 健康 + 权重过滤（修正传输错误路径不过滤的现状）。
+
+渠道资料（2026-08 确认，凭据只通过环境变量注入，禁止写入配置或文档）：
+
+- **b.ai**：`https://api.b.ai/v1`，OpenAI 兼容（Chat Completions）。免费模型：`deepseek-v4-flash`（tool_use、thinking）、`deepseek-v4-flash-vision-exp`（另含 image_in）、`glm-5.3-flash`（tool_use、always_thinking、image_in、video_in）、`qwen3.8-flash`。凭据环境变量 `B_AI_API_KEY`。
+- **硅基流动（SiliconFlow）**：`https://api.siliconflow.cn`，OpenAI 兼容。凭据环境变量 `SILICONFLOW_API_KEY`。
+- 跨渠道重叠模型（用于 fallback 测试）：`deepseek-v4-flash`（DeepSeek 官方 ↔ b.ai）、MiniMax-M2 系列（MiniMax 官方 ↔ 硅基流动）。
+
+配置示例：
+
+```json
+{
+  "providers": [
+    {
+      "id": "bai",
+      "name": "b.ai",
+      "base_url": "https://api.b.ai/v1",
+      "models": ["deepseek-v4-flash", "glm-5.3-flash"],
+      "native_protocols": ["openai_chat_completions"],
+      "endpoints": {"openai_chat_completions": "/chat/completions"},
+      "capabilities": {"streaming": "native", "tools": "native", "thinking": "native", "usage": "native"},
+      "protocol_capabilities": {
+        "openai_chat_completions": {"mode": "native"},
+        "openai_responses": {"mode": "unsupported"},
+        "anthropic_messages": {"mode": "unsupported"}
+      },
+      "model_overrides": {}
+    }
+  ],
+  "accounts": [
+    {"id": "bai-main", "provider_id": "bai", "display_name": "b.ai 免费渠道",
+     "credential_env": "B_AI_API_KEY", "enabled": true, "weight": 50,
+     "model_map": {"deepseek-chat": "deepseek-v4-flash"}}
+  ],
+  "routes": [
+    {
+      "id": "deepseek-all-native",
+      "model": "deepseek-*",
+      "provider_id": "deepseek",
+      "protocols": ["openai_chat_completions"],
+      "primary_account_id": "deepseek-main",
+      "fallback_accounts": ["bai-main"],
+      "mode": "native"
+    }
+  ]
+}
+```
+
 ## 4. 请求处理流程
 
 ```text
@@ -310,7 +369,7 @@ GATEWAY_API_KEY 鉴权
 }
 ```
 
-生产环境使用 `credential_env`，不建议在 JSON 中直接写 `credential`。
+生产环境使用 `credential_env`，不建议在 JSON 中直接写 `credential`。账号可选 `model_map`（逻辑模型 → 上游模型 ID）用于跨 Provider fallback 时重写模型名，规则见 3.6。
 
 ### Route
 
@@ -439,6 +498,14 @@ v1 响应 envelope 固定如下：summary 为 `{version, timezone, range, data}`
 
 - TTFT 和真实流式完成时间记录。
 
+2026-08-31 真实联调发现的 usage 提取缺口（并入 #25、#26 处理）：
+
+- Adapter（Responses → Anthropic）非流式响应的 usage 未落库：上游转换后的响应体含 usage，事件却记为 `missing` 且 0/0；
+- Kimi `/v1/messages` 非流式响应只提取到 output_tokens，input_tokens 为 0；
+- MiniMax/Kimi 流式无 usage 末事件时 tiktoken 估算值明显膨胀（如实际短回复估算出上千 output tokens）；
+- `reasoning_tokens` 恒为 0：MiniMax Responses 的 reasoning item、Anthropic thinking 的 token 均未提取；
+- 失败请求（如上游 401）也做了 token 估算并标记 `estimated`，语义待确认。
+
 ### 7.4 统计接口和页面
 
 已完成稳定 v1 `/admin/usage/summary`、`timeseries`、`breakdown`、`events`、`export` 查询契约、组合筛选、确定性游标分页、CSV/JSON 导出，以及 Provider/Account/Route 管理查询 API；同时已 vendor Keeper React 前端、构建静态资源（访问 `/admin/`）。仍待完成：
@@ -469,6 +536,17 @@ CPA Usage Keeper 只复用 React 页面和交互，不复用其 Go 后端、SQLi
 - 已覆盖流式 Anthropic SSE → Responses SSE；
 - 已增加 OpenAI/Anthropic usage JSON 和 SSE 提取单测。
 
+### 7.7 真实联调基线（2026-08-31）
+
+已用真实上游（MiniMax、DeepSeek、Kimi Code）跑通并落库验证：
+
+- 三协议原生透传全部可用，包括 MiniMax `/v1/responses`、DeepSeek `/v1/responses` 与 `/anthropic/v1/messages`（两家 Anthropic 兼容端点均为 `{base_url}/anthropic/v1/messages`，`config.example.json` 已修正）；
+- Kimi Responses → Anthropic adapter 非流式/流式可用，SSE 事件序列完整；
+- usage 落库、`/admin/usage/*` 聚合、Admin 控制台 Overview/Analysis 展示与 DB 一致；`protocol_in → protocol_upstream → mode` 链路记录正确；
+- 失败请求（上游 401）透传并记录 `success=false`，且不触发 fallback——符合 `is_retryable` 仅认 408/429/5xx 的语义；429/5xx 触发 fallback 的完整链路尚无真实环境验证手段，需要 mock 级 e2e 补齐；
+- `upstream_model_id` 恒为空、TTFT 未实现、fallback 最多一次重试且首选冷却时直接 503——均属已知缺口；
+- `web/dist` 需随前端源码重建，旧构建仍会调 CPA Keeper 的 `/api/v1/auth/*`（网关无此端点）。
+
 ## 8. 验收标准
 
 ### 原生 Provider
@@ -478,6 +556,14 @@ CPA Usage Keeper 只复用 React 页面和交互，不复用其 Go 后端、SQLi
 - Web Search、Tools、Thinking 字段不被网关修改；
 - 上游 SSE 可被客户端持续读取；
 - 429/5xx 可触发 fallback。
+
+### Fallback 渠道
+
+- 429/5xx/传输错误时可 fallback 到不同 Provider 的账号，响应来自候选渠道；
+- 转发 body 的 `model` 按候选账号 `model_map` 重写，attempt 记录实际 provider 与 upstream_model_id；
+- adapter 路由配置跨 Provider fallback 时被校验拒绝；
+- 首选账号冷却/禁用时自动进入 fallback 候选；
+- 上述链路有 mock 级端到端测试（非流式 + 流式）。
 
 ### Kimi
 

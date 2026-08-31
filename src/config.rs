@@ -350,6 +350,8 @@ pub struct AccountConfig {
     pub capabilities: Option<Capabilities>,
     #[serde(default)]
     pub model_overrides: HashMap<String, ModelCapabilityOverride>,
+    #[serde(default)]
+    pub model_map: HashMap<String, String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -507,6 +509,41 @@ impl GatewayConfig {
                     )),
                 }
             }
+            for (fb_index, fallback_id) in route.fallback_accounts.iter().enumerate() {
+                let fb_scope = format!("{scope}.fallback_accounts[{fb_index}] ({fallback_id})");
+                let Some(fb_account) = self.account(fallback_id) else {
+                    errors.push(format!("{fb_scope}: unknown account"));
+                    continue;
+                };
+                if fb_account.provider_id != provider.id {
+                    if route.mode == "adapter" {
+                        errors.push(format!(
+                            "{fb_scope}: adapter route cannot have cross-provider fallback"
+                        ));
+                    }
+                    let Some(fb_provider) = self.provider(&fb_account.provider_id) else {
+                        errors.push(format!(
+                            "{fb_scope}: unknown provider '{}'",
+                            fb_account.provider_id
+                        ));
+                        continue;
+                    };
+                    for protocol in &route.protocols {
+                        let fb_cap = self.protocol_capability(
+                            &fb_provider.id,
+                            Some(&fb_account.id),
+                            &route.model,
+                            *protocol,
+                        );
+                        if fb_cap.mode != ProtocolMode::Native {
+                            errors.push(format!(
+                                "{fb_scope}: cross-provider fallback requires native protocol {protocol} on provider '{}'",
+                                fb_provider.id
+                            ));
+                        }
+                    }
+                }
+            }
         }
         if errors.is_empty() {
             Ok(())
@@ -648,6 +685,7 @@ impl GatewayConfig {
             protocol_capabilities: HashMap::new(),
             capabilities: None,
             model_overrides: HashMap::new(),
+            model_map: HashMap::new(),
         }];
         let routes = vec![RouteConfig {
             id: "kimi-responses-adapter".into(),
@@ -1098,6 +1136,7 @@ mod tests {
                 protocol_capabilities: account_matrix,
                 capabilities: None,
                 model_overrides: HashMap::new(),
+                model_map: HashMap::new(),
             }],
             routes: vec![],
         };
