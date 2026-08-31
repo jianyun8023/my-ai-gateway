@@ -1,6 +1,16 @@
 -- Issue #52: persist account health independently from account configuration updates.
 -- `updated_at` describes control-plane edits; health timestamps below are the
 -- observation clock used for cooldown expiry and stale reporting.
+INSERT INTO gateway_schema_migrations (version, name)
+VALUES (12, 'health_persistence')
+ON CONFLICT (version) DO NOTHING;
+
+UPDATE gateway_schema_metadata
+SET schema_version = GREATEST(schema_version, 12),
+    migration_version = GREATEST(migration_version, 12),
+    updated_at = NOW()
+WHERE singleton = TRUE;
+
 ALTER TABLE accounts
   ADD COLUMN IF NOT EXISTS health_source TEXT NOT NULL DEFAULT 'unknown',
   ADD COLUMN IF NOT EXISTS health_updated_at TIMESTAMPTZ,
@@ -77,3 +87,6 @@ CREATE TABLE IF NOT EXISTS account_health_events (
 
 CREATE INDEX IF NOT EXISTS idx_account_health_events_latest
   ON account_health_events (account_id, observed_at DESC, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_account_health_events_retention
+  ON account_health_events (created_at ASC, id ASC);

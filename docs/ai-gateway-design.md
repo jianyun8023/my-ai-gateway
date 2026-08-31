@@ -494,7 +494,7 @@ ProviderPreset/模型发现回归使用真实 PostgreSQL 与 mock 上游，覆�
 
 ### 7.2.1 数据保留、清理、备份与恢复（#53）
 
-`migrations/0011_retention_backup.sql` 新增 `retention_policies`、`retention_cleanup_runs`、`audit_logs`、`backup_runs`、`gateway_schema_migrations` 和 `gateway_schema_metadata`。四类历史（logical UsageEvent、UsageAttempt、连接测试/运维 audit、discovery run）分别按 UTC `retention_days` 管理。`POST /admin/retention/cleanup` 在运行开始时固定策略和 cut-off，每个批次独立提交并记录 scanned/deleted/progress；同一 `operation_id` 可重复提交、取消和 retry。逻辑事件只有在不会级联删除仍在保留期内的 attempt 时才删除。
+`migrations/0011_retention_backup.sql` 新增 `retention_policies`、`retention_cleanup_runs`、`audit_logs`、`backup_runs`、`gateway_schema_migrations` 和 `gateway_schema_metadata`；`migrations/0012_health_persistence.sql` 追加健康状态字段、`account_health_events` 和迁移版本 12。四类历史（logical UsageEvent、UsageAttempt、连接测试/健康/运维 audit、discovery run）分别按 UTC `retention_days` 管理。`POST /admin/retention/cleanup` 在运行开始时固定策略和 cut-off，每个批次独立提交并记录 scanned/deleted/progress；同一 `operation_id` 可重复提交、取消和 retry。逻辑事件只有在不会级联删除仍在保留期内的 attempt 时才删除。
 
 控制面可通过 `GET /admin/control-plane/export` 导出脱敏 JSON，包含恢复路由所需的 Source/Account/模型/Binding/Route、schema/migration 版本和 runtime fingerprint，不包含 usage 正文、Authorization、API Key、Virtual Key hash 或凭据 ciphertext。`POST /admin/control-plane/import` 在显式 `replace=true` 时按 FK 顺序恢复到新库，重置序列并重新构建 snapshot；fingerprint 不一致时标记恢复失败。完整 pg_dump、Compose 和本地 CLI 步骤见 [`operations.md`](operations.md)。
 

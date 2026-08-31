@@ -277,7 +277,7 @@ Content-Type: application/json
 
 ### 保留策略
 
-`GET /admin/retention/policies` 返回四个独立策略：`usage_events`（logical UsageEvent）、`usage_attempts`（UsageAttempt）、`audit`（`audit_logs` 与连接测试历史）和 `discovery`（`source_discovery_runs`）。每项包含 `retention_days`、`enabled` 和 `updated_at`。
+`GET /admin/retention/policies` 返回四个独立策略：`usage_events`（logical UsageEvent）、`usage_attempts`（UsageAttempt）、`audit`（`audit_logs`、连接测试和 `account_health_events` 历史）和 `discovery`（`source_discovery_runs`）。每项包含 `retention_days`、`enabled` 和 `updated_at`。
 
 `PUT /admin/retention/policies` 接受以下任一形式：
 
@@ -324,7 +324,7 @@ dry-run 只统计候选，不删除数据。正式清理按 attempt → logical 
 
 `POST /admin/control-plane/import` 接受导出 JSON，或 `{ "data": <export>, "replace": true, "requested_by": "..." }` 包装。非空目标必须显式 `replace=true`。导入按 FK 顺序恢复并重置 serial sequence；提交后重新构建 snapshot，只有 fingerprint 与导出一致才返回 `verified=true` 和新的 `snapshot_revision`。目标环境必须自行注入导出中列出的 Secret。
 
-`GET /admin/ops/schema`（`/admin/schema` 为同义入口）返回当前 `schema_version`、`migration_version`、应用版本和 UTC 更新时间。网关启动时会自动应用 `migrations/0011_retention_backup.sql`，并在 `gateway_schema_migrations` 中记录 1..11。
+`GET /admin/ops/schema`（`/admin/schema` 为同义入口）返回当前 `schema_version`、`migration_version`、应用版本和 UTC 更新时间。网关启动时会自动应用 `migrations/0011_retention_backup.sql` 与 `migrations/0012_health_persistence.sql`，并在 `gateway_schema_migrations` 中记录 1..12。
 
 完整的 PostgreSQL `pg_dump`、新库恢复、Docker Compose 和本地 CLI 步骤见 [`docs/operations.md`](./operations.md)。物理 dump 可能包含数据库内的加密凭据和全部历史，必须按高敏感备份保护；脱敏迁移请使用控制面 JSON 导出。
 
