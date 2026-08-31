@@ -247,7 +247,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-<<<<<<< HEAD
 async fn run_ops_cli(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let Some(command) = args.first().map(String::as_str) else {
         return Err(ops_cli_usage().into());
@@ -659,7 +658,11 @@ async fn models(State(state): State<AppState>) -> Json<Value> {
     for model in live.models.iter() {
         let mut healthy = false;
         for account_id in &model.account_ids {
-            if state.health.is_available(account_id).await {
+            let enabled = live
+                .config
+                .account(account_id)
+                .is_some_and(|account| account.enabled);
+            if enabled && state.health.is_available(account_id).await {
                 healthy = true;
                 break;
             }
@@ -2858,15 +2861,19 @@ async fn proxy(
         {
             Ok(response) => {
                 let status = response.status();
-                if is_retryable(status) {
-                    state.health.mark_failure(&candidate.account.id).await;
-                } else {
-                    state.health.mark_success(&candidate.account.id).await;
-                }
+                record_response_health(&state.health, &candidate.account.id, status).await;
                 (response, status.as_u16() as i32, status.is_success())
             }
             Err(error) => {
-                state.health.mark_failure(&candidate.account.id).await;
+                state
+                    .health
+                    .mark_failure_with_details(
+                        &candidate.account.id,
+                        "passive",
+                        Some("upstream_transport_error"),
+                        Some("upstream request failed"),
+                    )
+                    .await;
                 let (status, code, message) =
                     if matches!(&error, transport::TransportError::Timeout(_)) {
                         (
@@ -2958,6 +2965,7 @@ async fn proxy(
                     usage_request_body,
                     attempts,
                     started,
+                    state.health.clone(),
                 );
             }
             if let Err(error) = database.insert_usage_with_attempts(&event, &attempts).await {
@@ -3003,7 +3011,7 @@ async fn proxy(
                 success: false,
                 latency_ms: result_started.elapsed().as_millis() as i64,
             });
-            state.health.mark_failure(&account.id).await;
+            record_response_health(&state.health, &account.id, response.status()).await;
             let (response, mut fallback_attempts) = try_fallback(
                 &config,
                 &state.health,
@@ -3032,7 +3040,7 @@ async fn proxy(
                 success: response.status().is_success(),
                 latency_ms: result_started.elapsed().as_millis() as i64,
             });
-            state.health.mark_success(&account.id).await;
+            record_response_health(&state.health, &account.id, response.status()).await;
             response
         }
         Err(error) => {
@@ -3046,7 +3054,15 @@ async fn proxy(
                 success: false,
                 latency_ms: result_started.elapsed().as_millis() as i64,
             });
-            state.health.mark_failure(&account.id).await;
+            state
+                .health
+                .mark_failure_with_details(
+                    &account.id,
+                    "passive",
+                    Some("upstream_transport_error"),
+                    Some("upstream request failed"),
+                )
+                .await;
             let (response, mut fallback_attempts) = try_fallback_error(
                 &config,
                 &state.health,
@@ -3154,6 +3170,7 @@ async fn proxy(
                 usage_request_body,
                 attempts,
                 started,
+                state.health.clone(),
             );
         }
         if let Err(error) = database.insert_usage_with_attempts(&event, &attempts).await {
@@ -3204,11 +3221,27 @@ fn wrap_stream_usage(
     request_body: Bytes,
     mut attempts: Vec<db::UsageAttempt>,
     request_started: Instant,
+    health: health::HealthRegistry,
 ) -> Response<Body> {
     let (parts, body) = response.into_parts();
     let body = usage::observe_stream_body(body, request_started, move |observation| {
         event.latency_ms = request_started.elapsed().as_millis() as i64;
+        let account_id = attempts.last().map(|attempt| attempt.account_id.clone());
         finalize_stream_usage(&mut event, &mut attempts, &request_body, observation);
+        if event.error_summary.as_deref() == Some("upstream stream error") {
+            if let Some(account_id) = account_id {
+                tokio::spawn(async move {
+                    health
+                        .mark_failure_with_details(
+                            &account_id,
+                            "passive",
+                            Some("upstream_stream_error"),
+                            Some("upstream stream failed"),
+                        )
+                        .await;
+                });
+            }
+        }
         tokio::spawn(async move {
             if let Err(error) = database.insert_usage_with_attempts(&event, &attempts).await {
                 tracing::warn!(%error, "failed to persist streaming usage event");
@@ -3408,6 +3441,9 @@ async fn select_fallback_candidate<'a>(
     let mut available = Vec::new();
     if !route.fallback_bindings.is_empty() {
         for binding in &route.fallback_bindings {
+            if binding.account_id == route.primary_account_id {
+                continue;
+            }
             let Some(account) = config.account(&binding.account_id) else {
                 continue;
             };
@@ -3435,6 +3471,9 @@ async fn select_fallback_candidate<'a>(
         }
     } else {
         for id in &route.fallback_accounts {
+            if id == &route.primary_account_id {
+                continue;
+            }
             let Some(account) = config.account(id) else {
                 continue;
             };
@@ -3542,11 +3581,7 @@ async fn try_fallback(
                 success: response.status().is_success(),
                 latency_ms: started.elapsed().as_millis() as i64,
             });
-            if is_retryable(response.status()) {
-                health.mark_failure(&candidate.account.id).await;
-            } else {
-                health.mark_success(&candidate.account.id).await;
-            }
+            record_response_health(health, &candidate.account.id, response.status()).await;
             (response, attempts)
         }
         Err(error) => {
@@ -3560,7 +3595,14 @@ async fn try_fallback(
                 success: false,
                 latency_ms: started.elapsed().as_millis() as i64,
             });
-            health.mark_failure(&candidate.account.id).await;
+            health
+                .mark_failure_with_details(
+                    &candidate.account.id,
+                    "passive",
+                    Some("upstream_transport_error"),
+                    Some("upstream request failed"),
+                )
+                .await;
             (first, attempts)
         }
     }
@@ -3621,11 +3663,7 @@ async fn try_fallback_error(
                 success: response.status().is_success(),
                 latency_ms: started.elapsed().as_millis() as i64,
             });
-            if is_retryable(response.status()) {
-                health.mark_failure(&candidate.account.id).await;
-            } else {
-                health.mark_success(&candidate.account.id).await;
-            }
+            record_response_health(health, &candidate.account.id, response.status()).await;
             (response, attempts)
         }
         Err(error) => {
@@ -3639,7 +3677,14 @@ async fn try_fallback_error(
                 success: false,
                 latency_ms: started.elapsed().as_millis() as i64,
             });
-            health.mark_failure(&candidate.account.id).await;
+            health
+                .mark_failure_with_details(
+                    &candidate.account.id,
+                    "passive",
+                    Some("upstream_transport_error"),
+                    Some("upstream request failed"),
+                )
+                .await;
             (
                 error_response(
                     transport_error_status(&error),
@@ -3723,6 +3768,26 @@ fn transport_error_status(error: &transport::TransportError) -> StatusCode {
         StatusCode::GATEWAY_TIMEOUT
     } else {
         StatusCode::BAD_GATEWAY
+    }
+}
+
+async fn record_response_health(
+    health: &health::HealthRegistry,
+    account_id: &str,
+    status: StatusCode,
+) {
+    if is_retryable(status) {
+        let code = format!("upstream_http_{}", status.as_u16());
+        health
+            .mark_failure_with_details(
+                account_id,
+                "passive",
+                Some(code.as_str()),
+                Some("retryable upstream response"),
+            )
+            .await;
+    } else if status.is_success() {
+        health.mark_success(account_id).await;
     }
 }
 

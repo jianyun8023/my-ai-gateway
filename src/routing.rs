@@ -227,13 +227,10 @@ impl RouteResolver {
                 Some(&route.id),
             ));
         }
-        if !account.enabled {
-            return Err(RouteResolutionError::new(
-                "account_disabled",
-                format!("primary account '{}' is disabled", account.id),
-                Some(&route.id),
-            ));
-        }
+        // Keep a disabled primary in the resolved route. The data plane owns
+        // the primary-then-fallback decision and must not silently promote a
+        // fallback to primary merely because an operator disabled this
+        // account.
         for fallback in &route.fallback_accounts {
             let Some(account) = self.config.account(fallback) else {
                 return Err(RouteResolutionError::new(
