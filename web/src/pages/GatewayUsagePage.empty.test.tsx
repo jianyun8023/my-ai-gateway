@@ -2,7 +2,7 @@
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { GatewayUsagePage } from './GatewayUsagePage';
+import App from '@/App';
 
 describe('GatewayUsagePage empty state', () => {
   let container: HTMLDivElement;
@@ -31,7 +31,7 @@ describe('GatewayUsagePage empty state', () => {
 
   it('renders a token-first empty state without pricing or CPA product surfaces', async () => {
     await act(async () => {
-      root.render(<GatewayUsagePage />);
+      root.render(<App />);
       await new Promise((resolve) => setTimeout(resolve, 20));
     });
     expect(container.textContent).toContain('当前范围暂无用量');
