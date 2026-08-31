@@ -2729,6 +2729,63 @@ mod tests {
         };
         state.reload_snapshot(stable_snapshot.clone());
         assert_eq!(state.snapshot().revision, active_revision);
+
+        let capability_response = crate::admin_capabilities_response(true, &state.snapshot());
+        assert_eq!(capability_response.status(), StatusCode::OK);
+        let capability_body = to_bytes(capability_response.into_body(), 1024 * 1024)
+            .await
+            .expect("read DB-backed capability matrix response");
+        let capability_text = String::from_utf8_lossy(&capability_body);
+        assert!(!capability_text.contains("SOURCE_B_API_KEY"));
+        assert!(!capability_text.contains("credential_env"));
+        let capability_body: Value =
+            serde_json::from_slice(&capability_body).expect("parse capability matrix JSON");
+        assert_eq!(capability_body["version"], "v1");
+        assert_eq!(capability_body["fact_source"], "runtime_snapshot");
+        assert_eq!(capability_body["snapshot_revision"], active_revision);
+        let capability_row = capability_body["data"]
+            .as_array()
+            .expect("capability matrix data")
+            .iter()
+            .find(|row| {
+                row["route_id"] == "route-b"
+                    && row["model"] == "logical-b"
+                    && row["source"]["source_id"] == "source-b"
+                    && row["account"]["account_id"] == "account-b"
+            })
+            .expect("DB runtime route capability row");
+        let protocol_cell = |protocol: &str| {
+            capability_row["protocols"]
+                .as_array()
+                .expect("three protocol cells")
+                .iter()
+                .find(|cell| cell["protocol_in"] == protocol)
+                .unwrap_or_else(|| panic!("missing capability cell for {protocol}"))
+        };
+        let chat_cell = protocol_cell("openai_chat_completions");
+        assert_eq!(chat_cell["status"], "routable");
+        assert_eq!(chat_cell["mode"], "native");
+        assert_eq!(chat_cell["binding_id"], binding.id);
+        let responses_cell = protocol_cell("openai_responses");
+        assert_eq!(responses_cell["status"], "routable");
+        assert_eq!(responses_cell["mode"], "adapter");
+        assert_eq!(responses_cell["binding_id"], adapter_binding.id);
+        assert_eq!(responses_cell["adapter"], "kimi_responses_adapter");
+        assert_eq!(responses_cell["protocol_upstream"], "anthropic_messages");
+        assert_eq!(responses_cell["degraded"], true);
+        assert_eq!(
+            responses_cell["conversion_chain"][0]["protocol_from"],
+            "openai_responses"
+        );
+        assert_eq!(
+            responses_cell["conversion_chain"][0]["protocol_to"],
+            "anthropic_messages"
+        );
+        let messages_cell = protocol_cell("anthropic_messages");
+        assert_eq!(messages_cell["status"], "unroutable");
+        assert!(messages_cell["mode"].is_null());
+        assert_eq!(messages_cell["error"]["code"], "route_not_found");
+
         let model_response = crate::models(State(state.clone())).await.0;
         assert!(model_response["data"]
             .as_array()

@@ -1,3 +1,4 @@
+mod capabilities;
 mod config;
 mod control_plane;
 mod db;
@@ -1472,39 +1473,83 @@ async fn admin_health(State(state): State<AppState>, headers: HeaderMap) -> Resp
 }
 
 async fn admin_capabilities(State(state): State<AppState>, headers: HeaderMap) -> Response<Body> {
-    if !admin_authorized(&headers) {
+    let live = state.snapshot();
+    admin_capabilities_response(admin_authorized(&headers), &live)
+}
+
+fn admin_capabilities_response(authorized: bool, live: &LiveConfig) -> Response<Body> {
+    if !authorized {
         return error_response(
             StatusCode::UNAUTHORIZED,
             "unauthorized",
             "admin key required",
         );
     }
-    let mut result = Vec::new();
-    let live = state.snapshot();
-    for model in live.models.iter() {
-        for protocol in [
-            Protocol::OpenAiChatCompletions,
-            Protocol::OpenAiResponses,
-            Protocol::AnthropicMessages,
-        ] {
-            if let Ok(route) = live.resolver.resolve_detailed(protocol, &model.id) {
-                result.push(json!({
-                    "route_id": route.route_id,
-                    "binding_id": route.binding_id,
-                    "model": model.id,
-                    "upstream_model_id": route.upstream_model_id,
-                    "provider_id": route.provider_id,
-                    "account_id": route.primary_account_id,
-                    "mode": route.mode,
-                    "protocol_in": route.protocol_in,
-                    "protocol_upstream": route.protocol_upstream,
-                    "capabilities": route.effective_capabilities,
-                    "degraded_features": route.degraded_features,
-                }));
-            }
+    match capabilities::CapabilityMatrixResponse::from_runtime_snapshot(
+        &live.config,
+        &live.resolver,
+        &live.models,
+        live.revision,
+        live.generated_at,
+    ) {
+        Ok(response) => (StatusCode::OK, Json(response)).into_response(),
+        Err(error) => error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            error.code(),
+            &error.to_string(),
+        ),
+    }
+}
+
+#[cfg(test)]
+mod admin_capabilities_api_tests {
+    use super::*;
+    use axum::body::to_bytes;
+
+    fn empty_runtime() -> LiveConfig {
+        let config = Arc::new(GatewayConfig {
+            listen_addr: "127.0.0.1:0".into(),
+            providers: Vec::new(),
+            accounts: Vec::new(),
+            routes: Vec::new(),
+        });
+        LiveConfig {
+            resolver: RouteResolver::from_runtime(config.clone(), Vec::new()),
+            config,
+            models: Arc::new(Vec::new()),
+            revision: 7,
+            generated_at: chrono::Utc::now(),
         }
     }
-    (StatusCode::OK, Json(json!({"data": result}))).into_response()
+
+    async fn response_json(response: Response<Body>) -> Value {
+        serde_json::from_slice(
+            &to_bytes(response.into_body(), 1024 * 1024)
+                .await
+                .expect("read capabilities response"),
+        )
+        .expect("capabilities JSON response")
+    }
+
+    #[tokio::test]
+    async fn capability_matrix_preserves_admin_authorization() {
+        let response = admin_capabilities_response(false, &empty_runtime());
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        let body = response_json(response).await;
+        assert_eq!(body["error"]["code"], "unauthorized");
+        assert!(body.get("data").is_none());
+    }
+
+    #[tokio::test]
+    async fn authorized_capability_matrix_uses_runtime_snapshot_contract() {
+        let response = admin_capabilities_response(true, &empty_runtime());
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response_json(response).await;
+        assert_eq!(body["version"], "v1");
+        assert_eq!(body["fact_source"], "runtime_snapshot");
+        assert_eq!(body["snapshot_revision"], 7);
+        assert_eq!(body["data"], json!([]));
+    }
 }
 
 async fn reload_config(State(state): State<AppState>, headers: HeaderMap) -> Response<Body> {

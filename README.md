@@ -24,7 +24,7 @@ Rust AI 网关 MVP，目标是将多个上游账号统一为一个入口，并�
 - 内置、版本化的 DeepSeek、MiniMax、Kimi Code ProviderPreset 和 ModelPreset；Source 创建时复制不可变快照，预设升级只展示差异。
 - 按协议连接测试、模型发现、稳定 `added/changed/missing` 差异、待确认列表、用户编辑和批量确认 API；发现结果不会自动创建 LogicalModel、Binding 或 Route，失败信息和日志均不包含凭据或完整响应正文。
 - Source、Account、LogicalModel、ModelBinding、Route 管理 API 支持创建、查询、更新、启停和删除；有效写入会在同一事务内完成校验与下一版 snapshot 构建，失败不会留下坏行。
-- 管理接口还包括 `/admin/keys`、`/admin/keys/:id/revoke`、`/admin/provider-presets`、`/admin/sources/*`，以及 `/admin/usage/summary|timeseries|breakdown|events|export`；`/admin/usage/aggregate` 保留为一次获取三类聚合的组合入口。
+- 管理接口还包括 `/admin/keys`、`/admin/keys/:id/revoke`、`/admin/provider-presets`、`/admin/sources/*`、基于当前 DB runtime snapshot 的有效能力矩阵 `/admin/capabilities`，以及 `/admin/usage/summary|timeseries|breakdown|events|export`；`/admin/usage/aggregate` 保留为一次获取三类聚合的组合入口。
 
 工具链由 [Mise](https://mise.jdx.dev/) 管理（Rust 1.97.1 + Node 24，见 [`mise.toml`](./mise.toml)）：
 

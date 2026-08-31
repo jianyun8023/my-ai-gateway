@@ -23,7 +23,8 @@
 - [x] Admin 路由调试端点鉴权与 proxy 结构化路由错误（#20、#22）
 - [x] degraded 仅表示实际损失，所有降级路径记录结构化 warning（#21）
 - [x] 三协议 × native/adapter/unsupported 解析矩阵与原生透传测试（#23）
-- [ ] 有效能力矩阵完整转换链、degraded 状态、DB 能力与 Web 展示（#24）
+- [x] DB runtime 有效能力矩阵 API：完整转换链、primary/fallback、degraded 与结构化不可路由状态（#24）
+- [ ] 有效能力矩阵 Web 展示（#24）
 - [x] 失败 usage 不估算与 usage_source 查询契约对齐（#25）
 - [x] usage 记录 route_id、streamed 与脱敏 error_summary（#26，部分）
 - [ ] usage 记录真实 upstream_model_id 与流式 ttft_ms（#26）

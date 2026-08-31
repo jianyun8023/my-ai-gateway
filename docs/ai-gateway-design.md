@@ -521,7 +521,7 @@ v1 响应 envelope 固定如下：summary 为 `{version, timezone, range, data}`
 
 控制面写入采用 `SERIALIZABLE` 事务：先写候选变更，再校验引用、endpoint、Adapter 注册表与方向、单段转换、能力链和 Binding 可路由性，随后在同一事务读取并构建下一版不可变 snapshot；任一步失败都回滚。提交成功后一次写锁替换整个 snapshot，并发请求只会持有旧版或新版的完整 `Arc`。手工 reload 使用一致性只读事务；失败不替换当前有效 snapshot。
 
-Admin 资源为 `/admin/sources`、`/admin/accounts`、`/admin/logical-models`、`/admin/model-bindings` 和 `/admin/routes`，支持集合 `GET/POST`、单资源 `GET/PUT/DELETE` 与 `PUT /{id}/enabled`。错误固定为 `{error:{code,message}}`；Account 响应不返回 `credential_ciphertext` 或明文凭据。
+Admin 资源为 `/admin/sources`、`/admin/accounts`、`/admin/logical-models`、`/admin/model-bindings` 和 `/admin/routes`，支持集合 `GET/POST`、单资源 `GET/PUT/DELETE` 与 `PUT /{id}/enabled`。`GET /admin/capabilities` 读取与 proxy 相同的不可变 runtime snapshot，按 Route、Source、Account、logical/upstream model 输出三协议完整矩阵、primary/fallback Binding、直接转换链、degraded 状态和结构化不可路由错误；它不会回退到初始化配置。错误固定为 `{error:{code,message}}`；Account 与能力矩阵响应均不返回 `credential_ciphertext`、`credential_env` 或明文凭据。
 
 控制面写入契约以 Source/Binding 为中心：Source 创建时复制 `provider_preset_id@version` 快照，后续 `PUT` 不允许更换该引用；Account 直接引用 `source_id`，凭据只能提交 `credential_env` 或 `credential_ciphertext`；LogicalModel 的 `status` 与 `enabled` 分离；ModelBinding 明确携带 `logical_model_id/source_id/account_id/upstream_model_id/protocol/status/enabled/priority`；Route 只声明 `logical_model_id/protocols/strategy/allow_lossy_conversion/enabled`，上游 Source、账号、模型、模式和 Adapter 全部由 Binding + SourceModelCapability 解析，Route 不再复制这些字段。ProviderPreset 与 SourceModel 的发现/确认 API 由 #13 负责，不在本控制面重复实现。
 

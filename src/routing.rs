@@ -132,6 +132,19 @@ impl RouteResolver {
         if let Some(routes) = &self.runtime_routes {
             return resolve_runtime_route(routes, protocol, model);
         }
+        self.resolve_selected(protocol, model)
+            .map(|(_, route)| route)
+    }
+
+    pub(crate) fn is_runtime_snapshot(&self) -> bool {
+        self.runtime_routes.is_some()
+    }
+
+    fn resolve_selected(
+        &self,
+        protocol: Protocol,
+        model: &str,
+    ) -> Result<(usize, ResolvedRoute), RouteResolutionError> {
         let mut candidates: Vec<(usize, usize, bool, u8)> = self
             .config
             .routes
@@ -157,7 +170,7 @@ impl RouteResolver {
         let mut last_error = None;
         for (index, _, _, _) in candidates {
             match self.resolve_candidate(index, protocol, model) {
-                Ok(route) => return Ok(route),
+                Ok(route) => return Ok((index, route)),
                 Err(error) => last_error = Some(error),
             }
         }

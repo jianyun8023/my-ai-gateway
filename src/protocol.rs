@@ -18,6 +18,14 @@ pub enum Protocol {
     AnthropicMessages,
 }
 
+impl Protocol {
+    pub const ALL: [Self; 3] = [
+        Self::OpenAiChatCompletions,
+        Self::OpenAiResponses,
+        Self::AnthropicMessages,
+    ];
+}
+
 impl fmt::Display for Protocol {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let value = match self {

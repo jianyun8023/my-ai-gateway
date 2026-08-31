@@ -145,6 +145,87 @@ Content-Type: application/json
 
 任一模型不存在、不可用或元数据非法时整批回滚。confirmed 模型刷新时保持已确认元数据和匹配预设；pending 模型刷新会重算 upstream/preset 字段，但保留所有 `user` 字段。
 
+## DB runtime 有效能力矩阵
+
+`GET /admin/capabilities` 返回当前已原子发布的 PostgreSQL runtime snapshot 有效能力矩阵，并要求 Admin Key 鉴权。它与 proxy、`/admin/routes/{protocol}/{model}` 和 `/v1/models` 读取同一个不可变 snapshot；不会读取 `GatewayConfig.routes` 作为回退，也不会让初始化 JSON 覆盖运行时事实。
+
+响应使用稳定的 `v1` 类型化契约，并通过 `fact_source=runtime_snapshot`、`snapshot_revision` 和 `snapshot_generated_at` 明确事实来源。每行按 Route、Source、Account、logical model 和 upstream model 聚合；primary 与 fallback Binding 都会输出。每行固定包含 `openai_chat_completions`、`openai_responses`、`anthropic_messages` 三个协议单元。以下示例为节省篇幅只展开一个协议单元，实际响应固定返回三项。
+
+```json
+{
+  "version": "v1",
+  "fact_source": "runtime_snapshot",
+  "snapshot_revision": 42,
+  "snapshot_generated_at": "2026-08-31T08:00:00Z",
+  "data": [
+    {
+      "route_id": "kimi-responses-adapter",
+      "source": {
+        "source_id": "kimi-code-primary",
+        "display_name": "Kimi Code"
+      },
+      "account": {
+        "account_id": "kimi-main",
+        "display_name": "Kimi 主账号",
+        "enabled": true
+      },
+      "model": "kimi-for-coding-highspeed",
+      "model_display_name": "Kimi for Coding Highspeed",
+      "upstream_model_id": "kimi-for-coding",
+      "protocols": [
+        {
+          "protocol_in": "openai_responses",
+          "status": "routable",
+          "binding_id": 17,
+          "selection": "primary",
+          "selection_rank": 0,
+          "protocol_upstream": "anthropic_messages",
+          "endpoint": "https://api.kimi.com/coding/v1/messages",
+          "mode": "adapter",
+          "adapter": "kimi_responses_adapter",
+          "conversion_chain": [
+            {
+              "protocol_from": "openai_responses",
+              "protocol_to": "anthropic_messages",
+              "mode": "adapter",
+              "adapter": "kimi_responses_adapter"
+            }
+          ],
+          "effective_capabilities": {
+            "streaming": "translated",
+            "tools": "translated",
+            "tool_streaming": "unsupported",
+            "thinking": "translated",
+            "web_search": "translated",
+            "file_search": "unsupported",
+            "vision": "unsupported",
+            "usage": "translated"
+          },
+          "degraded": true,
+          "degraded_features": [
+            "streaming",
+            "tools",
+            "thinking",
+            "web_search",
+            "usage"
+          ],
+          "allow_lossy_conversion": true,
+          "error": null
+        }
+      ]
+    }
+  ]
+}
+```
+
+`routable` 单元的 `conversion_chain` 完整描述入口协议到上游协议的一次直接步骤；native 路径也显式包含一个同协议步骤。`selection=primary|fallback` 与 `selection_rank` 来自 RouteResolver 的真实 Binding 顺序。`endpoint` 只由受控 Source Base URL 与协议 endpoint 组合，不读取账号凭据。
+
+无法路由的单元使用 `status=unroutable`，将未知的 `binding_id`、`selection`、`protocol_upstream`、`endpoint`、`mode`、`adapter` 和 `allow_lossy_conversion` 设为 `null`，转换链设为空，并返回 `{code,message,route_id}` 结构化 `error`。`route_not_found` 表示该 logical model + 协议没有已发布 Route；`runtime_binding_not_available` 表示该 Route 可由其他 Binding 解析，但本行 Source/Account/upstream model 在此协议没有 confirmed、available Binding。功能能力在无法确认时全部显式为 `unsupported`。
+
+`SourceModelCapability` 的 `pending`、`unknown`、`unsupported`、不可用或未确认状态不会进入 runtime snapshot。接口不会把这些缺失事实猜成 `native`、`adapter` 或 `unsupported`，而是保留 `mode=null` 的不可路由单元。缺 endpoint、未知 Adapter、非直接转换链或未经允许的 lossy 能力会在控制面事务构建候选 snapshot 时返回结构化校验错误；失败候选不会替换当前有效 snapshot。
+
+矩阵聚合直接复用真实 `RouteResolver`，不复制选择算法。Adapter 翻译或显式允许的能力损失会列入 `degraded_features`，`degraded` 只在实际发生翻译或损失时为 `true`。响应不包含 `credential_env`、加密/明文凭据、Authorization、API Key 或请求/响应正文。Web UI 展示仍是后续工作。
+
 ## 错误与安全
 
 HTTP 错误统一使用：
