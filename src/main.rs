@@ -231,11 +231,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let state = AppState {
         live: Arc::new(std::sync::RwLock::new(live)),
         http: transport::client(source_url_policy.clone())?,
-        db: Some(database),
+        db: Some(database.clone()),
         control_plane: Some(control_plane),
-        health: health::HealthRegistry::new(std::time::Duration::from_secs(30)),
+        health: health::HealthRegistry::with_database_config(
+            database,
+            health::HealthConfig::from_env(),
+        ),
         admin_auth,
     };
+    spawn_health_probe_loop(state.clone());
     let app = application(state);
     let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::info!(%addr, "AI gateway listening");
@@ -243,6 +247,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+<<<<<<< HEAD
 async fn run_ops_cli(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let Some(command) = args.first().map(String::as_str) else {
         return Err(ops_cli_usage().into());
@@ -427,11 +432,79 @@ fn ops_cli_usage() -> &'static str {
     "usage: cargo run -- ops <retention-cleanup|retention-cancel|retention-retry|retention-policies|retention-policy-set|control-plane-export|control-plane-import>"
 }
 
+fn spawn_health_probe_loop(state: AppState) {
+    let enabled = std::env::var("GATEWAY_HEALTH_PROBE_ENABLED")
+        .ok()
+        .map(|value| !matches!(value.as_str(), "0" | "false" | "FALSE" | "no"))
+        .unwrap_or(true);
+    if !enabled || state.health.database().is_none() {
+        return;
+    }
+    let interval = state.health.config().probe_interval;
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(interval).await;
+            run_health_probes_once(&state).await;
+        }
+    });
+}
+
+async fn run_health_probes_once(state: &AppState) {
+    let Some(database) = state.health.database() else {
+        return;
+    };
+    let targets = match database.health_probe_targets().await {
+        Ok(targets) => targets,
+        Err(error) => {
+            tracing::warn!(%error, "failed to enumerate periodic health probes");
+            return;
+        }
+    };
+    let now = state.health.now();
+    for (account_id, _source_id, protocol) in targets {
+        let current = state.health.get_health(&account_id).await;
+        let due = current.last_probe_at.is_none_or(|last| {
+            now.signed_duration_since(last)
+                .to_std()
+                .map(|elapsed| elapsed >= state.health.config().probe_interval)
+                .unwrap_or(true)
+        });
+        if !due || current.cooldown_remaining_ms > 0 {
+            continue;
+        }
+        match state
+            .health
+            .probe_account(
+                &state.http,
+                &account_id,
+                protocol,
+                None,
+                "periodic_health_probe",
+            )
+            .await
+        {
+            Ok(outcome) => tracing::info!(
+                account_id = %outcome.account_id,
+                %protocol,
+                status = %outcome.connection_test.status,
+                "periodic account health probe completed"
+            ),
+            Err(error) => tracing::warn!(
+                account_id = %account_id,
+                %protocol,
+                code = error.code(),
+                "periodic account health probe failed"
+            ),
+        }
+    }
+}
+
 fn application(state: AppState) -> Router {
-    let discovery_api = discovery_api::auxiliary_router(
+    let discovery_api = discovery_api::auxiliary_router_with_health(
         state.db.clone(),
         state.http.clone(),
         state.admin_auth.clone(),
+        state.health.clone(),
     );
     let admin_api = Router::new()
         .route("/admin/keys", get(list_keys).post(create_key))
@@ -536,6 +609,9 @@ fn application(state: AppState) -> Router {
         .route("/admin/config/reload", post(reload_config))
         .route("/admin/capabilities", get(admin_capabilities))
         .route("/admin/health", get(admin_health))
+        .route("/admin/health/probe", post(admin_health_probe))
+        .route("/admin/health/probes", post(admin_health_probes))
+        .route("/admin/accounts/{id}/probe", post(admin_account_probe))
         .route("/admin/routes/{protocol}/{model}", get(resolve_route))
         .with_state(state.clone())
         .merge(discovery_api)
@@ -2334,25 +2410,237 @@ async fn admin_health(State(state): State<AppState>, headers: HeaderMap) -> Resp
     }
     let health_map = state.health.all_health().await;
     let live = state.snapshot();
+    let accounts = if let Some(control_plane) = &state.control_plane {
+        match control_plane.list_accounts().await {
+            Ok(accounts) => accounts
+                .into_iter()
+                .map(|account| {
+                    (
+                        account.id,
+                        account.source_id,
+                        account.display_name,
+                        account.enabled,
+                    )
+                })
+                .collect::<Vec<_>>(),
+            Err(error) => return control_plane_error(error),
+        }
+    } else {
+        live.config
+            .accounts
+            .iter()
+            .map(|account| {
+                (
+                    account.id.clone(),
+                    account.provider_id.clone(),
+                    account.display_name.clone(),
+                    account.enabled,
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    let database_configured = state.health.database().is_some();
     let mut data = Vec::new();
-    for account in &live.config.accounts {
-        let health = match health_map.get(&account.id) {
-            Some(h) => h.clone(),
-            None => health::AccountHealth {
-                available: account.enabled,
-                consecutive_failures: 0,
-                cooldown_remaining_ms: 0,
-            },
-        };
+    for (account_id, source_id, display_name, enabled) in accounts {
+        let health =
+            health_map
+                .get(&account_id)
+                .cloned()
+                .unwrap_or_else(|| health::AccountHealth {
+                    available: enabled && !database_configured,
+                    consecutive_failures: 0,
+                    cooldown_remaining_ms: 0,
+                    status: if enabled { "unknown" } else { "disabled" }.into(),
+                    source: "unknown".into(),
+                    stale: true,
+                    updated_at: None,
+                    cooldown_until: None,
+                    last_error: None,
+                    last_success_at: None,
+                    last_probe_at: None,
+                    last_probe_status: None,
+                    last_probe_error: None,
+                });
         data.push(json!({
-            "account_id": account.id,
-            "provider_id": account.provider_id,
-            "display_name": account.display_name,
-            "enabled": account.enabled,
+            "account_id": account_id,
+            "provider_id": source_id,
+            "source_id": source_id,
+            "display_name": display_name,
+            "enabled": enabled,
             "health": health,
         }));
     }
-    (StatusCode::OK, Json(json!({"data": data}))).into_response()
+    (
+        StatusCode::OK,
+        Json(json!({
+            "fact_source": if database_configured { "postgresql" } else { "memory" },
+            "stale_after_secs": state.health.config().stale_after.as_secs(),
+            "data": data
+        })),
+    )
+        .into_response()
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct HealthProbeRequest {
+    account_id: Option<String>,
+    protocol: Option<Protocol>,
+    model: Option<String>,
+    #[serde(default = "default_probe_actor")]
+    requested_by: String,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct HealthProbesRequest {
+    account_ids: Option<Vec<String>>,
+    protocol: Option<Protocol>,
+    model: Option<String>,
+    #[serde(default = "default_probe_actor")]
+    requested_by: String,
+}
+
+fn default_probe_actor() -> String {
+    "admin_health_probe".into()
+}
+
+async fn admin_health_probe(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    payload: Result<Json<HealthProbeRequest>, JsonRejection>,
+) -> Response<Body> {
+    if !state.admin_auth.authorized(&headers) {
+        return error_response(
+            StatusCode::UNAUTHORIZED,
+            "unauthorized",
+            "admin key required",
+        );
+    }
+    let request = match json_payload(payload) {
+        Ok(request) => request,
+        Err(response) => return response,
+    };
+    let Some(account_id) = request
+        .account_id
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    else {
+        return error_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "account_required",
+            "account_id is required for a health probe",
+        );
+    };
+    let protocol = request.protocol.unwrap_or(Protocol::OpenAiChatCompletions);
+    match state
+        .health
+        .probe_account(
+            &state.http,
+            account_id,
+            protocol,
+            request.model.as_deref(),
+            &request.requested_by,
+        )
+        .await
+    {
+        Ok(outcome) => (StatusCode::OK, Json(json!({"data": outcome}))).into_response(),
+        Err(error) => probe_error_response(error),
+    }
+}
+
+async fn admin_account_probe(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(account_id): Path<String>,
+    payload: Result<Json<HealthProbeRequest>, JsonRejection>,
+) -> Response<Body> {
+    let payload = match payload {
+        Ok(Json(mut request)) => {
+            request.account_id = Some(account_id);
+            Ok(Json(request))
+        }
+        Err(error) => Err(error),
+    };
+    admin_health_probe(State(state), headers, payload).await
+}
+
+async fn admin_health_probes(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    payload: Result<Json<HealthProbesRequest>, JsonRejection>,
+) -> Response<Body> {
+    if !state.admin_auth.authorized(&headers) {
+        return error_response(
+            StatusCode::UNAUTHORIZED,
+            "unauthorized",
+            "admin key required",
+        );
+    }
+    let request = match json_payload(payload) {
+        Ok(request) => request,
+        Err(response) => return response,
+    };
+    let Some(database) = state.health.database() else {
+        return error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "database_unavailable",
+            "health probes require PostgreSQL",
+        );
+    };
+    let protocol = request.protocol.unwrap_or(Protocol::OpenAiChatCompletions);
+    let account_ids = match request.account_ids {
+        Some(ids) if !ids.is_empty() => ids,
+        _ => match database.health_probe_targets().await {
+            Ok(targets) => targets.into_iter().map(|target| target.0).collect(),
+            Err(error) => {
+                tracing::warn!(%error, "failed to list health probe targets");
+                return error_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "database_error",
+                    "failed to list health probe targets",
+                );
+            }
+        },
+    };
+    let mut outcomes = Vec::with_capacity(account_ids.len());
+    let mut errors = Vec::new();
+    for account_id in account_ids {
+        match state
+            .health
+            .probe_account(
+                &state.http,
+                &account_id,
+                protocol,
+                request.model.as_deref(),
+                &request.requested_by,
+            )
+            .await
+        {
+            Ok(outcome) => outcomes.push(outcome),
+            Err(error) => errors.push(json!({
+                "account_id": account_id,
+                "code": error.code(),
+                "message": error.message()
+            })),
+        }
+    }
+    (
+        StatusCode::OK,
+        Json(json!({"data": outcomes, "errors": errors})),
+    )
+        .into_response()
+}
+
+fn probe_error_response(error: health::ProbeError) -> Response<Body> {
+    let status = match error.code() {
+        "not_found" => StatusCode::NOT_FOUND,
+        "database_unavailable" => StatusCode::SERVICE_UNAVAILABLE,
+        "database_error" => StatusCode::INTERNAL_SERVER_ERROR,
+        "source_url_blocked" | "invalid_source_url" | "invalid_provider_preset" => {
+            StatusCode::UNPROCESSABLE_ENTITY
+        }
+        _ => StatusCode::BAD_GATEWAY,
+    };
+    error_response(status, error.code(), &error.message())
 }
 
 async fn admin_capabilities(State(state): State<AppState>, headers: HeaderMap) -> Response<Body> {

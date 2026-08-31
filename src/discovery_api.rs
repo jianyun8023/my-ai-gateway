@@ -29,11 +29,18 @@ struct DiscoveryApiState {
     database: Option<Database>,
     http: SourceHttpClient,
     admin_auth: AdminAuth,
+    health: Option<crate::health::HealthRegistry>,
 }
 
 #[cfg(test)]
 pub fn router(database: Option<Database>, http: SourceHttpClient) -> Router {
-    router_inner(database, http, AdminAuth::test(), true)
+    let health = database.clone().map(|database| {
+        crate::health::HealthRegistry::with_database_config(
+            database,
+            crate::health::HealthConfig::default(),
+        )
+    });
+    router_inner(database, http, AdminAuth::test(), true, health)
 }
 
 /// Discovery endpoints mounted by the gateway application. The Source
@@ -44,7 +51,16 @@ pub fn auxiliary_router(
     http: SourceHttpClient,
     admin_auth: AdminAuth,
 ) -> Router {
-    router_inner(database, http, admin_auth, false)
+    router_inner(database, http, admin_auth, false, None)
+}
+
+pub fn auxiliary_router_with_health(
+    database: Option<Database>,
+    http: SourceHttpClient,
+    admin_auth: AdminAuth,
+    health: crate::health::HealthRegistry,
+) -> Router {
+    router_inner(database, http, admin_auth, false, Some(health))
 }
 
 fn router_inner(
@@ -52,11 +68,13 @@ fn router_inner(
     http: SourceHttpClient,
     admin_auth: AdminAuth,
     include_source_collection: bool,
+    health: Option<crate::health::HealthRegistry>,
 ) -> Router {
     let state = DiscoveryApiState {
         database,
         http,
         admin_auth,
+        health,
     };
     let router = Router::new()
         .route("/admin/provider-presets", get(list_provider_presets))
@@ -277,7 +295,12 @@ async fn test_connection(
         )
         .await
     {
-        Ok(result) => ok(json!({"data":result})),
+        Ok(result) => {
+            if let Some(health) = &state.health {
+                health.apply_connection_test(&result).await;
+            }
+            ok(json!({"data":result}))
+        }
         Err(error) => service_error_response(error),
     }
 }

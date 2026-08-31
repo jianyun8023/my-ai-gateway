@@ -271,8 +271,8 @@ impl ControlPlane {
 
 fn account_view_select(filter: Option<&str>) -> &'static str {
     match filter {
-        Some(_) => "SELECT id,source_id,display_name,credential_env,(credential_env IS NOT NULL OR credential_ciphertext IS NOT NULL) AS credential_configured,enabled,weight,health_status,cooldown_until,created_at,updated_at FROM accounts WHERE id=$1 ORDER BY id",
-        None => "SELECT id,source_id,display_name,credential_env,(credential_env IS NOT NULL OR credential_ciphertext IS NOT NULL) AS credential_configured,enabled,weight,health_status,cooldown_until,created_at,updated_at FROM accounts ORDER BY id",
+        Some(_) => "SELECT id,source_id,display_name,credential_env,(credential_env IS NOT NULL OR credential_ciphertext IS NOT NULL) AS credential_configured,enabled,weight,health_status,health_source,health_updated_at,consecutive_failures,cooldown_until,last_error,last_success_at,last_probe_at,last_probe_status,last_probe_error,created_at,updated_at FROM accounts WHERE id=$1 ORDER BY id",
+        None => "SELECT id,source_id,display_name,credential_env,(credential_env IS NOT NULL OR credential_ciphertext IS NOT NULL) AS credential_configured,enabled,weight,health_status,health_source,health_updated_at,consecutive_failures,cooldown_until,last_error,last_success_at,last_probe_at,last_probe_status,last_probe_error,created_at,updated_at FROM accounts ORDER BY id",
     }
 }
 
@@ -373,6 +373,34 @@ async fn ensure_source_exists(
             "source '{id}' not found"
         )));
     }
+    Ok(())
+}
+
+/// Apply an operator enable/disable transition while the account is locked by
+/// the surrounding SERIALIZABLE control-plane transaction.
+async fn apply_manual_health_transition(
+    tx: &mut Transaction<'_, Postgres>,
+    account_id: &str,
+    enabled: bool,
+    observed_at: DateTime<Utc>,
+) -> Result<(), ControlPlaneError> {
+    let status = if enabled { "unknown" } else { "disabled" };
+    sqlx::query(
+        "UPDATE accounts SET health_status=$2,cooldown_until=NULL,consecutive_failures=0,last_error=NULL,last_success_at=NULL,health_source='manual',health_updated_at=$3,last_probe_error=NULL WHERE id=$1",
+    )
+    .bind(account_id)
+    .bind(status)
+    .bind(observed_at)
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query(
+        "INSERT INTO account_health_events (account_id,status,source,observed_at,cooldown_until,consecutive_failures) VALUES ($1,$2,'manual',$3,NULL,0)",
+    )
+    .bind(account_id)
+    .bind(status)
+    .bind(observed_at)
+    .execute(&mut **tx)
+    .await?;
     Ok(())
 }
 
@@ -1445,7 +1473,15 @@ pub struct AccountView {
     pub enabled: bool,
     pub weight: i32,
     pub health_status: String,
+    pub health_source: String,
+    pub health_updated_at: Option<DateTime<Utc>>,
+    pub consecutive_failures: i32,
     pub cooldown_until: Option<DateTime<Utc>>,
+    pub last_error: Option<String>,
+    pub last_success_at: Option<DateTime<Utc>>,
+    pub last_probe_at: Option<DateTime<Utc>>,
+    pub last_probe_status: Option<String>,
+    pub last_probe_error: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -1878,6 +1914,11 @@ impl ControlPlane {
         validate_account_input(input)?;
         let mut tx = self.begin_write().await?;
         ensure_source_exists(&mut tx, &input.source_id).await?;
+        let previous_enabled: Option<bool> =
+            sqlx::query_scalar("SELECT enabled FROM accounts WHERE id=$1 FOR UPDATE")
+                .bind(id)
+                .fetch_optional(&mut *tx)
+                .await?;
         let result = sqlx::query("UPDATE accounts SET provider_id=NULL,source_id=$2,display_name=$3,credential_ciphertext=$4,credential_env=$5,enabled=$6,weight=$7,updated_at=NOW() WHERE id=$1")
             .bind(id)
             .bind(&input.source_id)
@@ -1892,6 +1933,9 @@ impl ControlPlane {
             return Err(ControlPlaneError::NotFound(format!(
                 "account '{id}' not found"
             )));
+        }
+        if previous_enabled.is_some_and(|previous| previous != input.enabled) {
+            apply_manual_health_transition(&mut tx, id, input.enabled, Utc::now()).await?;
         }
         let record = fetch_account_tx(&mut tx, id).await?;
         let snapshot = self.finish_write(tx).await?;
@@ -1914,6 +1958,7 @@ impl ControlPlane {
                 "account '{id}' not found"
             )));
         }
+        apply_manual_health_transition(&mut tx, id, enabled, Utc::now()).await?;
         let record = fetch_account_tx(&mut tx, id).await?;
         let snapshot = self.finish_write(tx).await?;
         Ok(Mutation { record, snapshot })
