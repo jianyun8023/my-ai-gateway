@@ -814,6 +814,13 @@ impl<F: FnMut(String)> StreamTranslator<F> {
         self.emit("response.failed", json!({"response": resp}));
         self.response_id.clear();
     }
+
+    /// Emit a deterministic gateway-owned terminal failure while preserving
+    /// the Responses sequence-number state.  Used for cancellation/timeout
+    /// boundaries that happen after the downstream SSE headers were sent.
+    pub fn fail_with_reason(&mut self, code: &str, message: &str) {
+        self.fail(code, message);
+    }
 }
 
 #[cfg(test)]

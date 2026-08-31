@@ -81,11 +81,22 @@ All configuration is via environment variables:
 | `KIMI_MAX_TOKENS`          | `32768`                                  | fallback `max_tokens` when neither the client nor model metadata provides one |
 | `KIMI_THINKING_BUDGETS`    | `{"low":4096,"medium":16384,"high":32768}` | effort → budget; `minimal`/`none` disables thinking |
 | `KIMI_SEARCH_STATUS_PREFIX`| `Search results for query:`              | status-text marker to suppress |
+| `KIMI_SSE_HEARTBEAT_INTERVAL_MS` | `15000` | SSE comment heartbeat interval; `0` disables |
+| `KIMI_SSE_CONNECTION_TIMEOUT_MS` | `10000` | timeout waiting for upstream response headers |
+| `KIMI_SSE_FIRST_EVENT_TIMEOUT_MS` | `30000` | timeout waiting for the first provider event |
+| `KIMI_SSE_IDLE_TIMEOUT_MS` | `60000` | maximum gap between provider events |
+| `KIMI_SSE_TOTAL_TIMEOUT_MS` | `300000` | total logical request stream deadline |
 | `KIMI_DEBUG_SSE_FILE`      | (empty)                                  | when set, tee raw upstream SSE to this file for debugging |
 
 Thinking budgets are clamped below `max_tokens`. When thinking is enabled,
 sampling overrides (`temperature`, `top_p`) are dropped, as Anthropic
 requires.
+
+The five `KIMI_SSE_*` settings also accept duration strings such as `2s` or
+`500ms`. Heartbeats are emitted as the `: gateway-heartbeat` SSE comment and
+are never passed to the Responses translator as provider events. A timeout
+after response headers have been sent emits a stable `gateway_*` failure and
+closes the stream; dropping the response body drops the upstream request.
 
 ## Model metadata
 

@@ -11,6 +11,7 @@ mod protocol;
 mod provider_preset;
 mod routing;
 mod source_url;
+mod stream_contract;
 mod transport;
 mod usage;
 
@@ -2475,6 +2476,7 @@ async fn proxy(
     protocol: Protocol,
 ) -> Response<Body> {
     let started = Instant::now();
+    let stream_config = stream_contract::StreamConfig::from_env();
     let request_id = Uuid::new_v4().to_string();
     let live = state.snapshot();
     let config = live.config;
@@ -2561,6 +2563,8 @@ async fn proxy(
             candidate.upstream_endpoint.as_deref(),
             &headers,
             prepared.body,
+            &stream_config,
+            started,
         )
         .await
         {
@@ -2573,19 +2577,29 @@ async fn proxy(
                 }
                 (response, status.as_u16() as i32, status.is_success())
             }
-            Err(_) => {
+            Err(error) => {
                 state.health.mark_failure(&candidate.account.id).await;
+                let (status, code, message) =
+                    if matches!(&error, transport::TransportError::Timeout(_)) {
+                        (
+                            transport_error_status(&error),
+                            "upstream_request_failed",
+                            error.message(),
+                        )
+                    } else {
+                        (
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            if account.enabled {
+                                "account_cooling_down"
+                            } else {
+                                "account_disabled"
+                            },
+                            "primary account is unavailable and no fallback succeeded",
+                        )
+                    };
                 (
-                    error_response(
-                        StatusCode::SERVICE_UNAVAILABLE,
-                        if account.enabled {
-                            "account_cooling_down"
-                        } else {
-                            "account_disabled"
-                        },
-                        "primary account is unavailable and no fallback succeeded",
-                    ),
-                    599,
+                    error_response(status, code, message),
+                    error.status_code(),
                     false,
                 )
             }
@@ -2684,6 +2698,8 @@ async fn proxy(
         account,
         &headers,
         primary_request.body,
+        &stream_config,
+        started,
     )
     .await;
     let mut attempts = Vec::new();
@@ -2710,6 +2726,8 @@ async fn proxy(
                 &headers,
                 body,
                 response,
+                &stream_config,
+                started,
             )
             .await;
             attempts.append(&mut fallback_attempts);
@@ -2736,7 +2754,7 @@ async fn proxy(
                 source_id: route.source_id.clone(),
                 account_id: account.id.clone(),
                 upstream_model_id: Some(primary_request.upstream_model_id.clone()),
-                status_code: 599,
+                status_code: error.status_code(),
                 success: false,
                 latency_ms: result_started.elapsed().as_millis() as i64,
             });
@@ -2751,6 +2769,8 @@ async fn proxy(
                 &headers,
                 body,
                 error,
+                &stream_config,
+                started,
             )
             .await;
             attempts.append(&mut fallback_attempts);
@@ -2899,6 +2919,7 @@ fn wrap_stream_usage(
 ) -> Response<Body> {
     let (parts, body) = response.into_parts();
     let body = usage::observe_stream_body(body, request_started, move |observation| {
+        event.latency_ms = request_started.elapsed().as_millis() as i64;
         finalize_stream_usage(&mut event, &mut attempts, &request_body, observation);
         tokio::spawn(async move {
             if let Err(error) = database.insert_usage_with_attempts(&event, &attempts).await {
@@ -2916,12 +2937,38 @@ fn finalize_stream_usage(
     observation: usage::StreamObservation,
 ) {
     event.ttft_ms = observation.ttft_ms;
-    if observation.failed {
-        event.status_code = 599;
+    let termination = if observation.failed && !observation.termination.is_failure() {
+        stream_contract::StreamTermination::UpstreamError
+    } else {
+        observation.termination
+    };
+    tracing::debug!(
+        termination = termination.code(),
+        ttft_ms = ?observation.ttft_ms,
+        "stream terminated"
+    );
+    if termination.is_failure() {
+        event.status_code = termination.status_code();
         event.success = false;
-        event.error_summary = Some("upstream stream error".into());
+        event.error_summary = Some(
+            match termination {
+                stream_contract::StreamTermination::UpstreamError => "upstream stream error",
+                stream_contract::StreamTermination::EmptyStream => {
+                    "upstream stream ended without an event"
+                }
+                stream_contract::StreamTermination::ClientCancelled => "client disconnected",
+                stream_contract::StreamTermination::ConnectionTimeout => {
+                    "upstream connection timeout"
+                }
+                stream_contract::StreamTermination::FirstEventTimeout => "first event timeout",
+                stream_contract::StreamTermination::IdleTimeout => "upstream idle timeout",
+                stream_contract::StreamTermination::TotalTimeout => "stream total timeout",
+                stream_contract::StreamTermination::Completed => "",
+            }
+            .into(),
+        );
         if let Some(attempt) = attempts.last_mut() {
-            attempt.status_code = 599;
+            attempt.status_code = termination.status_code();
             attempt.success = false;
         }
     }
@@ -2943,6 +2990,8 @@ async fn forward_account(
     account: &config::AccountConfig,
     headers: &HeaderMap,
     body: Bytes,
+    stream_config: &stream_contract::StreamConfig,
+    request_started: Instant,
 ) -> Result<Response<Body>, transport::TransportError> {
     let credential = config.credential_for(account);
     if route.mode == "adapter" {
@@ -2954,12 +3003,14 @@ async fn forward_account(
                 credential.as_deref(),
                 headers,
                 body,
+                stream_config,
+                request_started,
             )
             .await;
         }
         Err(transport::TransportError::Request)
     } else {
-        transport::forward_url(
+        transport::forward_url_with_config(
             http,
             &route.upstream_endpoint,
             account,
@@ -2967,11 +3018,14 @@ async fn forward_account(
             route.protocol_upstream,
             headers,
             body,
+            stream_config,
+            request_started,
         )
         .await
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn embedded_kimi_adapter(
     http: &transport::SourceHttpClient,
     provider: &config::ProviderConfig,
@@ -2979,6 +3033,8 @@ async fn embedded_kimi_adapter(
     credential: Option<&str>,
     headers: &HeaderMap,
     body: Bytes,
+    stream_config: &stream_contract::StreamConfig,
+    request_started: Instant,
 ) -> Result<Response<Body>, transport::TransportError> {
     http.validate_base_url(&provider.base_url)?;
     let cfg = kimi_responses_adapter::adapter::config::Config {
@@ -2997,6 +3053,13 @@ async fn embedded_kimi_adapter(
         .into_iter()
         .collect(),
         search_status_prefix: "Search results for query:".into(),
+        stream_config: kimi_responses_adapter::adapter::config::StreamConfig::from_durations(
+            stream_config.heartbeat_interval,
+            stream_config.connection_timeout,
+            stream_config.first_event_timeout,
+            stream_config.idle_timeout,
+            stream_config.total_timeout,
+        ),
     };
     let adapter =
         kimi_responses_adapter::adapter::server::router_with_client(cfg, http.raw_client());
@@ -3005,6 +3068,11 @@ async fn embedded_kimi_adapter(
         .uri("/v1/responses")
         .body(Body::from(body))
         .map_err(|_| transport::TransportError::Request)?;
+    request
+        .extensions_mut()
+        .insert(kimi_responses_adapter::adapter::server::StreamRequestStart(
+            request_started,
+        ));
     let request_headers = request.headers_mut();
     for (name, value) in headers {
         if !matches!(
@@ -3149,6 +3217,8 @@ async fn try_fallback(
     headers: &HeaderMap,
     body: Bytes,
     first: Response<Body>,
+    stream_config: &stream_contract::StreamConfig,
+    request_started: Instant,
 ) -> (Response<Body>, Vec<db::UsageAttempt>) {
     let mut attempts = Vec::new();
     let Some(candidate) = select_fallback_candidate(config, health, route, model, protocol).await
@@ -3168,6 +3238,8 @@ async fn try_fallback(
         candidate.upstream_endpoint.as_deref(),
         headers,
         prepared.body,
+        stream_config,
+        request_started,
     )
     .await
     {
@@ -3189,14 +3261,14 @@ async fn try_fallback(
             }
             (response, attempts)
         }
-        Err(_) => {
+        Err(error) => {
             attempts.push(db::UsageAttempt {
                 attempt_no: 1,
                 provider_id: candidate.provider_id.clone(),
                 source_id: candidate.source_id.clone(),
                 account_id: candidate.account.id.clone(),
                 upstream_model_id: Some(prepared.upstream_model_id),
-                status_code: 599,
+                status_code: error.status_code(),
                 success: false,
                 latency_ms: started.elapsed().as_millis() as i64,
             });
@@ -3217,13 +3289,15 @@ async fn try_fallback_error(
     headers: &HeaderMap,
     body: Bytes,
     first_error: transport::TransportError,
+    stream_config: &stream_contract::StreamConfig,
+    request_started: Instant,
 ) -> (Response<Body>, Vec<db::UsageAttempt>) {
     let mut attempts = Vec::new();
     let Some(candidate) = select_fallback_candidate(config, health, route, model, protocol).await
     else {
         return (
             error_response(
-                StatusCode::BAD_GATEWAY,
+                transport_error_status(&first_error),
                 "upstream_request_failed",
                 first_error.message(),
             ),
@@ -3243,6 +3317,8 @@ async fn try_fallback_error(
         candidate.upstream_endpoint.as_deref(),
         headers,
         prepared.body,
+        stream_config,
+        request_started,
     )
     .await
     {
@@ -3264,23 +3340,23 @@ async fn try_fallback_error(
             }
             (response, attempts)
         }
-        Err(_) => {
+        Err(error) => {
             attempts.push(db::UsageAttempt {
                 attempt_no: 1,
                 provider_id: candidate.provider_id.clone(),
                 source_id: candidate.source_id.clone(),
                 account_id: candidate.account.id.clone(),
                 upstream_model_id: Some(prepared.upstream_model_id),
-                status_code: 599,
+                status_code: error.status_code(),
                 success: false,
                 latency_ms: started.elapsed().as_millis() as i64,
             });
             health.mark_failure(&candidate.account.id).await;
             (
                 error_response(
-                    StatusCode::BAD_GATEWAY,
+                    transport_error_status(&error),
                     "upstream_request_failed",
-                    first_error.message(),
+                    error.message(),
                 ),
                 attempts,
             )
@@ -3300,6 +3376,8 @@ async fn forward_fallback(
     upstream_endpoint: Option<&str>,
     headers: &HeaderMap,
     body: Bytes,
+    stream_config: &stream_contract::StreamConfig,
+    request_started: Instant,
 ) -> Result<Response<Body>, transport::TransportError> {
     let credential = config.credential_for(account);
     if mode == "adapter" {
@@ -3311,13 +3389,15 @@ async fn forward_fallback(
                 credential.as_deref(),
                 headers,
                 body,
+                stream_config,
+                request_started,
             )
             .await;
         }
         return Err(transport::TransportError::Request);
     }
     if let Some(endpoint) = upstream_endpoint {
-        return transport::forward_url(
+        return transport::forward_url_with_config(
             http,
             endpoint,
             account,
@@ -3325,10 +3405,12 @@ async fn forward_fallback(
             protocol,
             headers,
             body,
+            stream_config,
+            request_started,
         )
         .await;
     }
-    transport::forward(
+    transport::forward_with_config(
         http,
         provider,
         account,
@@ -3336,6 +3418,8 @@ async fn forward_fallback(
         protocol,
         headers,
         body,
+        stream_config,
+        request_started,
     )
     .await
 }
@@ -3344,6 +3428,14 @@ fn is_retryable(status: StatusCode) -> bool {
     status == StatusCode::REQUEST_TIMEOUT
         || status == StatusCode::TOO_MANY_REQUESTS
         || status.is_server_error()
+}
+
+fn transport_error_status(error: &transport::TransportError) -> StatusCode {
+    if matches!(error, transport::TransportError::Timeout(_)) {
+        StatusCode::GATEWAY_TIMEOUT
+    } else {
+        StatusCode::BAD_GATEWAY
+    }
 }
 
 async fn authorized_with_db(
@@ -4624,5 +4716,173 @@ mod ops_api_tests {
             .await
             .expect("drop ops API schema");
         admin.close().await;
+    }
+}
+
+#[cfg(test)]
+mod stream_contract_e2e_tests {
+    use super::*;
+    use axum::{body::to_bytes, extract::Request, http::header, routing::any, Router};
+    use futures_util::stream;
+    use std::{collections::HashMap, time::Duration};
+
+    async fn spawn_native_upstream() -> String {
+        let app = Router::new().route(
+            "/{*path}",
+            any(|request: Request| async move {
+                let path = request.uri().path().to_owned();
+                let payload = if path.ends_with("/chat/completions") {
+                    "data: {\"id\":\"chat-1\",\"choices\":[]}\n\ndata: [DONE]\n\n"
+                } else if path.ends_with("/messages") {
+                    "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg-1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":0}}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+                } else {
+                    "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n"
+                };
+                let chunks = stream::once(async move {
+                    tokio::time::sleep(Duration::from_millis(25)).await;
+                    Ok::<Bytes, std::io::Error>(Bytes::from_static(payload.as_bytes()))
+                });
+                Response::builder()
+                    .header(header::CONTENT_TYPE, "text/event-stream")
+                    .body(Body::from_stream(chunks))
+                    .expect("native SSE response")
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind native e2e upstream");
+        let address = listener.local_addr().expect("native e2e address");
+        tokio::spawn(async move {
+            axum::serve(listener, app)
+                .await
+                .expect("serve native e2e upstream")
+        });
+        format!("http://{address}")
+    }
+
+    fn native_provider(base_url: &str) -> config::ProviderConfig {
+        config::ProviderConfig {
+            id: "native-e2e".into(),
+            name: "Native E2E".into(),
+            base_url: base_url.into(),
+            models: vec!["m".into()],
+            native_protocols: vec![
+                Protocol::OpenAiChatCompletions,
+                Protocol::OpenAiResponses,
+                Protocol::AnthropicMessages,
+            ],
+            endpoints: HashMap::from([
+                (
+                    Protocol::OpenAiChatCompletions,
+                    "/v1/chat/completions".into(),
+                ),
+                (Protocol::OpenAiResponses, "/v1/responses".into()),
+                (Protocol::AnthropicMessages, "/v1/messages".into()),
+            ]),
+            capabilities: config::Capabilities::native(),
+            protocol_capabilities: HashMap::new(),
+            model_overrides: HashMap::new(),
+        }
+    }
+
+    fn native_state(base_url: &str) -> AppState {
+        let config = Arc::new(GatewayConfig {
+            listen_addr: "127.0.0.1:0".into(),
+            providers: vec![native_provider(base_url)],
+            accounts: vec![config::AccountConfig {
+                id: "native-account".into(),
+                provider_id: "native-e2e".into(),
+                display_name: "Native E2E".into(),
+                credential_env: None,
+                credential: Some("test-secret".into()),
+                enabled: true,
+                weight: 100,
+                protocol_capabilities: HashMap::new(),
+                capabilities: None,
+                model_overrides: HashMap::new(),
+                model_map: HashMap::new(),
+            }],
+            routes: vec![config::RouteConfig {
+                id: "native-e2e-route".into(),
+                model: "m".into(),
+                provider_id: "native-e2e".into(),
+                protocols: vec![
+                    Protocol::OpenAiChatCompletions,
+                    Protocol::OpenAiResponses,
+                    Protocol::AnthropicMessages,
+                ],
+                primary_account_id: "native-account".into(),
+                fallback_accounts: vec![],
+                strategy: "primary_then_weighted_fallback".into(),
+                mode: "native".into(),
+                adapter: None,
+                allow_lossy_conversion: false,
+            }],
+        });
+        AppState {
+            live: Arc::new(std::sync::RwLock::new(LiveConfig::legacy(config))),
+            http: transport::test_client().expect("native e2e HTTP client"),
+            db: None,
+            control_plane: None,
+            health: health::HealthRegistry::new(Duration::from_secs(1)),
+            admin_auth: AdminAuth::test(),
+        }
+    }
+
+    #[tokio::test]
+    async fn native_three_protocol_streams_share_the_sse_contract() {
+        let _environment_lock = ENV_LOCK.lock().await;
+        let _heartbeat = EnvRestore::set("GATEWAY_SSE_HEARTBEAT_INTERVAL_MS", "5");
+        let _connection = EnvRestore::set("GATEWAY_SSE_CONNECTION_TIMEOUT_MS", "500");
+        let _first = EnvRestore::set("GATEWAY_SSE_FIRST_EVENT_TIMEOUT_MS", "200");
+        let _idle = EnvRestore::set("GATEWAY_SSE_IDLE_TIMEOUT_MS", "200");
+        let _total = EnvRestore::set("GATEWAY_SSE_TOTAL_TIMEOUT_MS", "1000");
+        let base_url = spawn_native_upstream().await;
+        let state = native_state(&base_url);
+        for protocol in [
+            Protocol::OpenAiChatCompletions,
+            Protocol::OpenAiResponses,
+            Protocol::AnthropicMessages,
+        ] {
+            let mut headers = HeaderMap::new();
+            if let Ok(key) = std::env::var("GATEWAY_API_KEY") {
+                headers.insert(
+                    header::AUTHORIZATION,
+                    HeaderValue::from_str(&format!("Bearer {key}"))
+                        .expect("native e2e auth header"),
+                );
+            }
+            let response = proxy(
+                state.clone(),
+                headers,
+                Bytes::from(
+                    serde_json::to_vec(&json!({
+                        "model": "m",
+                        "stream": true,
+                        "input": "hello"
+                    }))
+                    .expect("native e2e body"),
+                ),
+                protocol,
+            )
+            .await;
+            assert_eq!(response.status(), StatusCode::OK);
+            let body = String::from_utf8_lossy(
+                &to_bytes(response.into_body(), 1024 * 1024)
+                    .await
+                    .expect("native e2e body bytes"),
+            )
+            .into_owned();
+            assert!(
+                body.contains(": gateway-heartbeat"),
+                "heartbeat missing for {protocol}: {body}"
+            );
+            assert!(!body.contains(": gateway-heartbeat\\ndata:"));
+            match protocol {
+                Protocol::OpenAiChatCompletions => assert!(body.contains("[DONE]")),
+                Protocol::OpenAiResponses => assert!(body.contains("response.completed")),
+                Protocol::AnthropicMessages => assert!(body.contains("message_stop")),
+            }
+        }
     }
 }

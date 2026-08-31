@@ -6,7 +6,7 @@ use std::{
     collections::HashMap,
     str::FromStr,
     sync::{Arc, Mutex},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 #[derive(Clone, Debug)]
@@ -342,6 +342,8 @@ async fn transport_error_path_uses_fallback_and_records_its_actual_model() {
         &HeaderMap::new(),
         Bytes::from_static(br#"{"model":"logical-model","messages":[]}"#),
         transport::TransportError::Request,
+        &stream_contract::StreamConfig::default(),
+        Instant::now(),
     )
     .await;
     assert_eq!(response.status(), StatusCode::OK);
@@ -383,6 +385,8 @@ async fn fallback_transport_failure_is_retained_as_the_final_actual_attempt() {
         &HeaderMap::new(),
         Bytes::from_static(br#"{"model":"logical-model","messages":[]}"#),
         transport::TransportError::Request,
+        &stream_contract::StreamConfig::default(),
+        Instant::now(),
     )
     .await;
     assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
@@ -450,6 +454,7 @@ fn failed_stream_keeps_ttft_absent_and_never_estimates_tokens() {
             captured: Vec::new(),
             ttft_ms: None,
             failed: true,
+            termination: stream_contract::StreamTermination::UpstreamError,
         },
     );
     assert_eq!(event.ttft_ms, None);
@@ -459,6 +464,66 @@ fn failed_stream_keeps_ttft_absent_and_never_estimates_tokens() {
     assert_eq!(event.total_tokens, 0);
     assert!(!attempts[0].success);
     assert_eq!(attempts[0].status_code, 599);
+}
+
+#[test]
+fn stream_termination_reasons_have_stable_usage_statuses_and_summaries() {
+    let cases = [
+        (
+            stream_contract::StreamTermination::EmptyStream,
+            599,
+            "upstream stream ended without an event",
+        ),
+        (
+            stream_contract::StreamTermination::ClientCancelled,
+            499,
+            "client disconnected",
+        ),
+        (
+            stream_contract::StreamTermination::FirstEventTimeout,
+            504,
+            "first event timeout",
+        ),
+        (
+            stream_contract::StreamTermination::IdleTimeout,
+            504,
+            "upstream idle timeout",
+        ),
+        (
+            stream_contract::StreamTermination::TotalTimeout,
+            504,
+            "stream total timeout",
+        ),
+    ];
+    for (termination, status, summary) in cases {
+        let mut event = usage_event();
+        let mut attempts = vec![db::UsageAttempt {
+            attempt_no: 0,
+            provider_id: "provider".into(),
+            source_id: "runtime-provider".into(),
+            account_id: "account".into(),
+            upstream_model_id: Some("upstream-model".into()),
+            status_code: 200,
+            success: true,
+            latency_ms: 1,
+        }];
+        finalize_stream_usage(
+            &mut event,
+            &mut attempts,
+            br#"{"model":"logical-model","stream":true}"#,
+            usage::StreamObservation {
+                captured: Vec::new(),
+                ttft_ms: None,
+                failed: true,
+                termination,
+            },
+        );
+        assert_eq!(event.status_code, status);
+        assert!(!event.success);
+        assert_eq!(event.error_summary.as_deref(), Some(summary));
+        assert_eq!(attempts[0].status_code, status);
+        assert!(!attempts[0].success);
+    }
 }
 
 async fn unused_local_url() -> String {

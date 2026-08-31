@@ -1,6 +1,7 @@
-use std::convert::Infallible;
+use std::collections::VecDeque;
 use std::io::Write as _;
-use std::sync::Arc;
+use std::pin::Pin;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use axum::body::{Body, Bytes};
@@ -9,10 +10,8 @@ use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, header}
 use axum::response::{IntoResponse, Response};
 use axum::routing::any;
 use axum::{Router, body};
-use futures_util::{StreamExt, TryStreamExt};
+use futures_util::{Stream, StreamExt, TryStreamExt, stream};
 use serde_json::{Value, json};
-use tokio::sync::mpsc;
-use tokio_stream::wrappers::UnboundedReceiverStream;
 use tokio_util::codec::{FramedRead, LinesCodec};
 use tokio_util::io::StreamReader;
 use tracing::{error, info};
@@ -26,11 +25,16 @@ use crate::adapter::types::{AnthropicError, AnthropicMessageObj, ResponsesReques
 
 pub struct AppState {
     pub cfg: Config,
-    // No client-level timeout: streaming responses can run for minutes.
-    // Cancellation propagates from the inbound request context.
+    // The stream contract applies phase-specific deadlines after headers are
+    // received; the client itself remains free of a global timeout.
     pub client: reqwest::Client,
     pub models: ModelRegistry,
 }
+
+/// Optional request context used by the embedded gateway to keep the total
+/// stream deadline anchored to the original downstream request start.
+#[derive(Clone, Copy, Debug)]
+pub struct StreamRequestStart(pub Instant);
 
 pub fn router(cfg: Config) -> Router {
     router_with_client(cfg, reqwest::Client::new())
@@ -139,8 +143,12 @@ async fn responses_entry(State(state): State<Arc<AppState>>, req: Request) -> Re
     if req.method() != Method::POST {
         return passthrough(State(state), req).await;
     }
-    let start = Instant::now();
     let (parts, body) = req.into_parts();
+    let start = parts
+        .extensions
+        .get::<StreamRequestStart>()
+        .map(|value| value.0)
+        .unwrap_or_else(Instant::now);
     let inbound = parts.headers;
     let body = match body::to_bytes(body, 64 << 20).await {
         Ok(b) => b,
@@ -201,16 +209,13 @@ async fn responses_entry(State(state): State<Arc<AppState>>, req: Request) -> Re
         .to_string();
 
     let url = format!("{}/v1/messages", state.cfg.kimi_base_url);
-    let resp = match state
-        .client
-        .post(url)
-        .headers(headers)
-        .body(up_body)
-        .send()
-        .await
-    {
+    let send = state.client.post(url).headers(headers).body(up_body).send();
+    let resp = match timed_send(send, start, &state.cfg.stream_config).await {
         Ok(r) => r,
-        Err(_) => {
+        Err(SendFailure::Timeout(code)) => {
+            return json_error(StatusCode::GATEWAY_TIMEOUT, timeout_message(code), code);
+        }
+        Err(SendFailure::Request) => {
             return json_error(
                 StatusCode::BAD_GATEWAY,
                 "upstream request failed",
@@ -277,67 +282,639 @@ async fn responses_entry(State(state): State<Arc<AppState>>, req: Request) -> Re
     }
 }
 
+type AdapterLineStream = Pin<Box<dyn Stream<Item = Result<String, std::io::Error>> + Send>>;
+type AdapterSink = Box<dyn FnMut(String) + Send>;
+type AdapterTranslator = StreamTranslator<AdapterSink>;
+
+#[derive(Default)]
+struct UpstreamFrameTracker {
+    partial: String,
+    event_name: String,
+    data: Vec<String>,
+    has_content: bool,
+    saw_event: bool,
+    error: bool,
+    terminal: bool,
+}
+
+impl UpstreamFrameTracker {
+    fn feed_bytes(&mut self, bytes: &[u8]) -> bool {
+        let mut event = false;
+        if self.partial.is_empty()
+            && self.event_name.is_empty()
+            && self.data.is_empty()
+            && !looks_like_sse_control(bytes)
+            && bytes.iter().any(|byte| !byte.is_ascii_whitespace())
+        {
+            self.saw_event = true;
+            event = true;
+        }
+        self.partial.push_str(&String::from_utf8_lossy(bytes));
+        while let Some(index) = self.partial.find('\n') {
+            let line = self.partial[..index].trim_end_matches('\r').to_owned();
+            self.partial.drain(..=index);
+            event |= self.feed_line(&line);
+        }
+        event
+    }
+
+    fn feed_line(&mut self, line: &str) -> bool {
+        if line.is_empty() {
+            return self.dispatch();
+        }
+        if line.starts_with(':') {
+            return false;
+        }
+        if let Some(value) = line.strip_prefix("event:") {
+            self.event_name = value.trim().to_owned();
+            self.has_content = true;
+        } else if let Some(value) = line.strip_prefix("data:") {
+            self.data.push(value.trim().to_owned());
+            self.has_content = true;
+        } else if !line.starts_with("id:") && !line.starts_with("retry:") {
+            self.has_content = true;
+        }
+        false
+    }
+
+    fn finish_eof(&mut self) -> bool {
+        let mut event = false;
+        if !self.partial.is_empty() {
+            let line = std::mem::take(&mut self.partial);
+            event |= self.feed_line(&line);
+        }
+        event | self.dispatch()
+    }
+
+    fn safe_for_heartbeat(&self) -> bool {
+        self.event_name.is_empty() && self.data.is_empty() && !self.has_content
+    }
+
+    fn dispatch(&mut self) -> bool {
+        if !self.has_content && self.data.is_empty() && self.event_name.is_empty() {
+            return false;
+        }
+        let event_name = std::mem::take(&mut self.event_name).to_ascii_lowercase();
+        let data = std::mem::take(&mut self.data).join("\n");
+        let had_content = std::mem::take(&mut self.has_content);
+        let is_error = event_name == "error"
+            || serde_json::from_str::<Value>(&data)
+                .ok()
+                .is_some_and(|value| value.get("error").is_some());
+        self.error |= is_error;
+        self.terminal |= matches!(
+            event_name.as_str(),
+            "message_stop" | "response.completed" | "response.incomplete" | "response.done"
+        ) || data.trim() == "[DONE]"
+            || serde_json::from_str::<Value>(&data)
+                .ok()
+                .and_then(|value| value.get("type").and_then(Value::as_str).map(str::to_owned))
+                .is_some_and(|value| {
+                    matches!(
+                        value.as_str(),
+                        "message_stop"
+                            | "response.completed"
+                            | "response.incomplete"
+                            | "response.done"
+                    )
+                });
+        let event = had_content || !data.is_empty() || !event_name.is_empty();
+        if event {
+            self.saw_event = true;
+        }
+        event
+    }
+}
+
+fn looks_like_sse_control(bytes: &[u8]) -> bool {
+    let text = String::from_utf8_lossy(bytes);
+    let text = text.trim_start();
+    text.starts_with(':')
+        || text.starts_with("data:")
+        || text.starts_with("event:")
+        || text.starts_with("id:")
+        || text.starts_with("retry:")
+}
+
+struct AdapterStreamState {
+    upstream: AdapterLineStream,
+    translator: AdapterTranslator,
+    outputs: Arc<Mutex<VecDeque<String>>>,
+    config: Config,
+    request_started: Instant,
+    connected_at: Instant,
+    tracker: UpstreamFrameTracker,
+    pending: VecDeque<Result<Bytes, std::io::Error>>,
+    finish_after_pending: bool,
+    done: bool,
+    next_heartbeat: Option<Instant>,
+    last_event: Option<Instant>,
+    debug: Option<std::fs::File>,
+}
+
+impl AdapterStreamState {
+    fn drain_outputs(&mut self) {
+        let mut outputs = self
+            .outputs
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        while let Some(value) = outputs.pop_front() {
+            self.pending.push_back(Ok(Bytes::from(value)));
+        }
+    }
+
+    fn fail(&mut self, code: &str, message: &str) {
+        self.translator.fail_with_reason(code, message);
+        self.drain_outputs();
+        self.finish_after_pending = true;
+    }
+
+    fn total_deadline(&self) -> Option<Instant> {
+        (!self.config.stream_config.total_timeout.is_zero())
+            .then(|| {
+                self.request_started
+                    .checked_add(self.config.stream_config.total_timeout)
+            })
+            .flatten()
+    }
+
+    fn first_deadline(&self) -> Option<Instant> {
+        (!self.config.stream_config.first_event_timeout.is_zero() && !self.tracker.saw_event)
+            .then(|| {
+                self.connected_at
+                    .checked_add(self.config.stream_config.first_event_timeout)
+            })
+            .flatten()
+    }
+
+    fn idle_deadline(&self) -> Option<Instant> {
+        self.last_event
+            .filter(|_| !self.config.stream_config.idle_timeout.is_zero())
+            .and_then(|at| at.checked_add(self.config.stream_config.idle_timeout))
+    }
+}
+
 fn stream_response(
     state: Arc<AppState>,
     req: ResponsesRequest,
     resp: reqwest::Response,
     start: Instant,
 ) -> Response {
-    let (tx, rx) = mpsc::unbounded_channel::<String>();
-    let tx_check = tx.clone();
-    let cfg = state.cfg.clone();
-    let model = req.model.clone();
-    tokio::spawn(async move {
-        let mut debug = std::env::var("KIMI_DEBUG_SSE_FILE")
-            .ok()
-            .filter(|p| !p.is_empty())
-            .and_then(|p| {
-                std::fs::OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open(&p)
-                    .ok()
-                    .inspect(|_| info!("debug: teeing upstream SSE to {p}"))
-            });
-        let byte_stream = resp.bytes_stream().map_err(std::io::Error::other);
-        let reader = StreamReader::new(byte_stream);
-        let mut framed = FramedRead::new(reader, LinesCodec::new_with_max_length(16 * 1024 * 1024));
-        let mut t = StreamTranslator::new(&cfg, &req, move |s: String| {
-            let _ = tx.send(s);
-        });
-        while let Some(line) = framed.next().await {
-            // Client disconnected: stop consuming and drop the upstream body.
-            if tx_check.is_closed() {
-                return;
-            }
-            match line {
-                Ok(l) => {
-                    if let Some(f) = debug.as_mut() {
-                        let _ = writeln!(f, "{l}");
-                    }
-                    t.feed_line(&l);
-                    if t.is_done() {
-                        break;
-                    }
-                }
-                Err(e) => {
-                    t.finish_eof();
-                    error!("stream translation error: {e}");
-                    return;
-                }
-            }
-        }
-        t.finish_eof();
-        info!(model = %model, elapsed = ?start.elapsed(), "responses done");
+    let outputs = Arc::new(Mutex::new(VecDeque::new()));
+    let sink_outputs = outputs.clone();
+    let sink: AdapterSink = Box::new(move |value| {
+        sink_outputs
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .push_back(value);
     });
-
-    let stream = UnboundedReceiverStream::new(rx).map(|s| Ok::<Bytes, Infallible>(Bytes::from(s)));
+    let cfg = state.cfg.clone();
+    let debug = std::env::var("KIMI_DEBUG_SSE_FILE")
+        .ok()
+        .filter(|path| !path.is_empty())
+        .and_then(|path| {
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&path)
+                .ok()
+                .inspect(|_| info!("debug: teeing upstream SSE to {path}"))
+        });
+    let byte_stream = resp.bytes_stream().map_err(std::io::Error::other);
+    let reader = StreamReader::new(byte_stream);
+    let framed = FramedRead::new(reader, LinesCodec::new_with_max_length(16 * 1024 * 1024))
+        .map(|line| line.map_err(std::io::Error::other));
+    let stream_state = AdapterStreamState {
+        upstream: Box::pin(framed),
+        translator: StreamTranslator::new(&cfg, &req, sink),
+        outputs,
+        config: cfg,
+        request_started: start,
+        connected_at: Instant::now(),
+        tracker: UpstreamFrameTracker::default(),
+        pending: VecDeque::new(),
+        finish_after_pending: false,
+        done: false,
+        next_heartbeat: (!state.cfg.stream_config.heartbeat_interval.is_zero())
+            .then(|| Instant::now().checked_add(state.cfg.stream_config.heartbeat_interval))
+            .flatten(),
+        last_event: None,
+        debug,
+    };
+    let stream = stream::unfold(stream_state, next_translated);
     Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "text/event-stream")
         .header(header::CACHE_CONTROL, "no-cache")
         .body(Body::from_stream(stream))
         .expect("response builds")
+}
+
+async fn next_translated(
+    mut state: AdapterStreamState,
+) -> Option<(Result<Bytes, std::io::Error>, AdapterStreamState)> {
+    loop {
+        state.drain_outputs();
+        if let Some(item) = state.pending.pop_front() {
+            return Some((item, state));
+        }
+        if state.done || state.finish_after_pending {
+            state.done = true;
+            return None;
+        }
+        let now = Instant::now();
+        if state
+            .total_deadline()
+            .is_some_and(|deadline| deadline <= now)
+        {
+            state.fail(
+                "gateway_total_timeout",
+                "upstream stream exceeded its total time limit",
+            );
+            continue;
+        }
+        if state
+            .first_deadline()
+            .is_some_and(|deadline| deadline <= now)
+        {
+            state.fail(
+                "gateway_first_event_timeout",
+                "timed out waiting for the first upstream event",
+            );
+            continue;
+        }
+        if state
+            .idle_deadline()
+            .is_some_and(|deadline| deadline <= now)
+        {
+            state.fail(
+                "gateway_idle_timeout",
+                "upstream stream was idle for too long",
+            );
+            continue;
+        }
+
+        let total_deadline = state.total_deadline();
+        let first_deadline = state.first_deadline();
+        let idle_deadline = state.idle_deadline();
+        let heartbeat_deadline = state.next_heartbeat;
+        let far = tokio::time::Instant::now() + Duration::from_secs(31_536_000);
+        let total_sleep = tokio::time::sleep_until(
+            total_deadline
+                .map(tokio::time::Instant::from_std)
+                .unwrap_or(far),
+        );
+        let first_sleep = tokio::time::sleep_until(
+            first_deadline
+                .map(tokio::time::Instant::from_std)
+                .unwrap_or(far),
+        );
+        let idle_sleep = tokio::time::sleep_until(
+            idle_deadline
+                .map(tokio::time::Instant::from_std)
+                .unwrap_or(far),
+        );
+        let heartbeat_sleep = tokio::time::sleep_until(
+            heartbeat_deadline
+                .map(tokio::time::Instant::from_std)
+                .unwrap_or(far),
+        );
+        tokio::pin!(total_sleep);
+        tokio::pin!(first_sleep);
+        tokio::pin!(idle_sleep);
+        tokio::pin!(heartbeat_sleep);
+
+        tokio::select! {
+            biased;
+            line = state.upstream.next() => {
+                match line {
+                    Some(Ok(line)) => {
+                        if let Some(file) = state.debug.as_mut() {
+                            let _ = writeln!(file, "{line}");
+                        }
+                        let event = state.tracker.feed_line(&line);
+                        if event {
+                            let now = Instant::now();
+                            state.last_event = Some(now);
+                            state.next_heartbeat =
+                                (!state.config.stream_config.heartbeat_interval.is_zero())
+                                    .then(|| {
+                                        now.checked_add(state.config.stream_config.heartbeat_interval)
+                                    })
+                                    .flatten();
+                        }
+                        state.translator.feed_line(&line);
+                        state.drain_outputs();
+                        if state.translator.is_done() || state.tracker.error {
+                            state.finish_after_pending = true;
+                        }
+                    }
+                    Some(Err(error)) => {
+                        error!("stream translation error: {error}");
+                        state.fail("gateway_upstream_error", "upstream stream failed");
+                    }
+                    None => {
+                        state.tracker.finish_eof();
+                        if !state.tracker.saw_event {
+                            state.fail("gateway_empty_stream", "upstream stream ended without an event");
+                        } else {
+                            state.translator.finish_eof();
+                            state.drain_outputs();
+                            state.finish_after_pending = true;
+                        }
+                    }
+                }
+            }
+            _ = &mut total_sleep, if total_deadline.is_some() => {
+                state.fail("gateway_total_timeout", "upstream stream exceeded its total time limit");
+            }
+            _ = &mut first_sleep, if first_deadline.is_some() => {
+                state.fail("gateway_first_event_timeout", "timed out waiting for the first upstream event");
+            }
+            _ = &mut idle_sleep, if idle_deadline.is_some() => {
+                state.fail("gateway_idle_timeout", "upstream stream was idle for too long");
+            }
+            _ = &mut heartbeat_sleep, if heartbeat_deadline.is_some() => {
+                if state.tracker.safe_for_heartbeat() {
+                    state.pending.push_back(Ok(Bytes::from_static(b": gateway-heartbeat\n\n")));
+                }
+                state.next_heartbeat = (!state.config.stream_config.heartbeat_interval.is_zero())
+                    .then(|| Instant::now().checked_add(state.config.stream_config.heartbeat_interval))
+                    .flatten();
+            }
+        }
+    }
+}
+
+type AdapterByteStream = Pin<Box<dyn Stream<Item = Result<Bytes, std::io::Error>> + Send>>;
+
+#[derive(Clone, Copy)]
+enum RawProtocol {
+    Chat,
+    Responses,
+    Anthropic,
+}
+
+struct RawStreamState {
+    upstream: AdapterByteStream,
+    protocol: RawProtocol,
+    stream_config: crate::adapter::config::StreamConfig,
+    request_started: Instant,
+    connected_at: Instant,
+    tracker: UpstreamFrameTracker,
+    pending: VecDeque<Result<Bytes, std::io::Error>>,
+    finish_after_pending: bool,
+    done: bool,
+    next_heartbeat: Option<Instant>,
+    last_event: Option<Instant>,
+}
+
+impl RawStreamState {
+    fn total_deadline(&self) -> Option<Instant> {
+        (!self.stream_config.total_timeout.is_zero())
+            .then(|| {
+                self.request_started
+                    .checked_add(self.stream_config.total_timeout)
+            })
+            .flatten()
+    }
+
+    fn first_deadline(&self) -> Option<Instant> {
+        (!self.stream_config.first_event_timeout.is_zero() && !self.tracker.saw_event)
+            .then(|| {
+                self.connected_at
+                    .checked_add(self.stream_config.first_event_timeout)
+            })
+            .flatten()
+    }
+
+    fn idle_deadline(&self) -> Option<Instant> {
+        self.last_event
+            .filter(|_| !self.stream_config.idle_timeout.is_zero())
+            .and_then(|at| at.checked_add(self.stream_config.idle_timeout))
+    }
+
+    fn fail(&mut self, code: &str, message: &str) {
+        self.pending
+            .push_back(Ok(raw_error_frame(self.protocol, code, message)));
+        self.finish_after_pending = true;
+    }
+}
+
+fn raw_error_frame(protocol: RawProtocol, code: &str, message: &str) -> Bytes {
+    let body = match protocol {
+        RawProtocol::Chat => json!({
+            "error": {"message": message, "type": code, "code": code}
+        }),
+        RawProtocol::Responses | RawProtocol::Anthropic => json!({
+            "type": "error",
+            "error": {"type": code, "code": code, "message": message}
+        }),
+    };
+    let body = serde_json::to_string(&body).unwrap_or_else(|_| "{}".to_owned());
+    let frame = match protocol {
+        RawProtocol::Chat => format!("data: {body}\n\ndata: [DONE]\n\n"),
+        RawProtocol::Responses | RawProtocol::Anthropic => {
+            format!("event: error\ndata: {body}\n\n")
+        }
+    };
+    Bytes::from(frame)
+}
+
+fn wrap_raw_body(
+    body: Body,
+    protocol: RawProtocol,
+    stream_config: crate::adapter::config::StreamConfig,
+    request_started: Instant,
+) -> Body {
+    let upstream = body
+        .into_data_stream()
+        .map(|result| result.map_err(|error| std::io::Error::other(error.to_string())));
+    let connected_at = Instant::now();
+    let state = RawStreamState {
+        upstream: Box::pin(upstream),
+        protocol,
+        next_heartbeat: (!stream_config.heartbeat_interval.is_zero())
+            .then(|| connected_at.checked_add(stream_config.heartbeat_interval))
+            .flatten(),
+        stream_config,
+        request_started,
+        connected_at,
+        tracker: UpstreamFrameTracker::default(),
+        pending: VecDeque::new(),
+        finish_after_pending: false,
+        done: false,
+        last_event: None,
+    };
+    Body::from_stream(stream::unfold(state, next_raw))
+}
+
+async fn next_raw(
+    mut state: RawStreamState,
+) -> Option<(Result<Bytes, std::io::Error>, RawStreamState)> {
+    loop {
+        if let Some(item) = state.pending.pop_front() {
+            return Some((item, state));
+        }
+        if state.done || state.finish_after_pending {
+            state.done = true;
+            return None;
+        }
+        let now = Instant::now();
+        if state
+            .total_deadline()
+            .is_some_and(|deadline| deadline <= now)
+        {
+            state.fail(
+                "gateway_total_timeout",
+                "upstream stream exceeded its total time limit",
+            );
+            continue;
+        }
+        if state
+            .first_deadline()
+            .is_some_and(|deadline| deadline <= now)
+        {
+            state.fail(
+                "gateway_first_event_timeout",
+                "timed out waiting for the first upstream event",
+            );
+            continue;
+        }
+        if state
+            .idle_deadline()
+            .is_some_and(|deadline| deadline <= now)
+        {
+            state.fail(
+                "gateway_idle_timeout",
+                "upstream stream was idle for too long",
+            );
+            continue;
+        }
+        let total_deadline = state.total_deadline();
+        let first_deadline = state.first_deadline();
+        let idle_deadline = state.idle_deadline();
+        let heartbeat_deadline = state.next_heartbeat;
+        let far = tokio::time::Instant::now() + Duration::from_secs(31_536_000);
+        let total_sleep = tokio::time::sleep_until(
+            total_deadline
+                .map(tokio::time::Instant::from_std)
+                .unwrap_or(far),
+        );
+        let first_sleep = tokio::time::sleep_until(
+            first_deadline
+                .map(tokio::time::Instant::from_std)
+                .unwrap_or(far),
+        );
+        let idle_sleep = tokio::time::sleep_until(
+            idle_deadline
+                .map(tokio::time::Instant::from_std)
+                .unwrap_or(far),
+        );
+        let heartbeat_sleep = tokio::time::sleep_until(
+            heartbeat_deadline
+                .map(tokio::time::Instant::from_std)
+                .unwrap_or(far),
+        );
+        tokio::pin!(total_sleep);
+        tokio::pin!(first_sleep);
+        tokio::pin!(idle_sleep);
+        tokio::pin!(heartbeat_sleep);
+        tokio::select! {
+            biased;
+            chunk = state.upstream.next() => {
+                match chunk {
+                    Some(Ok(bytes)) if bytes.is_empty() => continue,
+                    Some(Ok(bytes)) => {
+                        // Raw passthrough does not rewrite bytes; the tracker
+                        // only decides whether a timer should be reset.
+                        let activity = state.tracker.feed_bytes(&bytes);
+                        if activity {
+                            let now = Instant::now();
+                            state.last_event = Some(now);
+                            state.next_heartbeat = (!state.stream_config.heartbeat_interval.is_zero())
+                                .then(|| now.checked_add(state.stream_config.heartbeat_interval))
+                                .flatten();
+                        }
+                        state.pending.push_back(Ok(bytes));
+                        if state.tracker.error || state.tracker.terminal {
+                            state.finish_after_pending = true;
+                        }
+                    }
+                    Some(Err(_)) => state.fail("gateway_upstream_error", "upstream stream failed"),
+                    None => {
+                        state.tracker.finish_eof();
+                        if !state.tracker.saw_event {
+                            state.fail("gateway_empty_stream", "upstream stream ended without an event");
+                        } else if !state.tracker.terminal && !state.tracker.error {
+                            state.fail("gateway_upstream_error", "upstream stream ended before a terminal event");
+                        } else {
+                            state.finish_after_pending = true;
+                        }
+                    }
+                }
+            }
+            _ = &mut total_sleep, if total_deadline.is_some() => state.fail("gateway_total_timeout", "upstream stream exceeded its total time limit"),
+            _ = &mut first_sleep, if first_deadline.is_some() => state.fail("gateway_first_event_timeout", "timed out waiting for the first upstream event"),
+            _ = &mut idle_sleep, if idle_deadline.is_some() => state.fail("gateway_idle_timeout", "upstream stream was idle for too long"),
+            _ = &mut heartbeat_sleep, if heartbeat_deadline.is_some() => {
+                if state.tracker.safe_for_heartbeat() {
+                    state.pending.push_back(Ok(Bytes::from_static(b": gateway-heartbeat\n\n")));
+                }
+                state.next_heartbeat = (!state.stream_config.heartbeat_interval.is_zero())
+                    .then(|| Instant::now().checked_add(state.stream_config.heartbeat_interval))
+                    .flatten();
+            }
+        }
+    }
+}
+
+enum SendFailure {
+    Timeout(&'static str),
+    Request,
+}
+
+fn timeout_message(code: &str) -> &'static str {
+    match code {
+        "gateway_total_timeout" => "upstream stream exceeded its total time limit",
+        "gateway_first_event_timeout" => "timed out waiting for the first upstream event",
+        "gateway_idle_timeout" => "upstream stream was idle for too long",
+        _ => "timed out waiting for the upstream connection",
+    }
+}
+
+async fn timed_send(
+    send: impl std::future::Future<Output = Result<reqwest::Response, reqwest::Error>>,
+    request_started: Instant,
+    stream_config: &crate::adapter::config::StreamConfig,
+) -> Result<reqwest::Response, SendFailure> {
+    let now = Instant::now();
+    let total_deadline = (!stream_config.total_timeout.is_zero())
+        .then(|| request_started.checked_add(stream_config.total_timeout))
+        .flatten();
+    let connection_deadline = (!stream_config.connection_timeout.is_zero())
+        .then(|| now.checked_add(stream_config.connection_timeout))
+        .flatten();
+    let timeout = match (total_deadline, connection_deadline) {
+        (None, None) => None,
+        (Some(deadline), None) => Some((deadline, "gateway_total_timeout")),
+        (None, Some(deadline)) => Some((deadline, "gateway_connection_timeout")),
+        (Some(total), Some(connection)) if total <= connection => {
+            Some((total, "gateway_total_timeout"))
+        }
+        (Some(_), Some(connection)) => Some((connection, "gateway_connection_timeout")),
+    };
+    let Some((deadline, code)) = timeout else {
+        return send.await.map_err(|_| SendFailure::Request);
+    };
+    let duration = deadline.saturating_duration_since(now);
+    if duration.is_zero() {
+        return Err(SendFailure::Timeout(code));
+    }
+    match tokio::time::timeout(duration, send).await {
+        Ok(result) => result.map_err(|_| SendFailure::Request),
+        Err(_) => Err(SendFailure::Timeout(code)),
+    }
 }
 
 fn relay_upstream_error(status: StatusCode, headers: &HeaderMap, body: &[u8]) -> Response {
@@ -379,6 +956,11 @@ fn relay_upstream_error(status: StatusCode, headers: &HeaderMap, body: &[u8]) ->
 /// Proxies any non-Responses endpoint to the Kimi upstream unchanged: same
 /// method, path, query, body, and (streaming) response.
 async fn passthrough(State(state): State<Arc<AppState>>, req: Request) -> Response {
+    let request_started = req
+        .extensions()
+        .get::<StreamRequestStart>()
+        .map(|value| value.0)
+        .unwrap_or_else(Instant::now);
     let (parts, body) = req.into_parts();
     let path_and_query = parts
         .uri
@@ -400,16 +982,18 @@ async fn passthrough(State(state): State<Arc<AppState>>, req: Request) -> Respon
     let method = parts.method.clone();
     let path_log = parts.uri.path().to_string();
     let up_body = reqwest::Body::wrap_stream(body.into_data_stream());
-    let resp = match state
+    let send = state
         .client
         .request(method.clone(), url)
         .headers(headers)
         .body(up_body)
-        .send()
-        .await
-    {
+        .send();
+    let resp = match timed_send(send, request_started, &state.cfg.stream_config).await {
         Ok(r) => r,
-        Err(_) => {
+        Err(SendFailure::Timeout(code)) => {
+            return json_error(StatusCode::GATEWAY_TIMEOUT, timeout_message(code), code);
+        }
+        Err(SendFailure::Request) => {
             return json_error(
                 StatusCode::BAD_GATEWAY,
                 "upstream request failed",
@@ -419,6 +1003,11 @@ async fn passthrough(State(state): State<Arc<AppState>>, req: Request) -> Respon
     };
 
     let status = resp.status();
+    let is_sse = resp
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.to_ascii_lowercase().contains("text/event-stream"));
     let mut out_headers = HeaderMap::new();
     copy_headers(&mut out_headers, resp.headers());
     // Streaming body: chunks are written and flushed as they arrive, so SSE
@@ -426,7 +1015,25 @@ async fn passthrough(State(state): State<Arc<AppState>>, req: Request) -> Respon
     let stream = resp
         .bytes_stream()
         .map(|r| r.map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>));
-    let mut response = Response::new(Body::from_stream(stream));
+    let raw_protocol = if path_log.contains("/responses") {
+        RawProtocol::Responses
+    } else if path_log.contains("/messages") {
+        RawProtocol::Anthropic
+    } else {
+        RawProtocol::Chat
+    };
+    let body = Body::from_stream(stream);
+    let body = if is_sse {
+        wrap_raw_body(
+            body,
+            raw_protocol,
+            state.cfg.stream_config.clone(),
+            request_started,
+        )
+    } else {
+        body
+    };
+    let mut response = Response::new(body);
     *response.status_mut() = status;
     *response.headers_mut() = out_headers;
     info!(method = %method, path = %path_log, status = %status, "passthrough");
@@ -511,6 +1118,7 @@ fn json_response(status: StatusCode, v: Value) -> Response {
 mod tests {
     use super::*;
     use crate::adapter::test_config;
+    use futures_util::StreamExt;
     use http_body_util::BodyExt;
     use std::sync::Mutex;
     use tower::ServiceExt;
@@ -638,6 +1246,196 @@ mod tests {
         let status = resp.status();
         let bytes = resp.into_body().collect().await.unwrap().to_bytes();
         (status, String::from_utf8_lossy(&bytes).into_owned())
+    }
+
+    fn streaming_config(
+        heartbeat_interval: Duration,
+        first_event_timeout: Duration,
+        idle_timeout: Duration,
+        total_timeout: Duration,
+    ) -> crate::adapter::config::StreamConfig {
+        crate::adapter::config::StreamConfig::from_durations(
+            heartbeat_interval,
+            Duration::ZERO,
+            first_event_timeout,
+            idle_timeout,
+            total_timeout,
+        )
+    }
+
+    fn adapter_app_with_config(
+        base_url: &str,
+        stream_config: crate::adapter::config::StreamConfig,
+    ) -> Router {
+        let mut cfg = test_config();
+        cfg.kimi_base_url = base_url.to_string();
+        cfg.stream_config = stream_config;
+        router(cfg)
+    }
+
+    #[tokio::test]
+    async fn translated_stream_heartbeats_are_comments_outside_response_events() {
+        let upstream = concat!(
+            "event: message_start\n",
+            "data: {\"type\":\"message_start\",\"message\":{\"id\":\"m\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":0}}}\n\n",
+            "event: message_stop\n",
+            "data: {\"type\":\"message_stop\"}\n\n",
+        );
+        let (base, _) = spawn_upstream(move |_| {
+            let chunks = futures_util::stream::once(async move {
+                tokio::time::sleep(Duration::from_millis(30)).await;
+                Ok::<Bytes, std::io::Error>(Bytes::from_static(upstream.as_bytes()))
+            });
+            Response::builder()
+                .header(header::CONTENT_TYPE, "text/event-stream")
+                .body(Body::from_stream(chunks))
+                .unwrap()
+        })
+        .await;
+        let app = adapter_app_with_config(
+            &base,
+            streaming_config(
+                Duration::from_millis(5),
+                Duration::from_millis(200),
+                Duration::from_millis(200),
+                Duration::from_secs(1),
+            ),
+        );
+        let response = post(
+            &app,
+            "/v1/responses",
+            "k",
+            r#"{"model":"k3","stream":true,"max_output_tokens":1,"input":"hi"}"#,
+        )
+        .await;
+        let (_status, body) = body_string(response).await;
+        assert!(
+            body.contains(": gateway-heartbeat"),
+            "heartbeat missing: {body}"
+        );
+        assert!(
+            body.contains("event: response.completed"),
+            "completion missing: {body}"
+        );
+        let heartbeat = body
+            .lines()
+            .filter(|line| line.starts_with(": gateway-heartbeat"))
+            .count();
+        assert!(heartbeat >= 1);
+        assert!(!body.contains(": gateway-heartbeat\\ndata:"));
+    }
+
+    #[tokio::test]
+    async fn translated_stream_first_event_timeout_is_response_failed() {
+        let (base, _) = spawn_upstream(|_| {
+            let chunks = futures_util::stream::pending::<Result<Bytes, std::io::Error>>();
+            Response::builder()
+                .header(header::CONTENT_TYPE, "text/event-stream")
+                .body(Body::from_stream(chunks))
+                .unwrap()
+        })
+        .await;
+        let app = adapter_app_with_config(
+            &base,
+            streaming_config(
+                Duration::ZERO,
+                Duration::from_millis(15),
+                Duration::from_millis(100),
+                Duration::from_secs(1),
+            ),
+        );
+        let response = post(
+            &app,
+            "/v1/responses",
+            "k",
+            r#"{"model":"k3","stream":true,"max_output_tokens":1,"input":"hi"}"#,
+        )
+        .await;
+        let (_status, body) = body_string(response).await;
+        assert!(
+            body.contains("event: response.failed"),
+            "failure missing: {body}"
+        );
+        assert!(
+            body.contains("gateway_first_event_timeout"),
+            "reason missing: {body}"
+        );
+    }
+
+    #[tokio::test]
+    async fn passthrough_stream_first_event_timeout_is_gateway_error() {
+        let (base, _) = spawn_upstream(|_| {
+            let chunks = futures_util::stream::pending::<Result<Bytes, std::io::Error>>();
+            Response::builder()
+                .header(header::CONTENT_TYPE, "text/event-stream")
+                .body(Body::from_stream(chunks))
+                .unwrap()
+        })
+        .await;
+        let app = adapter_app_with_config(
+            &base,
+            streaming_config(
+                Duration::ZERO,
+                Duration::from_millis(15),
+                Duration::from_millis(100),
+                Duration::from_secs(1),
+            ),
+        );
+        let response = post(
+            &app,
+            "/v1/messages",
+            "k",
+            r#"{"model":"k3","stream":true,"max_output_tokens":1,"messages":[]}"#,
+        )
+        .await;
+        let (_status, body) = body_string(response).await;
+        assert!(
+            body.contains("gateway_first_event_timeout"),
+            "reason missing: {body}"
+        );
+        assert!(body.contains("event: error"), "error event missing: {body}");
+    }
+
+    #[tokio::test]
+    async fn translated_stream_idle_timeout_is_response_failed() {
+        let start_event = Bytes::from_static(
+            b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"m\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":0}}}\n\n",
+        );
+        let (base, _) = spawn_upstream(move |_| {
+            let chunks =
+                futures_util::stream::iter([Ok::<Bytes, std::io::Error>(start_event.clone())])
+                    .chain(futures_util::stream::pending());
+            Response::builder()
+                .header(header::CONTENT_TYPE, "text/event-stream")
+                .body(Body::from_stream(chunks))
+                .unwrap()
+        })
+        .await;
+        let app = adapter_app_with_config(
+            &base,
+            streaming_config(
+                Duration::ZERO,
+                Duration::from_secs(1),
+                Duration::from_millis(15),
+                Duration::from_secs(1),
+            ),
+        );
+        let response = post(
+            &app,
+            "/v1/responses",
+            "k",
+            r#"{"model":"k3","stream":true,"max_output_tokens":1,"input":"hi"}"#,
+        )
+        .await;
+        let (_status, body) = body_string(response).await;
+        assert!(
+            body.contains("event: response.failed"),
+            "failure missing: {body}"
+        );
+        assert!(
+            body.contains("gateway_idle_timeout"),
+            "reason missing: {body}"
+        );
     }
 
     #[tokio::test]
