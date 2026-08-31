@@ -1,0 +1,116 @@
+export const gatewayUsageSummaryFixture = {
+  version: 'v1',
+  timezone: 'UTC',
+  logical_requests: { total: 3, successes: 2, failures: 1 },
+  upstream_attempts: { total: 5, retries: 2 },
+  tokens: { input: 1200, output: 420, reasoning: 160, cached: 300, total: 1780 },
+  usage_sources: [
+    { usage_source: 'upstream', requests: 1 },
+    { usage_source: 'estimated', requests: 1 },
+    { usage_source: 'missing', requests: 1 },
+  ],
+};
+export const gatewayUsageTimeseriesFixture = {
+  version: 'v1',
+  items: [
+    {
+      bucket: '2026-08-30T10:00:00Z',
+      logical_requests: 2,
+      upstream_attempts: 3,
+      successful_requests: 2,
+      tokens: { input: 1000, output: 400, reasoning: 160, cached: 300, total: 1560 },
+    },
+    {
+      bucket: '2026-08-30T11:00:00Z',
+      logical_requests: 1,
+      upstream_attempts: 2,
+      successful_requests: 0,
+      tokens: { input: 200, output: 20, reasoning: 0, cached: 0, total: 220 },
+    },
+  ],
+};
+
+export const gatewayUsageBreakdownFixture = {
+  version: 'v1',
+  dimension: 'logical_model',
+  items: [
+    {
+      key: 'reasoning-large',
+      label: 'reasoning-large',
+      logical_requests: 3,
+      upstream_attempts: 5,
+      successful_requests: 2,
+      average_latency_ms: 940,
+      tokens: { input: 1200, output: 420, reasoning: 160, cached: 300, total: 1780 },
+    },
+  ],
+};
+
+export const gatewayUsageEventsFixture = {
+  version: 'v1',
+  items: [
+    {
+      id: 'evt-1',
+      request_id: 'req-fallback',
+      created_at: '2026-08-30T10:03:00Z',
+      logical_model: 'reasoning-large',
+      upstream_model_id: 'provider-model-v2',
+      provider_name: 'Example Provider',
+      source_name: 'Singapore Source',
+      account_name: 'fallback-account',
+      protocol_in: 'openai_responses',
+      protocol_upstream: 'anthropic_messages',
+      status_code: 200,
+      success: true,
+      retry_count: 1,
+      latency_ms: 1280,
+      usage_source: 'estimated',
+      tokens: { input: 680, output: 220, reasoning: 80, cached: 120, total: 980 },
+      attempts: [
+        {
+          attempt_index: 0,
+          provider_name: 'Example Provider',
+          source_name: 'Singapore Source',
+          account_name: 'primary-account',
+          upstream_model_id: 'provider-model-v2',
+          protocol_upstream: 'anthropic_messages',
+          status_code: 429,
+          success: false,
+          latency_ms: 310,
+        },
+        {
+          attempt_index: 1,
+          provider_name: 'Example Provider',
+          source_name: 'Singapore Source',
+          account_name: 'fallback-account',
+          upstream_model_id: 'provider-model-v2',
+          protocol_upstream: 'anthropic_messages',
+          status_code: 200,
+          success: true,
+          latency_ms: 970,
+        },
+      ],
+    },
+    {
+      id: 'evt-2',
+      request_id: 'req-missing',
+      created_at: '2026-08-30T10:02:00Z',
+      logical_model: 'chat-fast',
+      upstream_model_id: 'fast-v1',
+      provider_name: 'Second Provider',
+      source_name: 'Tokyo Source',
+      account_name: 'main',
+      protocol_in: 'openai_chat_completions',
+      protocol_upstream: 'openai_chat_completions',
+      status_code: 502,
+      success: false,
+      retry_count: 0,
+      latency_ms: 510,
+      usage_source: 'missing',
+      tokens: { input: 0, output: 0, reasoning: 0, cached: 0, total: 0 },
+      error_summary: 'Upstream returned a gateway error',
+    },
+  ],
+  next_cursor: 'cursor-2',
+  has_more: true,
+};
