@@ -4,6 +4,7 @@
 !.env.example
 !.env.live.example
 !.env.test.example
+!.env.codex-e2e.example
 *.log
 .DS_Store
 backups/
