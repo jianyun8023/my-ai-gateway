@@ -18,7 +18,11 @@ use chrono::{DateTime, Utc};
 use reqwest::{header::HeaderName, StatusCode, Url};
 use serde::Serialize;
 use serde_json::Value;
-use std::{collections::BTreeMap, fmt, time::Instant};
+use std::{
+    collections::BTreeMap,
+    fmt,
+    time::{Duration, Instant},
+};
 
 const MAX_DISCOVERY_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 
@@ -256,6 +260,7 @@ impl ModelDiscoveryService {
                 .iter()
                 .chain(protocol_preset.headers.iter()),
         )?
+        .timeout(Duration::from_secs(10))
         .body(serde_json::to_vec(&body).map_err(|_| DiscoveryServiceError::InvalidPreset)?);
         let response = match request.send().await {
             Ok(response) => response,

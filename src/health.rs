@@ -6,10 +6,12 @@ use crate::{
 };
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use serde::Serialize;
-#[cfg(test)]
-use std::sync::RwLock;
-use std::{collections::HashMap, sync::Arc, time::Duration};
-use tokio::sync::Mutex;
+use std::{
+    collections::HashMap,
+    sync::{Arc, RwLock},
+    time::Duration,
+};
+use tokio::sync::{Mutex, OwnedMutexGuard};
 
 pub const DEFAULT_COOLDOWN: Duration = Duration::from_secs(30);
 pub const DEFAULT_MAX_COOLDOWN: Duration = Duration::from_secs(30 * 60);
@@ -89,13 +91,12 @@ impl HealthClock for SystemHealthClock {
     }
 }
 
-#[cfg(test)]
 #[derive(Clone)]
 pub struct ManualHealthClock {
     now: Arc<RwLock<DateTime<Utc>>>,
 }
 
-#[cfg(test)]
+#[allow(dead_code)]
 impl ManualHealthClock {
     pub fn new(now: DateTime<Utc>) -> Self {
         Self {
@@ -115,7 +116,6 @@ impl ManualHealthClock {
     }
 }
 
-#[cfg(test)]
 impl HealthClock for ManualHealthClock {
     fn now(&self) -> DateTime<Utc> {
         *self.now.read().expect("manual health clock lock")
@@ -159,9 +159,11 @@ pub struct HealthRegistry {
     config: HealthConfig,
     database: Option<Database>,
     state: Arc<Mutex<HashMap<String, MemoryAccountState>>>,
+    probe_locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
     clock: Arc<dyn HealthClock>,
 }
 
+#[allow(dead_code)]
 impl HealthRegistry {
     pub fn new(cooldown: Duration) -> Self {
         let mut config = HealthConfig::default();
@@ -185,7 +187,10 @@ impl HealthRegistry {
         Self::with_database_config_and_clock(database, config, Arc::new(SystemHealthClock))
     }
 
-    #[cfg(test)]
+    pub fn from_database(database: Database, config: HealthConfig) -> Self {
+        Self::with_database_config(database, config)
+    }
+
     pub fn with_clock<C>(cooldown: Duration, clock: C) -> Self
     where
         C: HealthClock + 'static,
@@ -196,12 +201,12 @@ impl HealthRegistry {
         Self::with_config_and_clock(config, Arc::new(clock))
     }
 
-    #[cfg(test)]
     pub fn with_config_and_clock(config: HealthConfig, clock: Arc<dyn HealthClock>) -> Self {
         Self {
             config: config.normalized(),
             database: None,
             state: Arc::new(Mutex::new(HashMap::new())),
+            probe_locks: Arc::new(Mutex::new(HashMap::new())),
             clock,
         }
     }
@@ -215,16 +220,7 @@ impl HealthRegistry {
             config: config.normalized(),
             database: Some(database),
             state: Arc::new(Mutex::new(HashMap::new())),
-            clock,
-        }
-    }
-
-    #[cfg(not(test))]
-    fn with_config_and_clock(config: HealthConfig, clock: Arc<dyn HealthClock>) -> Self {
-        Self {
-            config: config.normalized(),
-            database: None,
-            state: Arc::new(Mutex::new(HashMap::new())),
+            probe_locks: Arc::new(Mutex::new(HashMap::new())),
             clock,
         }
     }
@@ -239,6 +235,25 @@ impl HealthRegistry {
 
     pub fn now(&self) -> DateTime<Utc> {
         self.clock.now()
+    }
+
+    async fn acquire_probe_lock(&self, account_id: &str) -> OwnedMutexGuard<()> {
+        let lock = {
+            let mut locks = self.probe_locks.lock().await;
+            locks
+                .entry(account_id.to_owned())
+                .or_insert_with(|| Arc::new(Mutex::new(())))
+                .clone()
+        };
+        lock.lock_owned().await
+    }
+
+    pub async fn restore(&self) -> Result<(), sqlx::Error> {
+        if let Some(database) = &self.database {
+            database.account_health_all().await.map(|_| ())
+        } else {
+            Ok(())
+        }
     }
 
     pub async fn is_available(&self, account_id: &str) -> bool {
@@ -413,12 +428,12 @@ impl HealthRegistry {
         .into();
         entry.source = normalize_source(source).into();
         entry.updated_at = Some(now);
-        entry.last_error = error_message.map(str::to_owned);
+        entry.last_error = sanitize_error(error_message);
         entry.last_success_at = None;
         if source == "probe" {
             entry.last_probe_at = Some(now);
             entry.last_probe_status = Some("failed".into());
-            entry.last_probe_error = error_message.map(str::to_owned);
+            entry.last_probe_error = sanitize_error(error_message);
         }
     }
 
@@ -516,6 +531,7 @@ impl HealthRegistry {
         model: Option<&str>,
         requested_by: &str,
     ) -> Result<ProbeOutcome, ProbeError> {
+        let _probe_guard = self.acquire_probe_lock(account_id).await;
         let database = self.database.clone().ok_or(ProbeError::DatabaseRequired)?;
         let source_id = database
             .account_source_id(account_id)
@@ -523,10 +539,25 @@ impl HealthRegistry {
             .map_err(ProbeError::Database)?
             .ok_or_else(|| ProbeError::AccountNotFound(account_id.to_owned()))?;
         let service = ModelDiscoveryService::new(database.model_catalog(), http.clone());
-        let record = service
+        let record = match service
             .test_connection(&source_id, account_id, protocol, model, requested_by)
             .await
-            .map_err(ProbeError::Discovery)?;
+        {
+            Ok(record) => record,
+            Err(error) => {
+                if !matches!(&error, DiscoveryServiceError::Catalog(_)) {
+                    self.mark_probe_failure(
+                        account_id,
+                        None,
+                        Some(error.code()),
+                        Some(error.public_message()),
+                        None,
+                    )
+                    .await;
+                }
+                return Err(ProbeError::Discovery(error));
+            }
+        };
         self.apply_connection_test(&record).await;
         let health = self.get_health(account_id).await;
         Ok(ProbeOutcome {
@@ -584,6 +615,24 @@ fn normalize_source(source: &str) -> &str {
     }
 }
 
+fn sanitize_error(value: Option<&str>) -> Option<String> {
+    let value = value?.trim();
+    let safe = matches!(
+        value,
+        "upstream request failed"
+            | "retryable upstream response"
+            | "upstream stream failed"
+            | "upstream connection failed"
+            | "upstream request timed out"
+            | "account credential unavailable"
+    );
+    Some(if safe {
+        value.to_owned()
+    } else {
+        "upstream request failed".into()
+    })
+}
+
 fn exponential_backoff(base: Duration, maximum: Duration, failures: u32) -> Duration {
     if failures == 0 {
         return Duration::ZERO;
@@ -603,7 +652,7 @@ fn stale(now: DateTime<Utc>, updated_at: Option<DateTime<Utc>>, stale_after: Dur
     let Ok(stale_after) = ChronoDuration::from_std(stale_after) else {
         return true;
     };
-    now.signed_duration_since(updated_at) > stale_after
+    now.signed_duration_since(updated_at) >= stale_after
 }
 
 fn cooldown_remaining(now: DateTime<Utc>, until: Option<DateTime<Utc>>) -> u64 {
@@ -736,10 +785,12 @@ mod tests {
     #[tokio::test]
     async fn stale_is_orthogonal_and_does_not_permanently_block_after_expiry() {
         let clock = clock();
-        let mut config = HealthConfig::default();
-        config.cooldown = Duration::from_secs(5);
-        config.max_cooldown = Duration::from_secs(20);
-        config.stale_after = Duration::from_secs(10);
+        let config = HealthConfig {
+            cooldown: Duration::from_secs(5),
+            max_cooldown: Duration::from_secs(20),
+            stale_after: Duration::from_secs(10),
+            ..HealthConfig::default()
+        };
         let registry = HealthRegistry::with_config_and_clock(config, Arc::new(clock.clone()));
         registry.mark_failure("a").await;
         clock.advance(Duration::from_secs(11));

@@ -228,15 +228,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if !admin_auth.is_configured() {
         tracing::warn!("GATEWAY_ADMIN_KEY is not configured; Admin API requests will be rejected");
     }
+    let health = health::HealthRegistry::with_database_config(
+        database.clone(),
+        health::HealthConfig::from_env(),
+    );
+    health.restore().await?;
     let state = AppState {
         live: Arc::new(std::sync::RwLock::new(live)),
         http: transport::client(source_url_policy.clone())?,
         db: Some(database.clone()),
         control_plane: Some(control_plane),
-        health: health::HealthRegistry::with_database_config(
-            database,
-            health::HealthConfig::from_env(),
-        ),
+        health,
         admin_auth,
     };
     spawn_health_probe_loop(state.clone());
@@ -610,6 +612,8 @@ fn application(state: AppState) -> Router {
         .route("/admin/health", get(admin_health))
         .route("/admin/health/probe", post(admin_health_probe))
         .route("/admin/health/probes", post(admin_health_probes))
+        .route("/admin/health/{id}", get(admin_account_health))
+        .route("/admin/health/{id}/probe", post(admin_account_probe))
         .route("/admin/accounts/{id}/probe", post(admin_account_probe))
         .route("/admin/routes/{protocol}/{model}", get(resolve_route))
         .with_state(state.clone())
@@ -2428,6 +2432,23 @@ async fn admin_health(State(state): State<AppState>, headers: HeaderMap) -> Resp
                 .collect::<Vec<_>>(),
             Err(error) => return control_plane_error(error),
         }
+    } else if let Some(database) = &state.db {
+        match sqlx::query_as::<_, (String, String, String, bool)>(
+            "SELECT id,source_id,display_name,enabled FROM accounts ORDER BY id",
+        )
+        .fetch_all(database.pool())
+        .await
+        {
+            Ok(accounts) => accounts,
+            Err(error) => {
+                tracing::warn!(%error, "failed to list accounts for health API");
+                return error_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "database_error",
+                    "failed to list accounts for health API",
+                );
+            }
+        }
     } else {
         live.config
             .accounts
@@ -2466,10 +2487,15 @@ async fn admin_health(State(state): State<AppState>, headers: HeaderMap) -> Resp
                 });
         data.push(json!({
             "account_id": account_id,
-            "provider_id": source_id,
-            "source_id": source_id,
+            "provider_id": source_id.clone(),
+            "source_id": source_id.clone(),
+            "source": {"source_id": source_id},
             "display_name": display_name,
             "enabled": enabled,
+            "health_status": health.status.clone(),
+            "health_source": health.source.clone(),
+            "health_updated_at": health.updated_at.clone(),
+            "stale": health.stale,
             "health": health,
         }));
     }
@@ -2482,6 +2508,57 @@ async fn admin_health(State(state): State<AppState>, headers: HeaderMap) -> Resp
         })),
     )
         .into_response()
+}
+
+async fn admin_account_health(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(account_id): Path<String>,
+) -> Response<Body> {
+    if !state.admin_auth.authorized(&headers) {
+        return error_response(
+            StatusCode::UNAUTHORIZED,
+            "unauthorized",
+            "admin key required",
+        );
+    }
+    let health = state.health.get_health(&account_id).await;
+    let metadata = if let Some(control_plane) = &state.control_plane {
+        match control_plane.get_account(&account_id).await {
+            Ok(account) => json!({
+                "account_id": account.id,
+                "source_id": account.source_id,
+                "display_name": account.display_name,
+                "enabled": account.enabled,
+            }),
+            Err(control_plane::ControlPlaneError::NotFound(_)) => {
+                return error_response(StatusCode::NOT_FOUND, "not_found", "account not found")
+            }
+            Err(error) => return control_plane_error(error),
+        }
+    } else {
+        let live = state.snapshot();
+        let Some(account) = live.config.account(&account_id) else {
+            return error_response(StatusCode::NOT_FOUND, "not_found", "account not found");
+        };
+        json!({
+            "account_id": account.id,
+            "source_id": account.provider_id,
+            "display_name": account.display_name,
+            "enabled": account.enabled,
+        })
+    };
+    let mut data = metadata;
+    if let Some(object) = data.as_object_mut() {
+        object.insert(
+            "health".into(),
+            serde_json::to_value(&health).unwrap_or(Value::Null),
+        );
+        object.insert("stale".into(), json!(health.stale));
+        object.insert("source".into(), json!(health.source.clone()));
+        object.insert("updated_at".into(), json!(health.updated_at.clone()));
+    }
+    (StatusCode::OK, Json(json!({"data": data}))).into_response()
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -2533,7 +2610,24 @@ async fn admin_health_probe(
             "account_id is required for a health probe",
         );
     };
-    let protocol = request.protocol.unwrap_or(Protocol::OpenAiChatCompletions);
+    let protocol = match request.protocol {
+        Some(protocol) => protocol,
+        None => match state.health.database() {
+            Some(database) => match database.health_probe_protocol(account_id).await {
+                Ok(Some(protocol)) => protocol,
+                Ok(None) => Protocol::OpenAiChatCompletions,
+                Err(error) => {
+                    tracing::warn!(%error, "failed to determine health probe protocol");
+                    return error_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "database_error",
+                        "failed to determine health probe protocol",
+                    );
+                }
+            },
+            None => Protocol::OpenAiChatCompletions,
+        },
+    };
     match state
         .health
         .probe_account(
@@ -2589,7 +2683,7 @@ async fn admin_health_probes(
             "health probes require PostgreSQL",
         );
     };
-    let protocol = request.protocol.unwrap_or(Protocol::OpenAiChatCompletions);
+    let requested_protocol = request.protocol;
     let account_ids = match request.account_ids {
         Some(ids) if !ids.is_empty() => ids,
         _ => match database.health_probe_targets().await {
@@ -2607,6 +2701,15 @@ async fn admin_health_probes(
     let mut outcomes = Vec::with_capacity(account_ids.len());
     let mut errors = Vec::new();
     for account_id in account_ids {
+        let protocol = match requested_protocol {
+            Some(protocol) => protocol,
+            None => database
+                .health_probe_protocol(&account_id)
+                .await
+                .ok()
+                .flatten()
+                .unwrap_or(Protocol::OpenAiChatCompletions),
+        };
         match state
             .health
             .probe_account(
@@ -3972,6 +4075,11 @@ mod admin_auth_tests {
         ("POST", "/admin/config/reload"),
         ("GET", "/admin/capabilities"),
         ("GET", "/admin/health"),
+        ("GET", "/admin/health/account-id"),
+        ("POST", "/admin/health/probe"),
+        ("POST", "/admin/health/probes"),
+        ("POST", "/admin/health/account-id/probe"),
+        ("POST", "/admin/accounts/account-id/probe"),
         ("GET", "/admin/routes/openai_responses/model-id"),
         ("GET", "/admin/provider-presets"),
         ("GET", "/admin/sources/source-id/preset-diff"),

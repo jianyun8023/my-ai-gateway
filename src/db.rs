@@ -245,6 +245,38 @@ fn normalize_health_source(source: &str) -> &str {
     }
 }
 
+fn sanitize_health_error(value: Option<&str>) -> Option<String> {
+    let value = value?.trim();
+    let safe = matches!(
+        value,
+        "upstream request failed"
+            | "retryable upstream response"
+            | "upstream stream failed"
+            | "upstream connection failed"
+            | "upstream request timed out"
+            | "account credential unavailable"
+    );
+    Some(if safe {
+        value.to_owned()
+    } else {
+        "upstream request failed".into()
+    })
+}
+
+fn sanitize_health_code(value: Option<&str>) -> Option<String> {
+    let value = value?.trim();
+    if !value.is_empty()
+        && value.len() <= 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+    {
+        Some(value.to_owned())
+    } else {
+        Some("upstream_failure".into())
+    }
+}
+
 fn exponential_backoff(base: Duration, maximum: Duration, failures: u32) -> Duration {
     if failures == 0 {
         return Duration::ZERO;
@@ -398,6 +430,18 @@ impl Database {
         Ok(targets)
     }
 
+    pub async fn health_probe_protocol(
+        &self,
+        account_id: &str,
+    ) -> Result<Option<Protocol>, sqlx::Error> {
+        Ok(self
+            .health_probe_targets()
+            .await?
+            .into_iter()
+            .find(|target| target.0 == account_id)
+            .map(|target| target.2))
+    }
+
     /// Atomically increment a failure counter and calculate the next
     /// exponential cooldown. `SELECT ... FOR UPDATE` serializes concurrent
     /// request/probe transitions for the same account.
@@ -436,7 +480,7 @@ impl Database {
         .bind(account_id)
         .bind(status)
         .bind(cooldown_until)
-        .bind(error_message)
+        .bind(sanitize_health_error(error_message))
         .bind(source)
         .bind(observed_at)
         .bind(i32::try_from(failures).unwrap_or(i32::MAX))
@@ -451,8 +495,8 @@ impl Database {
         .bind(observed_at)
         .bind(cooldown_until)
         .bind(i32::try_from(failures).unwrap_or(i32::MAX))
-        .bind(error_code)
-        .bind(error_message)
+        .bind(sanitize_health_code(error_code))
+        .bind(sanitize_health_error(error_message))
         .bind(connection_test_id)
         .bind(latency_ms)
         .execute(&mut *tx)

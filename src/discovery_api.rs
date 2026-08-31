@@ -46,6 +46,7 @@ pub fn router(database: Option<Database>, http: SourceHttpClient) -> Router {
 /// Discovery endpoints mounted by the gateway application. The Source
 /// collection itself is owned by the DB-first control plane so creation can
 /// publish a validated runtime snapshot in the same operation.
+#[allow(dead_code)]
 pub fn auxiliary_router(
     database: Option<Database>,
     http: SourceHttpClient,
