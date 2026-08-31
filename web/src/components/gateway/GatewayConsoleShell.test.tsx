@@ -55,6 +55,8 @@ describe('GatewayConsoleShell Admin key boundary', () => {
     });
 
     const input = container.querySelector<HTMLInputElement>('input[aria-label="Admin Key"]')!;
+    expect(input.required).toBe(true);
+    expect(input.placeholder).toBe('输入 GATEWAY_ADMIN_KEY');
     act(() => {
       const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
       valueSetter?.call(input, 'top-secret-value');

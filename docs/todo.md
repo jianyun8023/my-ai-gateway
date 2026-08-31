@@ -37,11 +37,11 @@
 
 ### 安全、质量与运维
 
-- [ ] Admin API fail closed，并与下游鉴权完全分离（#44）
-- [ ] Provider URL allowlist 与 SSRF 防护（#46）
+- [x] Admin API fail closed，并与下游鉴权完全分离（#44）
+- [x] Provider URL allowlist 与 SSRF 防护（#46）
 - [ ] 统一 Secret Resolver 与凭据信封加密（#47）
 - [ ] Admin 写操作审计日志（#48）
-- [ ] GitHub Actions 全量验证门禁（#49）
+- [x] GitHub Actions 全量验证门禁（#49）
 - [ ] Prometheus 与 OpenTelemetry（#50）
 - [ ] 数据保留、清理、备份与恢复（#53）
 

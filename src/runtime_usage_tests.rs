@@ -171,6 +171,7 @@ fn state(config: GatewayConfig, database: Option<db::Database>) -> AppState {
         db: database,
         control_plane: None,
         health: health::HealthRegistry::new(Duration::from_secs(1)),
+        admin_auth: AdminAuth::test(),
     }
 }
 
@@ -656,6 +657,7 @@ async fn postgres_db_first_source_attribution_covers_primary_fallback_stream_and
         db: Some(database.clone()),
         control_plane: None,
         health: health::HealthRegistry::new(Duration::from_secs(30)),
+        admin_auth: AdminAuth::test(),
     };
 
     let suffix = Uuid::new_v4().to_string();

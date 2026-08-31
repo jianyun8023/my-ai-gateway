@@ -504,7 +504,7 @@ UsageEvent 已记录实际 `upstream_model_id`、`route_id`、`streamed`、脱�
 
 已完成稳定 v1 `/admin/usage/summary`、`timeseries`、`breakdown`、`events`、`export` 查询契约、组合筛选、确定性游标分页和 CSV/JSON 导出。活动 Web 应用已经收敛为网关原生 Overview、Analysis、Request Events 三页，只请求 `/admin/usage/*`，不挂载 CPA Session、Ranking、Auth Files、配额、定价或请求正文功能。
 
-管理产品面的剩余工作是可复用控制台外壳与独立 Management 空间（#42）、有效能力矩阵页面（#43），以及 Source 接入和模型发现/确认页面（#45）。Admin API fail-closed 与数据面 Key 分离由 #44 负责；当前不把 CPA 登录或 Admin Session 当作已有能力。
+可复用控制台外壳与独立 Management 空间（#42）已经完成；管理产品面的剩余工作是有效能力矩阵页面（#43），以及 Source 接入和模型发现/确认页面（#45）。Admin API 已 fail closed 并与数据面 Key 完全分离；当前不把 CPA 登录或 Admin Session 当作已有能力。
 
 2026-08-31 控制台原型评审后，视觉基线采用 Tech-Utility 设计语言、Signal Green、固定桌面侧栏、紧凑顶部栏、卡片/表格和右侧详情抽屉；正式主导航仍只包含 Overview、Analysis、Request Events。设计 Token 与组件约束维护在 [`brand-spec.md`](brand-spec.md)，原型归档在 [`prototypes/ai-gateway-prototype.html`](prototypes/ai-gateway-prototype.html)，只作为设计参考，不参与构建。Source/Account、LogicalModel/SourceModel/ModelBinding/Route 必须继续按领域职责分离，不能照静态原型合并。响应式按 `<= 920px` overlay 侧栏、`<= 600px` 单列筛选/全宽 drawer、`<= 380px` 紧凑 KPI 渐进降级。实施与验收记录见 GitHub Issue #33。
 
@@ -521,8 +521,9 @@ CPA Usage Keeper 只复用 React 页面和交互，不复用其 Go 后端、SQLi
 - Prometheus/OpenTelemetry（#50）；
 - Secret Resolver 与凭据信封加密（#47）；
 - Admin 写操作审计日志（#48）；
-- Provider URL allowlist、解析后 IP 校验、重定向限制和 SSRF 防护（#46）；
 - 数据保留、清理、备份和恢复（#53）。
+
+Provider URL allowlist、解析后 IP 校验、重定向限制和 SSRF 防护（#46）已经完成。Admin API 只接受独立的 `GATEWAY_ADMIN_KEY`，未配置时请求级 fail closed 返回 `401`，不会回退到数据面 Key。
 
 ### 7.6 测试
 
@@ -587,8 +588,8 @@ CPA Usage Keeper 只复用 React 页面和交互，不复用其 Go 后端、SQLi
 
 以下顺序以当前开放 Issue 和依赖关系为准，互不冲突的切片可以并行：
 
-1. 建立自动验证门禁（#49），并收口 Admin Key 分离、URL/SSRF、Secret 和审计安全基线（#44、#46、#47、#48）。
-2. 建立独立 Management 外壳（#42），再并行接入有效能力矩阵（#43）和 Source/模型发现确认流（#45）。
+1. 在已完成自动验证门禁、Admin Key 分离和 URL/SSRF 防护（#49、#44、#46）的基础上，继续收口 Secret 和审计安全基线（#47、#48）。
+2. 在已完成独立 Management 外壳（#42）的基础上，并行接入有效能力矩阵（#43）和 Source/模型发现确认流（#45）。
 3. 修正 Provider/Source 独立归因（#56），随后完成 #8 用量分析 Epic 验收。
 4. 完成 Virtual Key 生命周期、健康持久化/主动探测和 SSE 生命周期契约（#51、#52、#54）。
 5. 接入 Prometheus/OpenTelemetry，并建立数据保留、备份与恢复流程（#50、#53）。

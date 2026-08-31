@@ -80,6 +80,7 @@ cargo run
 
 ```bash
 export GATEWAY_API_KEY='replace-with-a-random-secret'
+export GATEWAY_ADMIN_KEY='replace-with-a-different-admin-secret'
 docker compose up --build
 ```
 
@@ -160,14 +161,12 @@ CSV/JSON 导出复用 events 的筛选和排序，并有 10,000 行保护上限�
 
 ## 安全边界
 
-当前版本已经具备凭据响应脱敏、正文默认不落库、Virtual Key 哈希存储和可配置的管理接口鉴权，但以下生产安全工作仍在开放 Issue 中：
+当前版本已经具备凭据响应脱敏、正文默认不落库、Virtual Key 哈希存储、Admin API fail-closed，以及 Provider URL allowlist、解析后 IP 校验和重定向限制。仍待完成的生产安全工作包括：
 
-- Admin API 与数据面静态 Key 完全分离并 fail closed（#44）；
-- Provider URL allowlist、解析后 IP 校验和 SSRF 防护（#46）；
 - 统一 Secret Resolver 与凭据信封加密（#47）；
 - Admin 写操作审计日志（#48）。
 
-当前代码在未设置 `GATEWAY_ADMIN_KEY` 时会临时回退到 `GATEWAY_API_KEY`；两个 Key 都未设置时，Admin API 仍会放行。这只是开发期行为，不应被视为生产隔离。Provider Base URL 也尚未完成默认拒绝私网、元数据地址和危险重定向的策略；在 #46 合入前，只能使用受信任的服务端配置，并限制管理面访问。
+`GATEWAY_ADMIN_KEY` 与数据面 `GATEWAY_API_KEY` 完全分离。未设置 Admin Key 时网关仍可启动，但所有 Admin API 请求固定返回 `401`；数据面 Key 和 PostgreSQL Virtual Key 都不能调用管理接口。Provider Base URL 默认拒绝私网、loopback、link-local、云元数据地址和不安全重定向，私网自托管来源必须通过服务端 allowlist 显式放行。
 
 日志中禁止输出 Authorization、API Key 和完整请求正文。生产凭据应通过 `credential_env` 或受保护的 Secret 注入，不要把真实 Key 提交到仓库。
 

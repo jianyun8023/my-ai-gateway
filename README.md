@@ -37,15 +37,21 @@ mise run install  # 安装 web/ 前端锁定依赖
 
 ```bash
 export DATABASE_URL='postgres://gateway:gateway@127.0.0.1:5432/gateway'
+export GATEWAY_API_KEY='replace-with-a-random-data-plane-secret'
+export GATEWAY_ADMIN_KEY='replace-with-a-different-admin-secret'
 cargo run
 curl http://127.0.0.1:8787/healthz
 ```
+
+`GATEWAY_ADMIN_KEY` 只保护 `/admin/*` API，不会回退到数据面的
+`GATEWAY_API_KEY`。未设置 Admin Key 时网关仍可提供数据面服务，但所有
+Admin API 请求都会 fail closed 并返回 `401`。两个 Key 应使用不同的随机值。
 
 空控制面首次启动时，可通过 `GATEWAY_CONFIG_JSON` 一次性初始化。控制面已有任意管理数据后，后续启动不会解析或覆盖该 JSON；此时运行时直接加载数据库 snapshot。需要显式替换现有开发控制面时，同时设置 `GATEWAY_CONFIG_IMPORT=true`，该操作会在事务中清理并重新导入 Source/Account/模型/Binding/Route，因此只应在明确需要导入时使用。监听地址独立使用 `GATEWAY_LISTEN_ADDR`。
 
 常用任务：`mise run dev`（网关 + Vite 开发环境）、`mise run build`、`mise run test`、`mise run lint`、`mise run verify`（完整门禁）。
 
-设置 `GATEWAY_ADMIN_KEY` 后可创建下游 Virtual Key，原始 Key 只在创建响应中返回：
+使用 `GATEWAY_ADMIN_KEY` 可创建下游 Virtual Key，原始 Key 只在创建响应中返回：
 
 ```bash
 curl -X POST http://127.0.0.1:8787/admin/keys \
