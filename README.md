@@ -25,7 +25,11 @@ Rust AI 网关 MVP，目标是将多个上游账号统一为一个入口，并�
 - 按协议连接测试、模型发现、稳定 `added/changed/missing` 差异、待确认列表、用户编辑和批量确认 API；发现结果不会自动创建 LogicalModel、Binding 或 Route，失败信息和日志均不包含凭据或完整响应正文。
 - Source、Account、LogicalModel、ModelBinding、Route 管理 API 支持创建、查询、更新、启停和删除；有效写入会在同一事务内完成校验与下一版 snapshot 构建，失败不会留下坏行。
 - Account 健康状态以 PostgreSQL 为事实来源，支持被动失败冷却、ProviderPreset 主动连接探测、stale 过期放行、指数退避、重启恢复和人工启停。
-- 管理接口还包括 `/admin/keys`、`/admin/keys/:id/revoke`、`/admin/provider-presets`、`/admin/sources/*`、基于当前 DB runtime snapshot 的有效能力矩阵 `/admin/capabilities`，以及 `/admin/usage/summary|timeseries|breakdown|events|export`；`/admin/usage/aggregate` 保留为一次获取三类聚合的组合入口。
+- AES-256-GCM 凭据信封加密（`gwenc:v1` 格式），多版本 keyring 支持渐进式轮换；Admin 加密和凭据轮换端点已集成。
+- Admin 写操作审计日志，事务内原子记录成功、独立记录失败；diff 自动脱敏 14 类敏感字段。
+- Virtual Key 轮换（overlap 窗口）、scopes 权限更新和 key_group 分组。
+- Prometheus 指标采集（请求/attempt/Token/延迟/TTFT/冷却/snapshot/活跃流），`/metrics` 端点可用。
+- 管理接口还包括 `/admin/keys`、`/admin/keys/:id/rotate`、`/admin/keys/:id/revoke`、`/admin/provider-presets`、`/admin/sources/*`、基于当前 DB runtime snapshot 的有效能力矩阵 `/admin/capabilities`、`/admin/credentials/encrypt`、`/admin/accounts/:id/credentials/rotate`，以及 `/admin/usage/summary|timeseries|breakdown|events|export`；`/admin/usage/aggregate` 保留为一次获取三类聚合的组合入口。
 
 工具链由 [Mise](https://mise.jdx.dev/) 管理（Rust 1.97.1 + Node 24，见 [`mise.toml`](./mise.toml)）：
 
