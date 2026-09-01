@@ -586,7 +586,7 @@ async fn postgres_db_first_source_attribution_covers_primary_fallback_stream_and
             let chunks = stream::once(async {
                 tokio::time::sleep(Duration::from_millis(15)).await;
                 Ok::<Bytes, std::io::Error>(Bytes::from_static(
-                    b"data: {\"usage\":{\"input_tokens\":2,\"output_tokens\":3}}\n\n",
+                    b"data: {\"usage\":{\"input_tokens\":2,\"output_tokens\":3}}\n\ndata: [DONE]\n\n",
                 ))
             });
             return Response::builder()
