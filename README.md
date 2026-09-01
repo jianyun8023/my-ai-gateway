@@ -21,7 +21,7 @@ Rust AI 网关 MVP，目标是将多个上游账号统一为一个入口，并�
 - Kimi Responses 适配器已作为 workspace crate 内置，路由使用 `kimi_responses_adapter` 时直接在进程内转换。
 - PostgreSQL 是控制面与运行时路由的事实来源；启动在一致性事务中加载 Source、Account、LogicalModel、ModelBinding、SourceModelCapability 和 Route，并按单调 `snapshot_revision` 原子发布不可变 snapshot。
 - PostgreSQL-backed Virtual Key：创建、列表、撤销、模型白名单鉴权。
-- 内置、版本化的 DeepSeek、MiniMax、Kimi Code ProviderPreset 和 ModelPreset；Source 创建时复制不可变快照，预设升级只展示差异。
+- 内置、版本化的 DeepSeek、MiniMax、Kimi Code ProviderPreset 和 ModelPreset；当前最新内置预设为 `@2`，Source 创建时复制不可变快照，预设升级只展示差异，不改写既有 `@1` 快照。已验证的 Responses `web_search` 与 Kimi Adapter `tool_streaming` 能力只在 `@2` 声明。
 - 按协议连接测试、模型发现、稳定 `added/changed/missing` 差异、待确认列表、用户编辑和批量确认 API；发现结果不会自动创建 LogicalModel、Binding 或 Route，失败信息和日志均不包含凭据或完整响应正文。
 - Source、Account、LogicalModel、ModelBinding、Route 管理 API 支持创建、查询、更新、启停和删除；有效写入会在同一事务内完成校验与下一版 snapshot 构建，失败不会留下坏行。
 - Account 健康状态以 PostgreSQL 为事实来源，支持被动失败冷却、ProviderPreset 主动连接探测、stale 过期放行、指数退避、重启恢复和人工启停。

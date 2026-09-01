@@ -23,7 +23,7 @@ use std::{
 };
 
 use axum::{
-    body::{Body, Bytes},
+    body::{to_bytes, Body, Bytes},
     extract::{rejection::JsonRejection, Path, Query, State},
     http::{
         header::{CONTENT_DISPOSITION, CONTENT_TYPE},
@@ -3500,6 +3500,14 @@ async fn embedded_kimi_adapter(
     request_started: Instant,
 ) -> Result<Response<Body>, transport::TransportError> {
     http.validate_base_url(&provider.base_url)?;
+    // The embedded adapter does not pass through the native transport helper,
+    // so retain the original request and explicitly attach the same usage
+    // report for completed JSON responses.
+    let request_body = body.clone();
+    let is_streaming = serde_json::from_slice::<Value>(&request_body)
+        .ok()
+        .and_then(|value| value.get("stream").and_then(Value::as_bool))
+        .unwrap_or(false);
     let cfg = kimi_responses_adapter::adapter::config::Config {
         listen_addr: String::new(),
         kimi_base_url: provider.base_url.trim_end_matches('/').to_string(),
@@ -3554,10 +3562,21 @@ async fn embedded_kimi_adapter(
             request_headers.insert("authorization", value);
         }
     }
-    adapter
+    let response = adapter
         .oneshot(request)
         .await
-        .map_err(|_| transport::TransportError::Request)
+        .map_err(|_| transport::TransportError::Request)?;
+    if is_streaming || is_event_stream(&response) {
+        return Ok(response);
+    }
+    let (parts, body) = response.into_parts();
+    let bytes = to_bytes(body, 16 * 1024 * 1024)
+        .await
+        .map_err(|_| transport::TransportError::Request)?;
+    let report = usage::usage_for_json_response(parts.status.is_success(), &request_body, &bytes);
+    let mut response = Response::from_parts(parts, Body::from(bytes));
+    response.extensions_mut().insert(report);
+    Ok(response)
 }
 
 struct FallbackCandidate<'a> {
@@ -4924,6 +4943,7 @@ mod usage_api_tests {
 #[cfg(test)]
 mod kimi_adapter_e2e_tests {
     use super::*;
+    use crate::usage::UsageReport;
     use axum::{
         body::to_bytes,
         extract::Request,
@@ -5058,14 +5078,23 @@ mod kimi_adapter_e2e_tests {
         }
     }
 
-    async fn invoke_responses(state: AppState, body: &str) -> (StatusCode, String) {
+    async fn invoke_responses_with_usage(
+        state: AppState,
+        body: &str,
+    ) -> (StatusCode, String, Option<UsageReport>) {
         let response =
             responses(State(state), HeaderMap::new(), Bytes::from(body.to_owned())).await;
         let status = response.status();
+        let usage = transport::usage_from_response(&response);
         let bytes = to_bytes(response.into_body(), 16 * 1024 * 1024)
             .await
             .expect("response body");
-        (status, String::from_utf8_lossy(&bytes).into_owned())
+        (status, String::from_utf8_lossy(&bytes).into_owned(), usage)
+    }
+
+    async fn invoke_responses(state: AppState, body: &str) -> (StatusCode, String) {
+        let (status, body, _) = invoke_responses_with_usage(state, body).await;
+        (status, body)
     }
 
     #[tokio::test]
@@ -5083,7 +5112,7 @@ mod kimi_adapter_e2e_tests {
                 .unwrap()
         })
         .await;
-        let (status, body) = invoke_responses(
+        let (status, body, usage) = invoke_responses_with_usage(
             test_state(base),
             r#"{"model":"k3","stream":false,"input":"hello"}"#,
         )
@@ -5095,6 +5124,13 @@ mod kimi_adapter_e2e_tests {
         assert!(output.iter().any(|item| item["type"] == "reasoning"));
         assert!(output.iter().any(|item| item["type"] == "web_search_call"));
         assert_eq!(response["usage"]["input_tokens"], 12);
+        let usage = usage.expect("embedded adapter should attach a usage report");
+        assert_eq!(usage.source, "upstream");
+        assert_eq!(usage.input_tokens, 12);
+        assert_eq!(usage.output_tokens, 4);
+        assert_eq!(usage.reasoning_tokens, 1);
+        assert_eq!(usage.cached_tokens, 2);
+        assert_eq!(usage.total_tokens, 16);
         assert!(recorded
             .lock()
             .expect("recorded body mutex")

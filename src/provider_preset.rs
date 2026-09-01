@@ -11,6 +11,9 @@ use serde_json::{json, Value};
 use std::collections::BTreeMap;
 
 pub const PROVIDER_PRESET_SCHEMA_VERSION: u32 = 1;
+/// The latest built-in provider preset record version.  Record versions are
+/// immutable snapshots; bumping this value never rewrites an existing Source.
+pub const BUILTIN_PROVIDER_PRESET_VERSION: i32 = 2;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -325,18 +328,77 @@ pub async fn install_builtin_presets(
 }
 
 pub fn builtin_provider_presets() -> Result<Vec<ProviderPresetInput>, CatalogError> {
-    [deepseek(), minimax(), kimi_code()]
-        .into_iter()
-        .map(|(id, display_name, definition)| {
-            definition.validate()?;
-            Ok(ProviderPresetInput {
-                id: id.into(),
-                version: 1,
-                display_name: display_name.into(),
-                definition: serde_json::to_value(definition)?,
-            })
+    let (deepseek_id, deepseek_name, deepseek_definition) = deepseek();
+    let (minimax_id, minimax_name, minimax_definition) = minimax();
+    let (kimi_id, kimi_name, kimi_definition) = kimi_code();
+
+    let mut deepseek_v2 = deepseek_definition.clone();
+    mark_protocol_feature(
+        &mut deepseek_v2,
+        Protocol::OpenAiResponses,
+        "web_search",
+        CapabilitySupport::Supported,
+    );
+    let mut minimax_v2 = minimax_definition.clone();
+    mark_protocol_feature(
+        &mut minimax_v2,
+        Protocol::OpenAiResponses,
+        "web_search",
+        CapabilitySupport::Supported,
+    );
+    let mut kimi_v2 = kimi_definition.clone();
+    // The embedded Responses adapter translates streamed tool calls.  Keep
+    // this fact in the Source capability snapshot so the runtime matrix does
+    // not report the feature as an implicit unsupported value.
+    mark_protocol_feature(
+        &mut kimi_v2,
+        Protocol::OpenAiResponses,
+        "tool_streaming",
+        CapabilitySupport::Supported,
+    );
+
+    [
+        (deepseek_id, deepseek_name, 1, deepseek_definition),
+        (minimax_id, minimax_name, 1, minimax_definition),
+        (kimi_id, kimi_name, 1, kimi_definition),
+        (
+            deepseek_id,
+            deepseek_name,
+            BUILTIN_PROVIDER_PRESET_VERSION,
+            deepseek_v2,
+        ),
+        (
+            minimax_id,
+            minimax_name,
+            BUILTIN_PROVIDER_PRESET_VERSION,
+            minimax_v2,
+        ),
+        (kimi_id, kimi_name, BUILTIN_PROVIDER_PRESET_VERSION, kimi_v2),
+    ]
+    .into_iter()
+    .map(|(id, display_name, version, definition)| {
+        definition.validate()?;
+        Ok(ProviderPresetInput {
+            id: id.into(),
+            version,
+            display_name: display_name.into(),
+            definition: serde_json::to_value(definition)?,
         })
-        .collect()
+    })
+    .collect()
+}
+
+fn mark_protocol_feature(
+    definition: &mut ProviderPresetDefinition,
+    protocol: Protocol,
+    feature: &str,
+    support: CapabilitySupport,
+) {
+    if let Some(protocol_definition) = definition.protocols.get_mut(&protocol) {
+        protocol_definition
+            .default_capabilities
+            .insert(feature.to_owned(), support);
+    }
 }
 
 pub fn builtin_model_presets() -> Result<Vec<ModelPresetInput>, CatalogError> {
@@ -696,9 +758,12 @@ mod tests {
     #[test]
     fn builtins_are_versioned_complete_and_explicit_about_discovery() {
         let presets = builtin_provider_presets().expect("valid builtins");
-        assert_eq!(presets.len(), 3);
+        assert_eq!(presets.len(), 6);
         for preset in &presets {
-            assert_eq!(preset.version, 1);
+            assert!(matches!(
+                preset.version,
+                1 | BUILTIN_PROVIDER_PRESET_VERSION
+            ));
             let definition: ProviderPresetDefinition =
                 serde_json::from_value(preset.definition.clone()).unwrap();
             definition.validate().unwrap();
@@ -706,7 +771,7 @@ mod tests {
         }
         let kimi = presets
             .iter()
-            .find(|preset| preset.id == "kimi_code")
+            .find(|preset| preset.id == "kimi_code" && preset.version == 1)
             .unwrap();
         let definition: ProviderPresetDefinition =
             serde_json::from_value(kimi.definition.clone()).unwrap();
@@ -718,6 +783,33 @@ mod tests {
             definition.protocols[&Protocol::OpenAiResponses].mode,
             SourceProtocolMode::Adapter
         );
+        let kimi_v2 = presets
+            .iter()
+            .find(|preset| {
+                preset.id == "kimi_code" && preset.version == BUILTIN_PROVIDER_PRESET_VERSION
+            })
+            .unwrap();
+        let kimi_v2_definition: ProviderPresetDefinition =
+            serde_json::from_value(kimi_v2.definition.clone()).unwrap();
+        assert_eq!(
+            kimi_v2_definition.protocols[&Protocol::OpenAiResponses].default_capabilities
+                ["tool_streaming"],
+            CapabilitySupport::Supported
+        );
+        for provider_id in ["deepseek", "minimax"] {
+            let preset = presets
+                .iter()
+                .find(|preset| {
+                    preset.id == provider_id && preset.version == BUILTIN_PROVIDER_PRESET_VERSION
+                })
+                .unwrap();
+            let definition: ProviderPresetDefinition =
+                serde_json::from_value(preset.definition.clone()).unwrap();
+            assert_eq!(
+                definition.protocols[&Protocol::OpenAiResponses].default_capabilities["web_search"],
+                CapabilitySupport::Supported
+            );
+        }
     }
 
     #[test]

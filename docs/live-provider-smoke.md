@@ -2,7 +2,7 @@
 
 真实 Provider Smoke 用于验证上游当前契约，补充默认 CI 中的 mock 回归。它会产生真实外部请求和 Token 消耗，因此默认关闭，也不由 Pull Request CI 自动运行。
 
-问题与验收范围跟踪在 [Issue #62](https://github.com/jianyun8023/my-ai-gateway/issues/62)。
+问题与验收范围跟踪在 [Issue #62](https://github.com/jianyun8023/my-ai-gateway/issues/62)。Kimi 非流式 Adapter Usage 与已验证能力声明的回归检查属于该 Issue 的收口门禁。
 
 ## 两层测试
 
@@ -78,6 +78,11 @@ mise run test-live -- --include-high-cost
 5. Provider 行为变化先更新 Issue/ProviderPreset 版本，不静默放宽断言；
 6. 搜索、thinking 等高 Token 案例必须标记 `cost=high`；
 7. 暂时无法由上游触发的能力使用 `not_triggered`，不能记作通过。
+
+当 Kimi 非流式响应包含 `usage` 时，runner 会同时核对响应 Usage 与网关
+`UsageEvent` 的 `usage_source`/Token 字段；`--strict-known-issues` 应在该检查失败时返回非零。
+Provider 能力声明通过新增不可变 ProviderPreset 版本更新，既有 Source 的 `@1` 快照不会被
+静默改写。
 
 ## 结果与安全
 
