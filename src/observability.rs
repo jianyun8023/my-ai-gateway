@@ -13,9 +13,7 @@ use opentelemetry::trace::TracerProvider as _;
 use opentelemetry_otlp::SpanExporter;
 use opentelemetry_sdk::{trace::SdkTracerProvider, Resource};
 use tracing_opentelemetry::OpenTelemetryLayer;
-use tracing_subscriber::{
-    fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Registry,
-};
+use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Registry};
 
 pub const METRIC_REQUESTS_TOTAL: &str = "gateway_requests_total";
 pub const METRIC_ATTEMPTS_TOTAL: &str = "gateway_upstream_attempts_total";
@@ -63,8 +61,8 @@ pub fn init_tracing() -> Option<SdkTracerProvider> {
 
     match env::var("OTEL_EXPORTER_OTLP_ENDPOINT") {
         Ok(endpoint) if !endpoint.is_empty() => {
-            let service_name = env::var("OTEL_SERVICE_NAME")
-                .unwrap_or_else(|_| "my-ai-gateway".to_string());
+            let service_name =
+                env::var("OTEL_SERVICE_NAME").unwrap_or_else(|_| "my-ai-gateway".to_string());
 
             match init_otel_provider(&endpoint, &service_name) {
                 Ok(provider) => {
@@ -85,10 +83,7 @@ pub fn init_tracing() -> Option<SdkTracerProvider> {
                     Some(provider)
                 }
                 Err(err) => {
-                    Registry::default()
-                        .with(env_filter)
-                        .with(fmt_layer)
-                        .init();
+                    Registry::default().with(env_filter).with(fmt_layer).init();
 
                     tracing::warn!(
                         %err,
@@ -99,10 +94,7 @@ pub fn init_tracing() -> Option<SdkTracerProvider> {
             }
         }
         _ => {
-            Registry::default()
-                .with(env_filter)
-                .with(fmt_layer)
-                .init();
+            Registry::default().with(env_filter).with(fmt_layer).init();
             None
         }
     }
