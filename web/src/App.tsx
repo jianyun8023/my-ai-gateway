@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import './index.css';
 import './App.css';
 import {
@@ -10,22 +10,16 @@ import {
   IconFileText,
   IconFilterAll,
   IconGitBranch,
-  IconSearch,
   IconSettings,
-  IconShield,
   IconSidebarProviders,
 } from './components/ui/icons';
 import {
-  consoleRouteHash,
-  DEFAULT_CONSOLE_ROUTES,
-  GATEWAY_MANAGEMENT_PAGES,
-  GATEWAY_USAGE_TABS,
-  resolveConsoleRoute,
-  type GatewayConsoleRoute,
-  type GatewayConsoleSpace,
-  type GatewayManagementPage as GatewayManagementPageId,
-  type GatewayUsageTab,
+  consolePageHash,
+  resolveConsolePage,
+  type ConsolePage,
+  type ConsoleNavSection,
 } from './lib/consoleNavigation';
+
 const GatewayManagementPage = lazy(async () => {
   const module = await import('./pages/GatewayManagementPage');
   return { default: module.GatewayManagementPage };
@@ -38,107 +32,92 @@ const GatewayUsagePage = lazy(async () => {
 
 interface PageMeta {
   title: string;
-  shortTitle: string;
-  eyebrow: string;
   description: string;
 }
 
-const USAGE_META: Record<GatewayUsageTab, PageMeta> = {
-  overview: { title: 'Overview', shortTitle: '总览', eyebrow: 'PostgreSQL Usage Events', description: 'Token 总览、时间趋势与最近请求活动' },
-  analysis: { title: 'Analysis', shortTitle: '用量分析', eyebrow: 'PostgreSQL Usage Events', description: '模型、Provider、Source、协议与延迟分布' },
-  events: { title: 'Request Events', shortTitle: '请求事件', eyebrow: 'PostgreSQL Usage Events', description: '请求元数据、fallback、attempt 与 Token 明细' },
+const PAGE_META: Record<ConsolePage, PageMeta> = {
+  overview: { title: '总览', description: '过去 24 小时的网关运行状态' },
+  analysis: { title: '用量分析', description: 'Token 构成、模型分布、来源分析与延迟诊断' },
+  events: { title: '请求事件', description: '查看每次请求的元数据、重试和 Token 明细' },
+  sources: { title: '来源管理', description: '管理 Provider Source、Account 和连接配置' },
+  models: { title: '模型与路由', description: '逻辑模型映射、来源绑定与协议路由配置' },
+  settings: { title: '系统设置', description: '网关入口、Virtual Key 和配置管理' },
 };
 
-const MANAGEMENT_META: Record<GatewayManagementPageId, PageMeta> = {
-  sources: { title: 'Sources', shortTitle: '来源管理', eyebrow: 'Control Plane', description: 'Source 与 Account 管理空间' },
-  'model-discovery': { title: 'Model Discovery', shortTitle: '模型发现', eyebrow: 'Control Plane', description: '模型发现、差异与确认空间' },
-  capabilities: { title: 'Effective Capabilities', shortTitle: '有效能力', eyebrow: 'Control Plane', description: 'DB-first 三协议有效能力空间' },
-  'models-routes': { title: 'Models & Routes', shortTitle: '模型与路由', eyebrow: 'Control Plane', description: 'LogicalModel、ModelBinding 与 Route 生命周期' },
-  settings: { title: 'Settings', shortTitle: '系统设置', eyebrow: 'Admin Resources', description: 'Admin Key 会话、Virtual Key 与 runtime snapshot' },
+const PAGE_ICONS: Record<ConsolePage, React.ReactNode> = {
+  overview: <IconFilterAll size={18} />,
+  analysis: <IconChartLine size={18} />,
+  events: <IconFileText size={18} />,
+  sources: <IconSidebarProviders size={18} />,
+  models: <IconGitBranch size={18} />,
+  settings: <IconSettings size={18} />,
 };
 
-const USAGE_NAVIGATION: readonly GatewayConsoleNavItem[] = [
-  { id: 'overview', label: 'Overview', shortLabel: '总览', icon: <IconFilterAll size={18} /> },
-  { id: 'analysis', label: 'Analysis', shortLabel: '用量分析', icon: <IconChartLine size={18} /> },
-  { id: 'events', label: 'Request Events', shortLabel: '请求事件', icon: <IconFileText size={18} /> },
+const NAVIGATION_SECTIONS: readonly ConsoleNavSection[] = [
+  { label: '监控', pages: ['overview', 'analysis', 'events'] },
+  { label: '配置', pages: ['sources', 'models'] },
+  { label: '系统', pages: ['settings'] },
 ];
 
-const MANAGEMENT_NAVIGATION: readonly GatewayConsoleNavItem[] = [
-  { id: 'sources', label: 'Sources', shortLabel: '来源与账号', icon: <IconSidebarProviders size={18} /> },
-  { id: 'model-discovery', label: 'Model Discovery', shortLabel: '发现与确认', icon: <IconSearch size={18} /> },
-  { id: 'capabilities', label: 'Effective Capabilities', shortLabel: '三协议矩阵', icon: <IconShield size={18} /> },
-  { id: 'models-routes', label: 'Models & Routes', shortLabel: '模型与路由', icon: <IconGitBranch size={18} /> },
-  { id: 'settings', label: 'Settings', shortLabel: '系统设置', icon: <IconSettings size={18} /> },
+const NAVIGATION_ITEMS: readonly GatewayConsoleNavItem[] = [
+  { id: 'overview', label: '总览', icon: PAGE_ICONS.overview },
+  { id: 'analysis', label: '用量分析', icon: PAGE_ICONS.analysis },
+  { id: 'events', label: '请求事件', icon: PAGE_ICONS.events },
+  { id: 'sources', label: '来源管理', icon: PAGE_ICONS.sources },
+  { id: 'models', label: '模型与路由', icon: PAGE_ICONS.models },
+  { id: 'settings', label: '系统设置', icon: PAGE_ICONS.settings },
 ];
+
+const USAGE_PAGES = new Set<ConsolePage>(['overview', 'analysis', 'events']);
 
 function App() {
-  const [route, setRoute] = useState<GatewayConsoleRoute>(() => resolveConsoleRoute(window.location.hash));
-  const lastRouteRef = useRef({
-    usage: DEFAULT_CONSOLE_ROUTES.usage,
-    management: DEFAULT_CONSOLE_ROUTES.management,
-  });
+  const [page, setPage] = useState<ConsolePage>(() => resolveConsolePage(window.location.hash));
 
-  const rememberRoute = useCallback((nextRoute: GatewayConsoleRoute) => {
-    if (nextRoute.space === 'usage') lastRouteRef.current.usage = nextRoute;
-    else lastRouteRef.current.management = nextRoute;
-  }, []);
-
-  const navigateTo = useCallback((nextRoute: GatewayConsoleRoute) => {
-    rememberRoute(nextRoute);
-    const nextHash = consoleRouteHash(nextRoute);
+  const navigateTo = useCallback((nextPage: ConsolePage) => {
+    const nextHash = consolePageHash(nextPage);
     if (window.location.hash !== nextHash) window.location.hash = nextHash;
-    setRoute(nextRoute);
-  }, [rememberRoute]);
+    setPage(nextPage);
+  }, []);
 
   useEffect(() => {
     const syncRoute = () => {
-      const nextRoute = resolveConsoleRoute(window.location.hash);
-      const canonicalHash = consoleRouteHash(nextRoute);
+      const nextPage = resolveConsolePage(window.location.hash);
+      const canonicalHash = consolePageHash(nextPage);
       if (window.location.hash !== canonicalHash) {
         window.history.replaceState(null, '', canonicalHash);
       }
-      rememberRoute(nextRoute);
-      setRoute(nextRoute);
+      setPage(nextPage);
     };
     syncRoute();
     window.addEventListener('hashchange', syncRoute);
     return () => window.removeEventListener('hashchange', syncRoute);
-  }, [rememberRoute]);
+  }, []);
 
-  const changeSpace = (space: GatewayConsoleSpace) => navigateTo(lastRouteRef.current[space]);
-  const navigate = (page: string) => {
-    if (route.space === 'usage' && GATEWAY_USAGE_TABS.includes(page as GatewayUsageTab)) {
-      navigateTo({ space: 'usage', page: page as GatewayUsageTab });
-    } else if (route.space === 'management' && GATEWAY_MANAGEMENT_PAGES.includes(page as GatewayManagementPageId)) {
-      navigateTo({ space: 'management', page: page as GatewayManagementPageId });
-    }
+  const navigate = (id: string) => {
+    const target = id as ConsolePage;
+    navigateTo(target);
   };
 
-  const meta = route.space === 'usage' ? USAGE_META[route.page] : MANAGEMENT_META[route.page];
+  const meta = PAGE_META[page];
 
   return (
     <div className="app-frame">
       <main className="app-main">
         <GatewayConsoleShell
-          space={route.space}
-          navigationLabel={route.space === 'usage' ? '主导航' : '管理导航'}
-          navigationSection={route.space === 'usage' ? '监控' : '管理'}
-          navigationItems={route.space === 'usage' ? USAGE_NAVIGATION : MANAGEMENT_NAVIGATION}
-          activeItem={route.page}
+          activePage={page}
+          navigationSections={NAVIGATION_SECTIONS}
+          navigationItems={NAVIGATION_ITEMS}
           onNavigate={navigate}
-          onSpaceChange={changeSpace}
           title={meta.title}
-          shortTitle={meta.shortTitle}
-          eyebrow={meta.eyebrow}
           description={meta.description}
           refreshable
         >
           {({ getAdminKey, adminKeyConfigured, clearAdminKey, refreshRevision, setRefreshing }) => (
             <Suspense fallback={<div className="app-route-loading" role="status" aria-busy="true">正在加载页面…</div>}>
-              {route.space === 'usage'
+              {USAGE_PAGES.has(page)
                 ? (
                     <GatewayUsagePage
-                      activeTab={route.page}
+                      activeTab={page as 'overview' | 'analysis' | 'events'}
                       getAdminKey={getAdminKey}
                       refreshRevision={refreshRevision}
                       onLoadingChange={setRefreshing}
@@ -146,7 +125,7 @@ function App() {
                   )
                 : (
                     <GatewayManagementPage
-                      page={route.page}
+                      page={page === 'models' ? 'models-routes' : page === 'sources' ? 'sources' : page as 'settings'}
                       getAdminKey={getAdminKey}
                       adminKeyConfigured={adminKeyConfigured}
                       clearAdminKey={clearAdminKey}

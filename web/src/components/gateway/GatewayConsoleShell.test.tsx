@@ -32,16 +32,11 @@ describe('GatewayConsoleShell Admin key boundary', () => {
     act(() => {
       root.render(
         <GatewayConsoleShell
-          space="usage"
-          navigationLabel="主导航"
-          navigationSection="监控"
-          navigationItems={[{ id: 'overview', label: 'Overview', shortLabel: '总览', icon: <IconFilterAll /> }]}
-          activeItem="overview"
+          activePage="overview"
+          navigationSections={[{ label: '监控', pages: ['overview'] }]}
+          navigationItems={[{ id: 'overview', label: '总览', icon: <IconFilterAll /> }]}
           onNavigate={() => {}}
-          onSpaceChange={() => {}}
-          title="Overview"
-          shortTitle="总览"
-          eyebrow="Usage"
+          title="总览"
           description="Token"
           refreshable
         >
@@ -56,7 +51,7 @@ describe('GatewayConsoleShell Admin key boundary', () => {
 
     const input = container.querySelector<HTMLInputElement>('input[aria-label="Admin Key"]')!;
     expect(input.required).toBe(true);
-    expect(input.placeholder).toBe('输入 GATEWAY_ADMIN_KEY');
+    expect(input.placeholder).toBe('GATEWAY_ADMIN_KEY');
     act(() => {
       const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
       valueSetter?.call(input, 'top-secret-value');
