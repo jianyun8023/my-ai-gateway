@@ -1,8 +1,10 @@
-use super::protocol::Protocol;
-use crate::control_plane::model_catalog::{
-    CapabilitySupport, CatalogError, CatalogMetadata, MetadataField, MetadataValues,
-    ModelCatalogRepository, ModelPresetInput, ProviderPresetInput, ProviderPresetRecord,
-    SourceProtocolMode, SourceRecord,
+use super::{
+    catalog::{
+        CapabilitySupport, CatalogError, CatalogMetadata, MetadataField, MetadataValues,
+        ModelPresetInput, ProviderPresetInput, ProviderPresetRecord, SourceProtocolMode,
+        SourceRecord,
+    },
+    protocol::Protocol,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -309,18 +311,6 @@ fn validate_relative_endpoint(endpoint: &str) -> Result<(), CatalogError> {
         return Err(CatalogError::InvalidState(format!(
             "provider preset endpoint '{endpoint}' must be an absolute path"
         )));
-    }
-    Ok(())
-}
-
-pub async fn install_builtin_presets(
-    repository: &ModelCatalogRepository,
-) -> Result<(), CatalogError> {
-    for preset in builtin_provider_presets()? {
-        repository.insert_provider_preset(&preset).await?;
-    }
-    for preset in builtin_model_presets()? {
-        repository.insert_model_preset(&preset).await?;
     }
     Ok(())
 }
@@ -829,8 +819,8 @@ mod tests {
                 .values()
                 .all(|source| matches!(
                     source,
-                    crate::control_plane::model_catalog::MetadataSource::Preset
-                        | crate::control_plane::model_catalog::MetadataSource::Unknown
+                    crate::domain::catalog::MetadataSource::Preset
+                        | crate::domain::catalog::MetadataSource::Unknown
                 )));
         }
     }

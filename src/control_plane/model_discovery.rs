@@ -842,12 +842,11 @@ fn elapsed_ms(started: Instant) -> i64 {
 mod tests {
     use super::*;
     use crate::control_plane::model_catalog::{
-        CatalogAvailability, CatalogStatus, MetadataField, SourceInput,
+        install_builtin_presets, CatalogAvailability, CatalogStatus, MetadataField,
+        ModelCatalogRepository, SourceInput,
     };
     use crate::{
-        domain::provider_preset::{
-            builtin_provider_presets, install_builtin_presets, ProviderPresetDefinition,
-        },
+        domain::provider_preset::{builtin_provider_presets, ProviderPresetDefinition},
         infra::db::Database,
         proxy::transport,
     };
@@ -981,7 +980,7 @@ mod tests {
         let database = Database::connect(&url)
             .await
             .expect("connect discovery PostgreSQL test database");
-        install_builtin_presets(&database.model_catalog())
+        install_builtin_presets(&ModelCatalogRepository::from_database(&database))
             .await
             .expect("install built-in presets");
         Some(database)
@@ -992,7 +991,7 @@ mod tests {
         provider_preset_id: &str,
         base_url: String,
     ) -> Fixture {
-        let repository = database.model_catalog();
+        let repository = ModelCatalogRepository::from_database(database);
         let preset = repository
             .latest_provider_preset(provider_preset_id)
             .await
@@ -1101,7 +1100,7 @@ mod tests {
         ];
         let (base_url, recorded, server) = spawn_mock_upstream(replies).await;
         let fixture = create_fixture(&database, "deepseek", base_url).await;
-        let repository = database.model_catalog();
+        let repository = ModelCatalogRepository::from_database(&database);
         let service = ModelDiscoveryService::new(
             repository.clone(),
             transport::test_client().expect("discovery client"),
@@ -1289,7 +1288,7 @@ mod tests {
         let (base_url, recorded, server) = spawn_mock_upstream(replies).await;
         let fixture = create_fixture(&database, "minimax", base_url).await;
         let service = ModelDiscoveryService::new(
-            database.model_catalog(),
+            ModelCatalogRepository::from_database(&database),
             transport::test_client().expect("discovery client"),
         );
         let first = service
@@ -1304,8 +1303,7 @@ mod tests {
         assert_eq!(empty.run.status, "succeeded");
         assert_eq!(empty.run.discovered_model_count, 0);
         assert_eq!(empty.diff.missing.len(), 1);
-        let models = database
-            .model_catalog()
+        let models = ModelCatalogRepository::from_database(&database)
             .list_source_models(&fixture.source_id, None, None)
             .await
             .unwrap();
@@ -1370,7 +1368,7 @@ mod tests {
         let (base_url, recorded, server) = spawn_mock_upstream(replies).await;
         let fixture = create_fixture(&database, "kimi_code", format!("{base_url}/coding")).await;
         let service = ModelDiscoveryService::new(
-            database.model_catalog(),
+            ModelCatalogRepository::from_database(&database),
             transport::test_client().expect("discovery client"),
         );
 

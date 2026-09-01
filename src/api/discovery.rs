@@ -1,6 +1,7 @@
 use crate::{
     control_plane::model_catalog::{
-        CatalogAvailability, CatalogError, CatalogStatus, MetadataValues, SourceModelConfirmation,
+        CatalogAvailability, CatalogError, CatalogStatus, MetadataValues, ModelCatalogRepository,
+        SourceModelConfirmation,
     },
     control_plane::model_discovery::{DiscoveryServiceError, ModelDiscoveryService},
     domain::{
@@ -213,7 +214,7 @@ async fn create_source(
         }
         endpoints.insert(protocol, endpoint);
     }
-    let input = crate::control_plane::model_catalog::SourceInput {
+    let input = crate::domain::catalog::SourceInput {
         id: request.id,
         display_name: request.display_name,
         provider_preset_id: preset.id,
@@ -286,7 +287,10 @@ async fn test_connection(
         Ok(request) => request,
         Err(response) => return *response,
     };
-    let service = ModelDiscoveryService::new(database.model_catalog(), state.http.clone());
+    let service = ModelDiscoveryService::new(
+        ModelCatalogRepository::from_database(&database),
+        state.http.clone(),
+    );
     match service
         .test_connection(
             &source_id,
@@ -327,7 +331,10 @@ async fn discover_models(
         Ok(request) => request,
         Err(response) => return *response,
     };
-    let service = ModelDiscoveryService::new(database.model_catalog(), state.http.clone());
+    let service = ModelDiscoveryService::new(
+        ModelCatalogRepository::from_database(&database),
+        state.http.clone(),
+    );
     match service
         .discover(&source_id, &request.account_id, &request.requested_by)
         .await
@@ -494,8 +501,9 @@ fn authorized_database(state: &DiscoveryApiState, headers: &HeaderMap) -> Option
 fn authorized_repository(
     state: &DiscoveryApiState,
     headers: &HeaderMap,
-) -> Option<crate::control_plane::model_catalog::ModelCatalogRepository> {
-    authorized_database(state, headers).map(|database| database.model_catalog())
+) -> Option<ModelCatalogRepository> {
+    authorized_database(state, headers)
+        .map(|database| ModelCatalogRepository::from_database(&database))
 }
 
 fn authorization_or_database_error(
@@ -598,8 +606,9 @@ fn api_error(status: StatusCode, kind: &str, message: &str) -> Response<Body> {
 mod tests {
     use super::*;
     use crate::{
+        control_plane::model_catalog::install_builtin_presets,
         control_plane::model_catalog::{MetadataField, SourceModelRefresh},
-        domain::provider_preset::{install_builtin_presets, BUILTIN_PROVIDER_PRESET_VERSION},
+        domain::provider_preset::BUILTIN_PROVIDER_PRESET_VERSION,
         proxy::transport,
         state::TEST_ADMIN_KEY,
     };
@@ -660,7 +669,7 @@ mod tests {
         let database = Database::connect(&url)
             .await
             .expect("connect discovery API PostgreSQL database");
-        let repository = database.model_catalog();
+        let repository = ModelCatalogRepository::from_database(&database);
         install_builtin_presets(&repository)
             .await
             .expect("install built-in presets");

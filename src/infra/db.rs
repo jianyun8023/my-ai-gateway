@@ -1,6 +1,6 @@
 #[cfg(test)]
 use crate::domain::config::{AccountConfig, GatewayConfig, ProviderConfig, RouteConfig};
-use crate::{control_plane::model_catalog::ModelCatalogRepository, domain::protocol::Protocol};
+use crate::domain::protocol::Protocol;
 use chrono::{DateTime, TimeZone, Utc};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -653,11 +653,6 @@ impl Database {
         self.account_health(account_id)
             .await?
             .ok_or(sqlx::Error::RowNotFound)
-    }
-
-    #[allow(dead_code)]
-    pub fn model_catalog(&self) -> ModelCatalogRepository {
-        ModelCatalogRepository::new(self.pool.clone())
     }
 
     #[allow(dead_code)]

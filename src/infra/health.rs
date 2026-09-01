@@ -1,6 +1,9 @@
 use super::db::{AccountHealthRow, Database};
 use crate::{
-    control_plane::model_discovery::{DiscoveryServiceError, ModelDiscoveryService},
+    control_plane::{
+        model_catalog::ModelCatalogRepository,
+        model_discovery::{DiscoveryServiceError, ModelDiscoveryService},
+    },
     domain::protocol::Protocol,
     proxy::transport::SourceHttpClient,
 };
@@ -500,7 +503,7 @@ impl HealthRegistry {
     /// Model discovery never calls this method.
     pub async fn apply_connection_test(
         &self,
-        record: &crate::control_plane::model_catalog::ConnectionTestRecord,
+        record: &crate::domain::catalog::ConnectionTestRecord,
     ) {
         let Some(account_id) = record.account_id.as_deref() else {
             return;
@@ -542,7 +545,10 @@ impl HealthRegistry {
             .await
             .map_err(ProbeError::Database)?
             .ok_or_else(|| ProbeError::AccountNotFound(account_id.to_owned()))?;
-        let service = ModelDiscoveryService::new(database.model_catalog(), http.clone());
+        let service = ModelDiscoveryService::new(
+            ModelCatalogRepository::from_database(&database),
+            http.clone(),
+        );
         let record = match service
             .test_connection(&source_id, account_id, protocol, model, requested_by)
             .await
@@ -596,7 +602,7 @@ impl ProbeError {
 pub struct ProbeOutcome {
     pub account_id: String,
     pub protocol: Protocol,
-    pub connection_test: crate::control_plane::model_catalog::ConnectionTestRecord,
+    pub connection_test: crate::domain::catalog::ConnectionTestRecord,
     pub health: AccountHealth,
 }
 
@@ -762,10 +768,10 @@ fn unknown_health(available: bool, source: &str) -> AccountHealth {
 mod tests {
     use super::*;
     use crate::{
-        control_plane::model_catalog::SourceInput,
-        domain::provider_preset::{
-            builtin_provider_presets, install_builtin_presets, ProviderPresetDefinition,
+        control_plane::model_catalog::{
+            install_builtin_presets, ModelCatalogRepository, SourceInput,
         },
+        domain::provider_preset::{builtin_provider_presets, ProviderPresetDefinition},
         proxy::transport,
     };
     use axum::{
@@ -1036,7 +1042,7 @@ mod tests {
         let database = Database::from_test_pool(pool.clone())
             .await
             .expect("migrate isolated probe schema");
-        install_builtin_presets(&database.model_catalog())
+        install_builtin_presets(&ModelCatalogRepository::from_database(&database))
             .await
             .expect("install provider presets");
 
@@ -1081,8 +1087,7 @@ mod tests {
             .iter()
             .map(|(protocol, value)| (*protocol, value.endpoint.clone()))
             .collect::<std::collections::BTreeMap<_, _>>();
-        database
-            .model_catalog()
+        ModelCatalogRepository::from_database(&database)
             .create_source(&SourceInput {
                 id: "probe-source".into(),
                 display_name: "Probe Source".into(),

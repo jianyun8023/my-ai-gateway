@@ -1,21 +1,17 @@
 use super::model_catalog::{CatalogAvailability, CatalogStatus, SourceProtocolMode};
-use crate::{
-    domain::{
-        config::{
-            adapter_definition, AccountConfig, Capabilities, CapabilityMode, GatewayConfig,
-            ProtocolCapability, ProtocolCapabilityMatrix, ProtocolMode, ProviderConfig,
-            RouteConfig,
-        },
-        protocol::Protocol,
-        provider_preset::ProviderPresetDefinition,
-        routing::{
-            intersect_capabilities, join_endpoint, RouteResolver, RuntimeBinding, RuntimeRoute,
-        },
+use crate::domain::{
+    catalog::PublishedModel,
+    config::{
+        adapter_definition, AccountConfig, Capabilities, CapabilityMode, GatewayConfig,
+        ProtocolCapability, ProtocolCapabilityMatrix, ProtocolMode, ProviderConfig, RouteConfig,
     },
-    infra::{
-        db::Database,
-        source_url::{SourceUrlPolicy, SourceUrlPolicyError},
-    },
+    protocol::Protocol,
+    provider_preset::ProviderPresetDefinition,
+    routing::{intersect_capabilities, join_endpoint, RouteResolver, RuntimeBinding, RuntimeRoute},
+};
+use crate::infra::{
+    db::Database,
+    source_url::{SourceUrlPolicy, SourceUrlPolicyError},
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -90,14 +86,6 @@ impl From<serde_json::Error> for ControlPlaneError {
     fn from(value: serde_json::Error) -> Self {
         Self::Json(value)
     }
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct PublishedModel {
-    pub id: String,
-    pub display_name: String,
-    #[serde(skip)]
-    pub account_ids: Vec<String>,
 }
 
 #[derive(Clone)]

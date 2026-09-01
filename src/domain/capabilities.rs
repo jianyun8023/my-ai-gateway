@@ -1,9 +1,9 @@
+use super::catalog::PublishedModel;
 use super::{
     config::{Capabilities, GatewayConfig, ProtocolMode},
     protocol::Protocol,
     routing::{ResolvedBinding, ResolvedRoute, RouteResolutionError, RouteResolver},
 };
-use crate::control_plane::PublishedModel;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use std::{collections::BTreeMap, error::Error, fmt};

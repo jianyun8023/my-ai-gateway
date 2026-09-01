@@ -19,7 +19,6 @@ use serde_json::{json, Value};
 use tower_http::{services::ServeDir, trace::TraceLayer};
 
 use domain::config::GatewayConfig;
-use domain::provider_preset;
 use infra::{audit, db, health, observability, ops, secrets, source_url};
 use proxy::transport;
 use state::{error_response, AdminAuth, AppState, LiveConfig};
@@ -32,14 +31,14 @@ use api::{
     usage::{csv_field, parse_usage_query, usage_events_csv},
 };
 #[cfg(test)]
-use proxy::service::proxy as proxy_fn;
-#[cfg(test)]
 use axum::{
     body::Bytes,
     http::{header::CONTENT_TYPE, HeaderMap, HeaderValue},
 };
 #[cfg(test)]
 use domain::{config, protocol::Protocol};
+#[cfg(test)]
+use proxy::service::proxy as proxy_fn;
 #[cfg(test)]
 use proxy::usage;
 #[cfg(test)]
@@ -90,7 +89,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         None
     };
-    provider_preset::install_builtin_presets(&database.model_catalog()).await?;
+    let catalog = control_plane::model_catalog::ModelCatalogRepository::from_database(&database);
+    control_plane::model_catalog::install_builtin_presets(&catalog).await?;
     let control_plane = control_plane::ControlPlane::with_url_policy(
         &database,
         &listen_addr,

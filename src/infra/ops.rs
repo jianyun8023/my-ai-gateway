@@ -2193,9 +2193,11 @@ mod tests {
             .expect("migrate ops isolated schema");
         let repository = OpsRepository::from_database(&database);
         let control_plane = ControlPlane::new(&database, "127.0.0.1:0");
-        crate::domain::provider_preset::install_builtin_presets(&database.model_catalog())
-            .await
-            .expect("install built-in presets for export fixture");
+        crate::control_plane::model_catalog::install_builtin_presets(
+            &crate::control_plane::model_catalog::ModelCatalogRepository::from_database(&database),
+        )
+        .await
+        .expect("install built-in presets for export fixture");
 
         let policies = RETENTION_KEYS
             .iter()

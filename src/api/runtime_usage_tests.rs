@@ -3,7 +3,6 @@ use crate::{
     domain::{
         config::{self, GatewayConfig},
         protocol::Protocol,
-        provider_preset,
         routing::RouteResolver,
     },
     infra::{db, health, observability, secrets, source_url},
@@ -730,9 +729,11 @@ async fn postgres_db_first_source_attribution_covers_primary_fallback_stream_and
         "127.0.0.1:0",
         source_url::test_policy(),
     );
-    provider_preset::install_builtin_presets(&database.model_catalog())
-        .await
-        .expect("install ProviderPreset fixtures");
+    control_plane::model_catalog::install_builtin_presets(
+        &control_plane::model_catalog::ModelCatalogRepository::from_database(&database),
+    )
+    .await
+    .expect("install ProviderPreset fixtures");
     control_plane
         .initialize_from_config(&config, false)
         .await

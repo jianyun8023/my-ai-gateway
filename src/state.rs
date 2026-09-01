@@ -3,6 +3,7 @@ use std::sync::Arc;
 use crate::{
     control_plane,
     domain::{
+        catalog::PublishedModel,
         config::{self, GatewayConfig},
         routing::RouteResolver,
     },
@@ -24,7 +25,7 @@ use subtle::ConstantTimeEq;
 pub(crate) struct LiveConfig {
     pub(crate) config: Arc<GatewayConfig>,
     pub(crate) resolver: RouteResolver,
-    pub(crate) models: Arc<Vec<control_plane::PublishedModel>>,
+    pub(crate) models: Arc<Vec<PublishedModel>>,
     pub(crate) revision: i64,
     pub(crate) generated_at: chrono::DateTime<chrono::Utc>,
 }
@@ -41,7 +42,7 @@ impl LiveConfig {
         let models = config
             .models()
             .into_iter()
-            .map(|id| control_plane::PublishedModel {
+            .map(|id| PublishedModel {
                 display_name: id.clone(),
                 id,
                 account_ids: account_ids.clone(),
