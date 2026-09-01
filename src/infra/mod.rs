@@ -4,4 +4,3 @@ pub mod health;
 pub mod observability;
 pub mod ops;
 pub mod secrets;
-pub mod source_url;

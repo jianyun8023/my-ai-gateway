@@ -7,8 +7,8 @@ use crate::{
         config::{self, GatewayConfig},
         routing::RouteResolver,
     },
+    http,
     infra::{db, health, observability, secrets},
-    proxy::transport,
 };
 use axum::{
     body::Body,
@@ -71,7 +71,7 @@ impl LiveConfig {
 #[derive(Clone)]
 pub(crate) struct AppState {
     pub(crate) live: Arc<std::sync::RwLock<LiveConfig>>,
-    pub(crate) http: transport::SourceHttpClient,
+    pub(crate) http: http::SourceHttpClient,
     pub(crate) db: Option<db::Database>,
     pub(crate) control_plane: Option<control_plane::ControlPlane>,
     pub(crate) health: health::HealthRegistry,

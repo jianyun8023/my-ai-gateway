@@ -1,6 +1,5 @@
-use super::model_catalog::{CatalogAvailability, CatalogStatus, SourceProtocolMode};
 use crate::domain::{
-    catalog::PublishedModel,
+    catalog::{CatalogAvailability, CatalogStatus, PublishedModel, SourceProtocolMode},
     config::{
         adapter_definition, AccountConfig, Capabilities, CapabilityMode, GatewayConfig,
         ProtocolCapability, ProtocolCapabilityMatrix, ProtocolMode, ProviderConfig, RouteConfig,
@@ -9,10 +8,7 @@ use crate::domain::{
     provider_preset::ProviderPresetDefinition,
     routing::{intersect_capabilities, join_endpoint, RouteResolver, RuntimeBinding, RuntimeRoute},
 };
-use crate::infra::{
-    db::Database,
-    source_url::{SourceUrlPolicy, SourceUrlPolicyError},
-};
+use crate::source_url::{SourceUrlPolicy, SourceUrlPolicyError};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -125,17 +121,17 @@ pub struct ControlPlane {
 
 impl ControlPlane {
     #[cfg(test)]
-    pub fn new(database: &Database, listen_addr: impl Into<String>) -> Self {
-        Self::with_url_policy(database, listen_addr, Arc::new(SourceUrlPolicy::default()))
+    pub fn new(pool: PgPool, listen_addr: impl Into<String>) -> Self {
+        Self::with_url_policy(pool, listen_addr, Arc::new(SourceUrlPolicy::default()))
     }
 
     pub fn with_url_policy(
-        database: &Database,
+        pool: PgPool,
         listen_addr: impl Into<String>,
         source_url_policy: Arc<SourceUrlPolicy>,
     ) -> Self {
         Self {
-            pool: database.pool().clone(),
+            pool,
             listen_addr: listen_addr.into(),
             source_url_policy,
         }
@@ -2408,6 +2404,7 @@ impl ControlPlane {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::infra::db::Database;
     use axum::{
         body::{to_bytes, Body},
         extract::State,
@@ -2525,7 +2522,7 @@ mod tests {
     #[ignore = "requires TEST_DATABASE_URL and runs against an isolated PostgreSQL schema"]
     async fn postgres_db_first_crud_rollback_snapshot_and_models_contract() {
         let (database, admin, schema) = isolated_database().await;
-        let control_plane = ControlPlane::new(&database, "127.0.0.1:0");
+        let control_plane = ControlPlane::new(database.pool().clone(), "127.0.0.1:0");
 
         let first = control_plane
             .initialize_from_config(&bootstrap_config("https://source-a.example"), false)
@@ -2959,7 +2956,7 @@ mod tests {
             live: Arc::new(std::sync::RwLock::new(
                 crate::state::LiveConfig::from_snapshot(active_snapshot),
             )),
-            http: crate::proxy::transport::test_client().expect("HTTP client"),
+            http: crate::http::test_client().expect("HTTP client"),
             db: Some(database.clone()),
             control_plane: Some(control_plane.clone()),
             health: health.clone(),

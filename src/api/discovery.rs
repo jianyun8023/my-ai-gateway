@@ -1,15 +1,14 @@
 use crate::{
-    control_plane::model_catalog::{
-        CatalogAvailability, CatalogError, CatalogStatus, MetadataValues, ModelCatalogRepository,
-        SourceModelConfirmation,
-    },
+    control_plane::model_catalog::{provider_preset_diff, CatalogError, ModelCatalogRepository},
     control_plane::model_discovery::{DiscoveryServiceError, ModelDiscoveryService},
     domain::{
+        catalog::{CatalogAvailability, CatalogStatus, MetadataValues, SourceModelConfirmation},
         protocol::Protocol,
-        provider_preset::{provider_preset_diff, ProviderPresetDefinition},
+        provider_preset::ProviderPresetDefinition,
     },
-    infra::{db::Database, source_url::SourceUrlPolicyError},
-    proxy::transport::SourceHttpClient,
+    http::SourceHttpClient,
+    infra::db::Database,
+    source_url::SourceUrlPolicyError,
     state::AdminAuth,
 };
 use axum::{
@@ -288,7 +287,7 @@ async fn test_connection(
         Err(response) => return *response,
     };
     let service = ModelDiscoveryService::new(
-        ModelCatalogRepository::from_database(&database),
+        ModelCatalogRepository::new(database.pool().clone()),
         state.http.clone(),
     );
     match service
@@ -332,7 +331,7 @@ async fn discover_models(
         Err(response) => return *response,
     };
     let service = ModelDiscoveryService::new(
-        ModelCatalogRepository::from_database(&database),
+        ModelCatalogRepository::new(database.pool().clone()),
         state.http.clone(),
     );
     match service
@@ -503,7 +502,7 @@ fn authorized_repository(
     headers: &HeaderMap,
 ) -> Option<ModelCatalogRepository> {
     authorized_database(state, headers)
-        .map(|database| ModelCatalogRepository::from_database(&database))
+        .map(|database| ModelCatalogRepository::new(database.pool().clone()))
 }
 
 fn authorization_or_database_error(
@@ -607,9 +606,11 @@ mod tests {
     use super::*;
     use crate::{
         control_plane::model_catalog::install_builtin_presets,
-        control_plane::model_catalog::{MetadataField, SourceModelRefresh},
-        domain::provider_preset::BUILTIN_PROVIDER_PRESET_VERSION,
-        proxy::transport,
+        domain::{
+            catalog::{MetadataField, SourceModelRefresh},
+            provider_preset::BUILTIN_PROVIDER_PRESET_VERSION,
+        },
+        http,
         state::TEST_ADMIN_KEY,
     };
     use axum::{body::to_bytes, http::Request};
@@ -618,7 +619,7 @@ mod tests {
 
     #[test]
     fn source_creation_rejects_credential_bearing_urls() {
-        let client = transport::test_client().unwrap();
+        let client = http::test_client().unwrap();
         assert!(client
             .validate_base_url("https://api.example.com/base")
             .is_ok());
@@ -669,13 +670,13 @@ mod tests {
         let database = Database::connect(&url)
             .await
             .expect("connect discovery API PostgreSQL database");
-        let repository = ModelCatalogRepository::from_database(&database);
+        let repository = ModelCatalogRepository::new(database.pool().clone());
         install_builtin_presets(&repository)
             .await
             .expect("install built-in presets");
         let app = router(
             Some(database.clone()),
-            transport::test_client().expect("API HTTP client"),
+            http::test_client().expect("API HTTP client"),
         );
         let suffix = uuid::Uuid::new_v4().simple().to_string();
         let source_id = format!("discovery-api-source-{suffix}");

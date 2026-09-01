@@ -5,7 +5,8 @@ use crate::{
         protocol::Protocol,
         routing::RouteResolver,
     },
-    infra::{db, health, observability, secrets, source_url},
+    http,
+    infra::{db, health, observability, secrets},
     proxy::{
         service::{finalize_stream_usage, proxy as proxy_fn, try_fallback_error},
         stream::{StreamConfig, StreamTermination},
@@ -189,7 +190,7 @@ fn state(config: GatewayConfig, database: Option<db::Database>) -> AppState {
     let config = Arc::new(config);
     AppState {
         live: Arc::new(std::sync::RwLock::new(LiveConfig::legacy(config))),
-        http: transport::test_client().expect("runtime HTTP client"),
+        http: http::test_client().expect("runtime HTTP client"),
         db: database,
         control_plane: None,
         health: health::HealthRegistry::new(Duration::from_secs(1)),
@@ -360,7 +361,7 @@ async fn transport_error_path_uses_fallback_and_records_its_actual_model() {
         &config,
         &secrets::SecretResolver::empty(),
         &health::HealthRegistry::new(Duration::from_secs(1)),
-        &transport::test_client().unwrap(),
+        &http::test_client().unwrap(),
         &resolved,
         "logical-model",
         Protocol::OpenAiChatCompletions,
@@ -404,7 +405,7 @@ async fn fallback_transport_failure_is_retained_as_the_final_actual_attempt() {
         &config,
         &secrets::SecretResolver::empty(),
         &health::HealthRegistry::new(Duration::from_secs(1)),
-        &transport::test_client().unwrap(),
+        &http::test_client().unwrap(),
         &resolved,
         "logical-model",
         Protocol::OpenAiChatCompletions,
@@ -725,12 +726,12 @@ async fn postgres_db_first_source_attribution_covers_primary_fallback_stream_and
         ],
     };
     let control_plane = control_plane::ControlPlane::with_url_policy(
-        &database,
+        database.pool().clone(),
         "127.0.0.1:0",
-        source_url::test_policy(),
+        crate::source_url::test_policy(),
     );
     control_plane::model_catalog::install_builtin_presets(
-        &control_plane::model_catalog::ModelCatalogRepository::from_database(&database),
+        &control_plane::model_catalog::ModelCatalogRepository::new(database.pool().clone()),
     )
     .await
     .expect("install ProviderPreset fixtures");
@@ -759,7 +760,7 @@ async fn postgres_db_first_source_attribution_covers_primary_fallback_stream_and
         .expect("reload runtime snapshot with stable Provider identities");
     let state = AppState {
         live: Arc::new(std::sync::RwLock::new(LiveConfig::from_snapshot(snapshot))),
-        http: transport::test_client().expect("runtime HTTP client"),
+        http: http::test_client().expect("runtime HTTP client"),
         db: Some(database.clone()),
         control_plane: None,
         health: health::HealthRegistry::new(Duration::from_secs(30)),

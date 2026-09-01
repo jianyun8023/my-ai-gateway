@@ -7,7 +7,8 @@ use crate::{
         config::{AccountConfig, ProviderConfig},
         protocol::Protocol,
     },
-    infra::source_url::{reqwest_error_is_policy_violation, SourceUrlPolicy, SourceUrlPolicyError},
+    http::SourceHttpClient,
+    source_url::{reqwest_error_is_policy_violation, SourceUrlPolicyError},
 };
 use axum::{
     body::Body,
@@ -15,9 +16,7 @@ use axum::{
 };
 use bytes::Bytes;
 use futures_util::TryStreamExt;
-use reqwest::{Client, Method, RequestBuilder, Url};
 use serde_json::Value;
-use std::sync::Arc;
 
 #[derive(Debug)]
 pub enum TransportError {
@@ -48,42 +47,6 @@ impl TransportError {
 impl From<SourceUrlPolicyError> for TransportError {
     fn from(_: SourceUrlPolicyError) -> Self {
         Self::SourceUrlBlocked
-    }
-}
-
-#[derive(Clone)]
-pub struct SourceHttpClient {
-    inner: Client,
-    policy: Arc<SourceUrlPolicy>,
-}
-
-impl SourceHttpClient {
-    pub fn request(
-        &self,
-        method: Method,
-        url: Url,
-    ) -> Result<RequestBuilder, SourceUrlPolicyError> {
-        self.policy.validate_request_url(&url)?;
-        Ok(self.inner.request(method, url))
-    }
-
-    pub fn post(&self, url: &str) -> Result<RequestBuilder, SourceUrlPolicyError> {
-        let url = self.policy.parse_request_url(url)?;
-        Ok(self.inner.post(url))
-    }
-
-    #[cfg(test)]
-    pub fn get(&self, url: &str) -> Result<RequestBuilder, SourceUrlPolicyError> {
-        let url = self.policy.parse_request_url(url)?;
-        Ok(self.inner.get(url))
-    }
-
-    pub fn validate_base_url(&self, value: &str) -> Result<Url, SourceUrlPolicyError> {
-        self.policy.validate_base_url(value)
-    }
-
-    pub fn raw_client(&self) -> Client {
-        self.inner.clone()
     }
 }
 
@@ -362,25 +325,6 @@ pub fn usage_from_response(response: &Response<Body>) -> Option<UsageReport> {
     response.extensions().get::<UsageReport>().cloned()
 }
 
-pub fn client(policy: Arc<SourceUrlPolicy>) -> Result<SourceHttpClient, reqwest::Error> {
-    let redirect = policy.redirect_policy();
-    let resolver = Arc::new(policy.dns_resolver());
-    let inner = Client::builder()
-        // The stream contract owns connect/idle/total deadlines.  Reqwest's
-        // defaults are already unlimited, so no client-wide timeout is set;
-        // this keeps the phases distinguishable.
-        .no_proxy()
-        .redirect(redirect)
-        .dns_resolver(resolver)
-        .build()?;
-    Ok(SourceHttpClient { inner, policy })
-}
-
-#[cfg(test)]
-pub fn test_client() -> Result<SourceHttpClient, reqwest::Error> {
-    client(crate::infra::source_url::test_policy())
-}
-
 fn map_reqwest_error(error: reqwest::Error) -> TransportError {
     if reqwest_error_is_policy_violation(&error) {
         TransportError::SourceUrlBlocked
@@ -395,6 +339,7 @@ fn map_reqwest_error(error: reqwest::Error) -> TransportError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::http::test_client;
     use axum::{
         body::to_bytes,
         extract::Request,
@@ -530,7 +475,8 @@ mod tests {
 
     #[test]
     fn default_client_rejects_an_initial_loopback_url_without_network_access() {
-        let client = client(Arc::new(SourceUrlPolicy::default())).unwrap();
+        let client =
+            crate::http::client(Arc::new(crate::source_url::SourceUrlPolicy::default())).unwrap();
         let error = client
             .get("http://127.0.0.1:8787/private")
             .expect_err("loopback URL must be rejected before request construction");

@@ -1,18 +1,21 @@
 use super::model_catalog::{
-    CatalogError, ConnectionTestInput, ConnectionTestRecord, DiscoveryApplyInput,
-    DiscoveryApplyResult, DiscoveryDiff, DiscoveryFailureInput, DiscoveryRunRecord, MetadataValues,
-    ModelCatalogRepository, ModelPresetRef, SourceModelRefresh, SourceProtocolMode, SourceRecord,
+    CatalogError, ConnectionTestRecord, DiscoveryApplyResult, DiscoveryRunRecord,
+    ModelCatalogRepository, SourceModelRecord, SourceRecord,
 };
 use crate::{
     domain::{
+        catalog::{
+            ConnectionTestInput, DiscoveryApplyInput, DiscoveryDiff, DiscoveryFailureInput,
+            MetadataValues, ModelPresetRef, SourceModelRefresh, SourceProtocolMode,
+        },
         protocol::Protocol,
         provider_preset::{
             CredentialHeaderTemplate, DiscoveryParser, DiscoveryPreset, HttpMethod,
             ProviderPresetDefinition, SourceAuthConfig, SourceProtocolCapability,
         },
     },
-    infra::source_url::{reqwest_error_is_policy_violation, SourceUrlPolicyError},
-    proxy::transport::SourceHttpClient,
+    http::SourceHttpClient,
+    source_url::{reqwest_error_is_policy_violation, SourceUrlPolicyError},
 };
 use bytes::BytesMut;
 use chrono::{DateTime, Utc};
@@ -105,7 +108,7 @@ impl From<CatalogError> for DiscoveryServiceError {
 pub struct DiscoveryExecution {
     pub run: DiscoveryRunRecord,
     pub diff: DiscoveryDiff,
-    pub models: Vec<super::model_catalog::SourceModelRecord>,
+    pub models: Vec<SourceModelRecord>,
 }
 
 impl From<DiscoveryApplyResult> for DiscoveryExecution {
@@ -841,14 +844,15 @@ fn elapsed_ms(started: Instant) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::control_plane::model_catalog::{
-        install_builtin_presets, CatalogAvailability, CatalogStatus, MetadataField,
-        ModelCatalogRepository, SourceInput,
-    };
+    use crate::control_plane::model_catalog::{install_builtin_presets, ModelCatalogRepository};
     use crate::{
+        domain::catalog::{
+            CatalogAvailability, CatalogStatus, MetadataField, MetadataSource, SourceInput,
+            SourceModelConfirmation,
+        },
         domain::provider_preset::{builtin_provider_presets, ProviderPresetDefinition},
+        http,
         infra::db::Database,
-        proxy::transport,
     };
     use axum::{
         body::{to_bytes, Body},
@@ -980,7 +984,7 @@ mod tests {
         let database = Database::connect(&url)
             .await
             .expect("connect discovery PostgreSQL test database");
-        install_builtin_presets(&ModelCatalogRepository::from_database(&database))
+        install_builtin_presets(&ModelCatalogRepository::new(database.pool().clone()))
             .await
             .expect("install built-in presets");
         Some(database)
@@ -991,7 +995,7 @@ mod tests {
         provider_preset_id: &str,
         base_url: String,
     ) -> Fixture {
-        let repository = ModelCatalogRepository::from_database(database);
+        let repository = ModelCatalogRepository::new(database.pool().clone());
         let preset = repository
             .latest_provider_preset(provider_preset_id)
             .await
@@ -1100,10 +1104,10 @@ mod tests {
         ];
         let (base_url, recorded, server) = spawn_mock_upstream(replies).await;
         let fixture = create_fixture(&database, "deepseek", base_url).await;
-        let repository = ModelCatalogRepository::from_database(&database);
+        let repository = ModelCatalogRepository::new(database.pool().clone());
         let service = ModelDiscoveryService::new(
             repository.clone(),
-            transport::test_client().expect("discovery client"),
+            http::test_client().expect("discovery client"),
         );
 
         let initial = service
@@ -1141,11 +1145,11 @@ mod tests {
             .confirm_source_models(
                 &fixture.source_id,
                 &[
-                    crate::control_plane::model_catalog::SourceModelConfirmation {
+                    SourceModelConfirmation {
                         upstream_model_id: "custom-model".into(),
                         user_overrides: MetadataValues::default(),
                     },
-                    crate::control_plane::model_catalog::SourceModelConfirmation {
+                    SourceModelConfirmation {
                         upstream_model_id: "deepseek-v4-flash".into(),
                         user_overrides: MetadataValues::default(),
                     },
@@ -1182,7 +1186,7 @@ mod tests {
         );
         assert_eq!(
             metadata.field_sources[&MetadataField::ContextWindow],
-            crate::control_plane::model_catalog::MetadataSource::User
+            MetadataSource::User
         );
         assert_eq!(custom.confirmation_status, CatalogStatus::Confirmed);
 
@@ -1288,8 +1292,8 @@ mod tests {
         let (base_url, recorded, server) = spawn_mock_upstream(replies).await;
         let fixture = create_fixture(&database, "minimax", base_url).await;
         let service = ModelDiscoveryService::new(
-            ModelCatalogRepository::from_database(&database),
-            transport::test_client().expect("discovery client"),
+            ModelCatalogRepository::new(database.pool().clone()),
+            http::test_client().expect("discovery client"),
         );
         let first = service
             .discover(&fixture.source_id, &fixture.account_id, "integration-test")
@@ -1303,7 +1307,7 @@ mod tests {
         assert_eq!(empty.run.status, "succeeded");
         assert_eq!(empty.run.discovered_model_count, 0);
         assert_eq!(empty.diff.missing.len(), 1);
-        let models = ModelCatalogRepository::from_database(&database)
+        let models = ModelCatalogRepository::new(database.pool().clone())
             .list_source_models(&fixture.source_id, None, None)
             .await
             .unwrap();
@@ -1368,8 +1372,8 @@ mod tests {
         let (base_url, recorded, server) = spawn_mock_upstream(replies).await;
         let fixture = create_fixture(&database, "kimi_code", format!("{base_url}/coding")).await;
         let service = ModelDiscoveryService::new(
-            ModelCatalogRepository::from_database(&database),
-            transport::test_client().expect("discovery client"),
+            ModelCatalogRepository::new(database.pool().clone()),
+            http::test_client().expect("discovery client"),
         );
 
         let unsupported = service

@@ -1,11 +1,11 @@
 use super::db::{AccountHealthRow, Database};
 use crate::{
     control_plane::{
-        model_catalog::ModelCatalogRepository,
+        model_catalog::{ConnectionTestRecord, ModelCatalogRepository},
         model_discovery::{DiscoveryServiceError, ModelDiscoveryService},
     },
     domain::protocol::Protocol,
-    proxy::transport::SourceHttpClient,
+    http::SourceHttpClient,
 };
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use serde::Serialize;
@@ -501,10 +501,7 @@ impl HealthRegistry {
 
     /// Apply the result of the shared ProviderPreset connection-test service.
     /// Model discovery never calls this method.
-    pub async fn apply_connection_test(
-        &self,
-        record: &crate::domain::catalog::ConnectionTestRecord,
-    ) {
+    pub async fn apply_connection_test(&self, record: &ConnectionTestRecord) {
         let Some(account_id) = record.account_id.as_deref() else {
             return;
         };
@@ -546,7 +543,7 @@ impl HealthRegistry {
             .map_err(ProbeError::Database)?
             .ok_or_else(|| ProbeError::AccountNotFound(account_id.to_owned()))?;
         let service = ModelDiscoveryService::new(
-            ModelCatalogRepository::from_database(&database),
+            ModelCatalogRepository::new(database.pool().clone()),
             http.clone(),
         );
         let record = match service
@@ -602,7 +599,7 @@ impl ProbeError {
 pub struct ProbeOutcome {
     pub account_id: String,
     pub protocol: Protocol,
-    pub connection_test: crate::domain::catalog::ConnectionTestRecord,
+    pub connection_test: ConnectionTestRecord,
     pub health: AccountHealth,
 }
 
@@ -768,11 +765,12 @@ fn unknown_health(available: bool, source: &str) -> AccountHealth {
 mod tests {
     use super::*;
     use crate::{
-        control_plane::model_catalog::{
-            install_builtin_presets, ModelCatalogRepository, SourceInput,
+        control_plane::model_catalog::{install_builtin_presets, ModelCatalogRepository},
+        domain::{
+            catalog::SourceInput,
+            provider_preset::{builtin_provider_presets, ProviderPresetDefinition},
         },
-        domain::provider_preset::{builtin_provider_presets, ProviderPresetDefinition},
-        proxy::transport,
+        http,
     };
     use axum::{
         body::{to_bytes, Body},
@@ -964,7 +962,8 @@ mod tests {
         assert_eq!(recovered.status, "healthy");
         assert_eq!(recovered.consecutive_failures, 0);
 
-        let control_plane = crate::control_plane::ControlPlane::new(&database, "127.0.0.1:0");
+        let control_plane =
+            crate::control_plane::ControlPlane::new(database.pool().clone(), "127.0.0.1:0");
         control_plane
             .set_account_enabled("health-account", false)
             .await
@@ -1042,7 +1041,7 @@ mod tests {
         let database = Database::from_test_pool(pool.clone())
             .await
             .expect("migrate isolated probe schema");
-        install_builtin_presets(&ModelCatalogRepository::from_database(&database))
+        install_builtin_presets(&ModelCatalogRepository::new(database.pool().clone()))
             .await
             .expect("install provider presets");
 
@@ -1087,7 +1086,7 @@ mod tests {
             .iter()
             .map(|(protocol, value)| (*protocol, value.endpoint.clone()))
             .collect::<std::collections::BTreeMap<_, _>>();
-        ModelCatalogRepository::from_database(&database)
+        ModelCatalogRepository::new(database.pool().clone())
             .create_source(&SourceInput {
                 id: "probe-source".into(),
                 display_name: "Probe Source".into(),
@@ -1125,7 +1124,7 @@ mod tests {
             live: Arc::new(std::sync::RwLock::new(crate::state::LiveConfig::legacy(
                 Arc::new(empty_config),
             ))),
-            http: transport::test_client().expect("probe HTTP client"),
+            http: http::test_client().expect("probe HTTP client"),
             db: Some(database.clone()),
             control_plane: None,
             health: registry.clone(),

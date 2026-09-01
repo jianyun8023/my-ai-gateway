@@ -1,13 +1,381 @@
-pub use crate::domain::catalog::*;
-
 use crate::domain::{
+    catalog::{
+        CatalogAvailability, CatalogError as DomainCatalogError, CatalogMetadata, CatalogStatus,
+        ConnectionTestInput, DiscoveryApplyInput, DiscoveryDiff, DiscoveryDiffEntry,
+        DiscoveryFailureInput, LogicalModelInput, MetadataSource, MetadataValues,
+        ModelBindingInput, ModelPresetInput, ModelPresetRef, ProviderPresetInput, SourceInput,
+        SourceModelCapabilityInput, SourceModelConfirmation, SourceModelRefresh,
+        SourceProtocolMode,
+    },
     protocol::Protocol,
-    provider_preset::{builtin_model_presets, builtin_provider_presets},
+    provider_preset::{
+        builtin_model_presets, builtin_provider_presets, PresetDiffEntry, PresetDiffKind,
+        ProviderPresetDiff,
+    },
 };
 use chrono::{DateTime, Utc};
+use serde::Serialize;
 use serde_json::Value;
 use sqlx::{PgPool, Postgres, Transaction};
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, error::Error, fmt};
+
+#[derive(Debug)]
+pub enum CatalogError {
+    Database(sqlx::Error),
+    Json(serde_json::Error),
+    NotFound(String),
+    InvalidMetadata(String),
+    InvalidState(String),
+    ImmutableVersionConflict(String),
+}
+
+impl fmt::Display for CatalogError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Database(error) => write!(f, "database error: {error}"),
+            Self::Json(error) => write!(f, "JSON error: {error}"),
+            Self::NotFound(message)
+            | Self::InvalidMetadata(message)
+            | Self::InvalidState(message)
+            | Self::ImmutableVersionConflict(message) => f.write_str(message),
+        }
+    }
+}
+
+impl Error for CatalogError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Database(error) => Some(error),
+            Self::Json(error) => Some(error),
+            _ => None,
+        }
+    }
+}
+
+impl From<sqlx::Error> for CatalogError {
+    fn from(value: sqlx::Error) -> Self {
+        Self::Database(value)
+    }
+}
+
+impl From<serde_json::Error> for CatalogError {
+    fn from(value: serde_json::Error) -> Self {
+        Self::Json(value)
+    }
+}
+
+impl From<DomainCatalogError> for CatalogError {
+    fn from(value: DomainCatalogError) -> Self {
+        match value {
+            DomainCatalogError::Json(error) => Self::Json(error),
+            DomainCatalogError::InvalidMetadata(message) => Self::InvalidMetadata(message),
+            DomainCatalogError::InvalidState(message) => Self::InvalidState(message),
+        }
+    }
+}
+
+macro_rules! impl_catalog_enum_sqlx {
+    ($type:ty, $sql_name:literal) => {
+        impl sqlx::Type<Postgres> for $type {
+            fn type_info() -> sqlx::postgres::PgTypeInfo {
+                sqlx::postgres::PgTypeInfo::with_name($sql_name)
+            }
+        }
+
+        impl<'q> sqlx::Encode<'q, Postgres> for $type {
+            fn encode_by_ref(
+                &self,
+                buf: &mut sqlx::postgres::PgArgumentBuffer,
+            ) -> Result<sqlx::encode::IsNull, sqlx::error::BoxDynError> {
+                <&'q str as sqlx::Encode<'q, Postgres>>::encode(self.as_str(), buf)
+            }
+
+            fn size_hint(&self) -> usize {
+                self.as_str().len()
+            }
+        }
+
+        impl<'r> sqlx::Decode<'r, Postgres> for $type {
+            fn decode(
+                value: sqlx::postgres::PgValueRef<'r>,
+            ) -> Result<Self, sqlx::error::BoxDynError> {
+                let value = <&'r str as sqlx::Decode<'r, Postgres>>::decode(value)?;
+                value.parse().map_err(|_| {
+                    format!("invalid value {value:?} for {}", stringify!($type)).into()
+                })
+            }
+        }
+    };
+}
+
+impl_catalog_enum_sqlx!(CatalogStatus, "catalog_status");
+impl_catalog_enum_sqlx!(CatalogAvailability, "catalog_availability");
+impl_catalog_enum_sqlx!(SourceProtocolMode, "source_protocol_mode");
+
+#[derive(Clone, Debug, Serialize, sqlx::FromRow)]
+pub struct ProviderPresetRecord {
+    pub id: String,
+    pub version: i32,
+    pub display_name: String,
+    pub definition: Value,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, Serialize, sqlx::FromRow)]
+pub struct SourceRecord {
+    pub id: String,
+    pub display_name: String,
+    pub provider_preset_id: String,
+    pub provider_preset_version: i32,
+    pub provider_preset_snapshot: Value,
+    pub base_url: String,
+    pub endpoints: Value,
+    pub auth_config: Value,
+    pub protocol_capabilities: Value,
+    pub enabled: bool,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, Serialize, sqlx::FromRow)]
+pub struct ModelPresetRecord {
+    pub id: String,
+    pub version: i32,
+    pub canonical_model_id: String,
+    pub aliases: Value,
+    pub metadata: Value,
+    pub field_sources: Value,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl ModelPresetRecord {
+    pub fn catalog_metadata(&self) -> Result<CatalogMetadata, CatalogError> {
+        CatalogMetadata::from_json(self.metadata.clone(), self.field_sources.clone())
+            .map_err(Into::into)
+    }
+}
+
+#[derive(Clone, Debug, Serialize, sqlx::FromRow)]
+pub struct SourceModelRecord {
+    pub source_id: String,
+    pub upstream_model_id: String,
+    pub confirmation_status: CatalogStatus,
+    pub availability_status: CatalogAvailability,
+    pub raw_snapshot: Value,
+    pub metadata: Value,
+    pub field_sources: Value,
+    pub matched_model_preset_id: Option<String>,
+    pub matched_model_preset_version: Option<i32>,
+    pub first_discovered_at: DateTime<Utc>,
+    pub last_discovered_at: DateTime<Utc>,
+    pub confirmed_at: Option<DateTime<Utc>>,
+    pub unavailable_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl SourceModelRecord {
+    pub fn catalog_metadata(&self) -> Result<CatalogMetadata, CatalogError> {
+        CatalogMetadata::from_json(self.metadata.clone(), self.field_sources.clone())
+            .map_err(Into::into)
+    }
+}
+
+#[derive(Clone, Debug, Serialize, sqlx::FromRow)]
+pub struct DiscoveryRunRecord {
+    pub id: i64,
+    pub source_id: String,
+    pub account_id: Option<String>,
+    pub provider_preset_id: String,
+    pub provider_preset_version: i32,
+    pub status: String,
+    pub raw_snapshot: Option<Value>,
+    pub diff: Value,
+    pub discovered_model_count: i32,
+    pub http_status: Option<i32>,
+    pub latency_ms: i64,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
+    pub requested_by: String,
+    pub started_at: DateTime<Utc>,
+    pub completed_at: DateTime<Utc>,
+}
+
+impl DiscoveryRunRecord {
+    pub fn discovery_diff(&self) -> Result<DiscoveryDiff, CatalogError> {
+        serde_json::from_value(self.diff.clone()).map_err(Into::into)
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct DiscoveryApplyResult {
+    pub run: DiscoveryRunRecord,
+    pub diff: DiscoveryDiff,
+    pub models: Vec<SourceModelRecord>,
+}
+
+#[derive(Clone, Debug, Serialize, sqlx::FromRow)]
+pub struct ConnectionTestRecord {
+    pub id: i64,
+    pub source_id: String,
+    pub account_id: Option<String>,
+    pub protocol: Protocol,
+    pub upstream_protocol: Protocol,
+    pub mode: SourceProtocolMode,
+    pub status: String,
+    pub http_status: Option<i32>,
+    pub latency_ms: i64,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
+    pub requested_by: String,
+    pub tested_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, Serialize, sqlx::FromRow)]
+pub struct AccountCredentialRef {
+    pub id: String,
+    pub source_id: String,
+    pub credential_env: Option<String>,
+    pub has_credential_ciphertext: bool,
+}
+
+#[derive(Clone, Debug, Serialize, sqlx::FromRow)]
+pub struct LogicalModelRecord {
+    pub id: String,
+    pub public_name: String,
+    pub display_name: String,
+    pub status: CatalogStatus,
+    pub model_preset_id: Option<String>,
+    pub model_preset_version: Option<i32>,
+    pub metadata: Value,
+    pub field_sources: Value,
+    pub confirmed_at: Option<DateTime<Utc>>,
+    pub unavailable_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, Serialize, sqlx::FromRow)]
+pub struct SourceModelCapabilityRecord {
+    pub source_id: String,
+    pub upstream_model_id: String,
+    pub protocol: Protocol,
+    pub status: CatalogStatus,
+    pub mode: SourceProtocolMode,
+    pub source_protocol: Option<Protocol>,
+    pub adapter: Option<String>,
+    pub feature_capabilities: Value,
+    pub field_source: String,
+    pub observed_at: DateTime<Utc>,
+    pub confirmed_at: Option<DateTime<Utc>>,
+    pub unavailable_at: Option<DateTime<Utc>>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl SourceModelCapabilityRecord {
+    #[allow(dead_code)]
+    pub fn is_routable(&self) -> bool {
+        self.status == CatalogStatus::Confirmed && self.mode.is_routable()
+    }
+}
+
+#[derive(Clone, Debug, Serialize, sqlx::FromRow)]
+pub struct ModelBindingRecord {
+    pub id: i64,
+    pub logical_model_id: String,
+    pub source_id: String,
+    pub account_id: String,
+    pub upstream_model_id: String,
+    pub protocol: Protocol,
+    pub status: CatalogStatus,
+    pub priority: i32,
+    pub confirmed_at: Option<DateTime<Utc>>,
+    pub unavailable_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, Serialize, sqlx::FromRow)]
+pub struct RoutableBindingRecord {
+    pub binding_id: i64,
+    pub logical_model_id: String,
+    pub public_name: String,
+    pub source_id: String,
+    pub account_id: String,
+    pub upstream_model_id: String,
+    pub protocol: Protocol,
+    pub mode: SourceProtocolMode,
+    pub source_protocol: Option<Protocol>,
+    pub adapter: Option<String>,
+    pub feature_capabilities: Value,
+    pub priority: i32,
+}
+
+pub fn provider_preset_diff(
+    source: &SourceRecord,
+    latest: &ProviderPresetRecord,
+) -> ProviderPresetDiff {
+    let mut changes = Vec::new();
+    diff_json(
+        "$",
+        Some(&source.provider_preset_snapshot),
+        Some(&latest.definition),
+        &mut changes,
+    );
+    changes.sort_by(|left, right| left.path.cmp(&right.path));
+    ProviderPresetDiff {
+        source_id: source.id.clone(),
+        provider_preset_id: source.provider_preset_id.clone(),
+        source_version: source.provider_preset_version,
+        latest_version: latest.version,
+        changes,
+    }
+}
+
+fn diff_json(
+    path: &str,
+    before: Option<&Value>,
+    after: Option<&Value>,
+    changes: &mut Vec<PresetDiffEntry>,
+) {
+    match (before, after) {
+        (Some(Value::Object(before)), Some(Value::Object(after))) => {
+            let keys = before
+                .keys()
+                .chain(after.keys())
+                .collect::<std::collections::BTreeSet<_>>();
+            for key in keys {
+                diff_json(
+                    &format!("{path}.{key}"),
+                    before.get(key),
+                    after.get(key),
+                    changes,
+                );
+            }
+        }
+        (Some(before), Some(after)) if before == after => {}
+        (Some(before), Some(after)) => changes.push(PresetDiffEntry {
+            path: path.into(),
+            kind: PresetDiffKind::Changed,
+            before: Some(before.clone()),
+            after: Some(after.clone()),
+        }),
+        (None, Some(after)) => changes.push(PresetDiffEntry {
+            path: path.into(),
+            kind: PresetDiffKind::Added,
+            before: None,
+            after: Some(after.clone()),
+        }),
+        (Some(before), None) => changes.push(PresetDiffEntry {
+            path: path.into(),
+            kind: PresetDiffKind::Missing,
+            before: Some(before.clone()),
+            after: None,
+        }),
+        (None, None) => {}
+    }
+}
 
 pub async fn install_builtin_presets(
     repository: &ModelCatalogRepository,
@@ -30,10 +398,6 @@ pub struct ModelCatalogRepository {
 impl ModelCatalogRepository {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
-    }
-
-    pub fn from_database(database: &crate::infra::db::Database) -> Self {
-        Self::new(database.pool().clone())
     }
 
     pub async fn list_provider_presets(&self) -> Result<Vec<ProviderPresetRecord>, CatalogError> {
@@ -951,6 +1315,8 @@ async fn fetch_source_model(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::catalog::MetadataField;
+    use chrono::Utc;
     use serde_json::json;
 
     #[test]
@@ -1054,5 +1420,42 @@ mod tests {
         assert!(CatalogStatus::Confirmed.can_transition_to(CatalogStatus::Unavailable));
         assert!(!CatalogStatus::Unavailable.can_transition_to(CatalogStatus::Confirmed));
         assert!(CatalogStatus::Unavailable.can_transition_to(CatalogStatus::Pending));
+    }
+
+    #[test]
+    fn preset_upgrade_diff_is_stable_and_never_mutates_the_source_snapshot() {
+        let snapshot = json!({"default_base_url":"https://one.example","nested":{"a":1}});
+        let source = SourceRecord {
+            id: "source".into(),
+            display_name: "Source".into(),
+            provider_preset_id: "provider".into(),
+            provider_preset_version: 1,
+            provider_preset_snapshot: snapshot.clone(),
+            base_url: "https://source.example".into(),
+            endpoints: json!({}),
+            auth_config: json!({}),
+            protocol_capabilities: json!({}),
+            enabled: true,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        let latest = ProviderPresetRecord {
+            id: "provider".into(),
+            version: 2,
+            display_name: "Provider".into(),
+            definition: json!({"default_base_url":"https://two.example","nested":{"b":2}}),
+            created_at: Utc::now(),
+        };
+
+        let diff = provider_preset_diff(&source, &latest);
+
+        assert_eq!(
+            diff.changes
+                .iter()
+                .map(|change| change.path.as_str())
+                .collect::<Vec<_>>(),
+            vec!["$.default_base_url", "$.nested.a", "$.nested.b"]
+        );
+        assert_eq!(source.provider_preset_snapshot, snapshot);
     }
 }

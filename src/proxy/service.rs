@@ -11,6 +11,7 @@ use uuid::Uuid;
 use crate::domain::config::{self, GatewayConfig};
 use crate::domain::protocol::Protocol;
 use crate::domain::routing::ResolvedRoute;
+use crate::http::SourceHttpClient;
 use crate::infra::db;
 use crate::infra::health;
 use crate::infra::observability;
@@ -680,7 +681,7 @@ pub(crate) fn finalize_stream_usage(
 async fn forward_account(
     _config: &GatewayConfig,
     secrets: &secrets::SecretResolver,
-    http: &transport::SourceHttpClient,
+    http: &SourceHttpClient,
     route: &ResolvedRoute,
     provider: &config::ProviderConfig,
     account: &config::AccountConfig,
@@ -723,7 +724,7 @@ async fn forward_account(
 
 #[allow(clippy::too_many_arguments)]
 async fn embedded_kimi_adapter(
-    http: &transport::SourceHttpClient,
+    http: &SourceHttpClient,
     provider: &config::ProviderConfig,
     _account: &config::AccountConfig,
     credential: Option<&str>,
@@ -933,7 +934,7 @@ async fn try_fallback(
     config: &GatewayConfig,
     secrets: &secrets::SecretResolver,
     health: &health::HealthRegistry,
-    http: &transport::SourceHttpClient,
+    http: &SourceHttpClient,
     route: &ResolvedRoute,
     model: &str,
     protocol: Protocol,
@@ -1031,7 +1032,7 @@ pub(crate) async fn try_fallback_error(
     config: &GatewayConfig,
     secrets: &secrets::SecretResolver,
     health: &health::HealthRegistry,
-    http: &transport::SourceHttpClient,
+    http: &SourceHttpClient,
     route: &ResolvedRoute,
     model: &str,
     protocol: Protocol,
@@ -1141,7 +1142,7 @@ pub(crate) async fn try_fallback_error(
 async fn forward_fallback(
     _config: &GatewayConfig,
     secrets: &secrets::SecretResolver,
-    http: &transport::SourceHttpClient,
+    http: &SourceHttpClient,
     provider: &config::ProviderConfig,
     account: &config::AccountConfig,
     protocol: Protocol,

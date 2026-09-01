@@ -1,8 +1,10 @@
 mod api;
 mod control_plane;
 mod domain;
+pub(crate) mod http;
 mod infra;
 mod proxy;
+pub(crate) mod source_url;
 mod state;
 
 use std::{net::SocketAddr, sync::Arc};
@@ -19,7 +21,9 @@ use serde_json::{json, Value};
 use tower_http::{services::ServeDir, trace::TraceLayer};
 
 use domain::config::GatewayConfig;
-use infra::{audit, db, health, observability, ops, secrets, source_url};
+use http::client as source_http_client;
+use infra::{audit, db, health, observability, ops, secrets};
+#[cfg(test)]
 use proxy::transport;
 use state::{error_response, AdminAuth, AppState, LiveConfig};
 
@@ -67,7 +71,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .is_some_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes"));
     let source_url_policy = Arc::new(source_url::SourceUrlPolicy::from_env()?);
     let initial_control_plane = control_plane::ControlPlane::with_url_policy(
-        &database,
+        database.pool().clone(),
         &listen_addr,
         source_url_policy.clone(),
     );
@@ -89,10 +93,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         None
     };
-    let catalog = control_plane::model_catalog::ModelCatalogRepository::from_database(&database);
+    let catalog =
+        control_plane::model_catalog::ModelCatalogRepository::new(database.pool().clone());
     control_plane::model_catalog::install_builtin_presets(&catalog).await?;
     let control_plane = control_plane::ControlPlane::with_url_policy(
-        &database,
+        database.pool().clone(),
         &listen_addr,
         source_url_policy.clone(),
     );
@@ -129,7 +134,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     observability::set_snapshot_revision(live.revision);
     let state = AppState {
         live: Arc::new(std::sync::RwLock::new(live)),
-        http: transport::client(source_url_policy.clone())?,
+        http: source_http_client(source_url_policy.clone())?,
         db: Some(database.clone()),
         control_plane: Some(control_plane),
         health,
@@ -253,8 +258,11 @@ async fn run_ops_cli(args: &[String]) -> Result<(), Box<dyn std::error::Error>> 
             let policy = Arc::new(source_url::SourceUrlPolicy::from_env()?);
             let listen_addr =
                 std::env::var("GATEWAY_LISTEN_ADDR").unwrap_or_else(|_| "127.0.0.1:8787".into());
-            let control_plane =
-                control_plane::ControlPlane::with_url_policy(&database, listen_addr, policy);
+            let control_plane = control_plane::ControlPlane::with_url_policy(
+                database.pool().clone(),
+                listen_addr,
+                policy,
+            );
             let result = repository
                 .export_control_plane(&control_plane, "cli")
                 .await?;
@@ -302,8 +310,11 @@ async fn run_ops_cli(args: &[String]) -> Result<(), Box<dyn std::error::Error>> 
             let policy = Arc::new(source_url::SourceUrlPolicy::from_env()?);
             let listen_addr =
                 std::env::var("GATEWAY_LISTEN_ADDR").unwrap_or_else(|_| "127.0.0.1:8787".into());
-            let control_plane =
-                control_plane::ControlPlane::with_url_policy(&database, listen_addr, policy);
+            let control_plane = control_plane::ControlPlane::with_url_policy(
+                database.pool().clone(),
+                listen_addr,
+                policy,
+            );
             let result = repository
                 .restore_control_plane(&control_plane, &export, replace, &requested_by)
                 .await?;
@@ -769,7 +780,7 @@ mod admin_auth_tests {
         });
         AppState {
             live: Arc::new(std::sync::RwLock::new(LiveConfig::legacy(config))),
-            http: transport::test_client().expect("admin auth HTTP client"),
+            http: http::test_client().expect("admin auth HTTP client"),
             db: None,
             control_plane: None,
             health: health::HealthRegistry::new(std::time::Duration::from_secs(1)),
@@ -927,7 +938,7 @@ mod health_api_tests {
         });
         AppState {
             live: Arc::new(std::sync::RwLock::new(LiveConfig::legacy(config))),
-            http: transport::test_client().expect("health API HTTP client"),
+            http: http::test_client().expect("health API HTTP client"),
             db: None,
             control_plane: None,
             health: health::HealthRegistry::new(Duration::from_secs(1)),
@@ -1086,7 +1097,7 @@ mod audit_closeout_tests {
         let live = LiveConfig::legacy(config);
         AppState {
             live: Arc::new(std::sync::RwLock::new(live)),
-            http: transport::test_client().expect("audit HTTP client"),
+            http: http::test_client().expect("audit HTTP client"),
             db: None,
             control_plane: None,
             health: health::HealthRegistry::new(std::time::Duration::from_secs(30)),
@@ -1318,7 +1329,7 @@ mod usage_api_tests {
         let live = LiveConfig::legacy(config);
         AppState {
             live: Arc::new(std::sync::RwLock::new(live)),
-            http: transport::test_client().expect("HTTP client"),
+            http: http::test_client().expect("HTTP client"),
             db: Some(database),
             control_plane: None,
             health: health::HealthRegistry::new(std::time::Duration::from_secs(1)),
@@ -1692,7 +1703,7 @@ mod kimi_adapter_e2e_tests {
         let live = LiveConfig::legacy(config);
         AppState {
             live: Arc::new(std::sync::RwLock::new(live)),
-            http: transport::test_client().expect("http client"),
+            http: http::test_client().expect("http client"),
             db: None,
             control_plane: None,
             health: health::HealthRegistry::new(std::time::Duration::from_secs(1)),
@@ -1871,7 +1882,7 @@ mod ops_api_tests {
         });
         AppState {
             live: Arc::new(std::sync::RwLock::new(LiveConfig::legacy(config))),
-            http: transport::test_client().expect("ops API HTTP client"),
+            http: http::test_client().expect("ops API HTTP client"),
             db: Some(database),
             control_plane: Some(control_plane),
             health: health::HealthRegistry::new(std::time::Duration::from_secs(1)),
@@ -1885,7 +1896,8 @@ mod ops_api_tests {
     #[ignore = "requires TEST_DATABASE_URL; run with the PostgreSQL regression suite"]
     async fn postgres_ops_api_exposes_progress_versions_and_verified_restore() {
         let (database, pool, admin, schema) = isolated_database().await;
-        let control_plane = control_plane::ControlPlane::new(&database, "127.0.0.1:0");
+        let control_plane =
+            control_plane::ControlPlane::new(database.pool().clone(), "127.0.0.1:0");
         let app = application(db_state(database.clone(), control_plane));
 
         let policies = app
@@ -2085,7 +2097,7 @@ mod stream_contract_e2e_tests {
         });
         AppState {
             live: Arc::new(std::sync::RwLock::new(LiveConfig::legacy(config))),
-            http: transport::test_client().expect("native e2e HTTP client"),
+            http: http::test_client().expect("native e2e HTTP client"),
             db: None,
             control_plane: None,
             health: health::HealthRegistry::new(Duration::from_secs(1)),

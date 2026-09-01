@@ -4,9 +4,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{collections::BTreeMap, error::Error, fmt, str::FromStr};
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize, sqlx::Type)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-#[sqlx(type_name = "catalog_status", rename_all = "snake_case")]
 pub enum CatalogStatus {
     #[default]
     Pending,
@@ -15,6 +14,14 @@ pub enum CatalogStatus {
 }
 
 impl CatalogStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Confirmed => "confirmed",
+            Self::Unavailable => "unavailable",
+        }
+    }
+
     pub fn can_transition_to(self, next: Self) -> bool {
         self == next
             || matches!(
@@ -26,18 +33,64 @@ impl CatalogStatus {
     }
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, sqlx::Type)]
+impl fmt::Display for CatalogStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for CatalogStatus {
+    type Err = ();
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "pending" => Ok(Self::Pending),
+            "confirmed" => Ok(Self::Confirmed),
+            "unavailable" => Ok(Self::Unavailable),
+            _ => Err(()),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-#[sqlx(type_name = "catalog_availability", rename_all = "snake_case")]
 pub enum CatalogAvailability {
     Unknown,
     Available,
     Unavailable,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, sqlx::Type)]
+impl CatalogAvailability {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Unknown => "unknown",
+            Self::Available => "available",
+            Self::Unavailable => "unavailable",
+        }
+    }
+}
+
+impl fmt::Display for CatalogAvailability {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for CatalogAvailability {
+    type Err = ();
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "unknown" => Ok(Self::Unknown),
+            "available" => Ok(Self::Available),
+            "unavailable" => Ok(Self::Unavailable),
+            _ => Err(()),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-#[sqlx(type_name = "source_protocol_mode", rename_all = "snake_case")]
 pub enum SourceProtocolMode {
     Unknown,
     Native,
@@ -46,9 +99,38 @@ pub enum SourceProtocolMode {
 }
 
 impl SourceProtocolMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Unknown => "unknown",
+            Self::Native => "native",
+            Self::Adapter => "adapter",
+            Self::Unsupported => "unsupported",
+        }
+    }
+
     #[allow(dead_code)]
     pub fn is_routable(self) -> bool {
         matches!(self, Self::Native | Self::Adapter)
+    }
+}
+
+impl fmt::Display for SourceProtocolMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for SourceProtocolMode {
+    type Err = ();
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "unknown" => Ok(Self::Unknown),
+            "native" => Ok(Self::Native),
+            "adapter" => Ok(Self::Adapter),
+            "unsupported" => Ok(Self::Unsupported),
+            _ => Err(()),
+        }
     }
 }
 
@@ -313,23 +395,16 @@ impl CatalogMetadata {
 
 #[derive(Debug)]
 pub enum CatalogError {
-    Database(sqlx::Error),
     Json(serde_json::Error),
-    NotFound(String),
     InvalidMetadata(String),
     InvalidState(String),
-    ImmutableVersionConflict(String),
 }
 
 impl fmt::Display for CatalogError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Database(error) => write!(f, "database error: {error}"),
             Self::Json(error) => write!(f, "JSON error: {error}"),
-            Self::NotFound(message)
-            | Self::InvalidMetadata(message)
-            | Self::InvalidState(message)
-            | Self::ImmutableVersionConflict(message) => f.write_str(message),
+            Self::InvalidMetadata(message) | Self::InvalidState(message) => f.write_str(message),
         }
     }
 }
@@ -337,16 +412,9 @@ impl fmt::Display for CatalogError {
 impl Error for CatalogError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
-            Self::Database(error) => Some(error),
             Self::Json(error) => Some(error),
             _ => None,
         }
-    }
-}
-
-impl From<sqlx::Error> for CatalogError {
-    fn from(value: sqlx::Error) -> Self {
-        Self::Database(value)
     }
 }
 
@@ -370,15 +438,6 @@ pub struct ProviderPresetInput {
     pub definition: Value,
 }
 
-#[derive(Clone, Debug, Serialize, sqlx::FromRow)]
-pub struct ProviderPresetRecord {
-    pub id: String,
-    pub version: i32,
-    pub display_name: String,
-    pub definition: Value,
-    pub created_at: DateTime<Utc>,
-}
-
 #[derive(Clone, Debug)]
 pub struct SourceInput {
     pub id: String,
@@ -391,22 +450,6 @@ pub struct SourceInput {
     pub protocol_capabilities: Value,
 }
 
-#[derive(Clone, Debug, Serialize, sqlx::FromRow)]
-pub struct SourceRecord {
-    pub id: String,
-    pub display_name: String,
-    pub provider_preset_id: String,
-    pub provider_preset_version: i32,
-    pub provider_preset_snapshot: Value,
-    pub base_url: String,
-    pub endpoints: Value,
-    pub auth_config: Value,
-    pub protocol_capabilities: Value,
-    pub enabled: bool,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-}
-
 #[derive(Clone, Debug)]
 pub struct ModelPresetInput {
     pub id: String,
@@ -414,24 +457,6 @@ pub struct ModelPresetInput {
     pub canonical_model_id: String,
     pub aliases: Vec<String>,
     pub metadata: CatalogMetadata,
-}
-
-#[derive(Clone, Debug, Serialize, sqlx::FromRow)]
-pub struct ModelPresetRecord {
-    pub id: String,
-    pub version: i32,
-    pub canonical_model_id: String,
-    pub aliases: Value,
-    pub metadata: Value,
-    pub field_sources: Value,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-}
-
-impl ModelPresetRecord {
-    pub fn catalog_metadata(&self) -> Result<CatalogMetadata, CatalogError> {
-        CatalogMetadata::from_json(self.metadata.clone(), self.field_sources.clone())
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -443,31 +468,6 @@ pub struct SourceModelRefresh {
     pub matched_preset: Option<ModelPresetRef>,
     pub preset_metadata: Option<MetadataValues>,
     pub discovered_at: DateTime<Utc>,
-}
-
-#[derive(Clone, Debug, Serialize, sqlx::FromRow)]
-pub struct SourceModelRecord {
-    pub source_id: String,
-    pub upstream_model_id: String,
-    pub confirmation_status: CatalogStatus,
-    pub availability_status: CatalogAvailability,
-    pub raw_snapshot: Value,
-    pub metadata: Value,
-    pub field_sources: Value,
-    pub matched_model_preset_id: Option<String>,
-    pub matched_model_preset_version: Option<i32>,
-    pub first_discovered_at: DateTime<Utc>,
-    pub last_discovered_at: DateTime<Utc>,
-    pub confirmed_at: Option<DateTime<Utc>>,
-    pub unavailable_at: Option<DateTime<Utc>>,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-}
-
-impl SourceModelRecord {
-    pub fn catalog_metadata(&self) -> Result<CatalogMetadata, CatalogError> {
-        CatalogMetadata::from_json(self.metadata.clone(), self.field_sources.clone())
-    }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -494,39 +494,6 @@ pub struct DiscoveryApplyInput {
     pub requested_by: String,
     pub started_at: DateTime<Utc>,
     pub completed_at: DateTime<Utc>,
-}
-
-#[derive(Clone, Debug, Serialize, sqlx::FromRow)]
-pub struct DiscoveryRunRecord {
-    pub id: i64,
-    pub source_id: String,
-    pub account_id: Option<String>,
-    pub provider_preset_id: String,
-    pub provider_preset_version: i32,
-    pub status: String,
-    pub raw_snapshot: Option<Value>,
-    pub diff: Value,
-    pub discovered_model_count: i32,
-    pub http_status: Option<i32>,
-    pub latency_ms: i64,
-    pub error_code: Option<String>,
-    pub error_message: Option<String>,
-    pub requested_by: String,
-    pub started_at: DateTime<Utc>,
-    pub completed_at: DateTime<Utc>,
-}
-
-impl DiscoveryRunRecord {
-    pub fn discovery_diff(&self) -> Result<DiscoveryDiff, CatalogError> {
-        serde_json::from_value(self.diff.clone()).map_err(Into::into)
-    }
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct DiscoveryApplyResult {
-    pub run: DiscoveryRunRecord,
-    pub diff: DiscoveryDiff,
-    pub models: Vec<SourceModelRecord>,
 }
 
 #[derive(Clone, Debug)]
@@ -559,31 +526,6 @@ pub struct ConnectionTestInput {
     pub tested_at: DateTime<Utc>,
 }
 
-#[derive(Clone, Debug, Serialize, sqlx::FromRow)]
-pub struct ConnectionTestRecord {
-    pub id: i64,
-    pub source_id: String,
-    pub account_id: Option<String>,
-    pub protocol: Protocol,
-    pub upstream_protocol: Protocol,
-    pub mode: SourceProtocolMode,
-    pub status: String,
-    pub http_status: Option<i32>,
-    pub latency_ms: i64,
-    pub error_code: Option<String>,
-    pub error_message: Option<String>,
-    pub requested_by: String,
-    pub tested_at: DateTime<Utc>,
-}
-
-#[derive(Clone, Debug, Serialize, sqlx::FromRow)]
-pub struct AccountCredentialRef {
-    pub id: String,
-    pub source_id: String,
-    pub credential_env: Option<String>,
-    pub has_credential_ciphertext: bool,
-}
-
 #[derive(Clone, Debug)]
 pub struct SourceModelConfirmation {
     pub upstream_model_id: String,
@@ -598,22 +540,6 @@ pub struct LogicalModelInput {
     pub status: CatalogStatus,
     pub model_preset: Option<ModelPresetRef>,
     pub metadata: CatalogMetadata,
-}
-
-#[derive(Clone, Debug, Serialize, sqlx::FromRow)]
-pub struct LogicalModelRecord {
-    pub id: String,
-    pub public_name: String,
-    pub display_name: String,
-    pub status: CatalogStatus,
-    pub model_preset_id: Option<String>,
-    pub model_preset_version: Option<i32>,
-    pub metadata: Value,
-    pub field_sources: Value,
-    pub confirmed_at: Option<DateTime<Utc>>,
-    pub unavailable_at: Option<DateTime<Utc>>,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
 }
 
 #[derive(Clone, Debug)]
@@ -677,30 +603,6 @@ impl SourceModelCapabilityInput {
     }
 }
 
-#[derive(Clone, Debug, Serialize, sqlx::FromRow)]
-pub struct SourceModelCapabilityRecord {
-    pub source_id: String,
-    pub upstream_model_id: String,
-    pub protocol: Protocol,
-    pub status: CatalogStatus,
-    pub mode: SourceProtocolMode,
-    pub source_protocol: Option<Protocol>,
-    pub adapter: Option<String>,
-    pub feature_capabilities: Value,
-    pub field_source: String,
-    pub observed_at: DateTime<Utc>,
-    pub confirmed_at: Option<DateTime<Utc>>,
-    pub unavailable_at: Option<DateTime<Utc>>,
-    pub updated_at: DateTime<Utc>,
-}
-
-impl SourceModelCapabilityRecord {
-    #[allow(dead_code)]
-    pub fn is_routable(&self) -> bool {
-        self.status == CatalogStatus::Confirmed && self.mode.is_routable()
-    }
-}
-
 #[derive(Clone, Debug)]
 pub struct ModelBindingInput {
     pub logical_model_id: String,
@@ -708,38 +610,6 @@ pub struct ModelBindingInput {
     pub account_id: String,
     pub upstream_model_id: String,
     pub protocol: Protocol,
-    pub priority: i32,
-}
-
-#[derive(Clone, Debug, Serialize, sqlx::FromRow)]
-pub struct ModelBindingRecord {
-    pub id: i64,
-    pub logical_model_id: String,
-    pub source_id: String,
-    pub account_id: String,
-    pub upstream_model_id: String,
-    pub protocol: Protocol,
-    pub status: CatalogStatus,
-    pub priority: i32,
-    pub confirmed_at: Option<DateTime<Utc>>,
-    pub unavailable_at: Option<DateTime<Utc>>,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-}
-
-#[derive(Clone, Debug, Serialize, sqlx::FromRow)]
-pub struct RoutableBindingRecord {
-    pub binding_id: i64,
-    pub logical_model_id: String,
-    pub public_name: String,
-    pub source_id: String,
-    pub account_id: String,
-    pub upstream_model_id: String,
-    pub protocol: Protocol,
-    pub mode: SourceProtocolMode,
-    pub source_protocol: Option<Protocol>,
-    pub adapter: Option<String>,
-    pub feature_capabilities: Value,
     pub priority: i32,
 }
 
