@@ -2,7 +2,7 @@
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { IconFilterAll } from '@/components/ui/icons';
+import { IconDashboardGrid } from '@/components/ui/icons';
 import { GatewayConsoleShell, GATEWAY_ADMIN_KEY_STORAGE_KEY } from './GatewayConsoleShell';
 
 describe('GatewayConsoleShell Admin key boundary', () => {
@@ -34,7 +34,7 @@ describe('GatewayConsoleShell Admin key boundary', () => {
         <GatewayConsoleShell
           activePage="overview"
           navigationSections={[{ label: '监控', pages: ['overview'] }]}
-          navigationItems={[{ id: 'overview', label: '总览', icon: <IconFilterAll /> }]}
+          navigationItems={[{ id: 'overview', label: '总览', icon: <IconDashboardGrid /> }]}
           onNavigate={() => {}}
           title="总览"
           description="Token"

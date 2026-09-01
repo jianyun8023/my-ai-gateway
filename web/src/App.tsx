@@ -6,12 +6,12 @@ import {
   type GatewayConsoleNavItem,
 } from './components/gateway/GatewayConsoleShell';
 import {
-  IconChartLine,
+  IconBarChart,
+  IconDashboardGrid,
   IconFileText,
-  IconFilterAll,
-  IconGitBranch,
+  IconLayers,
   IconSettings,
-  IconSidebarProviders,
+  IconSunAsterisk,
 } from './components/ui/icons';
 import {
   consolePageHash,
@@ -45,11 +45,11 @@ const PAGE_META: Record<ConsolePage, PageMeta> = {
 };
 
 const PAGE_ICONS: Record<ConsolePage, React.ReactNode> = {
-  overview: <IconFilterAll size={18} />,
-  analysis: <IconChartLine size={18} />,
+  overview: <IconDashboardGrid size={18} />,
+  analysis: <IconBarChart size={18} />,
   events: <IconFileText size={18} />,
-  sources: <IconSidebarProviders size={18} />,
-  models: <IconGitBranch size={18} />,
+  sources: <IconLayers size={18} />,
+  models: <IconSunAsterisk size={18} />,
   settings: <IconSettings size={18} />,
 };
 
