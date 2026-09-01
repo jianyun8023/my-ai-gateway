@@ -29,6 +29,7 @@ Rust AI 网关 MVP，目标是将多个上游账号统一为一个入口，并�
 - Admin 写操作审计日志，事务内原子记录成功、独立记录失败；diff 自动脱敏 14 类敏感字段。
 - Virtual Key 轮换（overlap 窗口）、scopes 权限更新和 key_group 分组。
 - Prometheus 指标采集（请求/attempt/Token/延迟/TTFT/冷却/snapshot/活跃流），`/metrics` 端点可用。
+- OpenTelemetry tracing 导出（OTLP/gRPC），设置 `OTEL_EXPORTER_OTLP_ENDPOINT` 后自动启用；关键路径 span 包含 `request_id`、`protocol`、`source_id`、`account_id` 和 `upstream_model`。
 - 管理接口还包括 `/admin/keys`、`/admin/keys/:id/rotate`、`/admin/keys/:id/revoke`、`/admin/provider-presets`、`/admin/sources/*`、基于当前 DB runtime snapshot 的有效能力矩阵 `/admin/capabilities`、`/admin/credentials/encrypt`、`/admin/accounts/:id/credentials/rotate`，以及 `/admin/usage/summary|timeseries|breakdown|events|export`；`/admin/usage/aggregate` 保留为一次获取三类聚合的组合入口。
 
 工具链由 [Mise](https://mise.jdx.dev/) 管理（Rust 1.97.1 + Node 24，见 [`mise.toml`](./mise.toml)）：
