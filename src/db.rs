@@ -5,7 +5,7 @@ use chrono::{DateTime, TimeZone, Utc};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use sqlx::{postgres::PgPoolOptions, PgPool};
-use std::time::Duration;
+use std::{fmt, time::Duration};
 
 #[derive(Clone)]
 pub struct Database {
@@ -69,10 +69,96 @@ pub struct VirtualKeyRecord {
     pub name: String,
     pub key_prefix: String,
     pub allowed_models: Value,
+    pub scopes: Value,
+    pub key_group: Option<String>,
     pub enabled: bool,
     pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
     pub last_used_at: Option<DateTime<Utc>>,
+    pub expires_at: Option<DateTime<Utc>>,
     pub revoked_at: Option<DateTime<Utc>>,
+    pub replaced_by_id: Option<i64>,
+    pub overlap_until: Option<DateTime<Utc>>,
+    pub origin: String,
+}
+
+/// The only scope currently consumed by the data plane. Keeping this as a
+/// named contract makes adding another operation explicit instead of treating
+/// an arbitrary user string as permission.
+pub const VIRTUAL_KEY_INVOKE_SCOPE: &str = "gateway:invoke";
+pub const VIRTUAL_KEY_MODELS_SCOPE: &str = "gateway:models:read";
+
+#[derive(Debug, Clone, Default)]
+#[allow(dead_code)]
+pub struct VirtualKeyUpdate {
+    pub name: Option<String>,
+    pub allowed_models: Option<Vec<String>>,
+    pub scopes: Option<Vec<String>>,
+    /// `Some(None)` explicitly clears the expiry; `None` leaves it unchanged.
+    pub expires_at: Option<Option<DateTime<Utc>>>,
+    /// `Some(None)` explicitly clears the group; `None` leaves it unchanged.
+    pub key_group: Option<Option<String>>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct VirtualKeyRotationOptions {
+    pub overlap: Duration,
+    pub expires_at: Option<DateTime<Utc>>,
+    pub name: Option<String>,
+    pub allowed_models: Option<Vec<String>>,
+    pub scopes: Option<Vec<String>>,
+    pub key_group: Option<Option<String>>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct VirtualKeyRotation {
+    pub old_id: i64,
+    pub new_id: i64,
+    pub key_prefix: String,
+    pub key: String,
+    pub overlap_until: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[allow(dead_code)]
+pub struct StaticVirtualKeyMigration {
+    pub id: i64,
+    pub key_prefix: String,
+    pub created: bool,
+    pub active: bool,
+}
+
+#[derive(Debug)]
+pub enum VirtualKeyError {
+    Database(sqlx::Error),
+    NotFound,
+    Conflict(String),
+    Validation(String),
+}
+
+impl fmt::Display for VirtualKeyError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Database(error) => write!(f, "database error: {error}"),
+            Self::NotFound => f.write_str("virtual key not found"),
+            Self::Conflict(message) | Self::Validation(message) => f.write_str(message),
+        }
+    }
+}
+
+impl std::error::Error for VirtualKeyError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Database(error) => Some(error),
+            _ => None,
+        }
+    }
+}
+
+impl From<sqlx::Error> for VirtualKeyError {
+    fn from(error: sqlx::Error) -> Self {
+        Self::Database(error)
+    }
 }
 
 #[derive(Debug, serde::Serialize, sqlx::FromRow)]
@@ -361,6 +447,9 @@ impl Database {
             .execute(&mut *tx)
             .await?;
         sqlx::raw_sql(include_str!("../migrations/0012_health_persistence.sql"))
+            .execute(&mut *tx)
+            .await?;
+        sqlx::raw_sql(include_str!("../migrations/0015_virtual_key_lifecycle.sql"))
             .execute(&mut *tx)
             .await?;
         tx.commit().await
@@ -932,27 +1021,77 @@ impl Database {
         })
     }
 
+    /// Create a key with the default data-plane permissions. The raw value is
+    /// returned to the caller exactly once; only its SHA-256 digest is stored.
     pub async fn create_virtual_key(
         &self,
         name: &str,
         allowed_models: &[String],
     ) -> Result<(i64, String), sqlx::Error> {
+        self.create_virtual_key_with_options(
+            name,
+            allowed_models,
+            &[VIRTUAL_KEY_INVOKE_SCOPE.to_owned()],
+            None,
+            None,
+            "created",
+        )
+        .await
+    }
+
+    pub async fn create_virtual_key_with_options(
+        &self,
+        name: &str,
+        allowed_models: &[String],
+        scopes: &[String],
+        expires_at: Option<DateTime<Utc>>,
+        key_group: Option<&str>,
+        origin: &str,
+    ) -> Result<(i64, String), sqlx::Error> {
         let raw = format!("gw_{}", uuid::Uuid::new_v4().simple());
         let prefix = raw.chars().take(11).collect::<String>();
         let hash = hash_key(&raw);
-        let row = sqlx::query_as::<_, (i64,)>("INSERT INTO virtual_keys (name,key_prefix,key_hash,allowed_models) VALUES ($1,$2,$3,$4) RETURNING id")
-            .bind(name).bind(&prefix).bind(&hash).bind(serde_json::to_value(allowed_models).unwrap_or(Value::Array(vec![]))).fetch_one(&self.pool).await?;
+        let scopes = scopes_json(scopes);
+        let allowed_models =
+            serde_json::to_value(allowed_models).unwrap_or_else(|_| Value::Array(vec![]));
+        let row = sqlx::query_as::<_, (i64,)>(
+            "INSERT INTO virtual_keys
+             (name,key_prefix,key_hash,allowed_models,scopes,key_group,expires_at,origin)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id",
+        )
+        .bind(name)
+        .bind(&prefix)
+        .bind(&hash)
+        .bind(allowed_models)
+        .bind(scopes)
+        .bind(key_group)
+        .bind(expires_at)
+        .bind(origin)
+        .fetch_one(&self.pool)
+        .await?;
         Ok((row.0, raw))
     }
 
     pub async fn list_virtual_keys(&self) -> Result<Vec<VirtualKeyRecord>, sqlx::Error> {
-        sqlx::query_as::<_, VirtualKeyRecord>("SELECT id,name,key_prefix,allowed_models,enabled,created_at,last_used_at,revoked_at FROM virtual_keys ORDER BY id DESC")
-            .fetch_all(&self.pool).await
+        let query = virtual_key_select("FROM virtual_keys ORDER BY id DESC");
+        sqlx::query_as::<_, VirtualKeyRecord>(&query)
+            .fetch_all(&self.pool)
+            .await
+    }
+
+    pub async fn get_virtual_key(&self, id: i64) -> Result<Option<VirtualKeyRecord>, sqlx::Error> {
+        let query = virtual_key_select("FROM virtual_keys WHERE id=$1");
+        sqlx::query_as::<_, VirtualKeyRecord>(&query)
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await
     }
 
     pub async fn revoke_virtual_key(&self, id: i64) -> Result<bool, sqlx::Error> {
         let result = sqlx::query(
-            "UPDATE virtual_keys SET enabled=FALSE, revoked_at=NOW() WHERE id=$1 AND enabled=TRUE",
+            "UPDATE virtual_keys
+             SET enabled=FALSE, revoked_at=COALESCE(revoked_at,NOW()), updated_at=NOW()
+             WHERE id=$1 AND enabled=TRUE AND revoked_at IS NULL",
         )
         .bind(id)
         .execute(&self.pool)
@@ -960,31 +1099,262 @@ impl Database {
         Ok(result.rows_affected() > 0)
     }
 
+    /// Update mutable metadata and permissions in one atomic statement. The
+    /// `CASE` flags preserve the distinction between an omitted field and an
+    /// explicit null used to clear expiry/group metadata.
+    #[allow(dead_code)]
+    pub async fn update_virtual_key(
+        &self,
+        id: i64,
+        update: &VirtualKeyUpdate,
+    ) -> Result<VirtualKeyRecord, VirtualKeyError> {
+        let name_set = update.name.is_some();
+        let models_set = update.allowed_models.is_some();
+        let scopes_set = update.scopes.is_some();
+        let expiry_set = update.expires_at.is_some();
+        let group_set = update.key_group.is_some();
+        let models = update
+            .allowed_models
+            .as_ref()
+            .map(|values| serde_json::to_value(values).unwrap_or_else(|_| Value::Array(vec![])));
+        let scopes = update.scopes.as_ref().map(|values| scopes_json(values));
+        let expiry = update.expires_at.as_ref().and_then(|value| *value);
+        let group = update.key_group.as_ref().and_then(|value| value.as_deref());
+        let query = format!(
+            "UPDATE virtual_keys
+             SET name=CASE WHEN $2 THEN $3 ELSE name END,
+                 allowed_models=CASE WHEN $4 THEN $5 ELSE allowed_models END,
+                 scopes=CASE WHEN $6 THEN $7 ELSE scopes END,
+                 expires_at=CASE WHEN $8 THEN $9 ELSE expires_at END,
+                 key_group=CASE WHEN $10 THEN $11 ELSE key_group END,
+                 updated_at=NOW()
+             WHERE id=$1 AND revoked_at IS NULL
+             RETURNING {}",
+            VIRTUAL_KEY_COLUMNS
+        );
+        let record = sqlx::query_as::<_, VirtualKeyRecord>(&query)
+            .bind(id)
+            .bind(name_set)
+            .bind(update.name.as_deref())
+            .bind(models_set)
+            .bind(models)
+            .bind(scopes_set)
+            .bind(scopes)
+            .bind(expiry_set)
+            .bind(expiry)
+            .bind(group_set)
+            .bind(group)
+            .fetch_optional(&self.pool)
+            .await?
+            .ok_or(VirtualKeyError::NotFound)?;
+        Ok(record)
+    }
+
+    /// Rotate one key generation under a row lock. Concurrent rotations of the
+    /// same generation are serialized; the second caller receives Conflict.
+    pub async fn rotate_virtual_key(
+        &self,
+        id: i64,
+        options: &VirtualKeyRotationOptions,
+    ) -> Result<VirtualKeyRotation, VirtualKeyError> {
+        if options.overlap > Duration::from_secs(86_400) {
+            return Err(VirtualKeyError::Validation(
+                "overlap window must be at most 86400 seconds".into(),
+            ));
+        }
+        let mut tx = self.pool.begin().await?;
+        let query = virtual_key_select("FROM virtual_keys WHERE id=$1 FOR UPDATE");
+        let old = sqlx::query_as::<_, VirtualKeyRecord>(&query)
+            .bind(id)
+            .fetch_optional(&mut *tx)
+            .await?
+            .ok_or(VirtualKeyError::NotFound)?;
+        if !old.enabled || old.revoked_at.is_some() {
+            return Err(VirtualKeyError::Conflict(
+                "virtual key is disabled or revoked".into(),
+            ));
+        }
+        if old.expires_at.is_some_and(|expires| expires <= Utc::now()) {
+            return Err(VirtualKeyError::Conflict("virtual key is expired".into()));
+        }
+        if old.replaced_by_id.is_some() {
+            return Err(VirtualKeyError::Conflict(
+                "virtual key has already been rotated".into(),
+            ));
+        }
+
+        let overlap_until = if options.overlap.is_zero() {
+            None
+        } else {
+            Some(
+                Utc::now()
+                    + chrono::Duration::from_std(options.overlap).map_err(|_| {
+                        VirtualKeyError::Validation("invalid overlap window".into())
+                    })?,
+            )
+        };
+        let raw = format!("gw_{}", uuid::Uuid::new_v4().simple());
+        let prefix = raw.chars().take(11).collect::<String>();
+        let hash = hash_key(&raw);
+        let models_value = options
+            .allowed_models
+            .as_ref()
+            .map(|values| serde_json::to_value(values).unwrap_or_else(|_| Value::Array(vec![])))
+            .unwrap_or_else(|| old.allowed_models.clone());
+        let scopes_value = options
+            .scopes
+            .as_ref()
+            .map(|values| scopes_json(values))
+            .unwrap_or_else(|| old.scopes.clone());
+        let expires_at = options.expires_at.or(old.expires_at);
+        let name = options.name.as_deref().unwrap_or(&old.name);
+        let key_group = options
+            .key_group
+            .as_ref()
+            .and_then(|value| value.as_deref())
+            .or(old.key_group.as_deref());
+        let new_id = sqlx::query_as::<_, (i64,)>(
+            "INSERT INTO virtual_keys
+             (name,key_prefix,key_hash,allowed_models,scopes,key_group,expires_at,origin)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,'rotated') RETURNING id",
+        )
+        .bind(name)
+        .bind(&prefix)
+        .bind(&hash)
+        .bind(models_value)
+        .bind(scopes_value)
+        .bind(key_group)
+        .bind(expires_at)
+        .fetch_one(&mut *tx)
+        .await?
+        .0;
+        sqlx::query(
+            "UPDATE virtual_keys
+             SET replaced_by_id=$2, overlap_until=$3,
+                 enabled=CASE WHEN $3 IS NULL THEN FALSE ELSE enabled END,
+                 revoked_at=CASE WHEN $3 IS NULL THEN COALESCE(revoked_at,NOW()) ELSE revoked_at END,
+                 updated_at=NOW()
+             WHERE id=$1",
+        )
+        .bind(id)
+        .bind(new_id)
+        .bind(overlap_until)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(VirtualKeyRotation {
+            old_id: id,
+            new_id,
+            key_prefix: prefix,
+            key: raw,
+            overlap_until,
+        })
+    }
+
+    /// Import the configured legacy static key as a normal database-backed
+    /// credential. This operation is idempotent and never returns the raw key.
+    #[allow(dead_code)]
+    pub async fn migrate_static_virtual_key(
+        &self,
+        raw: &str,
+        name: &str,
+        allowed_models: &[String],
+        scopes: &[String],
+        expires_at: Option<DateTime<Utc>>,
+        key_group: Option<&str>,
+    ) -> Result<StaticVirtualKeyMigration, VirtualKeyError> {
+        let hash = hash_key(raw);
+        let prefix = raw.chars().take(11).collect::<String>();
+        let mut tx = self.pool.begin().await?;
+        if let Some(row) = sqlx::query_as::<_, (i64, bool, Option<DateTime<Utc>>, Option<DateTime<Utc>>)>(
+            "SELECT id,enabled,expires_at,revoked_at FROM virtual_keys WHERE key_hash=$1 FOR UPDATE",
+        )
+        .bind(&hash)
+        .fetch_optional(&mut *tx)
+        .await?
+        {
+            tx.commit().await?;
+            let active = row.1
+                && row.3.is_none()
+                && row.2.is_none_or(|expires| expires > Utc::now());
+            return Ok(StaticVirtualKeyMigration {
+                id: row.0,
+                key_prefix: prefix,
+                created: false,
+                active,
+            });
+        }
+        let row = sqlx::query_as::<_, (i64,)>(
+            "INSERT INTO virtual_keys
+             (name,key_prefix,key_hash,allowed_models,scopes,key_group,expires_at,origin)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,'static_migration') RETURNING id",
+        )
+        .bind(name)
+        .bind(&prefix)
+        .bind(&hash)
+        .bind(serde_json::to_value(allowed_models).unwrap_or_else(|_| Value::Array(vec![])))
+        .bind(scopes_json(scopes))
+        .bind(key_group)
+        .bind(expires_at)
+        .fetch_one(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(StaticVirtualKeyMigration {
+            id: row.0,
+            key_prefix: prefix,
+            created: true,
+            active: true,
+        })
+    }
+
     pub async fn authenticate_virtual_key(
         &self,
         raw: &str,
         model: &str,
     ) -> Result<Option<i64>, sqlx::Error> {
+        self.authenticate_virtual_key_with_scope(raw, model, VIRTUAL_KEY_INVOKE_SCOPE)
+            .await
+    }
+
+    pub async fn authenticate_virtual_key_with_scope(
+        &self,
+        raw: &str,
+        model: &str,
+        required_scope: &str,
+    ) -> Result<Option<i64>, sqlx::Error> {
         let hash = hash_key(raw);
-        let row = sqlx::query_as::<_, (i64, bool, Value)>("SELECT id,enabled,allowed_models FROM virtual_keys WHERE key_hash=$1 AND revoked_at IS NULL").bind(&hash).fetch_optional(&self.pool).await?;
-        let Some((id, enabled, allowed)) = row else {
+        let mut tx = self.pool.begin().await?;
+        let row = sqlx::query_as::<_, (i64, Value, Value)>(
+            "SELECT id,allowed_models,scopes FROM virtual_keys
+             WHERE key_hash=$1 AND enabled=TRUE AND revoked_at IS NULL
+               AND (expires_at IS NULL OR expires_at > NOW())
+               AND (replaced_by_id IS NULL OR (overlap_until IS NOT NULL AND overlap_until > NOW()))
+             FOR UPDATE",
+        )
+        .bind(&hash)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some((id, allowed, scopes)) = row else {
+            tx.commit().await?;
             return Ok(None);
         };
-        if !enabled {
+        let permitted_model = allowed_models_allow(&allowed, model);
+        let permitted_scope = scope_allow(&scopes, required_scope);
+        if !permitted_model || !permitted_scope {
+            tx.commit().await?;
             return Ok(None);
         }
-        let allowed_models = allowed.as_array().cloned().unwrap_or_default();
-        let permitted = allowed_models.is_empty()
-            || allowed_models
-                .iter()
-                .any(|item| item.as_str() == Some(model) || item.as_str() == Some("*"));
-        if permitted {
-            let _ = sqlx::query("UPDATE virtual_keys SET last_used_at=NOW() WHERE key_hash=$1")
-                .bind(&hash)
-                .execute(&self.pool)
-                .await;
-        }
-        Ok(permitted.then_some(id))
+        let updated = sqlx::query(
+            "UPDATE virtual_keys SET last_used_at=NOW() WHERE id=$1
+             AND enabled=TRUE AND revoked_at IS NULL
+             AND (expires_at IS NULL OR expires_at > NOW())
+             AND (replaced_by_id IS NULL OR (overlap_until IS NOT NULL AND overlap_until > NOW()))",
+        )
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok((updated.rows_affected() == 1).then_some(id))
     }
 
     pub async fn list_usage_events_page(
@@ -1228,6 +1598,52 @@ where
 
 fn hash_key(raw: &str) -> String {
     format!("{:x}", Sha256::digest(raw.as_bytes()))
+}
+
+const VIRTUAL_KEY_COLUMNS: &str =
+    "id,name,key_prefix,allowed_models,scopes,key_group,enabled,created_at,updated_at,last_used_at,expires_at,revoked_at,replaced_by_id,overlap_until,origin";
+
+fn virtual_key_select(suffix: &str) -> String {
+    format!("SELECT {VIRTUAL_KEY_COLUMNS} {suffix}")
+}
+
+fn scopes_json(scopes: &[String]) -> Value {
+    if scopes.is_empty() {
+        Value::Array(vec![Value::String(VIRTUAL_KEY_INVOKE_SCOPE.to_owned())])
+    } else {
+        serde_json::to_value(scopes).unwrap_or_else(|_| Value::Array(vec![]))
+    }
+}
+
+fn allowed_models_allow(value: &Value, model: &str) -> bool {
+    let allowed = value.as_array().cloned().unwrap_or_default();
+    allowed.is_empty()
+        || allowed
+            .iter()
+            .any(|item| item.as_str() == Some(model) || item.as_str() == Some("*"))
+}
+
+fn scope_allow(value: &Value, required: &str) -> bool {
+    let scopes = value.as_array().cloned().unwrap_or_default();
+    // `gateway:invoke` is the baseline permission and also permits the model
+    // catalogue endpoint. More granular scopes can be added without changing
+    // the authentication query or treating unknown values as grants.
+    scopes.iter().any(|item| {
+        item.as_str() == Some("*")
+            || item.as_str() == Some(required)
+            || (required == VIRTUAL_KEY_MODELS_SCOPE
+                && item.as_str() == Some(VIRTUAL_KEY_INVOKE_SCOPE))
+    })
+}
+
+pub fn validate_virtual_key_scopes(scopes: &[String]) -> Result<(), String> {
+    let allowed = [VIRTUAL_KEY_INVOKE_SCOPE, VIRTUAL_KEY_MODELS_SCOPE, "*"];
+    for scope in scopes {
+        if !allowed.contains(&scope.as_str()) {
+            return Err(format!("unsupported virtual key scope '{scope}'"));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
