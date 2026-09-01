@@ -794,8 +794,14 @@ mod tests {
             .expect("preset diff response");
         assert_eq!(response.status(), StatusCode::OK);
         let diff = response_json(response).await;
-        assert_eq!(diff["data"]["source_version"], BUILTIN_PROVIDER_PRESET_VERSION);
-        assert_eq!(diff["data"]["latest_version"], BUILTIN_PROVIDER_PRESET_VERSION);
+        assert_eq!(
+            diff["data"]["source_version"],
+            BUILTIN_PROVIDER_PRESET_VERSION
+        );
+        assert_eq!(
+            diff["data"]["latest_version"],
+            BUILTIN_PROVIDER_PRESET_VERSION
+        );
         assert!(diff["data"]["changes"].as_array().unwrap().is_empty());
 
         let binding_count: i64 =
