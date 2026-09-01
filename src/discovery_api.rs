@@ -598,7 +598,7 @@ mod tests {
     use super::*;
     use crate::{
         model_catalog::{MetadataField, SourceModelRefresh},
-        provider_preset::install_builtin_presets,
+        provider_preset::{install_builtin_presets, BUILTIN_PROVIDER_PRESET_VERSION},
         transport,
     };
     use axum::{body::to_bytes, http::Request};
@@ -686,7 +686,10 @@ mod tests {
         assert_eq!(response.status(), StatusCode::CREATED);
         let created = response_json(response).await;
         assert_eq!(created["data"]["provider_preset_id"], "deepseek");
-        assert_eq!(created["data"]["provider_preset_version"], 1);
+        assert_eq!(
+            created["data"]["provider_preset_version"],
+            BUILTIN_PROVIDER_PRESET_VERSION
+        );
         assert_eq!(
             created["data"]["provider_preset_snapshot"]["default_base_url"],
             "https://api.deepseek.com"
@@ -791,8 +794,8 @@ mod tests {
             .expect("preset diff response");
         assert_eq!(response.status(), StatusCode::OK);
         let diff = response_json(response).await;
-        assert_eq!(diff["data"]["source_version"], 1);
-        assert_eq!(diff["data"]["latest_version"], 1);
+        assert_eq!(diff["data"]["source_version"], BUILTIN_PROVIDER_PRESET_VERSION);
+        assert_eq!(diff["data"]["latest_version"], BUILTIN_PROVIDER_PRESET_VERSION);
         assert!(diff["data"]["changes"].as_array().unwrap().is_empty());
 
         let binding_count: i64 =
