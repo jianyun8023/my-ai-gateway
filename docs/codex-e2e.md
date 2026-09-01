@@ -38,13 +38,13 @@
 ## 配置
 
 复制 [`.env.codex-e2e.example`](../.env.codex-e2e.example) 为 Git ignored 的
-`.env.codex-e2e`，填入网关 Key：
+`.env.codex-e2e`，填入 Admin Key；runner 默认从 PostgreSQL 列表中选择并显式查看一个可恢复 Virtual Key：
 
 ```dotenv
 CODEX_E2E_TESTS=1
 CODEX_GATEWAY_BASE_URL=http://127.0.0.1:8788/v1
-CODEX_GATEWAY_API_KEY=<gateway-data-plane-key>
 CODEX_GATEWAY_ADMIN_KEY=<gateway-admin-key>
+CODEX_VIRTUAL_KEY_NAME=<optional-exact-name>
 CODEX_MODEL=k3
 CODEX_HOME=target/codex-e2e/home
 CODEX_E2E_WORKSPACE=target/codex-e2e/workspace
@@ -53,7 +53,7 @@ CODEX_E2E_RESULT_DIR=target/codex-e2e/results
 
 `.env.codex-e2e` 和 `CODEX_HOME` 必须是隔离路径；runner 会拒绝使用默认的
 `~/.codex`，并以 `600` 写入生成的 `config.toml`。Key 只通过
-`env_key = "CODEX_GATEWAY_API_KEY"` 注入，绝不会写入配置或 artifact。
+runner 只在内存中持有解析出的 Virtual Key，再通过 `env_key = "CODEX_GATEWAY_API_KEY"` 注入 Codex；Key 绝不会写入配置或 artifact。也可设置 `CODEX_VIRTUAL_KEY_ID` 精确选择。`CODEX_GATEWAY_API_KEY` 仅作为非数据库环境的显式兼容覆盖。
 
 Codex 的 custom provider 配置采用 Responses wire API。相关字段含义见 OpenAI 的
 [custom model provider](https://learn.chatgpt.com/docs/config-file/config-advanced)
@@ -67,7 +67,7 @@ Codex 的 custom provider 配置采用 Responses wire API。相关字段含义�
 mise run test-codex-e2e -- --list
 ```
 
-运行 Kimi Adapter 的 shell 工具 E2E（需要 `CODEX_E2E_TESTS=1` 和两个 Gateway Key）：
+运行 Kimi Adapter 的 shell 工具 E2E（需要 `CODEX_E2E_TESTS=1`、Admin Key 和一个可恢复的数据库 Virtual Key）：
 
 ```bash
 mise run test-codex-e2e -- --model k3
@@ -96,7 +96,7 @@ runner 将 `--search` 放在 `exec` 子命令之前，以兼容当前 Codex CLI 
 限制在配置的隔离目录。Codex 官方的非交互模式说明见
 [Codex exec](https://learn.chatgpt.com/docs/non-interactive-mode)。
 
-没有 Admin Key 时可以显式跳过 Usage 检查：
+使用显式 `CODEX_GATEWAY_API_KEY` 时，没有 Admin Key 可以跳过 Usage 检查：
 
 ```bash
 mise run test-codex-e2e -- --skip-usage-check
@@ -129,8 +129,7 @@ canary 和最终文本不匹配。
 输出、命令输出、Authorization 或 API Key。最终消息文件默认在断言后删除；只有显式传入
 `--keep-output` 才会保留以便调试。
 
-Artifact schema v2 将 Usage 中的 403/429 归类为 `provider_unavailable`，与行为断言失败分开；
-只有真正的 `failed` 令命令返回非零。
+Artifact schema v2 将 Usage 中的 403/429 归类为 `provider_unavailable`；CLI/Gateway/Usage 都成功但模型未触发 shell 或 search item 时归类为 `not_triggered`；命令已触发却执行失败、canary/最终结果错误等仍为 `failed`。只有真正的 `failed` 令命令返回非零。
 
 ## 维护规则
 

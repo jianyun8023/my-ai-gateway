@@ -29,6 +29,7 @@ import type {
   VirtualKey,
   VirtualKeyCreateInput,
   VirtualKeyCreateResult,
+  VirtualKeySecret,
 } from './types';
 
 export interface AdminTransport {
@@ -312,6 +313,13 @@ export class GatewayAdminResources {
 
   createVirtualKey(input: VirtualKeyCreateInput, signal?: AbortSignal): Promise<VirtualKeyCreateResult> {
     return this.transport.json('/admin/keys', jsonInit('POST', input, signal));
+  }
+
+  async revealVirtualKey(id: number, signal?: AbortSignal): Promise<VirtualKeySecret> {
+    return (await this.transport.json<AdminDataEnvelope<VirtualKeySecret>>(
+      `/admin/keys/${encodePath(id)}/value`,
+      { signal },
+    )).data;
   }
 
   async revokeVirtualKey(id: number, signal?: AbortSignal): Promise<void> {

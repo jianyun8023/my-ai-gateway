@@ -263,7 +263,7 @@ ProviderPreset 与发现确认阶段不改变 Route，也不把发现结果自�
   ↓
 入口协议识别
   ↓
-静态 GATEWAY_API_KEY 或 PostgreSQL Virtual Key 鉴权
+PostgreSQL Virtual Key 鉴权（静态 GATEWAY_API_KEY 仅过渡兼容）
   ↓
 读取 model
   ↓
@@ -398,7 +398,7 @@ Kimi Adapter：
 - 原生 JSON/SSE 上游透传；
 - 自定义 Provider endpoint；
 - 上游凭据替换；
-- `GATEWAY_API_KEY` 基础鉴权。
+- PostgreSQL Virtual Key 鉴权；`GATEWAY_API_KEY` 仅保留为过渡兼容。
 
 ### 路由
 
@@ -443,9 +443,10 @@ Kimi Adapter：
 - `POST /admin/keys` 创建 Virtual Key；
 - `GET /admin/keys` 查询 Key 列表；
 - `GET /admin/keys/:id` 查询单个 Key 详情；
+- `GET /admin/keys/:id/value` 由 Admin 显式查看可恢复 Key；
 - `POST /admin/keys/:id/rotate` 轮换 Key，支持 `overlap_secs` 平滑过渡、`scopes` 权限和 `key_group` 分组；
 - `POST /admin/keys/:id/revoke` 或 `DELETE /admin/keys/:id` 撤销 Key；
-- Key 使用 SHA-256 哈希存储，原始值只在创建/轮换时返回；
+- Key 使用 SHA-256 哈希执行数据面鉴权；原始值另以 AES-256-GCM envelope 保存，列表和普通详情不返回，只有显式 value 接口解密；
 - 支持 `allowed_models` 模型白名单；
 - 成功鉴权后更新 `last_used_at`；
 - `GET /admin/usage/summary` 返回逻辑请求、上游尝试、重试、成功/失败、延迟和 Token 汇总。
@@ -503,7 +504,7 @@ v1 响应 envelope 固定如下：summary 为 `{version, timezone, range, data}`
 
 ### 7.1 Virtual Key 正式系统
 
-已完成数据库-backed Key 创建、列表、查询、撤销、轮换和模型白名单鉴权。Key 轮换支持 `overlap_secs` 平滑窗口、scopes 权限更新和 `key_group` 分组；migration 0015 新增 `virtual_key_rotations`、`scopes`、`key_group`、`revoked_by` 等字段。Admin Session 当前使用独立的 `GATEWAY_ADMIN_KEY` fail closed 保护。
+已完成数据库-backed Key 创建、列表、查询、受控查看、撤销、轮换和模型白名单鉴权。Key 轮换支持 `overlap_secs` 平滑窗口、scopes 权限更新和 `key_group` 分组；migration 0015 新增生命周期字段，0016 增加绑定 Key prefix 的 AES-GCM recovery envelope。Admin Session 使用独立的 `GATEWAY_ADMIN_KEY` fail closed 保护；旧 hash-only Key 保持可鉴权，但必须轮换后才可查看。
 
 ### 7.2 PostgreSQL 持久化剩余项
 
@@ -525,7 +526,7 @@ ProviderPreset/模型发现回归使用真实 PostgreSQL 与 mock 上游，覆�
 
 `migrations/0011_retention_backup.sql` 新增 `retention_policies`、`retention_cleanup_runs`、`audit_logs`、`backup_runs`、`gateway_schema_migrations` 和 `gateway_schema_metadata`；`migrations/0012_health_persistence.sql` 追加健康状态字段、`account_health_events` 和迁移版本 12。四类历史（logical UsageEvent、UsageAttempt、连接测试/健康/运维 audit、discovery run）分别按 UTC `retention_days` 管理。`POST /admin/retention/cleanup` 在运行开始时固定策略和 cut-off，每个批次独立提交并记录 scanned/deleted/progress；同一 `operation_id` 可重复提交、取消和 retry。逻辑事件只有在不会级联删除仍在保留期内的 attempt 时才删除。
 
-控制面可通过 `GET /admin/control-plane/export` 导出脱敏 JSON，包含恢复路由所需的 Source/Account/模型/Binding/Route、schema/migration 版本和 runtime fingerprint，不包含 usage 正文、Authorization、API Key、Virtual Key hash 或凭据 ciphertext。`POST /admin/control-plane/import` 在显式 `replace=true` 时按 FK 顺序恢复到新库，重置序列并重新构建 snapshot；fingerprint 不一致时标记恢复失败。完整 pg_dump、Compose 和本地 CLI 步骤见 [`operations.md`](operations.md)。
+控制面可通过 `GET /admin/control-plane/export` 导出脱敏 JSON，包含恢复路由所需的 Source/Account/模型/Binding/Route、schema/migration 版本和 runtime fingerprint，不包含 usage 正文、Authorization、API Key、Virtual Key hash/recovery ciphertext 或账号凭据 ciphertext。`POST /admin/control-plane/import` 在显式 `replace=true` 时按 FK 顺序恢复到新库，重置序列并重新构建 snapshot；fingerprint 不一致时标记恢复失败。完整 pg_dump、Compose 和本地 CLI 步骤见 [`operations.md`](operations.md)。
 
 ### 7.3 Token 统计
 

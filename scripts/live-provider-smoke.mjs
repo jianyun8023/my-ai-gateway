@@ -991,8 +991,8 @@ async function startGateway({
   port,
   databaseUrl,
   config,
-  gatewayKey,
   adminKey,
+  masterKey,
   environment,
   allowLocalSource,
 }) {
@@ -1005,8 +1005,9 @@ async function startGateway({
       GATEWAY_LISTEN_ADDR: `127.0.0.1:${port}`,
       GATEWAY_CONFIG_JSON: JSON.stringify(config),
       GATEWAY_CONFIG_IMPORT: 'false',
-      GATEWAY_API_KEY: gatewayKey,
+      GATEWAY_API_KEY: '',
       GATEWAY_ADMIN_KEY: adminKey,
+      GATEWAY_CREDENTIAL_MASTER_KEY: masterKey,
       GATEWAY_SOURCE_URL_ALLOWLIST: mergeSourceUrlAllowlist(
         environment.GATEWAY_SOURCE_URL_ALLOWLIST,
         allowLocalSource,
@@ -1021,32 +1022,52 @@ async function startGateway({
   }
   child.stdout.on('data', capture)
   child.stderr.on('data', capture)
+  const secrets = [
+    environment.DEEPSEEK_API_KEY,
+    environment.MINIMAX_API_KEY,
+    environment.KIMI_API_KEY,
+    environment.B_AI_API_KEY,
+    adminKey,
+    masterKey,
+  ]
+  const diagnostics = () => redact(logs.join('').slice(-4000), secrets)
 
   const baseUrl = `http://127.0.0.1:${port}`
   const deadline = Date.now() + 30_000
   while (Date.now() < deadline) {
     if (child.exitCode !== null) {
-      const secrets = [
-        environment.DEEPSEEK_API_KEY,
-        environment.MINIMAX_API_KEY,
-        environment.KIMI_API_KEY,
-        environment.B_AI_API_KEY,
-        gatewayKey,
-        adminKey,
-      ]
       throw new SmokeFailure('gateway exited during startup', {
         exit_code: child.exitCode,
-        logs: redact(logs.join('').slice(-4000), secrets),
+        logs: diagnostics(),
       })
     }
     try {
       const response = await fetch(`${baseUrl}/healthz`, { signal: AbortSignal.timeout(1_000) })
-      if (response.ok) return { child, baseUrl }
+      if (response.ok) return { child, baseUrl, diagnostics }
     } catch {}
     await new Promise((resolve) => setTimeout(resolve, 100))
   }
   child.kill('SIGTERM')
   throw new SmokeFailure('gateway did not become healthy')
+}
+
+async function provisionVirtualKey(baseUrl, adminKey, name) {
+  const response = await fetch(`${baseUrl}/admin/keys`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${adminKey}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({ name, allowed_models: [] }),
+    signal: AbortSignal.timeout(10_000),
+  })
+  let payload
+  try { payload = await response.json() } catch {}
+  check(response.ok && typeof payload?.key === 'string', 'failed to provision database Virtual Key', {
+    http_status: response.status,
+    error_code: payload?.error?.code || null,
+  })
+  return payload.key
 }
 
 async function stopGateway(child) {
@@ -1099,6 +1120,7 @@ function preflight(binary) {
     gateway_binary: true,
     psql: true,
     case_isolation: true,
+    data_plane_auth: 'database_virtual_key',
   }
 }
 
@@ -1111,8 +1133,8 @@ async function runIsolatedCaseAttempt({
 }) {
   const shortRunId = `${randomBytes(4).toString('hex')}-${attemptNo}`
   const schema = `live_provider_${shortRunId.replaceAll('-', '_')}`
-  const gatewayKey = `gw_live_${randomBytes(24).toString('hex')}`
   const adminKey = `admin_live_${randomBytes(24).toString('hex')}`
+  const masterKey = `master_live_${randomBytes(32).toString('hex')}`
   let gateway
   let failureServer
   let schemaCreated = false
@@ -1127,11 +1149,16 @@ async function runIsolatedCaseAttempt({
       port,
       databaseUrl: schemaDatabaseUrl(process.env.LIVE_TEST_DATABASE_URL, schema),
       config,
-      gatewayKey,
       adminKey,
+      masterKey,
       environment: process.env,
       allowLocalSource: Boolean(failureServer),
     })
+    const gatewayKey = await provisionVirtualKey(
+      gateway.baseUrl,
+      adminKey,
+      `live-${testCase.id}-${shortRunId}`,
+    )
     return await runCase({
       gatewayBaseUrl: gateway.baseUrl,
       gatewayKey,
@@ -1139,6 +1166,11 @@ async function runIsolatedCaseAttempt({
       timeoutMs,
       shortRunId,
     }, testCase)
+  } catch (error) {
+    if (error instanceof SmokeFailure && gateway?.diagnostics) {
+      error.metadata.gateway_logs = gateway.diagnostics()
+    }
+    throw error
   } finally {
     await stopGateway(gateway?.child)
     if (failureServer) await failureServer.close()

@@ -85,6 +85,16 @@ describe('GatewayAdminResources', () => {
     );
   });
 
+  it('uses the explicit secret endpoint to reveal one Virtual Key', async () => {
+    const transport = transportWith(async () => ({ data: { id: 7, key: 'gw_secret' } }));
+
+    await expect(new GatewayAdminResources(transport).revealVirtualKey(7)).resolves.toEqual({
+      id: 7,
+      key: 'gw_secret',
+    });
+    expect(transport.json).toHaveBeenCalledWith('/admin/keys/7/value', expect.any(Object));
+  });
+
   it('builds configuration export from real resources and removes credential references', async () => {
     const source = {
       id: 'source-a',

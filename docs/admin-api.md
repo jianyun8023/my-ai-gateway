@@ -4,6 +4,14 @@
 
 模型发现只管理 ProviderPreset、Source 与 SourceModel。它不会自动创建 LogicalModel、ModelBinding 或 Route，也不会修改 `/v1/models` 或运行时路由。
 
+## Virtual Key 查看与复制
+
+`POST /admin/keys` 和 `POST /admin/keys/:id/rotate` 创建的 Key 使用 SHA-256 哈希完成数据面鉴权，同时用 `GATEWAY_CREDENTIAL_MASTER_KEY` 加密保存恢复副本。列表及普通详情只返回 `key_prefix` 和 `key_recoverable`，不会返回 Key、hash 或 ciphertext。
+
+`GET /admin/keys/:id/value` 只接受独立 Admin Key，并返回 `{"data":{"id":1,"key":"..."}}`。旧的 hash-only 行返回 `409 key_not_recoverable`，需轮换后查看。未配置 master key 时创建、轮换或查看均 fail closed；管理端通过该接口提供显式查看和复制。
+
+每次查看都会写入 `virtual_key.reveal` 元数据审计事件；审计记录、日志和控制面导出均不会包含 Key 明文或加密恢复副本。
+
 ## 内置预设
 
 每个内置 ProviderPreset 以不可变 `(id, version)` 保存。`deepseek@2` 与
@@ -325,7 +333,7 @@ dry-run 只统计候选，不删除数据。正式清理按 attempt → logical 
 
 - `credential_env` Secret 名称和 `credential: {"kind":"secret_ref","name":"..."}`；
 - 无 Secret 引用但存在加密字段时的 `{"kind":"redacted"}` 占位；
-- Virtual Key 元数据（不含 `key_hash`，恢复时报告 `skipped_virtual_keys`）。
+- Virtual Key 元数据（不含 `key_hash` 或 `key_ciphertext`，恢复时报告 `skipped_virtual_keys`）。
 
 `POST /admin/control-plane/import` 接受导出 JSON，或 `{ "data": <export>, "replace": true, "requested_by": "..." }` 包装。非空目标必须显式 `replace=true`。导入按 FK 顺序恢复并重置 serial sequence；提交后重新构建 snapshot，只有 fingerprint 与导出一致才返回 `verified=true` 和新的 `snapshot_revision`。目标环境必须自行注入导出中列出的 Secret。
 

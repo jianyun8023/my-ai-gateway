@@ -2,7 +2,8 @@
 --
 -- A key row represents one credential generation. Rotation keeps the old
 -- generation linked through `replaced_by_id` and accepts it only until the
--- explicit `overlap_until` instant. The raw credential is never persisted.
+-- explicit `overlap_until` instant. The raw credential is never persisted as
+-- plaintext; migration 0016 adds an optional encrypted recovery envelope.
 
 INSERT INTO gateway_schema_migrations (version, name)
 VALUES (15, 'virtual_key_lifecycle')

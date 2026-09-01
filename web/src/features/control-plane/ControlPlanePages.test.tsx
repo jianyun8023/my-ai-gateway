@@ -304,7 +304,7 @@ describe('production control-plane pages', () => {
     expect(container.textContent).not.toMatch(/Random|Round-Robin/);
   });
 
-  it('keeps a newly created Virtual Key out of rendered text', async () => {
+  it('shows and copies a newly created recoverable Virtual Key', async () => {
     const oneTimeValue = ['one', 'time', 'value'].join('-');
     const writeText = vi.fn(async () => {});
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
@@ -337,8 +337,38 @@ describe('production control-plane pages', () => {
     });
 
     expect(writeText).toHaveBeenCalledWith(oneTimeValue);
-    expect(document.body.textContent).not.toContain(oneTimeValue);
-    expect(document.body.textContent).toContain('原始 Key 已复制到剪贴板');
+    expect(document.body.textContent).toContain(oneTimeValue);
+    expect(document.body.textContent).toContain('API Key 已复制到剪贴板');
+  });
+
+  it('reveals an existing recoverable Virtual Key through the explicit Admin endpoint', async () => {
+    const storedValue = ['stored', 'virtual', 'key'].join('-');
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/admin/keys') return jsonResponse({ data: [{
+        id: 9,
+        name: 'personal-app',
+        key_prefix: 'gw_example',
+        key_recoverable: true,
+        allowed_models: [],
+        enabled: true,
+        created_at: '2026-09-01T00:00:00Z',
+        last_used_at: null,
+        revoked_at: null,
+      }] });
+      if (url === '/admin/keys/9/value') return jsonResponse({ data: { id: 9, key: storedValue } });
+      return baseHandler(input);
+    }));
+    await renderPage('settings', { adminKeyConfigured: true });
+
+    const reveal = Array.from(container.querySelectorAll<HTMLButtonElement>('button'))
+      .find((button) => button.getAttribute('aria-label')?.includes('查看 personal-app API Key'));
+    await act(async () => {
+      reveal?.click();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+
+    expect(document.body.textContent).toContain(storedValue);
   });
 
   it('renders structured 401 state with a retry action', async () => {

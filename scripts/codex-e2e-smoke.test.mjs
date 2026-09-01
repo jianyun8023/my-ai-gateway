@@ -17,6 +17,7 @@ import {
   parseCodexJsonLines,
   preflightGatewayModel,
   preflightGatewayRoute,
+  resolveCodexDataKey,
   sanitizeCodexEnvironment,
   secureFile,
   selectCases,
@@ -110,6 +111,40 @@ test('Gateway route preflight verifies an OpenAI Responses route when Admin Key 
   )
 })
 
+test('Codex resolves an active recoverable database Virtual Key without persisting it', async () => {
+  const calls = []
+  const fetchImpl = async (url) => {
+    calls.push(url)
+    if (url.endsWith('/admin/keys')) return {
+      ok: true,
+      status: 200,
+      json: async () => ({ data: [
+        { id: 9, name: 'legacy', enabled: true, key_recoverable: false },
+        { id: 7, name: 'codex-e2e', enabled: true, key_recoverable: true },
+      ] }),
+    }
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ data: { id: 7, key: 'gw_database_key' } }),
+    }
+  }
+  assert.deepEqual(await resolveCodexDataKey({
+    adminBaseUrl: 'http://127.0.0.1:8787',
+    adminKey: 'admin-key',
+    virtualKeyName: 'codex-e2e',
+    fetchImpl,
+  }), {
+    key: 'gw_database_key',
+    source: 'database_virtual_key',
+    virtual_key_id: 7,
+  })
+  assert.deepEqual(calls, [
+    'http://127.0.0.1:8787/admin/keys',
+    'http://127.0.0.1:8787/admin/keys/7/value',
+  ])
+})
+
 test('Codex output files are reduced to owner-only permissions', () => {
   const directory = mkdtempSync(path.join(os.tmpdir(), 'codex-e2e-permissions-'))
   const filePath = path.join(directory, 'final.txt')
@@ -175,10 +210,17 @@ test('tool prompt cannot reveal the random canary and missing commands get a pre
   ), 'command_event_missing')
 })
 
-test('Codex failures classify Provider 403/429 separately from assertions', () => {
+test('Codex failures separate Provider availability and model tool non-triggering', () => {
   assert.equal(classifyCodexFailure({ usage: { status_codes: [403] } }), 'provider_unavailable')
   assert.equal(classifyCodexFailure({ usage: { status_codes: [200] } }), 'failed')
-  assert.equal(classifyCodexFailure({ evaluation: { command_seen: false } }), 'failed')
+  assert.equal(classifyCodexFailure({
+    diagnostic_stage: 'command_event_missing',
+    usage: { passed: true, status_codes: [200] },
+  }), 'not_triggered')
+  assert.equal(classifyCodexFailure({
+    diagnostic_stage: 'command_failed',
+    usage: { passed: true, status_codes: [200] },
+  }), 'failed')
 })
 
 test('search requires a completed event and an official Rust Blog source', () => {

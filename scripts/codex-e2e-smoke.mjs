@@ -66,6 +66,8 @@ export function parseArguments(argv) {
     workspace: null,
     codexCli: null,
     model: null,
+    virtualKeyId: null,
+    virtualKeyName: null,
     timeoutMs: null,
   }
   for (let index = 0; index < argv.length; index += 1) {
@@ -89,6 +91,10 @@ export function parseArguments(argv) {
     else if (argument.startsWith('--codex=')) options.codexCli = argument.slice('--codex='.length)
     else if (argument === '--model') options.model = nextValue()
     else if (argument.startsWith('--model=')) options.model = argument.slice('--model='.length)
+    else if (argument === '--virtual-key-id') options.virtualKeyId = Number(nextValue())
+    else if (argument.startsWith('--virtual-key-id=')) options.virtualKeyId = Number(argument.slice('--virtual-key-id='.length))
+    else if (argument === '--virtual-key-name') options.virtualKeyName = nextValue()
+    else if (argument.startsWith('--virtual-key-name=')) options.virtualKeyName = argument.slice('--virtual-key-name='.length)
     else if (argument === '--timeout-ms') options.timeoutMs = Number(nextValue())
     else if (argument.startsWith('--timeout-ms=')) options.timeoutMs = Number(argument.slice('--timeout-ms='.length))
     else if (argument === '--include-search') options.includeSearch = true
@@ -131,6 +137,8 @@ function resolveOptions(options) {
     workspace: path.resolve(repositoryRoot, options.workspace || process.env.CODEX_E2E_WORKSPACE || defaultWorkspace),
     codexCli: options.codexCli || process.env.CODEX_CLI || 'codex',
     model: options.model || process.env.CODEX_MODEL || 'k3',
+    virtualKeyId: options.virtualKeyId ?? (process.env.CODEX_VIRTUAL_KEY_ID ? Number(process.env.CODEX_VIRTUAL_KEY_ID) : null),
+    virtualKeyName: options.virtualKeyName || process.env.CODEX_VIRTUAL_KEY_NAME || null,
     timeoutMs: Number.isFinite(timeoutMs) ? timeoutMs : 300_000,
   }
 }
@@ -147,7 +155,10 @@ function normalizedGatewayBaseUrl(raw) {
 function validateEnvironment(options, skipUsageCheck) {
   check(process.env.CODEX_E2E_TESTS === '1', 'CODEX_E2E_TESTS must be exactly 1 for live Codex E2E')
   check(process.env.CODEX_GATEWAY_BASE_URL, 'CODEX_GATEWAY_BASE_URL is required')
-  check(process.env.CODEX_GATEWAY_API_KEY, 'CODEX_GATEWAY_API_KEY is required')
+  check(
+    process.env.CODEX_GATEWAY_API_KEY || process.env.CODEX_GATEWAY_ADMIN_KEY,
+    'CODEX_GATEWAY_ADMIN_KEY is required to resolve a database Virtual Key unless CODEX_GATEWAY_API_KEY is explicitly set',
+  )
   if (!skipUsageCheck) check(process.env.CODEX_GATEWAY_ADMIN_KEY, 'CODEX_GATEWAY_ADMIN_KEY is required unless --skip-usage-check is set')
   check(options.model.trim().length > 0, 'Codex model must not be empty')
   check(Number.isFinite(options.timeoutMs) && options.timeoutMs >= 10_000, 'CODEX_E2E_TIMEOUT_MS must be at least 10000')
@@ -407,9 +418,16 @@ export function diagnosticStage(kind, processResult, invalidLines, evaluation, u
 
 export function classifyCodexFailure(failure) {
   const statuses = failure?.usage?.status_codes || []
-  return statuses.some((status) => [403, 429].includes(Number(status)))
-    ? 'provider_unavailable'
-    : 'failed'
+  if (statuses.some((status) => [403, 429].includes(Number(status)))) {
+    return 'provider_unavailable'
+  }
+  if (
+    failure?.usage?.passed
+    && ['command_event_missing', 'search_event_missing'].includes(failure?.diagnostic_stage)
+  ) {
+    return 'not_triggered'
+  }
+  return 'failed'
 }
 
 function safeFailure(error) {
@@ -494,7 +512,7 @@ async function runCase(context, testCase, options, runId, canary) {
     sanitizeCodexEnvironment(process.env, {
       home: options.home,
       stateDirectory: path.join(options.home, 'state'),
-      apiKey: process.env.CODEX_GATEWAY_API_KEY,
+      apiKey: context.dataKey,
     }),
     options.workspace,
     options.timeoutMs,
@@ -591,8 +609,61 @@ export async function preflightGatewayRoute(adminBaseUrl, adminKey, model, fetch
   return { responses_route_checked: true }
 }
 
+export async function resolveCodexDataKey({
+  adminBaseUrl,
+  adminKey,
+  explicitKey,
+  virtualKeyId,
+  virtualKeyName,
+  fetchImpl = fetch,
+}) {
+  if (explicitKey) return { key: explicitKey, source: 'explicit_environment', virtual_key_id: null }
+  check(adminKey, 'CODEX_GATEWAY_ADMIN_KEY is required to resolve a database Virtual Key')
+  const listResponse = await fetchImpl(`${adminBaseUrl}/admin/keys`, {
+    headers: { authorization: `Bearer ${adminKey}` },
+    signal: AbortSignal.timeout(5_000),
+  })
+  check(listResponse.ok, 'failed to list database Virtual Keys', { http_status: listResponse.status })
+  let listPayload
+  try { listPayload = await listResponse.json() } catch {}
+  check(Array.isArray(listPayload?.data), 'Virtual Key list returned an invalid payload')
+  const candidates = listPayload.data.filter((item) => (
+    item?.enabled === true
+    && !item?.revoked_at
+    && item?.key_recoverable === true
+  ))
+  let selected
+  if (Number.isInteger(virtualKeyId) && virtualKeyId > 0) {
+    selected = candidates.find((item) => Number(item.id) === virtualKeyId)
+  } else if (virtualKeyName) {
+    selected = candidates.find((item) => item.name === virtualKeyName)
+  } else {
+    selected = candidates[0]
+  }
+  check(selected, 'no matching active recoverable database Virtual Key is available', {
+    requested_virtual_key_id: virtualKeyId || null,
+    requested_virtual_key_name: virtualKeyName || null,
+  })
+  const revealResponse = await fetchImpl(`${adminBaseUrl}/admin/keys/${selected.id}/value`, {
+    headers: { authorization: `Bearer ${adminKey}` },
+    signal: AbortSignal.timeout(5_000),
+  })
+  check(revealResponse.ok, 'failed to reveal database Virtual Key', {
+    http_status: revealResponse.status,
+    virtual_key_id: selected.id,
+  })
+  let revealPayload
+  try { revealPayload = await revealResponse.json() } catch {}
+  check(typeof revealPayload?.data?.key === 'string', 'Virtual Key reveal returned an invalid payload')
+  return {
+    key: revealPayload.data.key,
+    source: 'database_virtual_key',
+    virtual_key_id: Number(selected.id),
+  }
+}
+
 function printHelp() {
-  console.log(`Codex CLI E2E smoke test (explicit opt-in)\n\nUsage:\n  CODEX_E2E_TESTS=1 mise run test-codex-e2e -- [options]\n\nOptions:\n  --case <id>              Run a named case (repeatable)\n  --include-search         Include high-cost web search case\n  --model <id>             Gateway model (default: k3)\n  --env-file <path>        Environment file (default: .env.codex-e2e)\n  --home <path>             Isolated CODEX_HOME\n  --workspace <path>        Controlled Codex workspace\n  --skip-usage-check       Do not query Admin Usage API\n  --list                   List cases without making requests\n  --keep-output            Keep final model output for debugging\n`)
+  console.log(`Codex CLI E2E smoke test (explicit opt-in)\n\nUsage:\n  CODEX_E2E_TESTS=1 mise run test-codex-e2e -- [options]\n\nOptions:\n  --case <id>              Run a named case (repeatable)\n  --include-search         Include high-cost web search case\n  --model <id>             Gateway model (default: k3)\n  --virtual-key-id <id>    Select a recoverable database Virtual Key\n  --virtual-key-name <name> Select by exact Virtual Key name\n  --env-file <path>        Environment file (default: .env.codex-e2e)\n  --home <path>             Isolated CODEX_HOME\n  --workspace <path>        Controlled Codex workspace\n  --skip-usage-check       Do not query Admin Usage API\n  --list                   List cases without making requests\n  --keep-output            Keep final model output for debugging\n`)
 }
 
 async function main() {
@@ -610,9 +681,16 @@ async function main() {
   }
   const selected = selectCases(cases, options)
   const gatewayUrls = validateEnvironment(options, options.skipUsageCheck)
+  const dataKey = await resolveCodexDataKey({
+    adminBaseUrl: gatewayUrls.adminBaseUrl,
+    adminKey: process.env.CODEX_GATEWAY_ADMIN_KEY,
+    explicitKey: process.env.CODEX_GATEWAY_API_KEY,
+    virtualKeyId: options.virtualKeyId,
+    virtualKeyName: options.virtualKeyName,
+  })
   const modelPreflight = await preflightGatewayModel(
     gatewayUrls.gatewayBaseUrl,
-    process.env.CODEX_GATEWAY_API_KEY,
+    dataKey.key,
     options.model,
   )
   const routePreflight = await preflightGatewayRoute(
@@ -620,7 +698,13 @@ async function main() {
     process.env.CODEX_GATEWAY_ADMIN_KEY,
     options.model,
   )
-  const preflight = { ...modelPreflight, ...routePreflight }
+  const preflight = {
+    ...modelPreflight,
+    ...routePreflight,
+    data_plane_auth: dataKey.source,
+    virtual_key_id: dataKey.virtual_key_id,
+  }
+  gatewayUrls.dataKey = dataKey.key
   ensureDirectory(options.home)
   ensureDirectory(path.join(options.home, 'state'))
   ensureDirectory(options.workspace)
@@ -645,6 +729,7 @@ async function main() {
   }
   const summary = {
     passed: results.filter((result) => result.outcome === 'passed').length,
+    not_triggered: results.filter((result) => result.outcome === 'not_triggered').length,
     provider_unavailable: results.filter((result) => result.outcome === 'provider_unavailable').length,
     failed: results.filter((result) => result.outcome === 'failed').length,
   }
@@ -668,7 +753,7 @@ async function main() {
   writeFileSync(outputPath, `${JSON.stringify(artifact, null, 2)}\n`, { mode: 0o600 })
   secureFile(outputPath)
   console.log(`RESULT ${path.relative(repositoryRoot, outputPath)}`)
-  console.log(`SUMMARY passed=${summary.passed} provider_unavailable=${summary.provider_unavailable} failed=${summary.failed}`)
+  console.log(`SUMMARY passed=${summary.passed} not_triggered=${summary.not_triggered} provider_unavailable=${summary.provider_unavailable} failed=${summary.failed}`)
   if (summary.failed > 0) process.exitCode = 1
 }
 

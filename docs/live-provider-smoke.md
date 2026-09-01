@@ -26,6 +26,8 @@ LIVE_TEST_DATABASE_URL=postgres://gateway:gateway@127.0.0.1:5432/gateway_test
 
 `LIVE_TEST_DATABASE_URL` 必须指向专用测试数据库，不能等于运行时 `DATABASE_URL`。Runner 会在该数据库创建随机 schema，启动随机本机端口的网关，并在结束时删除 schema。PostgreSQL 用户需要具有创建/删除 schema 的权限。
 
+每个隔离网关都会生成临时 Admin Key 和凭据主密钥，通过 Admin API 在该 schema 创建数据库 Virtual Key，再使用它完成三协议真实请求。Runner 会显式清空继承的 `GATEWAY_API_KEY`，因此该测试不会误走静态入口。
+
 Fallback case 的故障 Source 使用本机随机端口。Runner 只在该隔离网关子进程中设置
 `GATEWAY_SOURCE_URL_ALLOWLIST=127.0.0.1`，以符合 Source URL 安全策略；它会覆盖外部
 同名变量，不会给普通 Provider case 或正在运行的开发网关放宽策略。

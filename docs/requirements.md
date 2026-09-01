@@ -35,7 +35,7 @@ OpenAI Chat 与 Responses 的输入/输出模型并不等价，因此转换层�
 
 - `Provider`：上游服务、base URL、支持的协议、模型目录。
 - `Account`：provider 下的 API Key/OAuth 凭据、启用状态、健康状态、冷却时间。
-- `VirtualKey`：只保存哈希；原始值创建时显示一次；可撤销、轮换、绑定模型/路由组。
+- `VirtualKey`：哈希用于数据面鉴权；原始值使用应用层信封加密保存，可通过 Admin 显式查看；可撤销、轮换、绑定模型/路由组。
 - `Route`：协议、模型模式、首选账号、fallback 账号、adapter 名称。
 - `UsageEvent`：请求、Key、账号、provider、模型、协议、状态、延迟和 Token 计数。
 
@@ -49,7 +49,7 @@ OpenAI Chat 与 Responses 的输入/输出模型并不等价，因此转换层�
 
 ## 6. PostgreSQL 最小表
 
-`providers`、`accounts`、`virtual_keys`、`routes`、`usage_events`、`account_health_events`、`audit_logs`。账号当前健康状态保存在 `accounts.health_status/cooldown_until` 及相关 UTC 观测字段中，`account_health_events` 只保存脱敏状态转换，不保存请求/响应正文。凭据使用应用层信封加密；Virtual Key 使用不可逆哈希并加唯一索引；usage 写入可通过异步队列批量提交。
+`providers`、`accounts`、`virtual_keys`、`routes`、`usage_events`、`account_health_events`、`audit_logs`。账号当前健康状态保存在 `accounts.health_status/cooldown_until` 及相关 UTC 观测字段中，`account_health_events` 只保存脱敏状态转换，不保存请求/响应正文。凭据使用应用层信封加密；Virtual Key 使用唯一哈希鉴权，并以独立 AES-GCM envelope 支持受控恢复；usage 写入可通过异步队列批量提交。
 
 ## 7. Rust 实现建议
 

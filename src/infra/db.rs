@@ -68,6 +68,7 @@ pub struct VirtualKeyRecord {
     pub id: i64,
     pub name: String,
     pub key_prefix: String,
+    pub key_recoverable: bool,
     pub allowed_models: Value,
     pub scopes: Value,
     pub key_group: Option<String>,
@@ -117,6 +118,13 @@ pub struct VirtualKeyRotation {
     pub key_prefix: String,
     pub key: String,
     pub overlap_until: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct VirtualKeyMaterial {
+    pub raw: String,
+    pub prefix: String,
+    hash: String,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -453,6 +461,11 @@ impl Database {
             .await?;
         sqlx::raw_sql(include_str!(
             "../../migrations/0015_virtual_key_lifecycle.sql"
+        ))
+        .execute(&mut *tx)
+        .await?;
+        sqlx::raw_sql(include_str!(
+            "../../migrations/0016_virtual_key_recovery.sql"
         ))
         .execute(&mut *tx)
         .await?;
@@ -1020,8 +1033,9 @@ impl Database {
         })
     }
 
-    /// Create a key with the default data-plane permissions. The raw value is
-    /// returned to the caller exactly once; only its SHA-256 digest is stored.
+    /// Compatibility helper that creates a hash-only, unrecoverable key. The
+    /// Admin API uses encrypted recovery material instead.
+    #[allow(dead_code)]
     pub async fn create_virtual_key(
         &self,
         name: &str,
@@ -1038,6 +1052,7 @@ impl Database {
         .await
     }
 
+    #[allow(dead_code)]
     pub async fn create_virtual_key_with_options(
         &self,
         name: &str,
@@ -1047,20 +1062,51 @@ impl Database {
         key_group: Option<&str>,
         origin: &str,
     ) -> Result<(i64, String), sqlx::Error> {
+        let material = Self::generate_virtual_key_material();
+        self.create_virtual_key_with_material(
+            name,
+            allowed_models,
+            scopes,
+            expires_at,
+            key_group,
+            origin,
+            &material,
+            None,
+        )
+        .await
+    }
+
+    pub fn generate_virtual_key_material() -> VirtualKeyMaterial {
         let raw = format!("gw_{}", uuid::Uuid::new_v4().simple());
         let prefix = raw.chars().take(11).collect::<String>();
         let hash = hash_key(&raw);
+        VirtualKeyMaterial { raw, prefix, hash }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn create_virtual_key_with_material(
+        &self,
+        name: &str,
+        allowed_models: &[String],
+        scopes: &[String],
+        expires_at: Option<DateTime<Utc>>,
+        key_group: Option<&str>,
+        origin: &str,
+        material: &VirtualKeyMaterial,
+        key_ciphertext: Option<&str>,
+    ) -> Result<(i64, String), sqlx::Error> {
         let scopes = scopes_json(scopes);
         let allowed_models =
             serde_json::to_value(allowed_models).unwrap_or_else(|_| Value::Array(vec![]));
         let row = sqlx::query_as::<_, (i64,)>(
             "INSERT INTO virtual_keys
-             (name,key_prefix,key_hash,allowed_models,scopes,key_group,expires_at,origin)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id",
+             (name,key_prefix,key_hash,key_ciphertext,allowed_models,scopes,key_group,expires_at,origin)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id",
         )
         .bind(name)
-        .bind(&prefix)
-        .bind(&hash)
+        .bind(&material.prefix)
+        .bind(&material.hash)
+        .bind(key_ciphertext)
         .bind(allowed_models)
         .bind(scopes)
         .bind(key_group)
@@ -1068,7 +1114,7 @@ impl Database {
         .bind(origin)
         .fetch_one(&self.pool)
         .await?;
-        Ok((row.0, raw))
+        Ok((row.0, material.raw.clone()))
     }
 
     pub async fn list_virtual_keys(&self) -> Result<Vec<VirtualKeyRecord>, sqlx::Error> {
@@ -1081,6 +1127,16 @@ impl Database {
     pub async fn get_virtual_key(&self, id: i64) -> Result<Option<VirtualKeyRecord>, sqlx::Error> {
         let query = virtual_key_select("FROM virtual_keys WHERE id=$1");
         sqlx::query_as::<_, VirtualKeyRecord>(&query)
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await
+    }
+
+    pub async fn get_virtual_key_ciphertext(
+        &self,
+        id: i64,
+    ) -> Result<Option<(String, Option<String>)>, sqlx::Error> {
+        sqlx::query_as("SELECT key_prefix,key_ciphertext FROM virtual_keys WHERE id=$1")
             .bind(id)
             .fetch_optional(&self.pool)
             .await
@@ -1151,10 +1207,23 @@ impl Database {
 
     /// Rotate one key generation under a row lock. Concurrent rotations of the
     /// same generation are serialized; the second caller receives Conflict.
+    #[allow(dead_code)]
     pub async fn rotate_virtual_key(
         &self,
         id: i64,
         options: &VirtualKeyRotationOptions,
+    ) -> Result<VirtualKeyRotation, VirtualKeyError> {
+        let material = Self::generate_virtual_key_material();
+        self.rotate_virtual_key_with_material(id, options, &material, None)
+            .await
+    }
+
+    pub async fn rotate_virtual_key_with_material(
+        &self,
+        id: i64,
+        options: &VirtualKeyRotationOptions,
+        material: &VirtualKeyMaterial,
+        key_ciphertext: Option<&str>,
     ) -> Result<VirtualKeyRotation, VirtualKeyError> {
         if options.overlap > Duration::from_secs(86_400) {
             return Err(VirtualKeyError::Validation(
@@ -1192,9 +1261,6 @@ impl Database {
                     })?,
             )
         };
-        let raw = format!("gw_{}", uuid::Uuid::new_v4().simple());
-        let prefix = raw.chars().take(11).collect::<String>();
-        let hash = hash_key(&raw);
         let models_value = options
             .allowed_models
             .as_ref()
@@ -1214,12 +1280,13 @@ impl Database {
             .or(old.key_group.as_deref());
         let new_id = sqlx::query_as::<_, (i64,)>(
             "INSERT INTO virtual_keys
-             (name,key_prefix,key_hash,allowed_models,scopes,key_group,expires_at,origin)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,'rotated') RETURNING id",
+             (name,key_prefix,key_hash,key_ciphertext,allowed_models,scopes,key_group,expires_at,origin)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'rotated') RETURNING id",
         )
         .bind(name)
-        .bind(&prefix)
-        .bind(&hash)
+        .bind(&material.prefix)
+        .bind(&material.hash)
+        .bind(key_ciphertext)
         .bind(models_value)
         .bind(scopes_value)
         .bind(key_group)
@@ -1244,8 +1311,8 @@ impl Database {
         Ok(VirtualKeyRotation {
             old_id: id,
             new_id,
-            key_prefix: prefix,
-            key: raw,
+            key_prefix: material.prefix.clone(),
+            key: material.raw.clone(),
             overlap_until,
         })
     }
@@ -1600,7 +1667,7 @@ fn hash_key(raw: &str) -> String {
 }
 
 const VIRTUAL_KEY_COLUMNS: &str =
-    "id,name,key_prefix,allowed_models,scopes,key_group,enabled,created_at,updated_at,last_used_at,expires_at,revoked_at,replaced_by_id,overlap_until,origin";
+    "id,name,key_prefix,(key_ciphertext IS NOT NULL) AS key_recoverable,allowed_models,scopes,key_group,enabled,created_at,updated_at,last_used_at,expires_at,revoked_at,replaced_by_id,overlap_until,origin";
 
 fn virtual_key_select(suffix: &str) -> String {
     format!("SELECT {VIRTUAL_KEY_COLUMNS} {suffix}")

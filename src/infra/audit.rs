@@ -1,4 +1,5 @@
-//! Common, metadata-only audit support for Admin write operations.
+//! Common, metadata-only audit support for Admin write operations and explicit
+//! sensitive reads.
 //!
 //! The control plane runs its successful audit insert in the same PostgreSQL
 //! transaction as the mutation. The HTTP middleware records failures after a
@@ -399,6 +400,7 @@ fn classify_path(
         ("route", Some("enabled"), _) => enabled_action("route", payload),
         ("virtual_key", Some("revoke"), _) => "virtual_key.revoke".to_owned(),
         ("virtual_key", Some("rotate"), _) => "virtual_key.rotate".to_owned(),
+        ("virtual_key", Some("value"), &Method::GET) => "virtual_key.reveal".to_owned(),
         ("source", Some("discoveries"), _) => "source.discovery".to_owned(),
         ("source", Some("connection-tests"), _) => "source.connection_test".to_owned(),
         ("source", Some("models"), &Method::PATCH) => "source_model.update".to_owned(),
@@ -574,5 +576,18 @@ mod tests {
         assert_eq!(context.actor, "operator");
         assert_eq!(context.action, "source.disable");
         assert_eq!(context.resource.as_deref(), Some("source/source-a"));
+    }
+
+    #[test]
+    fn context_classifies_virtual_key_reveal_as_sensitive_read() {
+        let context = context_from_request(
+            &Method::GET,
+            "/admin/keys/42/value",
+            &HeaderMap::new(),
+            None,
+        );
+        assert_eq!(context.action, "virtual_key.reveal");
+        assert_eq!(context.resource.as_deref(), Some("virtual_key/42"));
+        assert_eq!(context.diff, json!({}));
     }
 }

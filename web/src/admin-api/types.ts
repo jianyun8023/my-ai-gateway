@@ -431,11 +431,17 @@ export interface VirtualKey {
   id: number;
   name: string;
   key_prefix: string;
+  key_recoverable: boolean;
   allowed_models: string[];
   enabled: boolean;
   created_at: string;
   last_used_at?: string | null;
   revoked_at?: string | null;
+}
+
+export interface VirtualKeySecret {
+  id: number;
+  key: string;
 }
 
 export interface VirtualKeyCreateInput {

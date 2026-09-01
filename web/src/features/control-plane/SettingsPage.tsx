@@ -14,6 +14,7 @@ import {
   IconCopy,
   IconDatabase,
   IconDownload,
+  IconEye,
   IconKey,
   IconPlus,
   IconRefreshCw,
@@ -99,7 +100,7 @@ export function SettingsPage({
   onClearAdminKey,
 }: SettingsPageProps) {
   const [createOpen, setCreateOpen] = useState(false);
-  const [createdKey, setCreatedKey] = useState<string>();
+  const [revealedKey, setRevealedKey] = useState<{ id: number; name: string; key: string }>();
   const [copyStatus, setCopyStatus] = useState<'copied' | 'pending' | 'failed'>('pending');
   const [revokeTarget, setRevokeTarget] = useState<VirtualKey>();
   const [mutationBusy, setMutationBusy] = useState(false);
@@ -133,10 +134,10 @@ export function SettingsPage({
     }
   };
 
-  const copyCreatedKey = async () => {
-    if (!createdKey) return;
+  const copyRevealedKey = async () => {
+    if (!revealedKey) return;
     try {
-      await navigator.clipboard.writeText(createdKey);
+      await navigator.clipboard.writeText(revealedKey.key);
       setCopyStatus('copied');
     } catch {
       setCopyStatus('failed');
@@ -147,7 +148,7 @@ export function SettingsPage({
     void mutate(async () => {
       const result = await api.createVirtualKey({ name, allowed_models: allowedModels });
       setCreateOpen(false);
-      setCreatedKey(result.key);
+      setRevealedKey({ id: result.id, name: result.name, key: result.key });
       setCopyStatus('pending');
       try {
         await navigator.clipboard.writeText(result.key);
@@ -155,8 +156,16 @@ export function SettingsPage({
       } catch {
         setCopyStatus('failed');
       }
-      setNotice('Virtual Key 已创建。原始值未显示在页面中。');
+      setNotice('Virtual Key 已创建并已加密保存，可随时再次查看。');
       query.reload();
+    });
+  };
+
+  const revealKey = (key: VirtualKey) => {
+    void mutate(async () => {
+      const result = await api.revealVirtualKey(key.id);
+      setRevealedKey({ id: key.id, name: key.name, key: result.key });
+      setCopyStatus('pending');
     });
   };
 
@@ -244,7 +253,7 @@ export function SettingsPage({
         </Card>
       </div>
 
-      <Card variant="flush" title="Virtual Keys" subtitle="原始 Key 只在创建响应中出现一次；页面不渲染秘密" extra={<Button size="sm" variant="primary" onClick={() => setCreateOpen(true)}><IconPlus size={14} />新建 Key</Button>}>
+      <Card variant="flush" title="Virtual Keys" subtitle="认证使用不可逆哈希；原始值加密保存，需 Admin Key 才能查看和复制" extra={<Button size="sm" variant="primary" onClick={() => setCreateOpen(true)}><IconPlus size={14} />新建 Key</Button>}>
         {data.keys.length === 0 ? <EmptyTable title="尚无 Virtual Key" /> : (
           <TableScroll label="Virtual Key 表格">
             <table className={styles.table}>
@@ -257,7 +266,10 @@ export function SettingsPage({
                   <td>{formatDateTime(key.created_at)}</td>
                   <td>{formatDateTime(key.last_used_at)}</td>
                   <td><StatusPill tone={key.enabled && !key.revoked_at ? 'success' : 'muted'}>{key.revoked_at ? 'revoked' : key.enabled ? 'active' : 'disabled'}</StatusPill></td>
-                  <td><IconButton label={`撤销 ${key.name}`} className={styles.dangerIcon} disabled={!key.enabled || Boolean(key.revoked_at)} onClick={() => setRevokeTarget(key)}><IconTrash2 size={16} /></IconButton></td>
+                  <td><span className={styles.inlineActions}>
+                    <IconButton label={key.key_recoverable ? `查看 ${key.name} API Key` : `${key.name} 不可查看，需轮换`} disabled={!key.key_recoverable} onClick={() => revealKey(key)}><IconEye size={16} /></IconButton>
+                    <IconButton label={`撤销 ${key.name}`} className={styles.dangerIcon} disabled={!key.enabled || Boolean(key.revoked_at)} onClick={() => setRevokeTarget(key)}><IconTrash2 size={16} /></IconButton>
+                  </span></td>
                 </tr>
               ))}</tbody>
             </table>
@@ -277,19 +289,20 @@ export function SettingsPage({
       </Modal>
 
       <Modal
-        open={Boolean(createdKey)}
-        title="Virtual Key 已创建"
+        open={Boolean(revealedKey)}
+        title={revealedKey ? `Virtual Key · ${revealedKey.name}` : 'Virtual Key'}
         width={520}
-        onClose={() => { setCreatedKey(undefined); setCopyStatus('pending'); }}
-        footer={<Button variant="secondary" onClick={() => { setCreatedKey(undefined); setCopyStatus('pending'); }}>完成</Button>}
+        onClose={() => { setRevealedKey(undefined); setCopyStatus('pending'); }}
+        footer={<Button variant="secondary" onClick={() => { setRevealedKey(undefined); setCopyStatus('pending'); }}>完成</Button>}
       >
         <div className={styles.secretResult} role="status">
           <IconKey size={22} />
           <div>
-            <strong>{copyStatus === 'copied' ? '原始 Key 已复制到剪贴板' : copyStatus === 'failed' ? '浏览器未允许自动复制' : '原始 Key 已生成'}</strong>
-            <span>为避免秘密进入 DOM 或截图，页面不会显示 Key 内容。</span>
+            <strong>{copyStatus === 'copied' ? 'API Key 已复制到剪贴板' : copyStatus === 'failed' ? '浏览器未允许自动复制' : 'API Key 可查看和复制'}</strong>
+            <span>该值只通过 Admin API 解密返回；数据面认证仍使用数据库中的不可逆哈希。</span>
+            {revealedKey && <code className={styles.secretValue}>{revealedKey.key}</code>}
           </div>
-          <Button variant="primary" onClick={() => void copyCreatedKey()}><IconCopy size={14} />复制原始 Key</Button>
+          <Button variant="primary" onClick={() => void copyRevealedKey()}><IconCopy size={14} />复制 API Key</Button>
         </div>
       </Modal>
 

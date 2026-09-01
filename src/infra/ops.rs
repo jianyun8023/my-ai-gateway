@@ -1722,6 +1722,7 @@ fn sanitize_account_row(row: &mut Value) {
 fn sanitize_virtual_key_row(row: &mut Value) {
     if let Some(object) = row.as_object_mut() {
         object.remove("key_hash");
+        object.remove("key_ciphertext");
     }
 }
 
@@ -2129,6 +2130,22 @@ mod tests {
         assert_eq!(row["credential"]["kind"], "secret_ref");
         assert_eq!(row["credential"]["name"], "UPSTREAM_KEY");
         assert!(row.get("credential_ciphertext").is_none());
+    }
+
+    #[test]
+    fn virtual_key_export_never_contains_authentication_or_recovery_material() {
+        let mut row = json!({
+            "id": 7,
+            "name": "personal",
+            "key_prefix": "mgk_public",
+            "key_hash": "hash-that-must-not-escape",
+            "key_ciphertext": "ciphertext-that-must-not-escape"
+        });
+        sanitize_virtual_key_row(&mut row);
+
+        assert_eq!(row["key_prefix"], "mgk_public");
+        assert!(row.get("key_hash").is_none());
+        assert!(row.get("key_ciphertext").is_none());
     }
 
     #[test]

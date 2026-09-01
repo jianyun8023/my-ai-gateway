@@ -15,6 +15,28 @@ use crate::infra::{db, secrets};
 use super::helpers::virtual_key_error_response;
 use crate::state::{error_response, AppState};
 
+fn encrypted_virtual_key_material(
+    state: &AppState,
+) -> Result<(db::VirtualKeyMaterial, String), Box<Response<Body>>> {
+    if !state.secrets.has_master_key() {
+        return Err(Box::new(error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "master_key_unavailable",
+            "credential master key is required to create recoverable Virtual Keys",
+        )));
+    }
+    let material = db::Database::generate_virtual_key_material();
+    let aad = secrets::SecretResolver::virtual_key_aad(&material.prefix);
+    match state.secrets.encrypt(&material.raw, aad.as_bytes()) {
+        Ok(ciphertext) => Ok((material, ciphertext)),
+        Err(error) => Err(Box::new(error_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            error.code(),
+            error.public_message(),
+        ))),
+    }
+}
+
 #[derive(Deserialize)]
 pub(crate) struct CreateKeyRequest {
     name: String,
@@ -152,9 +174,78 @@ pub(crate) async fn create_key(
             "DATABASE_URL is not configured",
         );
     };
-    match database.create_virtual_key(&request.name, &request.allowed_models).await {
+    let (material, ciphertext) = match encrypted_virtual_key_material(&state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    match database
+        .create_virtual_key_with_material(
+            &request.name,
+            &request.allowed_models,
+            &[db::VIRTUAL_KEY_INVOKE_SCOPE.to_owned()],
+            None,
+            None,
+            "created",
+            &material,
+            Some(&ciphertext),
+        )
+        .await
+    {
         Ok((id, key)) => (StatusCode::CREATED, Json(json!({"id":id,"key":key,"name":request.name,"allowed_models":request.allowed_models}))).into_response(),
         Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, "key_create_failed", &error.to_string()),
+    }
+}
+
+pub(crate) async fn reveal_key(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+) -> Response<Body> {
+    if !state.admin_auth.authorized(&headers) {
+        return error_response(
+            StatusCode::UNAUTHORIZED,
+            "unauthorized",
+            "admin key required",
+        );
+    }
+    let Some(database) = &state.db else {
+        return error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "database_unavailable",
+            "DATABASE_URL is not configured",
+        );
+    };
+    let row = match database.get_virtual_key_ciphertext(id).await {
+        Ok(Some(row)) => row,
+        Ok(None) => {
+            return error_response(
+                StatusCode::NOT_FOUND,
+                "key_not_found",
+                "virtual key not found",
+            );
+        }
+        Err(_) => {
+            return error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "key_get_failed",
+                "failed to fetch virtual key",
+            );
+        }
+    };
+    let Some(ciphertext) = row.1 else {
+        return error_response(
+            StatusCode::CONFLICT,
+            "key_not_recoverable",
+            "this Virtual Key predates recoverable storage; rotate it to obtain a viewable key",
+        );
+    };
+    match state.secrets.resolve_virtual_key(&row.0, &ciphertext) {
+        Ok(key) => Json(json!({"data":{"id":id,"key":key.as_str()}})).into_response(),
+        Err(error) => error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            error.code(),
+            error.public_message(),
+        ),
     }
 }
 
@@ -267,7 +358,14 @@ pub(crate) async fn rotate_key(
         scopes: request.scopes,
         key_group: request.key_group,
     };
-    match database.rotate_virtual_key(id, &options).await {
+    let (material, ciphertext) = match encrypted_virtual_key_material(&state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    match database
+        .rotate_virtual_key_with_material(id, &options, &material, Some(&ciphertext))
+        .await
+    {
         Ok(rotation) => (StatusCode::OK, Json(json!(rotation))).into_response(),
         Err(error) => virtual_key_error_response(error),
     }

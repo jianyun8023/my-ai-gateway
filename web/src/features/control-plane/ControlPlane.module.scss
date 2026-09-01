@@ -1010,6 +1010,20 @@
   overflow-wrap: anywhere;
 }
 
+.secretValue {
+  display: block;
+  max-width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  background: var(--bg-inset);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
 .secretResult span {
   color: var(--text-secondary);
   font-size: 12px;

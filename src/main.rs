@@ -429,6 +429,7 @@ fn application(state: AppState) -> Router {
             get(keys::get_key).delete(keys::revoke_key),
         )
         .route("/admin/keys/{id}/rotate", post(keys::rotate_key))
+        .route("/admin/keys/{id}/value", get(keys::reveal_key))
         .route("/admin/keys/{id}/revoke", post(keys::revoke_key))
         .route("/admin/usage/summary", get(usage::usage_summary))
         .route("/admin/usage/timeseries", get(usage::usage_timeseries))
@@ -624,7 +625,7 @@ async fn audit_middleware(
     next: Next,
 ) -> Response<Body> {
     let method = request.method().clone();
-    if method == Method::GET || method == Method::HEAD || method == Method::OPTIONS {
+    if !should_audit_admin_request(&method, request.uri().path()) {
         return next.run(request).await;
     }
     let (parts, body) = request.into_parts();
@@ -651,6 +652,17 @@ async fn audit_middleware(
         response
     })
     .await
+}
+
+fn should_audit_admin_request(method: &Method, path: &str) -> bool {
+    match *method {
+        Method::HEAD | Method::OPTIONS => false,
+        Method::GET => {
+            let segments = path.trim_matches('/').split('/').collect::<Vec<_>>();
+            matches!(segments.as_slice(), ["admin", "keys", _, "value"])
+        }
+        _ => true,
+    }
 }
 
 async fn require_admin_auth(
@@ -688,6 +700,7 @@ mod admin_auth_tests {
         ("GET", "/admin/keys/1"),
         ("DELETE", "/admin/keys/1"),
         ("POST", "/admin/keys/1/rotate"),
+        ("GET", "/admin/keys/1/value"),
         ("POST", "/admin/keys/1/revoke"),
         ("GET", "/admin/usage/summary"),
         ("GET", "/admin/usage/timeseries"),
@@ -770,6 +783,20 @@ mod admin_auth_tests {
         ("PATCH", "/admin/sources/source-id/models"),
         ("POST", "/admin/sources/source-id/models/confirm"),
     ];
+
+    #[test]
+    fn audit_includes_virtual_key_reveal_but_skips_ordinary_reads() {
+        assert!(should_audit_admin_request(
+            &Method::GET,
+            "/admin/keys/1/value"
+        ));
+        assert!(!should_audit_admin_request(&Method::GET, "/admin/keys/1"));
+        assert!(!should_audit_admin_request(
+            &Method::GET,
+            "/admin/usage/summary"
+        ));
+        assert!(should_audit_admin_request(&Method::POST, "/admin/keys"));
+    }
 
     fn state(admin_auth: AdminAuth) -> AppState {
         let config = Arc::new(GatewayConfig {

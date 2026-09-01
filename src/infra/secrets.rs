@@ -31,6 +31,7 @@ const NONCE_LEN: usize = 12;
 const MAX_ENVELOPE_LEN: usize = 16 * 1024 * 1024;
 const MAX_KEY_VERSION_LEN: usize = 64;
 const ACCOUNT_AAD_PREFIX: &str = "my-ai-gateway/account/v1";
+const VIRTUAL_KEY_AAD_PREFIX: &str = "my-ai-gateway/virtual-key/v1";
 
 /// A stable, non-secret error returned by the resolver.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -268,6 +269,19 @@ impl SecretResolver {
     /// metadata, but binding it prevents ciphertext replay across accounts.
     pub fn account_aad(source_id: &str, account_id: &str) -> String {
         format!("{ACCOUNT_AAD_PREFIX}/{source_id}/{account_id}")
+    }
+
+    pub fn virtual_key_aad(key_prefix: &str) -> String {
+        format!("{VIRTUAL_KEY_AAD_PREFIX}/{key_prefix}")
+    }
+
+    pub fn resolve_virtual_key(
+        &self,
+        key_prefix: &str,
+        ciphertext: &str,
+    ) -> Result<SecretLease, SecretResolverError> {
+        let aad = Self::virtual_key_aad(key_prefix);
+        self.resolve_refs(None, Some(ciphertext), None, aad.as_bytes())
     }
 
     /// Resolve an Account's references.  Exactly one of `credential_env`,
@@ -656,6 +670,30 @@ mod tests {
         assert!(!format!("{resolver:?}").contains("cipher-secret"));
         assert!(!format!("{value:?}").contains("cipher-secret"));
         assert!(!resolver.needs_rotation(&ciphertext).unwrap());
+    }
+
+    #[test]
+    fn virtual_key_recovery_is_bound_to_its_public_prefix() {
+        let resolver = SecretResolver::from_master_key("virtual-key-master-for-test");
+        let prefix = "mgk_example";
+        let aad = SecretResolver::virtual_key_aad(prefix);
+        let ciphertext = resolver
+            .encrypt("mgk_example-secret", aad.as_bytes())
+            .unwrap();
+
+        assert_eq!(
+            resolver
+                .resolve_virtual_key(prefix, &ciphertext)
+                .unwrap()
+                .as_str(),
+            "mgk_example-secret"
+        );
+        assert_eq!(
+            resolver
+                .resolve_virtual_key("mgk_other", &ciphertext)
+                .unwrap_err(),
+            SecretResolverError::DecryptionFailed
+        );
     }
 
     #[test]

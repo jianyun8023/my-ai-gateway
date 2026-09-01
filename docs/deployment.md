@@ -14,11 +14,12 @@ chmod 600 .env.compose
 编辑 `.env.compose`，至少替换以下值：
 
 - `POSTGRES_PASSWORD`：数据库密码；它会被 Compose 拼入容器内的 `DATABASE_URL`，应使用 URL-safe 字符（例如十六进制随机值）；
-- `GATEWAY_API_KEY`：临时数据面静态入口 Key；
 - `GATEWAY_ADMIN_KEY`：独立的 Admin API Key，不能与数据面 Key 或 Provider Key 复用；
+- `GATEWAY_CREDENTIAL_MASTER_KEY`：创建、轮换和查看数据库 Virtual Key 所需的加密主密钥；
+- `GATEWAY_API_KEY`：可选的过渡数据面静态入口 Key，新客户端不应依赖；
 - 与 `config.example.json` 中 `credential_env` 对应的 Provider Key。
 
-如果使用 `credential_ciphertext`，还要设置 `GATEWAY_CREDENTIAL_MASTER_KEY` 或 keyring 变量。不要把真实凭据写入 `GATEWAY_CONFIG_JSON`、镜像层或 Git。
+数据库 Virtual Key 的受控查看及 `credential_ciphertext` 都要求设置 `GATEWAY_CREDENTIAL_MASTER_KEY` 或 keyring 变量。不要把真实凭据写入 `GATEWAY_CONFIG_JSON`、镜像层或 Git。
 
 ## 启动与检查
 

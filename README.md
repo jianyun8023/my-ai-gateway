@@ -54,7 +54,7 @@ mise run install
 
 ```bash
 cp .env.example .env
-# 编辑 .env；数据面 Key、Admin Key 和上游 Provider Key 不应复用。
+# 编辑 .env；至少配置 DATABASE_URL、Admin Key 和凭据主密钥。
 mise run dev
 ```
 
@@ -71,7 +71,7 @@ GATEWAY_LISTEN_ADDR=0.0.0.0:8787
 VITE_DEV_HOST=0.0.0.0
 ```
 
-对局域网开放前，必须设置不同的 `GATEWAY_API_KEY` 和 `GATEWAY_ADMIN_KEY`。真实上游凭据可以通过 `GATEWAY_ENV_FILE` 放在单独的、被 Git 忽略的环境文件中。
+对局域网开放前，必须配置独立的 `GATEWAY_ADMIN_KEY` 和 `GATEWAY_CREDENTIAL_MASTER_KEY`，并签发数据库 Virtual Key。真实上游凭据可以通过 `GATEWAY_ENV_FILE` 放在单独的、被 Git 忽略的环境文件中。
 
 ### 初始化控制面
 
@@ -94,7 +94,7 @@ cargo run
 
 ```bash
 cp .env.compose.example .env.compose
-# 编辑 .env.compose，至少替换数据库密码、GATEWAY_API_KEY 和 GATEWAY_ADMIN_KEY。
+# 编辑 .env.compose，至少替换数据库密码、Admin Key 和凭据主密钥。
 docker compose --env-file .env.compose config --quiet
 docker compose --env-file .env.compose up -d --build
 curl http://127.0.0.1:8787/healthz
@@ -120,11 +120,11 @@ ghcr.io/jianyun8023/my-ai-gateway:<tag>
 
 ## 调用网关
 
-静态 `GATEWAY_API_KEY` 是过渡入口保护；正式客户端优先使用 PostgreSQL-backed Virtual Key。三种协议入口都接受 `Authorization: Bearer ...`，兼容客户端也可以使用 `x-api-key`。
+正式客户端使用 PostgreSQL-backed Virtual Key；静态 `GATEWAY_API_KEY` 只保留为过渡兼容入口。三种协议入口都接受 `Authorization: Bearer ...`，兼容客户端也可以使用 `x-api-key`。
 
 ```bash
 curl http://127.0.0.1:8787/v1/responses \
-  -H "Authorization: Bearer $GATEWAY_API_KEY" \
+  -H "Authorization: Bearer $GATEWAY_VIRTUAL_KEY" \
   -H "Content-Type: application/json" \
   -d '{"model":"kimi-for-coding-highspeed","input":"hello","stream":true}'
 ```
@@ -145,13 +145,16 @@ Kimi Responses 路由会在进程内完成 Responses 与 Anthropic Messages 的�
 
 集合路径支持 `GET`、`POST`，单资源路径支持 `GET`、`PUT`、`DELETE`，启停操作使用 `PUT .../{id}/enabled`。ProviderPreset、连接测试、模型发现、能力矩阵、凭据轮换、健康探测和 Usage 查询等完整契约见 [`docs/admin-api.md`](docs/admin-api.md)。
 
-创建 Virtual Key 时，原始 Key 只在创建响应中返回：
+创建 Virtual Key 需要配置 `GATEWAY_CREDENTIAL_MASTER_KEY`。鉴权使用不可逆哈希；原始值以 AES-GCM 密文保存，并可由 Admin 显式查看和复制：
 
 ```bash
 curl -X POST http://127.0.0.1:8787/admin/keys \
   -H "Authorization: Bearer $GATEWAY_ADMIN_KEY" \
   -H "Content-Type: application/json" \
   -d '{"name":"service-a","allowed_models":["MiniMax-M2.7"]}'
+
+curl http://127.0.0.1:8787/admin/keys/1/value \
+  -H "Authorization: Bearer $GATEWAY_ADMIN_KEY"
 ```
 
 Usage API 统一使用 UTC，并支持按时间、逻辑模型、上游模型、Provider、Source、账号、协议、Virtual Key、状态和 `usage_source` 组合筛选。逻辑事件只累计最终 Usage；每次上游尝试通过 `upstream_attempts` 单独统计。事件与导出默认不保存 prompt/response 正文。
@@ -164,7 +167,8 @@ Usage API 统一使用 UTC，并支持按时间、逻辑模型、上游模型、
 
 ## 安全边界
 
-- `GATEWAY_ADMIN_KEY` 与数据面的 `GATEWAY_API_KEY` 完全分离；未配置 Admin Key 时，所有 Admin API 都会 fail closed 并返回 `401`。
+- `GATEWAY_ADMIN_KEY` 与数据面的 Virtual Key 完全分离；未配置 Admin Key 时，所有 Admin API 都会 fail closed 并返回 `401`。
+- Key 列表、日志和脱敏控制面导出均不返回哈希或密文；只有 `/admin/keys/:id/value` 执行显式解密。0016 之前创建的 hash-only Key 必须先轮换才能查看。
 - Provider Base URL 默认拒绝私网、loopback、link-local、云元数据地址和不安全重定向；私网自托管来源必须通过服务端 allowlist 显式放行。
 - 日志禁止输出 Authorization、API Key 和完整请求正文。
 - 生产凭据应通过 `credential_env` 或受保护的 Secret 注入，不能写入镜像或提交到仓库。

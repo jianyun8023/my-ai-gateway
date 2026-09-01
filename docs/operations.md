@@ -1,6 +1,6 @@
 # 数据保留、备份与恢复 Runbook
 
-本文对应 Issue #53，适用于本地部署和 `docker compose` 部署。Compose 的启动、镜像更新和基础生命周期见 [`docs/deployment.md`](deployment.md)。所有控制面运维接口都要求独立的 `GATEWAY_ADMIN_KEY`；数据面 `GATEWAY_API_KEY` 不能调用这些接口。
+本文对应 Issue #53，适用于本地部署和 `docker compose` 部署。Compose 的启动、镜像更新和基础生命周期见 [`docs/deployment.md`](deployment.md)。所有控制面运维接口都要求独立的 `GATEWAY_ADMIN_KEY`；数据面 Virtual Key 和过渡静态 Key 都不能调用这些接口。
 
 ## 数据边界
 
@@ -77,7 +77,7 @@ curl -X POST "$ADMIN_URL/admin/retention/cleanup/cleanup-2026-08-31/retry" \
 
 - `credential_env` 只作为 Secret 名称保留，并附带 `{"kind":"secret_ref","name":"..."}`；
 - 只有加密字段而没有 Secret 名称时输出不可解密的 `redacted` 占位；
-- Virtual Key 的不可逆 `key_hash` 不导出，恢复时会计数为 `skipped_virtual_keys`，请在目标库重新签发 Key；
+- Virtual Key 的 `key_hash` 和恢复用 `key_ciphertext` 都不导出，恢复时会计数为 `skipped_virtual_keys`，请在目标库重新签发 Key；
 - Source `auth_config`、预设 snapshot 和所有嵌套敏感字段递归脱敏。
 
 ```bash
@@ -113,7 +113,7 @@ curl "$ADMIN_URL/admin/ops/schema" \
 
 ## PostgreSQL 物理备份
 
-控制面 JSON 适合脱敏迁移；完整 PostgreSQL 备份适合灾难恢复，可能包含当前数据库中的加密凭据字段和全部历史，因此必须当作高敏感文件保护。建议使用 `.pgpass` 或 Secret 注入，避免把密码写进命令历史：
+控制面 JSON 适合脱敏迁移；完整 PostgreSQL 备份适合灾难恢复，可能包含账号凭据和 Virtual Key 的加密字段及全部历史，因此必须当作高敏感文件保护。建议使用 `.pgpass` 或 Secret 注入，避免把密码写进命令历史：
 
 ```bash
 umask 077
