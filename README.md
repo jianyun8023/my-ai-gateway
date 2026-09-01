@@ -1,65 +1,96 @@
 # my-ai-gateway
 
-Rust AI 网关 MVP，目标是将多个上游账号统一为一个入口，并提供 OpenAI Chat Completions、OpenAI Responses、Anthropic Messages（Claude/Coze 客户端兼容面）入口。
+my-ai-gateway 是一个使用 Rust 编写的 AI 网关。它通过统一的下游入口代理多个上游 Provider、Source 和账号，并提供协议感知路由、故障切换、用量统计与控制面管理能力。
 
-当前版本完成：
+项目仍处于持续开发阶段，配置、HTTP API 和数据库 Schema 尚未承诺向后兼容，不建议在未经额外加固的情况下直接暴露到不可信网络。
 
-- Axum HTTP 服务与 `/healthz`、`/v1/models`。
-- 三类协议入口，按 `protocol + model` 解析路由。
-- Provider 原生协议直接透传，支持自定义 endpoint、能力矩阵和凭据引用。
-- 上游返回的 JSON/SSE 响应头和响应体流式转发；429/5xx 可进入 fallback 账号。
-- Provider、Account、Route 配置抽象。
-- 精确路由优先：为协议+模型绑定的账号优先于默认启用账号。
-- Kimi Responses 适配器已作为 workspace crate 内置，路由使用 `kimi_responses_adapter` 时直接在进程内转换。
-- PostgreSQL 是控制面与运行时路由的事实来源；启动在一致性事务中加载 Source、Account、LogicalModel、ModelBinding、SourceModelCapability 和 Route，并按单调 `snapshot_revision` 原子发布不可变 snapshot。
-- PostgreSQL-backed Virtual Key：创建、列表、撤销、模型白名单鉴权。
-- 内置、版本化的 DeepSeek、MiniMax、Kimi Code ProviderPreset 和 ModelPreset；当前最新内置预设为 `@2`，Source 创建时复制不可变快照，预设升级只展示差异，不改写既有 `@1` 快照。已验证的 Responses `web_search` 与 Kimi Adapter `tool_streaming` 能力只在 `@2` 声明。
-- 按协议连接测试、模型发现、稳定 `added/changed/missing` 差异、待确认列表、用户编辑和批量确认 API；发现结果不会自动创建 LogicalModel、Binding 或 Route，失败信息和日志均不包含凭据或完整响应正文。
-- Source、Account、LogicalModel、ModelBinding、Route 管理 API 支持创建、查询、更新、启停和删除；有效写入会在同一事务内完成校验与下一版 snapshot 构建，失败不会留下坏行。
-- Account 健康状态以 PostgreSQL 为事实来源，支持被动失败冷却、ProviderPreset 主动连接探测、stale 过期放行、指数退避、重启恢复和人工启停。
-- AES-256-GCM 凭据信封加密（`gwenc:v1` 格式），多版本 keyring 支持渐进式轮换；Admin 加密和凭据轮换端点已集成。
-- Admin 写操作审计日志，事务内原子记录成功、独立记录失败；diff 自动脱敏 14 类敏感字段。
-- Virtual Key 轮换（overlap 窗口）、scopes 权限更新和 key_group 分组。
-- Prometheus 指标采集（请求/attempt/Token/延迟/TTFT/冷却/snapshot/活跃流），`/metrics` 端点可用。
-- OpenTelemetry tracing 导出（OTLP/gRPC），设置 `OTEL_EXPORTER_OTLP_ENDPOINT` 后自动启用；关键路径 span 包含 `request_id`、`protocol`、`source_id`、`account_id` 和 `upstream_model`。
-- 管理接口还包括 `/admin/keys`、`/admin/keys/:id/rotate`、`/admin/keys/:id/revoke`、`/admin/provider-presets`、`/admin/sources/*`、基于当前 DB runtime snapshot 的有效能力矩阵 `/admin/capabilities`、`/admin/credentials/encrypt`、`/admin/accounts/:id/credentials/rotate`，以及 `/admin/usage/summary|timeseries|breakdown|events|export`；`/admin/usage/aggregate` 保留为一次获取三类聚合的组合入口。
+## 支持的协议
 
-工具链由 [Mise](https://mise.jdx.dev/) 管理（Rust 1.97.1 + Node 24，见 [`mise.toml`](./mise.toml)）：
+| 协议 | 网关入口 | 上游处理方式 |
+| --- | --- | --- |
+| OpenAI Chat Completions | `POST /v1/chat/completions` | 优先原生透传 |
+| OpenAI Responses | `POST /v1/responses` | 原生透传，或执行一次明确的 Adapter 转换 |
+| Anthropic Messages | `POST /v1/messages` | 优先原生透传 |
+
+MiniMax、DeepSeek 等原生支持三种协议的 Provider 不经过转换器。Kimi Code 的 Responses 请求由仓库内置的 `kimi-responses-adapter` 处理，无需额外部署 Adapter 服务。
+
+## 核心能力
+
+- PostgreSQL 是控制面和运行时路由的事实来源。
+- `Source` 管理 Base URL、协议 endpoint、模型目录和能力矩阵；`Account` 独立管理凭据、权重、启用状态与健康状态。
+- `LogicalModel`、`SourceModel`、`ModelBinding` 和 `Route` 职责分离；`/v1/models` 只公开已经确认且至少存在一个可用 Binding 的逻辑模型。
+- 原生协议优先，Adapter 只允许一次直接转换；未知或不支持的能力会返回结构化错误，不会被猜测为可用。
+- 固定首选账号优先；遇到 408、429、5xx、传输错误或账号不可用时，可以进入加权 fallback。
+- 非流式 JSON 和流式 SSE 均支持 Usage 采集。逻辑请求与上游 attempt 分开记录，fallback 不会重复累计最终 Token。
+- ProviderPreset、连接测试、模型发现、差异预览、模型编辑和批量确认流程已经集成。
+- PostgreSQL-backed Virtual Key 支持模型白名单、轮换、撤销、scopes 和 key group。
+- 账号健康状态支持被动失败冷却、主动探测、stale 过期放行、指数退避、重启恢复和人工启停。
+- 凭据使用 AES-256-GCM 信封加密，支持多版本 keyring 和渐进式轮换；Admin 写操作具备脱敏审计日志。
+- 管理端提供 Overview、Analysis 和 Request Events 页面。
+- `/metrics` 提供 Prometheus 指标；配置 `OTEL_EXPORTER_OTLP_ENDPOINT` 后可通过 OTLP/gRPC 导出 OpenTelemetry trace。
+
+完整设计、当前进度和管理 API 契约分别见：
+
+- [`docs/ai-gateway-design.md`](docs/ai-gateway-design.md)
+- [`docs/todo.md`](docs/todo.md)
+- [`docs/admin-api.md`](docs/admin-api.md)
+
+## 快速开始
+
+### 准备工具链
+
+仓库通过 [Mise](https://mise.jdx.dev/) 固定 Rust 1.97.1 和 Node.js 24：
 
 ```bash
-mise install      # 安装 Rust 与 Node 工具链
-mise run install  # 安装 web/ 前端锁定依赖
+mise install
+mise run install
 ```
 
-运行（`DATABASE_URL` 是 DB-first 运行时的必填项）：
+运行网关还需要 PostgreSQL 16。
+
+### 本地运行
+
+复制开发环境配置，并至少填写 `DATABASE_URL`：
 
 ```bash
 cp .env.example .env
-# 编辑 .env，至少设置 DATABASE_URL；mise run dev 会加载该文件。
+# 编辑 .env；数据面 Key、Admin Key 和上游 Provider Key 不应复用。
 mise run dev
+```
+
+服务启动后可以检查健康状态：
+
+```bash
 curl http://127.0.0.1:8787/healthz
 ```
 
-需要从局域网访问开发环境时，在 `.env` 中设置
-`GATEWAY_LISTEN_ADDR=0.0.0.0:8787` 和 `VITE_DEV_HOST=0.0.0.0`。Rust 网关及其
-`/admin` 静态页面使用 `8787`，Vite 热更新开发页使用 `5173`；客户端访问宿主机的
-局域网 IP，Vite 的 API 代理仍通过 `VITE_API_PROXY_TARGET=http://127.0.0.1:8787`
-连接本机网关。对局域网开放时必须预先设置非空的 `GATEWAY_API_KEY` 和
-`GATEWAY_ADMIN_KEY`，不要复用上游 Provider Key。
+网关与管理端静态页面默认监听 `127.0.0.1:8787`，Vite 开发服务器使用 `5173`。需要从局域网访问时，在 `.env` 中设置：
 
-需要将真实上游凭据与基础开发配置分离时，可在 `.env` 中设置
-`GATEWAY_ENV_FILE=.env.pre`。`mise run dev` 会在 `.env` 后加载该覆盖文件；该文件
-应保持 Git 忽略并设置为仅当前用户可读，测试任务不会自动加载它。
+```dotenv
+GATEWAY_LISTEN_ADDR=0.0.0.0:8787
+VITE_DEV_HOST=0.0.0.0
+```
 
-`GATEWAY_ADMIN_KEY` 只保护 `/admin/*` API，不会回退到数据面的
-`GATEWAY_API_KEY`。未设置 Admin Key 时网关仍可提供数据面服务，但所有
-Admin API 请求都会 fail closed 并返回 `401`。两个 Key 应使用不同的随机值。
+对局域网开放前，必须设置不同的 `GATEWAY_API_KEY` 和 `GATEWAY_ADMIN_KEY`。真实上游凭据可以通过 `GATEWAY_ENV_FILE` 放在单独的、被 Git 忽略的环境文件中。
 
-空控制面首次启动时，可通过 `GATEWAY_CONFIG_JSON` 一次性初始化。控制面已有任意管理数据后，后续启动不会解析或覆盖该 JSON；此时运行时直接加载数据库 snapshot。需要显式替换现有开发控制面时，同时设置 `GATEWAY_CONFIG_IMPORT=true`，该操作会在事务中清理并重新导入 Source/Account/模型/Binding/Route，因此只应在明确需要导入时使用。监听地址独立使用 `GATEWAY_LISTEN_ADDR`。
+### 初始化控制面
 
-### Docker Compose 部署
+空控制面首次启动时，可以通过 `GATEWAY_CONFIG_JSON` 导入 [`config.example.json`](config.example.json)：
 
-仓库提供多阶段 Docker 镜像和 [`docker-compose.yml`](docker-compose.yml)，用于在单机上运行 Gateway 与 PostgreSQL 16。先准备 Compose 专用环境文件：
+```bash
+export GATEWAY_CONFIG_JSON="$(<config.example.json)"
+cargo run
+```
+
+该 JSON 只用于初始化、显式导入和测试，不是运行期配置源。数据库已有管理数据后，普通启动不会再次解析或覆盖它。只有显式设置 `GATEWAY_CONFIG_IMPORT=true` 才会事务化替换当前控制面，因此使用前必须确认数据影响。
+
+示例配置只引用 `credential_env`。不要把真实 API Key 写入 JSON、仓库或日志。
+
+## Docker 部署
+
+### Docker Compose
+
+仓库提供多阶段 [`Dockerfile`](Dockerfile) 和 [`docker-compose.yml`](docker-compose.yml)，可在单机上运行 Gateway 与 PostgreSQL 16：
 
 ```bash
 cp .env.compose.example .env.compose
@@ -69,98 +100,40 @@ docker compose --env-file .env.compose up -d --build
 curl http://127.0.0.1:8787/healthz
 ```
 
-镜像默认标记为 `my-ai-gateway:local`，可通过 `GATEWAY_IMAGE` 覆盖；PostgreSQL 数据保存在
-`gateway_pgdata` 命名卷中。默认只向宿主机回环地址发布 `8787`，需要由反向代理或局域网直接访问时再设置
-`GATEWAY_BIND_ADDRESS`。首次导入 [`config.example.json`](config.example.json) 时，可在启动命令前导出
-`GATEWAY_CONFIG_JSON`；已有控制面需要显式替换时才设置 `GATEWAY_CONFIG_IMPORT=true`。完整的启动、升级、备份和恢复说明见
-[`docs/deployment.md`](docs/deployment.md) 与 [`docs/operations.md`](docs/operations.md)。
+镜像默认标记为 `my-ai-gateway:local`，可以通过 `GATEWAY_IMAGE` 覆盖。PostgreSQL 数据保存在 `gateway_pgdata` 命名卷中，端口 `8787` 默认只发布到宿主机回环地址。
 
-流式请求使用进程级 `GATEWAY_SSE_*_MS` 参数（见 [`.env.example`](.env.example)）：默认心跳
-15 秒、连接 10 秒、首事件 30 秒、空闲 60 秒、总时长 300 秒；设为 `0` 可禁用单项限制。
-连接超时发生在上游响应头之前，其他超时发生在 SSE 已建立之后。网关心跳是
-`: gateway-heartbeat` SSE comment，不会改变 Provider 事件顺序、序列号、Usage 或 TTFT。
-已建立流发生超时会发送脱敏的 `gateway_*_timeout` 错误帧并关闭；客户端断开只取消上游
-读取并将 Usage 记为客户端取消，不会触发 fallback。独立运行 Kimi Adapter 时使用同名的
-`KIMI_SSE_*_MS` 参数。
+完整的启动、升级、备份和恢复说明见 [`docs/deployment.md`](docs/deployment.md) 与 [`docs/operations.md`](docs/operations.md)。
 
-For reverse-proxy deployments, disable response buffering (for example,
-Nginx `proxy_buffering off`), preserve `text/event-stream`, and set the proxy
-read timeout above the gateway total timeout. The proxy stream-idle timeout
-should be longer than the heartbeat interval; do not rewrite SSE comment lines.
-健康运维接口由独立 Admin Key 保护：
+### 预构建镜像
+
+GitHub Actions 会向 GitHub Container Registry 发布同时支持 `linux/amd64` 和 `linux/arm64` 的多架构镜像：
 
 ```text
-GET  /admin/health
-GET  /admin/health/:account_id
-POST /admin/accounts/:account_id/probe
-POST /admin/health/probe
-POST /admin/health/probes
+ghcr.io/jianyun8023/my-ai-gateway:<tag>
 ```
 
-`/admin/health` 返回每个账号的 `source`、`updated_at`、`stale`、状态和 cooldown。探测
-复用 ProviderPreset 连接测试，只访问数据库中保存的 Source endpoint；模型 discovery
-失败不会改变路由健康。408、429、5xx 和传输错误采用指数退避，冷却到期或 stale 后不会
-永久屏蔽账号；固定首选只有在失败、不可用或人工停用时才进入 fallback。默认周期探测间隔
-为 60 秒，可用 `GATEWAY_HEALTH_PROBE_INTERVAL_SECS` 调整；`GATEWAY_HEALTH_PROBE_ENABLED=false`
-可关闭，`GATEWAY_HEALTH_PROBE_ON_STARTUP=true` 可在启动时立即探测一次。
+标签规则如下：
 
-常用任务：`mise run dev`（加载被 Git 忽略的 `.env`，启动网关 + Vite 开发环境）、`mise run build`、`mise run test`、`mise run test-db`（加载独立 `.env.test`，串行运行真实 PostgreSQL 回归）、`mise run lint`、`mise run verify`（完整门禁）。
+- 推送到 `main`：只更新 `main` 标签，不更新 `latest`。
+- 推送 `vMAJOR.MINOR.PATCH` Release tag：发布原始 tag，并生成去掉 `v` 的完整版本和 `MAJOR.MINOR` 标签。
+- 稳定 Release tag：同时更新 `latest`；Prerelease tag 不更新 `latest`。
 
-真实 Provider 的工具调用、服务端搜索、Kimi Adapter 与 fallback 使用显式 opt-in 的
-`mise run test-live`，默认不会进入 CI 或消耗上游 Token。Case、环境隔离、结果格式和安全
-边界见 [`docs/live-provider-smoke.md`](./docs/live-provider-smoke.md)。
+## 调用网关
 
-Codex CLI 到 Gateway 的工具调用与网络搜索 E2E 使用显式 opt-in 的
-`mise run test-codex-e2e`，默认只执行本地契约单测；真实运行需要隔离的 `CODEX_HOME`、
-Gateway Key 和 Admin Key。配置、搜索 case、Usage 校验与安全边界见
-[`docs/codex-e2e.md`](./docs/codex-e2e.md)。
-
-使用 `GATEWAY_ADMIN_KEY` 可创建下游 Virtual Key，原始 Key 只在创建响应中返回：
+静态 `GATEWAY_API_KEY` 是过渡入口保护；正式客户端优先使用 PostgreSQL-backed Virtual Key。三种协议入口都接受 `Authorization: Bearer ...`，兼容客户端也可以使用 `x-api-key`。
 
 ```bash
-curl -X POST http://127.0.0.1:8787/admin/keys \
-  -H "Authorization: Bearer $GATEWAY_ADMIN_KEY" \
+curl http://127.0.0.1:8787/v1/responses \
+  -H "Authorization: Bearer $GATEWAY_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"name":"service-a","allowed_models":["MiniMax-M2.7"]}'
+  -d '{"model":"kimi-for-coding-highspeed","input":"hello","stream":true}'
 ```
 
-Usage API 返回显式的 `version: "v1"` 和 `timezone: "UTC"`。所有入口共享 `from`、`to`（RFC3339、半开区间 `[from,to)`）、`logical_model`、`upstream_model`、`provider`、`source_id`、`client_source`、`account`、`protocol_in`、`protocol_upstream`、`virtual_key`、`status=success|failure`、`status_code` 和 `usage_source` 组合筛选。`provider`/`provider_id` 来自 Source 创建时固化的 `provider_preset_id`，同一 ProviderPreset 下的多个 Source 会归入同一 Provider；`source_id` 是 DB-first Runtime Binding 最终实际选中的 Source。可选下游 `X-Client-Source` 只记录为独立 `client_source`，缺省为 `unknown`。Virtual Key 鉴权的请求会记录 Key ID，静态 `GATEWAY_API_KEY` 请求为 `null`。
+Kimi Responses 路由会在进程内完成 Responses 与 Anthropic Messages 的转换，并保留 thinking/signature、tool call、web search、Usage 和 SSE 事件顺序。
 
-ProviderPreset、连接测试、模型发现和确认接口的完整请求/响应契约见 [`docs/admin-api.md`](./docs/admin-api.md)。最小流程为：创建 Source 快照 → 选择关联且启用的 Account 按协议测试 → 执行 discovery → 查看 diff/待确认模型 → 编辑并批量确认。确认 SourceModel 仍不会自动创建 LogicalModel、Binding 或 Route。
+## 控制面与 Usage
 
-Issue #53 的数据保留、dry-run/分批清理、脱敏控制面导出、PostgreSQL 备份恢复和新库校验步骤见 [`docs/operations.md`](./docs/operations.md)。构建后的二进制提供 `my-ai-gateway ops retention-cleanup --dry-run`、`my-ai-gateway ops control-plane-export --output control-plane.json` 等运维命令。
-
-```bash
-curl 'http://127.0.0.1:8787/admin/usage/timeseries?from=2026-08-01T00:00:00Z&to=2026-09-01T00:00:00Z&granularity=day&logical_model=MiniMax-M2.7' \
-  -H "Authorization: Bearer $GATEWAY_ADMIN_KEY"
-
-curl 'http://127.0.0.1:8787/admin/usage/breakdown?breakdown=source_id&usage_source=upstream' \
-  -H "Authorization: Bearer $GATEWAY_ADMIN_KEY"
-
-curl 'http://127.0.0.1:8787/admin/usage/export?format=csv&status=failure' \
-  -H "Authorization: Bearer $GATEWAY_ADMIN_KEY" -o usage-events.csv
-```
-
-`events` 固定按 `(created_at DESC, request_id DESC)` 排序，`limit` 为 `1..500`；后续页应原样传回响应中的 `page.next_cursor`。逻辑事件的 `source_id` 对应成功 attempt，全部失败时对应最终实际 attempt；attempt 明细也独立携带 `source_id`。Summary、timeseries 和 breakdown 的 Token 只累计每个逻辑请求的最终 Usage，不会因 fallback 重复；`upstream_attempts` 单独统计关联的上游尝试。CSV/JSON 导出复用完全相同的筛选与排序，显式区分 `source_id`/`client_source`，且事件契约不包含 prompt/response 正文。
-
-可通过 `GATEWAY_CONFIG_JSON` 初始化多个 Source、账号和固定路由（示例）：
-
-完整的 MiniMax、DeepSeek、Kimi 三 Provider 示例见 [`config.example.json`](./config.example.json)。
-
-```bash
-export GATEWAY_CONFIG_JSON='{
-  "listen_addr":"127.0.0.1:8787",
-  "providers":[{"id":"minimax","name":"MiniMax","base_url":"https://your-minimax-endpoint","models":["MiniMax-M2.7"],"native_protocols":["openai_chat_completions","openai_responses","anthropic_messages"],"endpoints":{"openai_chat_completions":"/v1/chat/completions","openai_responses":"/v1/responses","anthropic_messages":"/v1/messages"},"capabilities":{"streaming":true,"tools":true,"thinking":true,"web_search":true,"usage":true}}],
-  "accounts":[{"id":"minimax-01","provider_id":"minimax","display_name":"primary","credential_env":"MINIMAX_API_KEY","enabled":true},{"id":"minimax-02","provider_id":"minimax","display_name":"backup","credential_env":"MINIMAX_API_KEY_2","enabled":true}],
-  "routes":[{"id":"minimax-all","model":"MiniMax-M2.7","provider_id":"minimax","protocols":["openai_chat_completions","openai_responses","anthropic_messages"],"primary_account_id":"minimax-01","fallback_accounts":["minimax-02"],"mode":"native"}]
-}'
-export DATABASE_URL='postgres://gateway:gateway@127.0.0.1:5432/gateway'
-cargo run
-```
-
-该文件是初始化/显式导入输入，不是每次启动同步源。
-
-控制面资源路径如下；单资源路径支持 `GET`、`PUT`、`DELETE`，集合路径支持 `GET`、`POST`，启停使用 `PUT .../{id}/enabled` 与 `{"enabled":true|false}`：
+核心管理资源包括：
 
 ```text
 /admin/sources
@@ -170,21 +143,71 @@ cargo run
 /admin/routes
 ```
 
-所有错误使用 `{"error":{"code":"...","message":"..."}}`；Account 响应只返回 `credential_env` 和 `credential_configured`，不会返回 `credential_ciphertext` 或明文凭据。启用 Route 时，每个协议必须已有 confirmed/available Binding；Binding 的 endpoint、Adapter 方向、单段转换、SourceModelCapability 和引用完整性会在保存事务内校验。写入响应与 `/healthz` 会返回单调 `snapshot_revision`，用于避免并发写入完成顺序与内存发布顺序不一致。
+集合路径支持 `GET`、`POST`，单资源路径支持 `GET`、`PUT`、`DELETE`，启停操作使用 `PUT .../{id}/enabled`。ProviderPreset、连接测试、模型发现、能力矩阵、凭据轮换、健康探测和 Usage 查询等完整契约见 [`docs/admin-api.md`](docs/admin-api.md)。
 
-需要执行 PostgreSQL 集成测试时，显式设置专用的 `TEST_DATABASE_URL`；测试为每次运行创建并清理独立 schema，不会复用运行时 `DATABASE_URL`。控制面完整回归是显式 ignored 测试，必须实际运行，不能把缺少数据库导致的跳过作为通过：
-
-```bash
-cp .env.test.example .env.test
-# 确认 .env.test 指向专用测试库后执行；任务会串行运行并包含 ignored 用例。
-mise run test-db
-```
-
-设置 `GATEWAY_API_KEY` 后，三类协议入口会要求 `Authorization: Bearer ...` 或 `x-api-key`。Kimi Responses 路由只需配置 `"adapter":"kimi_responses_adapter"`，不需要启动额外服务；账号凭据通过 `credential_env` 注入。之后客户端仍然只需要调用网关：
+创建 Virtual Key 时，原始 Key 只在创建响应中返回：
 
 ```bash
-curl http://127.0.0.1:8787/v1/responses \
-  -H "Authorization: Bearer $GATEWAY_API_KEY" \
+curl -X POST http://127.0.0.1:8787/admin/keys \
+  -H "Authorization: Bearer $GATEWAY_ADMIN_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"model":"kimi-for-coding-highspeed","input":"hello","stream":true}'
+  -d '{"name":"service-a","allowed_models":["MiniMax-M2.7"]}'
 ```
+
+Usage API 统一使用 UTC，并支持按时间、逻辑模型、上游模型、Provider、Source、账号、协议、Virtual Key、状态和 `usage_source` 组合筛选。逻辑事件只累计最终 Usage；每次上游尝试通过 `upstream_attempts` 单独统计。事件与导出默认不保存 prompt/response 正文。
+
+## 流式请求
+
+`GATEWAY_SSE_*_MS` 用于配置心跳、连接、首事件、空闲和总时限，具体参数见 [`.env.example`](.env.example)。网关心跳使用 `: gateway-heartbeat` SSE comment，不会改变 Provider 事件顺序、Usage、序列号或 TTFT。
+
+反向代理部署时应关闭响应缓冲、保留 `text/event-stream`，并将代理读取超时设置为大于网关总时限。代理的 stream idle timeout 应长于心跳间隔，且不能合并、删除或改写以 `:` 开头的 SSE comment。
+
+## 安全边界
+
+- `GATEWAY_ADMIN_KEY` 与数据面的 `GATEWAY_API_KEY` 完全分离；未配置 Admin Key 时，所有 Admin API 都会 fail closed 并返回 `401`。
+- Provider Base URL 默认拒绝私网、loopback、link-local、云元数据地址和不安全重定向；私网自托管来源必须通过服务端 allowlist 显式放行。
+- 日志禁止输出 Authorization、API Key 和完整请求正文。
+- 生产凭据应通过 `credential_env` 或受保护的 Secret 注入，不能写入镜像或提交到仓库。
+
+更多说明见 [`docs/security.md`](docs/security.md)。
+
+## 开发与验证
+
+常用任务：
+
+```bash
+mise run dev          # 启动网关与前端开发服务器
+mise run build        # 构建前端静态资源与 Rust 网关
+mise run lint         # Rust 与前端静态检查
+mise run test         # Rust、前端和本地契约测试
+mise run test-db      # 使用 .env.test 运行完整 PostgreSQL 回归
+mise run verify       # 完整本地门禁
+```
+
+Pull Request 会分别执行以下两个检查：
+
+- `Validate and build`：配置解析、Rust/前端静态检查和完整构建。
+- `Unit and PostgreSQL tests`：Rust、前端、契约测试和 PostgreSQL 集成测试。
+
+真实 Provider 与 Codex CLI E2E 测试均为显式 opt-in，不会进入默认 CI，也不会自动消耗上游 Token：
+
+- [`docs/live-provider-smoke.md`](docs/live-provider-smoke.md)
+- [`docs/codex-e2e.md`](docs/codex-e2e.md)
+- [`docs/ci.md`](docs/ci.md)
+
+## 项目结构
+
+```text
+src/                           Rust 网关主程序
+crates/kimi-responses-adapter/ 内置 Kimi Responses Adapter
+migrations/                    PostgreSQL migrations
+docs/                          设计、接口、部署和运维文档
+web/                           React + TypeScript 管理端
+config.example.json            初始化与导入示例
+```
+
+## 第三方代码
+
+my-ai-gateway 不是 CPA Usage Keeper，也不使用其 Go 后端、SQLite、Redis queue、CPA Management API、Auth Files、Ranking、配额或充值逻辑。
+
+管理端的 Overview、Analysis 和 Request Events 页面结构及部分 React 交互基于 CPA Usage Keeper 的 MIT 代码适配。来源、复用边界和许可证见 [`web/THIRD_PARTY_NOTICES.md`](web/THIRD_PARTY_NOTICES.md) 与 [`web/licenses/CPA_USAGE_KEEPER_LICENSE`](web/licenses/CPA_USAGE_KEEPER_LICENSE)。
