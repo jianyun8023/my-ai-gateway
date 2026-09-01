@@ -174,6 +174,7 @@ fn state(config: GatewayConfig, database: Option<db::Database>) -> AppState {
         health: health::HealthRegistry::new(Duration::from_secs(1)),
         admin_auth: AdminAuth::test(),
         secrets: secrets::SecretResolver::empty(),
+        prometheus_handle: crate::observability::prometheus_handle(),
     }
 }
 
@@ -749,6 +750,7 @@ async fn postgres_db_first_source_attribution_covers_primary_fallback_stream_and
         health: health::HealthRegistry::new(Duration::from_secs(30)),
         admin_auth: AdminAuth::test(),
         secrets: secrets::SecretResolver::empty(),
+        prometheus_handle: crate::observability::prometheus_handle(),
     };
 
     let suffix = Uuid::new_v4().to_string();

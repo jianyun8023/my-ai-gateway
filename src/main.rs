@@ -7,6 +7,7 @@ mod discovery_api;
 mod health;
 mod model_catalog;
 mod model_discovery;
+mod observability;
 mod ops;
 mod protocol;
 mod provider_preset;
@@ -21,7 +22,7 @@ use std::{
     fmt::Write as _,
     net::SocketAddr,
     sync::Arc,
-    time::{Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use axum::{
@@ -37,6 +38,7 @@ use axum::{
     Json, Router,
 };
 use config::GatewayConfig;
+use metrics_exporter_prometheus::PrometheusHandle;
 use protocol::Protocol;
 use routing::{ResolvedRoute, RouteResolver};
 use serde::Deserialize;
@@ -103,6 +105,7 @@ struct AppState {
     health: health::HealthRegistry,
     admin_auth: AdminAuth,
     secrets: secrets::SecretResolver,
+    prometheus_handle: PrometheusHandle,
 }
 
 #[derive(Clone)]
@@ -163,7 +166,9 @@ impl AppState {
         let candidate = LiveConfig::from_snapshot(snapshot);
         let mut current = self.live.write().unwrap();
         if candidate.revision >= current.revision {
+            let revision = candidate.revision;
             *current = candidate;
+            observability::set_snapshot_revision(revision);
         }
     }
 }
@@ -243,6 +248,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
         secrets::SecretResolver::empty()
     });
+    let prometheus_handle = observability::prometheus_handle();
+    observability::spawn_upkeep(prometheus_handle.clone());
+    observability::set_snapshot_revision(live.revision);
     let state = AppState {
         live: Arc::new(std::sync::RwLock::new(live)),
         http: transport::client(source_url_policy.clone())?,
@@ -251,6 +259,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         health,
         admin_auth,
         secrets,
+        prometheus_handle,
     };
     spawn_health_probe_loop(state.clone());
     let app = application(state);
@@ -650,6 +659,7 @@ fn application(state: AppState) -> Router {
         ));
     Router::new()
         .route("/healthz", get(healthz))
+        .route("/metrics", get(metrics_handler))
         .route("/v1/models", get(models))
         .route("/v1/chat/completions", post(chat_completions))
         .route("/v1/responses", post(responses))
@@ -714,6 +724,13 @@ async fn healthz(State(state): State<AppState>) -> Json<Value> {
     let live = state.snapshot();
     Json(
         json!({"status":"ok", "sources":live.config.providers.len(), "accounts":live.config.accounts.len(), "snapshot_revision":live.revision, "snapshot_generated_at":live.generated_at}),
+    )
+}
+
+async fn metrics_handler(State(state): State<AppState>) -> impl IntoResponse {
+    (
+        [(CONTENT_TYPE, "text/plain; version=0.0.4; charset=utf-8")],
+        state.prometheus_handle.render(),
     )
 }
 
@@ -3083,25 +3100,41 @@ async fn proxy(
     let payload: Value = match serde_json::from_slice(&body) {
         Ok(value) => value,
         Err(_) => {
-            return error_response(
-                StatusCode::BAD_REQUEST,
-                "invalid_json",
-                "request body must be valid JSON",
-            )
+            return finish_proxy(
+                protocol,
+                "default",
+                started,
+                false,
+                error_response(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_json",
+                    "request body must be valid JSON",
+                ),
+            );
         }
     };
     let model = payload
         .get("model")
         .and_then(Value::as_str)
         .unwrap_or("default");
+    let is_streamed = payload
+        .get("stream")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     let virtual_key_id = match authorized_with_db(&state, &headers, model).await {
         Some(virtual_key_id) => virtual_key_id,
         None => {
-            return error_response(
-                StatusCode::UNAUTHORIZED,
-                "unauthorized",
-                "invalid or revoked virtual key",
-            )
+            return finish_proxy(
+                protocol,
+                model,
+                started,
+                is_streamed,
+                error_response(
+                    StatusCode::UNAUTHORIZED,
+                    "unauthorized",
+                    "invalid or revoked virtual key",
+                ),
+            );
         }
     };
     let route = match resolver.resolve_detailed(protocol, model) {
@@ -3112,22 +3145,40 @@ async fn proxy(
                 "account_disabled" | "account_cooling_down" => StatusCode::SERVICE_UNAVAILABLE,
                 _ => StatusCode::UNPROCESSABLE_ENTITY,
             };
-            return error_response(status, &error.code, &error.message);
+            return finish_proxy(
+                protocol,
+                model,
+                started,
+                is_streamed,
+                error_response(status, &error.code, &error.message),
+            );
         }
     };
     warn_degraded_route(&request_id, &route);
     let Some(provider) = config.provider(&route.source_id) else {
-        return error_response(
-            StatusCode::BAD_GATEWAY,
-            "provider_not_found",
-            "route references an unknown provider",
+        return finish_proxy(
+            protocol,
+            model,
+            started,
+            is_streamed,
+            error_response(
+                StatusCode::BAD_GATEWAY,
+                "provider_not_found",
+                "route references an unknown provider",
+            ),
         );
     };
     let Some(account) = config.account(&route.primary_account_id) else {
-        return error_response(
-            StatusCode::BAD_GATEWAY,
-            "account_not_found",
-            "route references an unknown account",
+        return finish_proxy(
+            protocol,
+            model,
+            started,
+            is_streamed,
+            error_response(
+                StatusCode::BAD_GATEWAY,
+                "account_not_found",
+                "route references an unknown account",
+            ),
         );
     };
     let primary_unavailable = !account.enabled || !state.health.is_available(&account.id).await;
@@ -3135,14 +3186,20 @@ async fn proxy(
         let Some(candidate) =
             select_fallback_candidate(&config, &state.health, &route, model, protocol).await
         else {
-            return error_response(
-                StatusCode::SERVICE_UNAVAILABLE,
-                if account.enabled {
-                    "account_cooling_down"
-                } else {
-                    "account_disabled"
-                },
-                "primary account is unavailable and no fallback succeeded",
+            return finish_proxy(
+                protocol,
+                model,
+                started,
+                is_streamed,
+                error_response(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    if account.enabled {
+                        "account_cooling_down"
+                    } else {
+                        "account_disabled"
+                    },
+                    "primary account is unavailable and no fallback succeeded",
+                ),
             );
         };
         if !route.is_degraded() && !candidate.degraded_features.is_empty() {
@@ -3170,7 +3227,20 @@ async fn proxy(
         {
             Ok(response) => {
                 let status = response.status();
-                record_response_health(&state.health, &candidate.account.id, status).await;
+                record_response_health(
+                    &state.health,
+                    &candidate.source_id,
+                    &candidate.account.id,
+                    status,
+                )
+                .await;
+                observability::record_attempt(
+                    &protocol.to_string(),
+                    &candidate.source_id,
+                    &candidate.account.id,
+                    status.as_u16(),
+                    true,
+                );
                 (response, status.as_u16() as i32, status.is_success())
             }
             Err(error) => {
@@ -3209,10 +3279,6 @@ async fn proxy(
             }
         };
         let usage = transport::usage_from_response(&response);
-        let is_streamed = payload
-            .get("stream")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
         let degraded = !candidate.degraded_features.is_empty();
         let error_summary = if !response.status().is_success() {
             Some(format!("HTTP {}", response.status().as_u16()))
@@ -3275,13 +3341,15 @@ async fn proxy(
                     attempts,
                     started,
                     state.health.clone(),
+                    protocol,
+                    model,
                 );
             }
             if let Err(error) = database.insert_usage_with_attempts(&event, &attempts).await {
                 tracing::warn!(%error, "failed to persist usage event");
             }
         }
-        return response;
+        return finish_proxy(protocol, model, started, is_streamed, response);
     }
     let primary_upstream_model = if route.binding_id.is_none() {
         account
@@ -3321,7 +3389,13 @@ async fn proxy(
                 success: false,
                 latency_ms: result_started.elapsed().as_millis() as i64,
             });
-            record_response_health(&state.health, &account.id, response.status()).await;
+            record_response_health(
+                &state.health,
+                &route.source_id,
+                &account.id,
+                response.status(),
+            )
+            .await;
             let (response, mut fallback_attempts) = try_fallback(
                 &config,
                 &state.secrets,
@@ -3351,7 +3425,13 @@ async fn proxy(
                 success: response.status().is_success(),
                 latency_ms: result_started.elapsed().as_millis() as i64,
             });
-            record_response_health(&state.health, &account.id, response.status()).await;
+            record_response_health(
+                &state.health,
+                &route.source_id,
+                &account.id,
+                response.status(),
+            )
+            .await;
             response
         }
         Err(error) => {
@@ -3394,10 +3474,6 @@ async fn proxy(
         }
     };
     let usage = transport::usage_from_response(&response);
-    let is_streamed = payload
-        .get("stream")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
     let final_attempt = attempts
         .iter()
         .rev()
@@ -3483,12 +3559,31 @@ async fn proxy(
                 attempts,
                 started,
                 state.health.clone(),
+                protocol,
+                model,
             );
         }
         if let Err(error) = database.insert_usage_with_attempts(&event, &attempts).await {
             tracing::warn!(%error, "failed to persist usage event");
         }
     }
+    finish_proxy(protocol, model, started, is_streamed, response)
+}
+
+fn finish_proxy(
+    protocol: Protocol,
+    model: &str,
+    started: Instant,
+    is_stream: bool,
+    response: Response<Body>,
+) -> Response<Body> {
+    observability::record_proxy_request(
+        &protocol.to_string(),
+        model,
+        response.status().as_u16(),
+        started,
+        is_stream,
+    );
     response
 }
 
@@ -3526,6 +3621,7 @@ fn is_event_stream(response: &Response<Body>) -> bool {
         .is_some_and(|value| value.to_ascii_lowercase().contains("text/event-stream"))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn wrap_stream_usage(
     response: Response<Body>,
     database: db::Database,
@@ -3534,12 +3630,35 @@ fn wrap_stream_usage(
     mut attempts: Vec<db::UsageAttempt>,
     request_started: Instant,
     health: health::HealthRegistry,
+    protocol: Protocol,
+    model: &str,
 ) -> Response<Body> {
+    observability::track_stream_start();
+    let model = model.to_owned();
+    let protocol = protocol.to_string();
     let (parts, body) = response.into_parts();
     let body = usage::observe_stream_body(body, request_started, move |observation| {
+        observability::track_stream_end();
         event.latency_ms = request_started.elapsed().as_millis() as i64;
         let account_id = attempts.last().map(|attempt| attempt.account_id.clone());
+        let ttft_ms = observation.ttft_ms;
         finalize_stream_usage(&mut event, &mut attempts, &request_body, observation);
+        observability::record_proxy_request(
+            &protocol,
+            &model,
+            event.status_code as u16,
+            request_started,
+            true,
+        );
+        if let Some(ttft_ms) = ttft_ms {
+            observability::record_ttft(&protocol, &model, Duration::from_millis(ttft_ms as u64));
+        }
+        if event.input_tokens > 0 {
+            observability::record_tokens(&model, "input", event.input_tokens as u64);
+        }
+        if event.output_tokens > 0 {
+            observability::record_tokens(&model, "output", event.output_tokens as u64);
+        }
         if event.error_summary.as_deref() == Some("upstream stream error") {
             if let Some(account_id) = account_id {
                 tokio::spawn(async move {
@@ -3915,7 +4034,20 @@ async fn try_fallback(
                 success: response.status().is_success(),
                 latency_ms: started.elapsed().as_millis() as i64,
             });
-            record_response_health(health, &candidate.account.id, response.status()).await;
+            record_response_health(
+                health,
+                &candidate.source_id,
+                &candidate.account.id,
+                response.status(),
+            )
+            .await;
+            observability::record_attempt(
+                &protocol.to_string(),
+                &candidate.source_id,
+                &candidate.account.id,
+                response.status().as_u16(),
+                true,
+            );
             (response, attempts)
         }
         Err(error) => {
@@ -3929,6 +4061,13 @@ async fn try_fallback(
                 success: false,
                 latency_ms: started.elapsed().as_millis() as i64,
             });
+            observability::record_attempt(
+                &protocol.to_string(),
+                &candidate.source_id,
+                &candidate.account.id,
+                error.status_code() as u16,
+                true,
+            );
             health
                 .mark_failure_with_details(
                     &candidate.account.id,
@@ -3999,7 +4138,20 @@ async fn try_fallback_error(
                 success: response.status().is_success(),
                 latency_ms: started.elapsed().as_millis() as i64,
             });
-            record_response_health(health, &candidate.account.id, response.status()).await;
+            record_response_health(
+                health,
+                &candidate.source_id,
+                &candidate.account.id,
+                response.status(),
+            )
+            .await;
+            observability::record_attempt(
+                &protocol.to_string(),
+                &candidate.source_id,
+                &candidate.account.id,
+                response.status().as_u16(),
+                true,
+            );
             (response, attempts)
         }
         Err(error) => {
@@ -4013,6 +4165,13 @@ async fn try_fallback_error(
                 success: false,
                 latency_ms: started.elapsed().as_millis() as i64,
             });
+            observability::record_attempt(
+                &protocol.to_string(),
+                &candidate.source_id,
+                &candidate.account.id,
+                error.status_code() as u16,
+                true,
+            );
             health
                 .mark_failure_with_details(
                     &candidate.account.id,
@@ -4110,10 +4269,12 @@ fn transport_error_status(error: &transport::TransportError) -> StatusCode {
 
 async fn record_response_health(
     health: &health::HealthRegistry,
+    source_id: &str,
     account_id: &str,
     status: StatusCode,
 ) {
     if is_retryable(status) {
+        observability::record_cooldown(source_id, account_id);
         let code = format!("upstream_http_{}", status.as_u16());
         health
             .mark_failure_with_details(
@@ -4366,6 +4527,7 @@ mod admin_auth_tests {
             health: health::HealthRegistry::new(std::time::Duration::from_secs(1)),
             admin_auth,
             secrets: secrets::SecretResolver::empty(),
+            prometheus_handle: observability::prometheus_handle(),
         }
     }
 
@@ -4523,6 +4685,7 @@ mod health_api_tests {
             health: health::HealthRegistry::new(Duration::from_secs(1)),
             admin_auth: AdminAuth::test(),
             secrets: secrets::SecretResolver::empty(),
+            prometheus_handle: observability::prometheus_handle(),
         }
     }
 
@@ -4681,6 +4844,7 @@ mod audit_closeout_tests {
             health: health::HealthRegistry::new(std::time::Duration::from_secs(30)),
             admin_auth: AdminAuth::test(),
             secrets: secrets::SecretResolver::empty(),
+            prometheus_handle: observability::prometheus_handle(),
         }
     }
 
@@ -4912,6 +5076,7 @@ mod usage_api_tests {
             health: health::HealthRegistry::new(std::time::Duration::from_secs(1)),
             admin_auth: AdminAuth::test(),
             secrets: secrets::SecretResolver::empty(),
+            prometheus_handle: observability::prometheus_handle(),
         }
     }
 
@@ -5285,6 +5450,7 @@ mod kimi_adapter_e2e_tests {
             health: health::HealthRegistry::new(std::time::Duration::from_secs(1)),
             admin_auth: AdminAuth::test(),
             secrets: secrets::SecretResolver::empty(),
+            prometheus_handle: observability::prometheus_handle(),
         }
     }
 
@@ -5463,6 +5629,7 @@ mod ops_api_tests {
             health: health::HealthRegistry::new(std::time::Duration::from_secs(1)),
             admin_auth: AdminAuth::test(),
             secrets: secrets::SecretResolver::empty(),
+            prometheus_handle: observability::prometheus_handle(),
         }
     }
 
@@ -5671,6 +5838,7 @@ mod stream_contract_e2e_tests {
             health: health::HealthRegistry::new(Duration::from_secs(1)),
             admin_auth: AdminAuth::test(),
             secrets: secrets::SecretResolver::empty(),
+            prometheus_handle: observability::prometheus_handle(),
         }
     }
 

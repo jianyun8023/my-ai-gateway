@@ -2970,6 +2970,7 @@ mod tests {
             health: health.clone(),
             admin_auth: crate::AdminAuth::test(),
             secrets: crate::secrets::SecretResolver::empty(),
+            prometheus_handle: crate::observability::prometheus_handle(),
         };
         state.reload_snapshot(stable_snapshot.clone());
         assert_eq!(state.snapshot().revision, active_revision);

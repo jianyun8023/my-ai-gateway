@@ -1123,6 +1123,7 @@ mod tests {
             health: registry.clone(),
             admin_auth: crate::AdminAuth::test(),
             secrets: crate::secrets::SecretResolver::empty(),
+            prometheus_handle: crate::observability::prometheus_handle(),
         };
         let response = crate::application(app_state)
             .oneshot(
