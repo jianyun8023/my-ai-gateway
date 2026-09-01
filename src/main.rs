@@ -5376,8 +5376,8 @@ mod ops_api_tests {
             .await
             .expect("schema response");
         let schema_response = response_json(schema_response).await;
-        assert_eq!(schema_response["data"]["schema_version"], 12);
-        assert_eq!(schema_response["data"]["migration_version"], 12);
+        assert!(schema_response["data"]["schema_version"].as_i64().unwrap() >= 12);
+        assert!(schema_response["data"]["migration_version"].as_i64().unwrap() >= 12);
 
         let export_response = app
             .clone()

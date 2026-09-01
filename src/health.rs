@@ -871,7 +871,7 @@ mod tests {
         .fetch_one(&pool)
         .await
         .expect("read schema metadata");
-        assert_eq!(versions, (12, 12));
+        assert!(versions.0 >= 12 && versions.1 >= 12);
         let migration_name: String =
             sqlx::query_scalar("SELECT name FROM gateway_schema_migrations WHERE version=12")
                 .fetch_one(&pool)

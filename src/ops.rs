@@ -22,8 +22,8 @@ use std::{
 };
 use uuid::Uuid;
 
-pub const CURRENT_SCHEMA_VERSION: i32 = 12;
-pub const CURRENT_MIGRATION_VERSION: i32 = 12;
+pub const CURRENT_SCHEMA_VERSION: i32 = 15;
+pub const CURRENT_MIGRATION_VERSION: i32 = 15;
 pub const DEFAULT_BATCH_SIZE: i32 = 500;
 pub const DEFAULT_MAX_BATCHES: i32 = 1_000;
 pub const MAX_BATCH_SIZE: i32 = 10_000;
