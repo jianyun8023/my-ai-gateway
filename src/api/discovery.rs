@@ -1,14 +1,15 @@
 use crate::{
-    db::Database,
-    model_catalog::{
-        CatalogAvailability, CatalogError, CatalogStatus, MetadataValues, SourceModelConfirmation,
+    control_plane::model_catalog::{provider_preset_diff, CatalogError, ModelCatalogRepository},
+    control_plane::model_discovery::{DiscoveryServiceError, ModelDiscoveryService},
+    domain::{
+        catalog::{CatalogAvailability, CatalogStatus, MetadataValues, SourceModelConfirmation},
+        protocol::Protocol,
+        provider_preset::ProviderPresetDefinition,
     },
-    model_discovery::{DiscoveryServiceError, ModelDiscoveryService},
-    protocol::Protocol,
-    provider_preset::{provider_preset_diff, ProviderPresetDefinition},
+    http::SourceHttpClient,
+    infra::db::Database,
     source_url::SourceUrlPolicyError,
-    transport::SourceHttpClient,
-    AdminAuth,
+    state::AdminAuth,
 };
 use axum::{
     body::{Body, Bytes},
@@ -29,15 +30,15 @@ struct DiscoveryApiState {
     database: Option<Database>,
     http: SourceHttpClient,
     admin_auth: AdminAuth,
-    health: Option<crate::health::HealthRegistry>,
+    health: Option<crate::infra::health::HealthRegistry>,
 }
 
 #[cfg(test)]
 pub fn router(database: Option<Database>, http: SourceHttpClient) -> Router {
     let health = database.clone().map(|database| {
-        crate::health::HealthRegistry::with_database_config(
+        crate::infra::health::HealthRegistry::with_database_config(
             database,
-            crate::health::HealthConfig::default(),
+            crate::infra::health::HealthConfig::default(),
         )
     });
     router_inner(database, http, AdminAuth::test(), true, health)
@@ -59,7 +60,7 @@ pub fn auxiliary_router_with_health(
     database: Option<Database>,
     http: SourceHttpClient,
     admin_auth: AdminAuth,
-    health: crate::health::HealthRegistry,
+    health: crate::infra::health::HealthRegistry,
 ) -> Router {
     router_inner(database, http, admin_auth, false, Some(health))
 }
@@ -69,7 +70,7 @@ fn router_inner(
     http: SourceHttpClient,
     admin_auth: AdminAuth,
     include_source_collection: bool,
-    health: Option<crate::health::HealthRegistry>,
+    health: Option<crate::infra::health::HealthRegistry>,
 ) -> Router {
     let state = DiscoveryApiState {
         database,
@@ -212,7 +213,7 @@ async fn create_source(
         }
         endpoints.insert(protocol, endpoint);
     }
-    let input = crate::model_catalog::SourceInput {
+    let input = crate::domain::catalog::SourceInput {
         id: request.id,
         display_name: request.display_name,
         provider_preset_id: preset.id,
@@ -285,7 +286,10 @@ async fn test_connection(
         Ok(request) => request,
         Err(response) => return *response,
     };
-    let service = ModelDiscoveryService::new(database.model_catalog(), state.http.clone());
+    let service = ModelDiscoveryService::new(
+        ModelCatalogRepository::new(database.pool().clone()),
+        state.http.clone(),
+    );
     match service
         .test_connection(
             &source_id,
@@ -326,7 +330,10 @@ async fn discover_models(
         Ok(request) => request,
         Err(response) => return *response,
     };
-    let service = ModelDiscoveryService::new(database.model_catalog(), state.http.clone());
+    let service = ModelDiscoveryService::new(
+        ModelCatalogRepository::new(database.pool().clone()),
+        state.http.clone(),
+    );
     match service
         .discover(&source_id, &request.account_id, &request.requested_by)
         .await
@@ -493,8 +500,9 @@ fn authorized_database(state: &DiscoveryApiState, headers: &HeaderMap) -> Option
 fn authorized_repository(
     state: &DiscoveryApiState,
     headers: &HeaderMap,
-) -> Option<crate::model_catalog::ModelCatalogRepository> {
-    authorized_database(state, headers).map(|database| database.model_catalog())
+) -> Option<ModelCatalogRepository> {
+    authorized_database(state, headers)
+        .map(|database| ModelCatalogRepository::new(database.pool().clone()))
 }
 
 fn authorization_or_database_error(
@@ -597,9 +605,13 @@ fn api_error(status: StatusCode, kind: &str, message: &str) -> Response<Body> {
 mod tests {
     use super::*;
     use crate::{
-        model_catalog::{MetadataField, SourceModelRefresh},
-        provider_preset::{install_builtin_presets, BUILTIN_PROVIDER_PRESET_VERSION},
-        transport,
+        control_plane::model_catalog::install_builtin_presets,
+        domain::{
+            catalog::{MetadataField, SourceModelRefresh},
+            provider_preset::BUILTIN_PROVIDER_PRESET_VERSION,
+        },
+        http,
+        state::TEST_ADMIN_KEY,
     };
     use axum::{body::to_bytes, http::Request};
     use chrono::Utc;
@@ -607,7 +619,7 @@ mod tests {
 
     #[test]
     fn source_creation_rejects_credential_bearing_urls() {
-        let client = transport::test_client().unwrap();
+        let client = http::test_client().unwrap();
         assert!(client
             .validate_base_url("https://api.example.com/base")
             .is_ok());
@@ -624,7 +636,7 @@ mod tests {
             .method(method)
             .uri(uri)
             .header("content-type", "application/json")
-            .header("authorization", format!("Bearer {}", crate::TEST_ADMIN_KEY))
+            .header("authorization", format!("Bearer {}", TEST_ADMIN_KEY))
             .body(Body::from(body.to_string()))
             .expect("admin API request")
     }
@@ -658,13 +670,13 @@ mod tests {
         let database = Database::connect(&url)
             .await
             .expect("connect discovery API PostgreSQL database");
-        let repository = database.model_catalog();
+        let repository = ModelCatalogRepository::new(database.pool().clone());
         install_builtin_presets(&repository)
             .await
             .expect("install built-in presets");
         let app = router(
             Some(database.clone()),
-            transport::test_client().expect("API HTTP client"),
+            http::test_client().expect("API HTTP client"),
         );
         let suffix = uuid::Uuid::new_v4().simple().to_string();
         let source_id = format!("discovery-api-source-{suffix}");

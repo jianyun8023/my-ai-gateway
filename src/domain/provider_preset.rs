@@ -1,8 +1,7 @@
-use crate::{
-    model_catalog::{
+use super::{
+    catalog::{
         CapabilitySupport, CatalogError, CatalogMetadata, MetadataField, MetadataValues,
-        ModelCatalogRepository, ModelPresetInput, ProviderPresetInput, ProviderPresetRecord,
-        SourceProtocolMode, SourceRecord,
+        ModelPresetInput, ProviderPresetInput, SourceProtocolMode,
     },
     protocol::Protocol,
 };
@@ -123,71 +122,6 @@ pub struct ProviderPresetDiff {
     pub source_version: i32,
     pub latest_version: i32,
     pub changes: Vec<PresetDiffEntry>,
-}
-
-pub fn provider_preset_diff(
-    source: &SourceRecord,
-    latest: &ProviderPresetRecord,
-) -> ProviderPresetDiff {
-    let mut changes = Vec::new();
-    diff_json(
-        "$",
-        Some(&source.provider_preset_snapshot),
-        Some(&latest.definition),
-        &mut changes,
-    );
-    changes.sort_by(|left, right| left.path.cmp(&right.path));
-    ProviderPresetDiff {
-        source_id: source.id.clone(),
-        provider_preset_id: source.provider_preset_id.clone(),
-        source_version: source.provider_preset_version,
-        latest_version: latest.version,
-        changes,
-    }
-}
-
-fn diff_json(
-    path: &str,
-    before: Option<&Value>,
-    after: Option<&Value>,
-    changes: &mut Vec<PresetDiffEntry>,
-) {
-    match (before, after) {
-        (Some(Value::Object(before)), Some(Value::Object(after))) => {
-            let keys = before
-                .keys()
-                .chain(after.keys())
-                .collect::<std::collections::BTreeSet<_>>();
-            for key in keys {
-                diff_json(
-                    &format!("{path}.{key}"),
-                    before.get(key),
-                    after.get(key),
-                    changes,
-                );
-            }
-        }
-        (Some(before), Some(after)) if before == after => {}
-        (Some(before), Some(after)) => changes.push(PresetDiffEntry {
-            path: path.into(),
-            kind: PresetDiffKind::Changed,
-            before: Some(before.clone()),
-            after: Some(after.clone()),
-        }),
-        (None, Some(after)) => changes.push(PresetDiffEntry {
-            path: path.into(),
-            kind: PresetDiffKind::Added,
-            before: None,
-            after: Some(after.clone()),
-        }),
-        (Some(before), None) => changes.push(PresetDiffEntry {
-            path: path.into(),
-            kind: PresetDiffKind::Missing,
-            before: Some(before.clone()),
-            after: None,
-        }),
-        (None, None) => {}
-    }
 }
 
 impl ProviderPresetDefinition {
@@ -311,18 +245,6 @@ fn validate_relative_endpoint(endpoint: &str) -> Result<(), CatalogError> {
         return Err(CatalogError::InvalidState(format!(
             "provider preset endpoint '{endpoint}' must be an absolute path"
         )));
-    }
-    Ok(())
-}
-
-pub async fn install_builtin_presets(
-    repository: &ModelCatalogRepository,
-) -> Result<(), CatalogError> {
-    for preset in builtin_provider_presets()? {
-        repository.insert_provider_preset(&preset).await?;
-    }
-    for preset in builtin_model_presets()? {
-        repository.insert_model_preset(&preset).await?;
     }
     Ok(())
 }
@@ -753,7 +675,6 @@ fn kimi_code() -> (&'static str, &'static str, ProviderPresetDefinition) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::Utc;
 
     #[test]
     fn builtins_are_versioned_complete_and_explicit_about_discovery() {
@@ -831,44 +752,9 @@ mod tests {
                 .values()
                 .all(|source| matches!(
                     source,
-                    crate::model_catalog::MetadataSource::Preset
-                        | crate::model_catalog::MetadataSource::Unknown
+                    crate::domain::catalog::MetadataSource::Preset
+                        | crate::domain::catalog::MetadataSource::Unknown
                 )));
         }
-    }
-
-    #[test]
-    fn preset_upgrade_diff_is_stable_and_never_mutates_the_source_snapshot() {
-        let snapshot = json!({"default_base_url":"https://one.example","nested":{"a":1}});
-        let source = SourceRecord {
-            id: "source".into(),
-            display_name: "Source".into(),
-            provider_preset_id: "provider".into(),
-            provider_preset_version: 1,
-            provider_preset_snapshot: snapshot.clone(),
-            base_url: "https://source.example".into(),
-            endpoints: json!({}),
-            auth_config: json!({}),
-            protocol_capabilities: json!({}),
-            enabled: true,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-        };
-        let latest = ProviderPresetRecord {
-            id: "provider".into(),
-            version: 2,
-            display_name: "Provider".into(),
-            definition: json!({"default_base_url":"https://two.example","nested":{"b":2}}),
-            created_at: Utc::now(),
-        };
-        let diff = provider_preset_diff(&source, &latest);
-        assert_eq!(
-            diff.changes
-                .iter()
-                .map(|change| change.path.as_str())
-                .collect::<Vec<_>>(),
-            vec!["$.default_base_url", "$.nested.a", "$.nested.b"]
-        );
-        assert_eq!(source.provider_preset_snapshot, snapshot);
     }
 }

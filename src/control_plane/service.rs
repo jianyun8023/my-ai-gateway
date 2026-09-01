@@ -1,15 +1,14 @@
-use crate::{
+use crate::domain::{
+    catalog::{CatalogAvailability, CatalogStatus, PublishedModel, SourceProtocolMode},
     config::{
         adapter_definition, AccountConfig, Capabilities, CapabilityMode, GatewayConfig,
         ProtocolCapability, ProtocolCapabilityMatrix, ProtocolMode, ProviderConfig, RouteConfig,
     },
-    db::Database,
-    model_catalog::{CatalogAvailability, CatalogStatus, SourceProtocolMode},
     protocol::Protocol,
     provider_preset::ProviderPresetDefinition,
     routing::{intersect_capabilities, join_endpoint, RouteResolver, RuntimeBinding, RuntimeRoute},
-    source_url::{SourceUrlPolicy, SourceUrlPolicyError},
 };
+use crate::source_url::{SourceUrlPolicy, SourceUrlPolicyError};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -85,14 +84,6 @@ impl From<serde_json::Error> for ControlPlaneError {
     }
 }
 
-#[derive(Clone, Debug, Serialize)]
-pub struct PublishedModel {
-    pub id: String,
-    pub display_name: String,
-    #[serde(skip)]
-    pub account_ids: Vec<String>,
-}
-
 #[derive(Clone)]
 pub struct RuntimeSnapshot {
     pub config: Arc<GatewayConfig>,
@@ -130,17 +121,17 @@ pub struct ControlPlane {
 
 impl ControlPlane {
     #[cfg(test)]
-    pub fn new(database: &Database, listen_addr: impl Into<String>) -> Self {
-        Self::with_url_policy(database, listen_addr, Arc::new(SourceUrlPolicy::default()))
+    pub fn new(pool: PgPool, listen_addr: impl Into<String>) -> Self {
+        Self::with_url_policy(pool, listen_addr, Arc::new(SourceUrlPolicy::default()))
     }
 
     pub fn with_url_policy(
-        database: &Database,
+        pool: PgPool,
         listen_addr: impl Into<String>,
         source_url_policy: Arc<SourceUrlPolicy>,
     ) -> Self {
         Self {
-            pool: database.pool().clone(),
+            pool,
             listen_addr: listen_addr.into(),
             source_url_policy,
         }
@@ -2413,6 +2404,7 @@ impl ControlPlane {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::infra::db::Database;
     use axum::{
         body::{to_bytes, Body},
         extract::State,
@@ -2530,7 +2522,7 @@ mod tests {
     #[ignore = "requires TEST_DATABASE_URL and runs against an isolated PostgreSQL schema"]
     async fn postgres_db_first_crud_rollback_snapshot_and_models_contract() {
         let (database, admin, schema) = isolated_database().await;
-        let control_plane = ControlPlane::new(&database, "127.0.0.1:0");
+        let control_plane = ControlPlane::new(database.pool().clone(), "127.0.0.1:0");
 
         let first = control_plane
             .initialize_from_config(&bootstrap_config("https://source-a.example"), false)
@@ -2958,19 +2950,19 @@ mod tests {
             .expect("reload restored snapshot");
         assert!(active_snapshot.revision > stable_snapshot.revision);
 
-        let health = crate::health::HealthRegistry::new(Duration::from_secs(60));
+        let health = crate::infra::health::HealthRegistry::new(Duration::from_secs(60));
         let active_revision = active_snapshot.revision;
-        let state = crate::AppState {
-            live: Arc::new(std::sync::RwLock::new(crate::LiveConfig::from_snapshot(
-                active_snapshot,
-            ))),
-            http: crate::transport::test_client().expect("HTTP client"),
+        let state = crate::state::AppState {
+            live: Arc::new(std::sync::RwLock::new(
+                crate::state::LiveConfig::from_snapshot(active_snapshot),
+            )),
+            http: crate::http::test_client().expect("HTTP client"),
             db: Some(database.clone()),
             control_plane: Some(control_plane.clone()),
             health: health.clone(),
-            admin_auth: crate::AdminAuth::test(),
-            secrets: crate::secrets::SecretResolver::empty(),
-            prometheus_handle: crate::observability::prometheus_handle(),
+            admin_auth: crate::state::AdminAuth::test(),
+            secrets: crate::infra::secrets::SecretResolver::empty(),
+            prometheus_handle: crate::infra::observability::prometheus_handle(),
         };
         state.reload_snapshot(stable_snapshot.clone());
         assert_eq!(state.snapshot().revision, active_revision);
@@ -3051,7 +3043,10 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .uri("/admin/accounts")
-                    .header("authorization", format!("Bearer {}", crate::TEST_ADMIN_KEY))
+                    .header(
+                        "authorization",
+                        format!("Bearer {}", crate::state::TEST_ADMIN_KEY),
+                    )
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -3068,7 +3063,10 @@ mod tests {
                     .method("POST")
                     .uri("/admin/sources")
                     .header("content-type", "application/json")
-                    .header("authorization", format!("Bearer {}", crate::TEST_ADMIN_KEY))
+                    .header(
+                        "authorization",
+                        format!("Bearer {}", crate::state::TEST_ADMIN_KEY),
+                    )
                     .body(Body::from(
                         json!({
                             "id":"source-api",

@@ -15,7 +15,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::protocol::Protocol;
+use crate::domain::protocol::Protocol;
 
 /// A comment frame is valid for all three supported SSE protocols.  Keeping
 /// the marker stable lets usage observation filter gateway heartbeats without

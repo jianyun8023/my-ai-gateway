@@ -1,4 +1,4 @@
-use crate::protocol::Protocol;
+use super::protocol::Protocol;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -1135,7 +1135,7 @@ mod tests {
     #[test]
     fn shipped_example_is_valid() {
         let config: GatewayConfig =
-            serde_json::from_str(include_str!("../config.example.json")).unwrap();
+            serde_json::from_str(include_str!("../../config.example.json")).unwrap();
         assert!(
             config.validate().is_ok(),
             "example config errors: {:?}",
