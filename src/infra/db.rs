@@ -409,49 +409,53 @@ impl Database {
             .bind(0x6d79_6169_6777_6179_i64)
             .execute(&mut *tx)
             .await?;
-        sqlx::raw_sql(include_str!("../migrations/0001_init.sql"))
+        sqlx::raw_sql(include_str!("../../migrations/0001_init.sql"))
             .execute(&mut *tx)
             .await?;
-        sqlx::raw_sql(include_str!("../migrations/0002_control_plane.sql"))
+        sqlx::raw_sql(include_str!("../../migrations/0002_control_plane.sql"))
             .execute(&mut *tx)
             .await?;
-        sqlx::raw_sql(include_str!("../migrations/0003_model_catalog.sql"))
-            .execute(&mut *tx)
-            .await?;
-        sqlx::raw_sql(include_str!("../migrations/0004_usage_query_contract.sql"))
-            .execute(&mut *tx)
-            .await?;
-        sqlx::raw_sql(include_str!("../migrations/0005_usage_event_fields.sql"))
-            .execute(&mut *tx)
-            .await?;
-        sqlx::raw_sql(include_str!("../migrations/0006_control_plane_crud.sql"))
-            .execute(&mut *tx)
-            .await?;
-        sqlx::raw_sql(include_str!("../migrations/0007_db_first_runtime.sql"))
-            .execute(&mut *tx)
-            .await?;
-        sqlx::raw_sql(include_str!("../migrations/0008_provider_discovery.sql"))
+        sqlx::raw_sql(include_str!("../../migrations/0003_model_catalog.sql"))
             .execute(&mut *tx)
             .await?;
         sqlx::raw_sql(include_str!(
-            "../migrations/0009_usage_source_dimensions.sql"
+            "../../migrations/0004_usage_query_contract.sql"
+        ))
+        .execute(&mut *tx)
+        .await?;
+        sqlx::raw_sql(include_str!("../../migrations/0005_usage_event_fields.sql"))
+            .execute(&mut *tx)
+            .await?;
+        sqlx::raw_sql(include_str!("../../migrations/0006_control_plane_crud.sql"))
+            .execute(&mut *tx)
+            .await?;
+        sqlx::raw_sql(include_str!("../../migrations/0007_db_first_runtime.sql"))
+            .execute(&mut *tx)
+            .await?;
+        sqlx::raw_sql(include_str!("../../migrations/0008_provider_discovery.sql"))
+            .execute(&mut *tx)
+            .await?;
+        sqlx::raw_sql(include_str!(
+            "../../migrations/0009_usage_source_dimensions.sql"
         ))
         .execute(&mut *tx)
         .await?;
         sqlx::raw_sql(include_str!(
-            "../migrations/0010_usage_provider_attribution.sql"
+            "../../migrations/0010_usage_provider_attribution.sql"
         ))
         .execute(&mut *tx)
         .await?;
-        sqlx::raw_sql(include_str!("../migrations/0011_retention_backup.sql"))
+        sqlx::raw_sql(include_str!("../../migrations/0011_retention_backup.sql"))
             .execute(&mut *tx)
             .await?;
-        sqlx::raw_sql(include_str!("../migrations/0012_health_persistence.sql"))
+        sqlx::raw_sql(include_str!("../../migrations/0012_health_persistence.sql"))
             .execute(&mut *tx)
             .await?;
-        sqlx::raw_sql(include_str!("../migrations/0015_virtual_key_lifecycle.sql"))
-            .execute(&mut *tx)
-            .await?;
+        sqlx::raw_sql(include_str!(
+            "../../migrations/0015_virtual_key_lifecycle.sql"
+        ))
+        .execute(&mut *tx)
+        .await?;
         tx.commit().await
     }
 
@@ -1703,27 +1707,27 @@ mod tests {
 
     #[test]
     fn initial_schema_keeps_logical_request_and_attempt_idempotency() {
-        let schema = include_str!("../migrations/0001_init.sql");
+        let schema = include_str!("../../migrations/0001_init.sql");
         assert!(schema.contains("logical_model TEXT NOT NULL"));
         assert!(schema.contains("UNIQUE (request_id, attempt_no)"));
         assert!(schema.contains("request_id TEXT NOT NULL UNIQUE"));
-        let query_schema = include_str!("../migrations/0004_usage_query_contract.sql");
+        let query_schema = include_str!("../../migrations/0004_usage_query_contract.sql");
         assert!(query_schema.contains("virtual_key_id BIGINT"));
         assert!(query_schema.contains("created_at DESC, request_id DESC"));
-        let fields_schema = include_str!("../migrations/0005_usage_event_fields.sql");
+        let fields_schema = include_str!("../../migrations/0005_usage_event_fields.sql");
         assert!(fields_schema.contains("route_id TEXT"));
         assert!(fields_schema.contains("streamed BOOLEAN"));
         assert!(fields_schema.contains("error_summary TEXT"));
-        let source_schema = include_str!("../migrations/0009_usage_source_dimensions.sql");
+        let source_schema = include_str!("../../migrations/0009_usage_source_dimensions.sql");
         assert!(source_schema.contains("RENAME COLUMN source TO client_source"));
         assert!(source_schema.contains("ADD COLUMN IF NOT EXISTS source_id TEXT"));
         assert!(!source_schema.contains("REFERENCES sources"));
-        let provider_schema = include_str!("../migrations/0010_usage_provider_attribution.sql");
+        let provider_schema = include_str!("../../migrations/0010_usage_provider_attribution.sql");
         assert!(provider_schema.contains("source.provider_preset_id"));
         assert!(provider_schema.contains("provider_id = event.source_id"));
         assert!(provider_schema.contains("provider_id = attempt.source_id"));
         assert!(provider_schema.contains("'unknown'"));
-        let health_schema = include_str!("../migrations/0012_health_persistence.sql");
+        let health_schema = include_str!("../../migrations/0012_health_persistence.sql");
         for marker in [
             "health_source TEXT",
             "health_updated_at TIMESTAMPTZ",
@@ -1763,7 +1767,7 @@ mod tests {
             .await
             .expect("connect isolated usage migration schema");
 
-        sqlx::raw_sql(include_str!("../migrations/0001_init.sql"))
+        sqlx::raw_sql(include_str!("../../migrations/0001_init.sql"))
             .execute(&pool)
             .await
             .expect("apply legacy usage schema");
@@ -1781,18 +1785,20 @@ mod tests {
             .expect("insert legacy usage attempt");
 
         sqlx::raw_sql(include_str!(
-            "../migrations/0009_usage_source_dimensions.sql"
+            "../../migrations/0009_usage_source_dimensions.sql"
         ))
         .execute(&pool)
         .await
         .expect("apply Source dimension migration");
         // The gateway embeds idempotent scripts and replays them at startup.
-        sqlx::raw_sql(include_str!("../migrations/0004_usage_query_contract.sql"))
-            .execute(&pool)
-            .await
-            .expect("replay earlier usage indexes after migration");
         sqlx::raw_sql(include_str!(
-            "../migrations/0009_usage_source_dimensions.sql"
+            "../../migrations/0004_usage_query_contract.sql"
+        ))
+        .execute(&pool)
+        .await
+        .expect("replay earlier usage indexes after migration");
+        sqlx::raw_sql(include_str!(
+            "../../migrations/0009_usage_source_dimensions.sql"
         ))
         .execute(&pool)
         .await
@@ -1875,7 +1881,7 @@ mod tests {
 
         for _ in 0..2 {
             sqlx::raw_sql(include_str!(
-                "../migrations/0010_usage_provider_attribution.sql"
+                "../../migrations/0010_usage_provider_attribution.sql"
             ))
             .execute(&pool)
             .await
@@ -2292,14 +2298,14 @@ mod tests {
 
     #[test]
     fn model_catalog_schema_declares_required_keys_and_routability_guard() {
-        let schema = include_str!("../migrations/0003_model_catalog.sql");
+        let schema = include_str!("../../migrations/0003_model_catalog.sql");
         assert!(schema.contains("PRIMARY KEY (source_id, upstream_model_id, protocol)"));
         assert!(schema.contains(
             "UNIQUE (logical_model_id, source_id, account_id, upstream_model_id, protocol)"
         ));
         assert!(schema.contains("provider_preset_snapshot JSONB NOT NULL"));
         assert!(schema.contains("confirmed model binding is not routable"));
-        let discovery_schema = include_str!("../migrations/0008_provider_discovery.sql");
+        let discovery_schema = include_str!("../../migrations/0008_provider_discovery.sql");
         assert!(discovery_schema.contains("CREATE TABLE IF NOT EXISTS source_discovery_runs"));
         assert!(discovery_schema.contains("CREATE TABLE IF NOT EXISTS source_connection_tests"));
         assert!(discovery_schema.contains("raw_snapshot JSONB"));
@@ -2308,7 +2314,7 @@ mod tests {
 
     #[test]
     fn retention_schema_declares_independent_policies_and_operation_state() {
-        let schema = include_str!("../migrations/0011_retention_backup.sql");
+        let schema = include_str!("../../migrations/0011_retention_backup.sql");
         for marker in [
             "CREATE TABLE IF NOT EXISTS retention_policies",
             "CREATE TABLE IF NOT EXISTS retention_cleanup_runs",

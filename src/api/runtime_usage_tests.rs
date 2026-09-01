@@ -232,7 +232,7 @@ async fn primary_account_model_map_is_applied_for_all_three_protocols() {
         ),
     ];
     for (protocol, payload) in &cases {
-        let response = proxy(
+        let response = proxy_fn(
             state.clone(),
             static_auth_headers(),
             Bytes::from(serde_json::to_vec(payload).unwrap()),
@@ -288,7 +288,7 @@ async fn retryable_primary_response_uses_mapped_fallback_after_primary() {
         ],
         routes: vec![route(Protocol::OpenAiChatCompletions, true)],
     };
-    let response = proxy(
+    let response = proxy_fn(
         state(config, None),
         static_auth_headers(),
         Bytes::from_static(
@@ -555,7 +555,7 @@ async fn runtime_request(
         "x-client-source",
         HeaderValue::from_str(client_source).unwrap(),
     );
-    proxy(
+    proxy_fn(
         state.clone(),
         headers,
         Bytes::from(serde_json::to_vec(&payload).unwrap()),
