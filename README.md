@@ -1,13 +1,5 @@
 # my-ai-gateway
 
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="./assets/keeper-logo-dark.svg" />
-    <source media="(prefers-color-scheme: light)" srcset="./assets/keeper-logo-light.svg" />
-    <img src="./assets/keeper-logo-light.svg" alt="Keeper" width="560" />
-  </picture>
-</p>
-
 Rust AI 网关 MVP，目标是将多个上游账号统一为一个入口，并提供 OpenAI Chat Completions、OpenAI Responses、Anthropic Messages（Claude/Coze 客户端兼容面）入口。
 
 当前版本完成：
@@ -64,6 +56,24 @@ curl http://127.0.0.1:8787/healthz
 Admin API 请求都会 fail closed 并返回 `401`。两个 Key 应使用不同的随机值。
 
 空控制面首次启动时，可通过 `GATEWAY_CONFIG_JSON` 一次性初始化。控制面已有任意管理数据后，后续启动不会解析或覆盖该 JSON；此时运行时直接加载数据库 snapshot。需要显式替换现有开发控制面时，同时设置 `GATEWAY_CONFIG_IMPORT=true`，该操作会在事务中清理并重新导入 Source/Account/模型/Binding/Route，因此只应在明确需要导入时使用。监听地址独立使用 `GATEWAY_LISTEN_ADDR`。
+
+### Docker Compose 部署
+
+仓库提供多阶段 Docker 镜像和 [`docker-compose.yml`](docker-compose.yml)，用于在单机上运行 Gateway 与 PostgreSQL 16。先准备 Compose 专用环境文件：
+
+```bash
+cp .env.compose.example .env.compose
+# 编辑 .env.compose，至少替换数据库密码、GATEWAY_API_KEY 和 GATEWAY_ADMIN_KEY。
+docker compose --env-file .env.compose config --quiet
+docker compose --env-file .env.compose up -d --build
+curl http://127.0.0.1:8787/healthz
+```
+
+镜像默认标记为 `my-ai-gateway:local`，可通过 `GATEWAY_IMAGE` 覆盖；PostgreSQL 数据保存在
+`gateway_pgdata` 命名卷中。默认只向宿主机回环地址发布 `8787`，需要由反向代理或局域网直接访问时再设置
+`GATEWAY_BIND_ADDRESS`。首次导入 [`config.example.json`](config.example.json) 时，可在启动命令前导出
+`GATEWAY_CONFIG_JSON`；已有控制面需要显式替换时才设置 `GATEWAY_CONFIG_IMPORT=true`。完整的启动、升级、备份和恢复说明见
+[`docs/deployment.md`](docs/deployment.md) 与 [`docs/operations.md`](docs/operations.md)。
 
 流式请求使用进程级 `GATEWAY_SSE_*_MS` 参数（见 [`.env.example`](.env.example)）：默认心跳
 15 秒、连接 10 秒、首事件 30 秒、空闲 60 秒、总时长 300 秒；设为 `0` 可禁用单项限制。

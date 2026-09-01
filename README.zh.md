@@ -98,15 +98,26 @@ cargo run
 
 ### Docker Compose
 
-仓库中的 [`docker-compose.yml`](docker-compose.yml) 提供 Gateway + PostgreSQL 16 的开发部署结构：
+仓库提供多阶段 Docker 镜像和 [`docker-compose.yml`](docker-compose.yml)，用于在单机上运行 Gateway 与 PostgreSQL 16。
+先准备 Compose 专用环境文件：
 
 ```bash
-export GATEWAY_API_KEY='replace-with-a-random-secret'
-export GATEWAY_ADMIN_KEY='replace-with-a-different-admin-secret'
-docker compose up --build
+cp .env.compose.example .env.compose
+# 编辑 .env.compose，至少替换数据库密码、GATEWAY_API_KEY 和 GATEWAY_ADMIN_KEY。
+docker compose --env-file .env.compose config --quiet
+docker compose --env-file .env.compose up -d --build
+curl http://127.0.0.1:8787/healthz
 ```
 
-Compose 示例使用开发数据库账号，不是生产安全模板。生产部署前需要单独配置强凭据、Admin Key、TLS、网络边界、备份和 Secret 注入。
+镜像默认标记为 `my-ai-gateway:local`，可通过 `GATEWAY_IMAGE` 覆盖；PostgreSQL 数据保存在
+`gateway_pgdata` 命名卷中。默认只向宿主机回环地址发布 `8787`，需要由反向代理或局域网直接访问时再设置
+`GATEWAY_BIND_ADDRESS`。首次导入 [`config.example.json`](config.example.json) 时，可在启动命令前导出
+`GATEWAY_CONFIG_JSON`；已有控制面需要显式替换时才设置 `GATEWAY_CONFIG_IMPORT=true`。完整的启动、升级、备份和恢复说明见
+[`docs/deployment.md`](docs/deployment.md) 与 [`docs/operations.md`](docs/operations.md)。
+
+Compose 环境文件中的 Provider 凭据会传入 Gateway 容器，变量名必须与 `Account.credential_env` 一致；不要把真实
+凭据写入 JSON、镜像或 Git。该 Compose 文件默认适合单机开发/内部部署，生产环境仍需配置 TLS、网络边界、备份和受控
+Secret 注入。
 
 ## 调用网关
 

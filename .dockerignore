@@ -1,4 +1,8 @@
 .git
+.github
+.worktrees
+.agents
+.codex
 target
 web/node_modules
 web/dist
@@ -6,3 +10,14 @@ web/dist
 backups
 control-plane*.json
 .env
+.env.*
+!.env.example
+!.env.live.example
+!.env.test.example
+!.env.codex-e2e.example
+!.env.compose.example
+docs
+tests
+scripts
+assets
+ai-gateway-prototype.html

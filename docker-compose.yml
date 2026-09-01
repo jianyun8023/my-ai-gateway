@@ -1,16 +1,41 @@
 services:
   gateway:
-    build: .
+    image: ${GATEWAY_IMAGE:-my-ai-gateway:local}
+    build:
+      context: .
+      args:
+        NODE_VERSION: ${NODE_VERSION:-24.11.1-bookworm}
+        RUST_VERSION: ${RUST_VERSION:-1.97.1-bookworm}
+    env_file:
+      - path: ${COMPOSE_ENV_FILE:-.env.compose}
+        required: false
     ports:
-      - "8787:8787"
+      - "${GATEWAY_BIND_ADDRESS:-127.0.0.1}:${GATEWAY_PORT:-8787}:8787"
     environment:
       GATEWAY_LISTEN_ADDR: 0.0.0.0:8787
-      DATABASE_URL: postgres://gateway:gateway@postgres:5432/gateway
+      DATABASE_URL: "postgres://${POSTGRES_USER:-gateway}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-gateway}"
       GATEWAY_CONFIG_JSON: ${GATEWAY_CONFIG_JSON:-}
       GATEWAY_CONFIG_IMPORT: ${GATEWAY_CONFIG_IMPORT:-false}
       GATEWAY_API_KEY: ${GATEWAY_API_KEY:?set GATEWAY_API_KEY}
       GATEWAY_ADMIN_KEY: ${GATEWAY_ADMIN_KEY:?set GATEWAY_ADMIN_KEY}
       GATEWAY_SOURCE_URL_ALLOWLIST: ${GATEWAY_SOURCE_URL_ALLOWLIST:-}
+      GATEWAY_CREDENTIAL_MASTER_KEY: ${GATEWAY_CREDENTIAL_MASTER_KEY:-}
+      GATEWAY_CREDENTIAL_MASTER_KEYS: ${GATEWAY_CREDENTIAL_MASTER_KEYS:-}
+      GATEWAY_CREDENTIAL_MASTER_KEY_VERSION: ${GATEWAY_CREDENTIAL_MASTER_KEY_VERSION:-v1}
+      GATEWAY_CREDENTIAL_ACTIVE_KEY_VERSION: ${GATEWAY_CREDENTIAL_ACTIVE_KEY_VERSION:-}
+      KIMI_API_KEY: ${KIMI_API_KEY:-}
+      MINIMAX_API_KEY: ${MINIMAX_API_KEY:-}
+      MINIMAX_API_KEY_2: ${MINIMAX_API_KEY_2:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      SILICONFLOW_API_KEY: ${SILICONFLOW_API_KEY:-}
+      B_AI_API_KEY: ${B_AI_API_KEY:-}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8787/healthz"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
     depends_on:
       postgres:
         condition: service_healthy
@@ -18,13 +43,14 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: gateway
-      POSTGRES_PASSWORD: gateway
-      POSTGRES_DB: gateway
+      POSTGRES_USER: ${POSTGRES_USER:-gateway}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-gateway}
     volumes:
       - gateway_pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U gateway -d gateway"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 10

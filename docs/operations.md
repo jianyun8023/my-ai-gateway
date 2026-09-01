@@ -1,6 +1,6 @@
 # 数据保留、备份与恢复 Runbook
 
-本文对应 Issue #53，适用于本地部署和 `docker compose` 部署。所有控制面运维接口都要求独立的 `GATEWAY_ADMIN_KEY`；数据面 `GATEWAY_API_KEY` 不能调用这些接口。
+本文对应 Issue #53，适用于本地部署和 `docker compose` 部署。Compose 的启动、镜像更新和基础生命周期见 [`docs/deployment.md`](deployment.md)。所有控制面运维接口都要求独立的 `GATEWAY_ADMIN_KEY`；数据面 `GATEWAY_API_KEY` 不能调用这些接口。
 
 ## 数据边界
 
@@ -135,12 +135,15 @@ pg_restore --no-owner --exit-on-error \
 
 ## Docker Compose 与本地 CLI
 
-Compose 只负责 Gateway + PostgreSQL；备份文件应挂载到宿主机受限目录，不写入镜像层：
+Compose 只负责 Gateway + PostgreSQL；完整启动配置见 [`docs/deployment.md`](deployment.md)。备份文件应写入宿主机受限目录，不写入镜像层：
 
 ```bash
-docker compose up -d --build
-docker compose exec -T postgres pg_dump --format=custom --no-owner --no-acl \
-  -U gateway -d gateway > backups/gateway-$(date -u +%Y%m%dT%H%M%SZ).dump
+umask 077
+mkdir -p backups
+docker compose --env-file .env.compose up -d --build
+docker compose --env-file .env.compose exec -T postgres \
+  sh -c 'pg_dump --format=custom --no-owner --no-acl -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
+  > "backups/gateway-$(date -u +%Y%m%dT%H%M%SZ).dump"
 ```
 
 网关二进制也提供不依赖 HTTP 的 Admin CLI（仍使用 `DATABASE_URL`，输出只含脱敏数据）：
