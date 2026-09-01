@@ -3,7 +3,10 @@ import test from 'node:test'
 
 import {
   buildGatewayConfig,
+  classifyFailure,
+  isTransientFailure,
   loadCaseManifest,
+  mergeSourceUrlAllowlist,
   parseArguments,
   parseSse,
   selectCases,
@@ -71,4 +74,20 @@ test('SSE parser preserves event order and monotonic sequence checks', () => {
   ])
   assert.equal(strictlyIncreasing(events.map((event) => event.sequence_number)), true)
   assert.equal(strictlyIncreasing([0, 0]), false)
+})
+
+test('source URL allowlist preserves configured Provider hosts and appends localhost once', () => {
+  assert.equal(
+    mergeSourceUrlAllowlist('api.deepseek.com,api.minimaxi.com,127.0.0.1', true),
+    'api.deepseek.com,api.minimaxi.com,127.0.0.1',
+  )
+  assert.equal(mergeSourceUrlAllowlist('api.kimi.com', false), 'api.kimi.com')
+})
+
+test('live failures distinguish Provider availability from transient transport failures', () => {
+  assert.equal(classifyFailure({ http_status: 403, error_code: 'permission_error' }), 'provider_unavailable')
+  assert.equal(classifyFailure({ http_status: 429, error_code: 'rate_limit_exceeded' }), 'provider_unavailable')
+  assert.equal(classifyFailure({ http_status: 502, error_code: 'upstream_request_failed' }), 'failed')
+  assert.equal(isTransientFailure({ http_status: 504, error_code: 'upstream_request_failed' }), true)
+  assert.equal(isTransientFailure({ http_status: 403, error_code: 'permission_error' }), false)
 })

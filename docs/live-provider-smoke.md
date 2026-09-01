@@ -44,6 +44,10 @@ mise run test-live -- --list
 mise run test-live
 ```
 
+每个 case 都使用独立的 PostgreSQL schema、Gateway 进程和账号健康状态，前一项超时不会再让
+后一项被 `account_cooling_down` 连带污染。`GATEWAY_SOURCE_URL_ALLOWLIST` 中已有的 Provider
+host 会原样继承；fallback case 只追加 `127.0.0.1`。
+
 选择单个案例：
 
 ```bash
@@ -64,6 +68,14 @@ mise run test-live -- --include-high-cost
 - `--keep-schema`：调试失败时保留隔离 schema，使用后必须手工清理；
 - `--env-file <path>`：覆盖默认 `.env.live`；
 - `--output-dir <path>`：覆盖结果目录。
+
+上游传输错误和 502/504 默认会在全新的隔离环境中重试一次，可通过
+`LIVE_TRANSIENT_RETRIES=0..3` 调整。403 权限/余额错误和 429 限流不会重试，结果记为
+`provider_unavailable`，不会与网关代码回归混为 `failed`。每次尝试都会记录在 case 的
+`attempts` 元数据中。
+
+Runner 在发出 Provider 请求前会检查 Gateway binary 与 `psql` 客户端。缺少本机 `psql`
+时会直接报告预检错误，不再笼统显示 schema command failed。
 
 ## Case 维护
 
@@ -93,6 +105,9 @@ Provider 能力声明通过新增不可变 ProviderPreset 版本更新，既有 
 - Source/citation 数量；
 - Usage 和 request ID；
 - metadata-only 的 Usage attempt。
+
+Artifact schema v2 的 summary 包含 `passed`、`not_triggered`、`provider_unavailable`、
+`failed` 和 `known_issue_failures`。只有 `failed`（或严格模式下的 known issue）令命令失败。
 
 禁止写入 Authorization、API Key、完整 prompt/response、搜索正文、thinking 或 signature。Runner 失败信息也只保留结构化错误码和状态码。
 

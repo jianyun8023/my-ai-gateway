@@ -108,6 +108,31 @@ export function selectCases(cases, options) {
   return selected
 }
 
+export function mergeSourceUrlAllowlist(existing, allowLocalSource = false) {
+  const entries = String(existing || '')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+  if (allowLocalSource) entries.push('127.0.0.1')
+  return [...new Set(entries)].join(',')
+}
+
+export function classifyFailure(failure) {
+  const status = Number(failure?.http_status || 0)
+  const code = String(failure?.error_code || '').toLowerCase()
+  if (
+    [403, 429].includes(status)
+    || ['permission_error', 'insufficient_quota', 'billing_error', 'rate_limit_exceeded'].includes(code)
+  ) return 'provider_unavailable'
+  return 'failed'
+}
+
+export function isTransientFailure(failure) {
+  const status = Number(failure?.http_status || 0)
+  const code = String(failure?.error_code || '').toLowerCase()
+  return [502, 504].includes(status) || code === 'upstream_request_failed'
+}
+
 function protocolCapabilities(protocols) {
   return Object.fromEntries(
     ['openai_chat_completions', 'openai_responses', 'anthropic_messages'].map((protocol) => [
@@ -913,7 +938,10 @@ function runPsql(databaseUrl, statement) {
     { cwd: repositoryRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
   )
   if (result.status !== 0) {
-    throw new SmokeFailure('PostgreSQL schema command failed', { exit_code: result.status })
+    throw new SmokeFailure('PostgreSQL schema command failed', {
+      exit_code: result.status,
+      process_error: result.error?.code || null,
+    })
   }
 }
 
@@ -979,7 +1007,10 @@ async function startGateway({
       GATEWAY_CONFIG_IMPORT: 'false',
       GATEWAY_API_KEY: gatewayKey,
       GATEWAY_ADMIN_KEY: adminKey,
-      GATEWAY_SOURCE_URL_ALLOWLIST: allowLocalSource ? '127.0.0.1' : '',
+      GATEWAY_SOURCE_URL_ALLOWLIST: mergeSourceUrlAllowlist(
+        environment.GATEWAY_SOURCE_URL_ALLOWLIST,
+        allowLocalSource,
+      ),
       FALLBACK_PRIMARY_TEST_KEY: 'injected-primary-test-key',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -1054,6 +1085,99 @@ function safeFailure(error) {
   return { message: error?.name || 'unexpected failure' }
 }
 
+function preflight(binary) {
+  check(existsSync(binary), 'gateway binary is missing; run cargo build first')
+  const psql = spawnSync('psql', ['--version'], {
+    cwd: repositoryRoot,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+  check(psql.status === 0, 'psql is required for live Provider smoke tests', {
+    process_error: psql.error?.code || null,
+  })
+  return {
+    gateway_binary: true,
+    psql: true,
+    case_isolation: true,
+  }
+}
+
+async function runIsolatedCaseAttempt({
+  testCase,
+  binary,
+  timeoutMs,
+  attemptNo,
+  keepSchema,
+}) {
+  const shortRunId = `${randomBytes(4).toString('hex')}-${attemptNo}`
+  const schema = `live_provider_${shortRunId.replaceAll('-', '_')}`
+  const gatewayKey = `gw_live_${randomBytes(24).toString('hex')}`
+  const adminKey = `admin_live_${randomBytes(24).toString('hex')}`
+  let gateway
+  let failureServer
+  let schemaCreated = false
+  try {
+    if (testCase.id === 'fallback.deepseek_bai') failureServer = await startFailureServer()
+    runPsql(process.env.LIVE_TEST_DATABASE_URL, `CREATE SCHEMA "${schema}"`)
+    schemaCreated = true
+    const port = await unusedPort()
+    const config = buildGatewayConfig([testCase], process.env, port, failureServer?.url)
+    gateway = await startGateway({
+      binary,
+      port,
+      databaseUrl: schemaDatabaseUrl(process.env.LIVE_TEST_DATABASE_URL, schema),
+      config,
+      gatewayKey,
+      adminKey,
+      environment: process.env,
+      allowLocalSource: Boolean(failureServer),
+    })
+    return await runCase({
+      gatewayBaseUrl: gateway.baseUrl,
+      gatewayKey,
+      adminKey,
+      timeoutMs,
+      shortRunId,
+    }, testCase)
+  } finally {
+    await stopGateway(gateway?.child)
+    if (failureServer) await failureServer.close()
+    if (schemaCreated && !keepSchema) {
+      runPsql(process.env.LIVE_TEST_DATABASE_URL, `DROP SCHEMA "${schema}" CASCADE`)
+    }
+  }
+}
+
+async function runIsolatedCase({ testCase, binary, timeoutMs, retries, keepSchema }) {
+  const startedAt = nowMilliseconds()
+  const attempts = []
+  for (let attemptNo = 0; attemptNo <= retries; attemptNo += 1) {
+    try {
+      const metadata = await runIsolatedCaseAttempt({
+        testCase,
+        binary,
+        timeoutMs,
+        attemptNo,
+        keepSchema,
+      })
+      attempts.push({ attempt_no: attemptNo, outcome: metadata.outcome || 'passed' })
+      return {
+        outcome: metadata.outcome || 'passed',
+        duration_ms: duration(startedAt),
+        metadata,
+        attempts,
+      }
+    } catch (error) {
+      const failure = safeFailure(error)
+      const outcome = classifyFailure(failure)
+      attempts.push({ attempt_no: attemptNo, outcome, failure })
+      if (outcome === 'failed' && attemptNo < retries && isTransientFailure(failure)) continue
+      return { outcome, duration_ms: duration(startedAt), failure, attempts }
+    }
+  }
+  throw new SmokeFailure('unreachable live case retry state')
+}
+
 async function main() {
   const options = parseArguments(process.argv.slice(2))
   const envPath = path.resolve(repositoryRoot, options.envFile)
@@ -1069,79 +1193,33 @@ async function main() {
   const selected = selectCases(cases, options)
   validateEnvironment(selected, process.env)
   const binary = path.resolve(repositoryRoot, process.env.GATEWAY_BIN || 'target/debug/my-ai-gateway')
-  check(existsSync(binary), 'gateway binary is missing; run cargo build first')
+  const preflightResult = preflight(binary)
 
   const runId = stableRunId()
-  const shortRunId = randomBytes(4).toString('hex')
-  const schema = `live_provider_${shortRunId}`
   const startedAt = new Date().toISOString()
-  const gatewayKey = `gw_live_${randomBytes(24).toString('hex')}`
-  const adminKey = `admin_live_${randomBytes(24).toString('hex')}`
   const timeoutMs = Number(process.env.LIVE_REQUEST_TIMEOUT_MS || 300_000)
   check(Number.isFinite(timeoutMs) && timeoutMs >= 1_000, 'LIVE_REQUEST_TIMEOUT_MS is invalid')
+  const retries = Number(process.env.LIVE_TRANSIENT_RETRIES ?? 1)
+  check(Number.isInteger(retries) && retries >= 0 && retries <= 3, 'LIVE_TRANSIENT_RETRIES must be an integer between 0 and 3')
 
-  let gateway
-  let failureServer
-  let schemaCreated = false
   const results = []
-  try {
-    if (selected.some((testCase) => testCase.id === 'fallback.deepseek_bai')) {
-      failureServer = await startFailureServer()
-    }
-    runPsql(process.env.LIVE_TEST_DATABASE_URL, `CREATE SCHEMA "${schema}"`)
-    schemaCreated = true
-    const port = await unusedPort()
-    const config = buildGatewayConfig(selected, process.env, port, failureServer?.url)
-    gateway = await startGateway({
+  for (const testCase of selected) {
+    const result = await runIsolatedCase({
+      testCase,
       binary,
-      port,
-      databaseUrl: schemaDatabaseUrl(process.env.LIVE_TEST_DATABASE_URL, schema),
-      config,
-      gatewayKey,
-      adminKey,
-      environment: process.env,
-      allowLocalSource: Boolean(failureServer),
-    })
-    const context = {
-      gatewayBaseUrl: gateway.baseUrl,
-      gatewayKey,
-      adminKey,
       timeoutMs,
-      shortRunId,
-    }
-
-    for (const testCase of selected) {
-      const caseStarted = nowMilliseconds()
-      try {
-        const metadata = await runCase(context, testCase)
-        const outcome = metadata.outcome || 'passed'
-        results.push({
-          id: testCase.id,
-          provider: testCase.provider,
-          cost: testCase.cost,
-          outcome,
-          duration_ms: duration(caseStarted),
-          metadata,
-        })
-        console.log(`${outcome.toUpperCase()} ${testCase.id} ${duration(caseStarted)}ms`)
-      } catch (error) {
-        results.push({
-          id: testCase.id,
-          provider: testCase.provider,
-          cost: testCase.cost,
-          outcome: 'failed',
-          duration_ms: duration(caseStarted),
-          failure: safeFailure(error),
-        })
-        console.error(`FAILED ${testCase.id} ${duration(caseStarted)}ms`)
-      }
-    }
-  } finally {
-    await stopGateway(gateway?.child)
-    if (failureServer) await failureServer.close()
-    if (schemaCreated && !options.keepSchema) {
-      runPsql(process.env.LIVE_TEST_DATABASE_URL, `DROP SCHEMA "${schema}" CASCADE`)
-    }
+      retries,
+      keepSchema: options.keepSchema,
+    })
+    results.push({
+      id: testCase.id,
+      provider: testCase.provider,
+      cost: testCase.cost,
+      ...result,
+    })
+    const label = result.outcome.toUpperCase()
+    const log = result.outcome === 'failed' ? console.error : console.log
+    log(`${label} ${testCase.id} ${result.duration_ms}ms attempts=${result.attempts.length}`)
   }
 
   const knownIssueFailures = results.flatMap((result) =>
@@ -1152,11 +1230,12 @@ async function main() {
   const summary = {
     passed: results.filter((result) => result.outcome === 'passed').length,
     not_triggered: results.filter((result) => result.outcome === 'not_triggered').length,
+    provider_unavailable: results.filter((result) => result.outcome === 'provider_unavailable').length,
     failed: results.filter((result) => result.outcome === 'failed').length,
     known_issue_failures: knownIssueFailures.length,
   }
   const artifact = {
-    schema_version: 1,
+    schema_version: 2,
     run_id: runId,
     git: gitMetadata(),
     started_at: startedAt,
@@ -1167,7 +1246,9 @@ async function main() {
       high_cost_included: selected.some((testCase) => testCase.cost === 'high'),
       response_bodies_stored: false,
       known_issues_are_strict: options.strictKnownIssues,
+      transient_retries: retries,
     },
+    preflight: preflightResult,
     summary,
     known_issue_failures: knownIssueFailures,
     results,
@@ -1177,7 +1258,7 @@ async function main() {
   const outputPath = path.join(outputDirectory, `${runId}.json`)
   writeFileSync(outputPath, `${JSON.stringify(artifact, null, 2)}\n`, { mode: 0o600 })
   console.log(`RESULT ${path.relative(repositoryRoot, outputPath)}`)
-  console.log(`SUMMARY passed=${summary.passed} not_triggered=${summary.not_triggered} failed=${summary.failed} known_issue_failures=${summary.known_issue_failures}`)
+  console.log(`SUMMARY passed=${summary.passed} not_triggered=${summary.not_triggered} provider_unavailable=${summary.provider_unavailable} failed=${summary.failed} known_issue_failures=${summary.known_issue_failures}`)
 
   if (summary.failed > 0 || (options.strictKnownIssues && summary.known_issue_failures > 0)) {
     process.exitCode = 1

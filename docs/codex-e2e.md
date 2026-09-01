@@ -31,6 +31,10 @@
 - `deepseek-v4-flash`：DeepSeek 原生 Responses；
 - `MiniMax-M3`：MiniMax 原生 Responses。
 
+实际模型名以目标 Gateway 的 `GET /v1/models` 为准。Runner 会在启动 Codex CLI 前查询该
+接口，并在提供 Admin Key 时同时解析 `/admin/routes/openai_responses/{model}`；指定模型未公开
+或没有可用 Responses 路由时立即退出，避免把控制面配置问题误判为 CLI 或 Provider 故障。
+
 ## 配置
 
 复制 [`.env.codex-e2e.example`](../.env.codex-e2e.example) 为 Git ignored 的
@@ -109,6 +113,10 @@ mise run test-codex-e2e -- --skip-usage-check
 - 最终消息严格为 `CODEX_GATEWAY_E2E_OK:<canary>`；
 - Admin Usage API 返回成功且 `total_tokens > 0` 的事件。
 
+随机 canary 不再出现在 prompt 中，模型必须真实执行 shell 命令才能得到最终答案。失败 artifact
+会给出 `diagnostic_stage`，区分 CLI 启动/超时、JSONL、Usage、命令事件缺失、命令失败、未观察到
+canary 和最终文本不匹配。
+
 `codex.web_search` 会断言：
 
 - CLI JSONL 中至少有一个已完成的 `web_search` item；
@@ -120,6 +128,9 @@ mise run test-codex-e2e -- --skip-usage-check
 事件类型/数量、断言布尔值、Usage 汇总和安全的 Usage 元数据，不保存 prompt、完整模型
 输出、命令输出、Authorization 或 API Key。最终消息文件默认在断言后删除；只有显式传入
 `--keep-output` 才会保留以便调试。
+
+Artifact schema v2 将 Usage 中的 403/429 归类为 `provider_unavailable`，与行为断言失败分开；
+只有真正的 `failed` 令命令返回非零。
 
 ## 维护规则
 

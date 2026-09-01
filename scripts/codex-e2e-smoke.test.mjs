@@ -7,16 +7,21 @@ import test from 'node:test'
 import {
   buildCodexArgs,
   buildCodexConfig,
+  classifyCodexFailure,
+  diagnosticStage,
   evaluateSearchResult,
   evaluateToolResult,
   gatewayAdminBaseUrl,
   loadCaseManifest,
   parseArguments,
   parseCodexJsonLines,
+  preflightGatewayModel,
+  preflightGatewayRoute,
   sanitizeCodexEnvironment,
   secureFile,
   selectCases,
   summarizeCodexEvents,
+  toolPrompt,
 } from './codex-e2e-smoke.mjs'
 
 const cases = loadCaseManifest()
@@ -72,6 +77,39 @@ test('Admin Usage queries strip only the Responses /v1 suffix', () => {
   assert.equal(gatewayAdminBaseUrl('http://127.0.0.1:8788'), 'http://127.0.0.1:8788')
 })
 
+test('Gateway model preflight requires the selected model to be advertised', async () => {
+  const fetchImpl = async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ data: [{ id: 'deepseek-chat' }, { id: 'MiniMax-M2.7' }] }),
+  })
+  assert.deepEqual(
+    await preflightGatewayModel('http://127.0.0.1:8787/v1', 'gateway-key', 'deepseek-chat', fetchImpl),
+    { model_present: true, advertised_model_count: 2 },
+  )
+  await assert.rejects(
+    preflightGatewayModel('http://127.0.0.1:8787/v1', 'gateway-key', 'k3', fetchImpl),
+    /Codex model is not available from Gateway: k3/,
+  )
+})
+
+test('Gateway route preflight verifies an OpenAI Responses route when Admin Key is available', async () => {
+  const calls = []
+  const fetchImpl = async (url) => {
+    calls.push(url)
+    return { ok: true, status: 200 }
+  }
+  assert.deepEqual(
+    await preflightGatewayRoute('http://127.0.0.1:8787', 'admin-key', 'deepseek/chat', fetchImpl),
+    { responses_route_checked: true },
+  )
+  assert.match(calls[0], /openai_responses\/deepseek%2Fchat$/)
+  assert.deepEqual(
+    await preflightGatewayRoute('http://127.0.0.1:8787', '', 'deepseek-chat', fetchImpl),
+    { responses_route_checked: false },
+  )
+})
+
 test('Codex output files are reduced to owner-only permissions', () => {
   const directory = mkdtempSync(path.join(os.tmpdir(), 'codex-e2e-permissions-'))
   const filePath = path.join(directory, 'final.txt')
@@ -117,6 +155,30 @@ test('tool events and final canary are summarized without retaining body text', 
     total_tokens: 14,
   })
   assert.equal(evaluateToolResult('CODEX_GATEWAY_E2E_OK:codex-gateway-canary', summary, 'codex-gateway-canary').passed, true)
+})
+
+test('tool prompt cannot reveal the random canary and missing commands get a precise stage', () => {
+  const prompt = toolPrompt()
+  assert.doesNotMatch(prompt, /codex-gateway-[a-f0-9]+/)
+  assert.match(prompt, /MUST invoke the shell tool/)
+  assert.equal(diagnosticStage(
+    'tool',
+    { code: 0, timedOut: false, error: null },
+    0,
+    {
+      command_seen: false,
+      command_succeeded: false,
+      canary_seen: false,
+      final_exact: false,
+    },
+    { passed: true },
+  ), 'command_event_missing')
+})
+
+test('Codex failures classify Provider 403/429 separately from assertions', () => {
+  assert.equal(classifyCodexFailure({ usage: { status_codes: [403] } }), 'provider_unavailable')
+  assert.equal(classifyCodexFailure({ usage: { status_codes: [200] } }), 'failed')
+  assert.equal(classifyCodexFailure({ evaluation: { command_seen: false } }), 'failed')
 })
 
 test('search requires a completed event and an official Rust Blog source', () => {

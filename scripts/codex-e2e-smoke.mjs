@@ -385,6 +385,33 @@ export function evaluateSearchResult(finalText, summary) {
   }
 }
 
+export function diagnosticStage(kind, processResult, invalidLines, evaluation, usage) {
+  if (processResult.error) return 'cli_process_error'
+  if (processResult.timedOut) return 'cli_timeout'
+  if (processResult.code !== 0) return 'cli_nonzero_exit'
+  if (invalidLines > 0) return 'cli_invalid_jsonl'
+  if (usage && !usage.passed) return 'usage_missing_or_empty'
+  if (kind === 'tool') {
+    if (!evaluation.command_seen) return 'command_event_missing'
+    if (!evaluation.command_succeeded) return 'command_failed'
+    if (!evaluation.canary_seen) return 'canary_not_observed'
+    if (!evaluation.final_exact) return 'final_message_mismatch'
+  } else {
+    if (!evaluation.search_seen) return 'search_event_missing'
+    if (!evaluation.search_completed) return 'search_not_completed'
+    if (!evaluation.nonempty_query_seen) return 'search_query_missing'
+    if (evaluation.source_host !== 'blog.rust-lang.org') return 'official_source_missing'
+  }
+  return 'passed'
+}
+
+export function classifyCodexFailure(failure) {
+  const statuses = failure?.usage?.status_codes || []
+  return statuses.some((status) => [403, 429].includes(Number(status)))
+    ? 'provider_unavailable'
+    : 'failed'
+}
+
 function safeFailure(error) {
   if (error instanceof CodexE2EFailure) return { message: error.message, ...error.metadata }
   return { message: error?.name || 'unexpected failure' }
@@ -408,6 +435,8 @@ async function adminUsageEvent(baseUrl, adminKey, clientSource, timeoutMs) {
             passed: successful.length > 0 && successful.some((event) => Number(event.total_tokens || 0) > 0),
             event_count: events.length,
             successful_count: successful.length,
+            unsuccessful_count: events.length - successful.length,
+            status_codes: [...new Set(events.map((event) => Number(event.status_code || 0)))].sort((a, b) => a - b),
             total_tokens: events.reduce((sum, event) => sum + Number(event.total_tokens || 0), 0),
             usage_sources: [...new Set(events.map((event) => event.usage_source).filter(Boolean))].sort(),
             modes: [...new Set(events.map((event) => event.mode).filter(Boolean))].sort(),
@@ -418,11 +447,21 @@ async function adminUsageEvent(baseUrl, adminKey, clientSource, timeoutMs) {
     } catch {}
     await new Promise((resolve) => setTimeout(resolve, 100))
   }
-  return { passed: false, event_count: 0, successful_count: 0, total_tokens: 0, usage_sources: [], modes: [], streamed: false }
+  return {
+    passed: false,
+    event_count: 0,
+    successful_count: 0,
+    unsuccessful_count: 0,
+    status_codes: [],
+    total_tokens: 0,
+    usage_sources: [],
+    modes: [],
+    streamed: false,
+  }
 }
 
-function toolPrompt(expectedCanary) {
-  return `Use the shell tool to read CANARY.txt from the current workspace. Do not infer or guess its contents. After the tool succeeds, answer exactly CODEX_GATEWAY_E2E_OK:${expectedCanary} with no other text.`
+export function toolPrompt() {
+  return 'You MUST invoke the shell tool to read CANARY.txt from the current workspace. Do not infer, guess, or repeat any value from this instruction. After the command succeeds, answer exactly CODEX_GATEWAY_E2E_OK:<the exact file contents> with no other text.'
 }
 
 function searchPrompt() {
@@ -439,7 +478,7 @@ async function runCase(context, testCase, options, runId, canary) {
   }), { mode: 0o600 })
   secureFile(configPath)
   const outputPath = path.join(options.home, `.last-message-${testCase.id.replaceAll('.', '-')}.txt`)
-  const prompt = testCase.kind === 'tool' ? toolPrompt(canary) : searchPrompt()
+  const prompt = testCase.kind === 'tool' ? toolPrompt() : searchPrompt()
   const args = buildCodexArgs({
     model: options.model,
     workspace: options.workspace,
@@ -484,6 +523,13 @@ async function runCase(context, testCase, options, runId, canary) {
     evaluation,
     usage,
   }
+  diagnostics.diagnostic_stage = diagnosticStage(
+    testCase.kind,
+    result,
+    parsed.invalidLines,
+    evaluation,
+    usage,
+  )
   check(result.code === 0 && !result.timedOut && !result.error, 'Codex CLI process failed', diagnostics)
   check(parsed.invalidLines === 0, 'Codex CLI emitted non-JSON stdout lines', diagnostics)
   check(evaluation.passed, 'Codex E2E assertion failed', { kind: testCase.kind, ...diagnostics })
@@ -498,6 +544,51 @@ async function runCase(context, testCase, options, runId, canary) {
     evaluation,
     usage,
   }
+}
+
+export async function preflightGatewayModel(gatewayBaseUrl, apiKey, model, fetchImpl = fetch) {
+  let response
+  try {
+    response = await fetchImpl(`${gatewayBaseUrl}/models`, {
+      headers: { authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(5_000),
+    })
+  } catch (error) {
+    throw new CodexE2EFailure('Gateway model preflight request failed', {
+      process_error: error?.name || 'request_failed',
+    })
+  }
+  check(response.ok, 'Gateway model preflight failed', { http_status: response.status })
+  let payload
+  try { payload = await response.json() } catch {}
+  check(Array.isArray(payload?.data), 'Gateway /v1/models returned an invalid payload')
+  const modelIds = payload.data.map((item) => item?.id).filter((id) => typeof id === 'string')
+  check(modelIds.includes(model), `Codex model is not available from Gateway: ${model}`, {
+    available_models: modelIds.sort(),
+  })
+  return { model_present: true, advertised_model_count: modelIds.length }
+}
+
+export async function preflightGatewayRoute(adminBaseUrl, adminKey, model, fetchImpl = fetch) {
+  if (!adminKey) return { responses_route_checked: false }
+  let response
+  try {
+    response = await fetchImpl(
+      `${adminBaseUrl}/admin/routes/openai_responses/${encodeURIComponent(model)}`,
+      {
+        headers: { authorization: `Bearer ${adminKey}` },
+        signal: AbortSignal.timeout(5_000),
+      },
+    )
+  } catch (error) {
+    throw new CodexE2EFailure('Gateway Responses route preflight request failed', {
+      process_error: error?.name || 'request_failed',
+    })
+  }
+  check(response.ok, `Gateway has no available OpenAI Responses route for Codex model: ${model}`, {
+    http_status: response.status,
+  })
+  return { responses_route_checked: true }
 }
 
 function printHelp() {
@@ -519,6 +610,17 @@ async function main() {
   }
   const selected = selectCases(cases, options)
   const gatewayUrls = validateEnvironment(options, options.skipUsageCheck)
+  const modelPreflight = await preflightGatewayModel(
+    gatewayUrls.gatewayBaseUrl,
+    process.env.CODEX_GATEWAY_API_KEY,
+    options.model,
+  )
+  const routePreflight = await preflightGatewayRoute(
+    gatewayUrls.adminBaseUrl,
+    process.env.CODEX_GATEWAY_ADMIN_KEY,
+    options.model,
+  )
+  const preflight = { ...modelPreflight, ...routePreflight }
   ensureDirectory(options.home)
   ensureDirectory(path.join(options.home, 'state'))
   ensureDirectory(options.workspace)
@@ -533,16 +635,21 @@ async function main() {
       results.push({ id: testCase.id, cost: testCase.cost, outcome: 'passed', ...metadata })
       console.log(`PASSED ${testCase.id} ${metadata.duration_ms}ms`)
     } catch (error) {
-      results.push({ id: testCase.id, cost: testCase.cost, outcome: 'failed', failure: safeFailure(error) })
-      console.error(`FAILED ${testCase.id}`)
+      const failure = safeFailure(error)
+      const outcome = classifyCodexFailure(failure)
+      results.push({ id: testCase.id, cost: testCase.cost, outcome, failure })
+      const label = outcome.toUpperCase()
+      if (outcome === 'failed') console.error(`${label} ${testCase.id}`)
+      else console.log(`${label} ${testCase.id}`)
     }
   }
   const summary = {
     passed: results.filter((result) => result.outcome === 'passed').length,
+    provider_unavailable: results.filter((result) => result.outcome === 'provider_unavailable').length,
     failed: results.filter((result) => result.outcome === 'failed').length,
   }
   const artifact = {
-    schema_version: 1,
+    schema_version: 2,
     run_id: runId,
     git: gitMetadata(),
     selected_cases: selected.map((testCase) => testCase.id),
@@ -553,6 +660,7 @@ async function main() {
       response_bodies_stored: false,
       usage_checked: !options.skipUsageCheck,
     },
+    preflight,
     summary,
     results,
   }
@@ -560,7 +668,7 @@ async function main() {
   writeFileSync(outputPath, `${JSON.stringify(artifact, null, 2)}\n`, { mode: 0o600 })
   secureFile(outputPath)
   console.log(`RESULT ${path.relative(repositoryRoot, outputPath)}`)
-  console.log(`SUMMARY passed=${summary.passed} failed=${summary.failed}`)
+  console.log(`SUMMARY passed=${summary.passed} provider_unavailable=${summary.provider_unavailable} failed=${summary.failed}`)
   if (summary.failed > 0) process.exitCode = 1
 }
 
