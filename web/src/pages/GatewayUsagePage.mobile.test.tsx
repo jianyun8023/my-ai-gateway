@@ -63,26 +63,25 @@ describe('GatewayUsagePage mobile navigation', () => {
 
     act(() => container.querySelector<HTMLButtonElement>('button[aria-label="打开导航"]')?.click());
     const analysisButton = Array.from(container.querySelectorAll<HTMLButtonElement>('nav[aria-label="主导航"] button'))
-      .find((button) => button.textContent?.includes('Analysis'));
+      .find((button) => button.textContent?.includes('用量分析'));
     act(() => analysisButton?.click());
 
     expect(container.querySelector<HTMLElement>('[data-od-id="sidebar"]')?.dataset.open).toBe('false');
     expect(document.body.style.overflow).toBe('');
   });
 
-  it('closes the drawer when switching into the Management space', async () => {
+  it('navigates to sources page via flat sidebar', async () => {
     await act(async () => {
       root.render(<App />);
       await new Promise((resolve) => setTimeout(resolve, 20));
     });
 
     act(() => container.querySelector<HTMLButtonElement>('button[aria-label="打开导航"]')?.click());
-    const managementButton = Array.from(container.querySelectorAll<HTMLButtonElement>('[role="group"][aria-label="工作空间"] button'))
-      .find((button) => button.textContent?.includes('Management'));
-    act(() => managementButton?.click());
+    const sourcesButton = Array.from(container.querySelectorAll<HTMLButtonElement>('nav[aria-label="主导航"] button'))
+      .find((button) => button.textContent?.includes('来源管理'));
+    act(() => sourcesButton?.click());
 
-    expect(window.location.hash).toBe('#management/sources');
-    expect(container.querySelector('nav[aria-label="管理导航"]')).not.toBeNull();
+    expect(window.location.hash).toBe('#sources');
     expect(container.querySelector<HTMLElement>('[data-od-id="sidebar"]')?.dataset.open).toBe('false');
   });
 });

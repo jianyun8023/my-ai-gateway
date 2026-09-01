@@ -83,10 +83,10 @@ const protocolModeTone = (mode: SourceProtocolMode | undefined) => {
 };
 
 const protocolModeLabel = (mode: SourceProtocolMode | undefined) => {
-  if (mode === 'native') return 'native';
-  if (mode === 'adapter') return 'adapter';
-  if (mode === 'unsupported') return 'unsupported';
-  return 'unknown';
+  if (mode === 'native') return '原生';
+  if (mode === 'adapter') return '转换';
+  if (mode === 'unsupported') return '—';
+  return '未知';
 };
 
 const credentialLabel = (account: Account) => (

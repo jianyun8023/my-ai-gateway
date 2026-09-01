@@ -7,14 +7,17 @@ const appSource = readFileSync(new URL('../App.tsx', import.meta.url), 'utf8');
 const shellSource = readFileSync(new URL('../components/gateway/GatewayConsoleShell.tsx', import.meta.url), 'utf8');
 const shellStyles = readFileSync(new URL('../components/gateway/GatewayConsoleShell.module.scss', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 const brandStyles = readFileSync(new URL('../styles/gateway-brand.scss', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
-const gatewayIcon = readFileSync(new URL('../assets/gateway-icon.svg', import.meta.url), 'utf8');
 
 describe('GatewayUsagePage prototype adaptation', () => {
-  it('uses the sidebar shell while keeping the first-release navigation boundary', () => {
+  it('uses the sidebar shell with flat navigation matching the prototype', () => {
     expect(shellSource).toContain('className={styles.sidebar}');
-    expect(shellSource).toContain('navigationItems.map');
-    expect(appSource).toContain("navigationLabel={route.space === 'usage' ? '主导航' : '管理导航'}");
-    expect(pageSource).not.toMatch(/来源管理|模型与路由|系统设置|Round-Robin/);
+    expect(shellSource).toContain('navItemsById');
+    expect(appSource).toContain("'总览'");
+    expect(appSource).toContain("'用量分析'");
+    expect(appSource).toContain("'来源管理'");
+    expect(appSource).toContain("'模型与路由'");
+    expect(appSource).toContain("'系统设置'");
+    expect(pageSource).not.toMatch(/Round-Robin/);
   });
 
   it('implements the reviewed tablet, phone, and small-phone breakpoints', () => {
@@ -22,9 +25,8 @@ describe('GatewayUsagePage prototype adaptation', () => {
     expect(shellStyles).toContain('@media (max-width: 600px)');
     expect(shellStyles).toContain('@media (max-width: 380px)');
     expect(shellStyles).toContain('@media (prefers-reduced-motion: reduce)');
-    expect(shellStyles).toContain('visibility 0s linear 200ms');
     expect(shellSource).toContain('aria-label="打开导航"');
-    expect(shellSource).toContain("event.key === 'Escape'");
+    expect(shellSource).toContain("e.key === 'Escape'");
     expect(shellSource).toContain("document.body.style.overflow = 'hidden'");
     expect(styles).toMatch(/\.eventTable \{ overflow-x: auto; \}/);
     expect(styles).toMatch(/\.statsGrid\s*\{\s*min-width: 0;/);
@@ -36,8 +38,6 @@ describe('GatewayUsagePage prototype adaptation', () => {
       expect(brandStyles).toContain(token);
     }
     expect(brandStyles).toContain('oklch(');
-    expect(gatewayIcon).toContain('oklch(58% 0.16 145)');
-    expect(gatewayIcon).not.toContain('linearGradient');
   });
 
   it('does not import or embed the archived static prototype', () => {

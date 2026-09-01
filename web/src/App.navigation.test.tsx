@@ -43,29 +43,22 @@ describe('App console routing', () => {
     vi.unstubAllGlobals();
   });
 
-  it('deep-links Management separately and switches back to exactly three Usage pages', async () => {
-    window.location.hash = '#management/capabilities';
+  it('flat sidebar shows all 6 navigation pages', async () => {
+    window.location.hash = '#overview';
     await act(async () => {
       root.render(<App />);
       await new Promise((resolve) => setTimeout(resolve, 500));
     });
 
-    expect(container.querySelector('nav[aria-label="管理导航"]')).not.toBeNull();
-    await vi.waitFor(() => expect(container.querySelector('[data-od-id="page-capabilities"]')).not.toBeNull(), { timeout: 3000 });
-    expect(container.textContent).toContain('runtime snapshot');
-    expect(container.textContent).not.toMatch(/Ranking|Auth Files|充值|配额/);
-
-    const usageButton = Array.from(container.querySelectorAll<HTMLButtonElement>('[role="group"][aria-label="工作空间"] button'))
-      .find((button) => button.textContent?.includes('Usage'));
-    act(() => usageButton?.click());
-    await act(async () => new Promise((resolve) => setTimeout(resolve, 500)));
-
-    const usageButtons = container.querySelectorAll('nav[aria-label="主导航"] button');
-    expect(usageButtons).toHaveLength(3);
-    expect(Array.from(usageButtons).map((button) => button.textContent)).toEqual(expect.arrayContaining([
-      expect.stringContaining('Overview'),
-      expect.stringContaining('Analysis'),
-      expect.stringContaining('Request Events'),
+    const navButtons = container.querySelectorAll('nav[aria-label="主导航"] button');
+    expect(navButtons).toHaveLength(6);
+    expect(Array.from(navButtons).map((b) => b.textContent)).toEqual(expect.arrayContaining([
+      expect.stringContaining('总览'),
+      expect.stringContaining('用量分析'),
+      expect.stringContaining('请求事件'),
+      expect.stringContaining('来源管理'),
+      expect.stringContaining('模型与路由'),
+      expect.stringContaining('系统设置'),
     ]));
   });
 
@@ -78,11 +71,10 @@ describe('App console routing', () => {
     expect(window.location.hash).toBe('#overview');
 
     await act(async () => {
-      window.location.hash = '#management/model-discovery';
+      window.location.hash = '#sources';
       window.dispatchEvent(new HashChangeEvent('hashchange'));
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
-    await vi.waitFor(() => expect(container.querySelector('nav[aria-label="管理导航"]')).not.toBeNull(), { timeout: 3000 });
-    expect(container.textContent).toContain('Model Discovery');
+    expect(window.location.hash).toBe('#sources');
   });
 });

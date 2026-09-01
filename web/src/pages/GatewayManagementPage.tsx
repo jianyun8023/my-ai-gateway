@@ -6,10 +6,10 @@ import { ModelsRoutesPage } from '@/features/control-plane/ModelsRoutesPage';
 import { SettingsPage } from '@/features/control-plane/SettingsPage';
 import { SourcesPage } from '@/features/control-plane/SourcesPage';
 import { ControlPlaneClient } from '@/control-plane/client';
-import type { GatewayManagementPage } from '@/lib/consoleNavigation';
+import type { GatewayManagementPage as GatewayManagementPageType } from '@/lib/consoleNavigation';
 
 interface GatewayManagementPageProps {
-  page: GatewayManagementPage;
+  page: GatewayManagementPageType;
   getAdminKey: () => string;
   adminKeyConfigured: boolean;
   clearAdminKey: () => void;
