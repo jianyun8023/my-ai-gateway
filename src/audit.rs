@@ -113,6 +113,7 @@ pub fn current_context() -> Option<AuditContext> {
 
 /// Insert a successful event in the caller's open control-plane transaction.
 /// The boolean indicates whether a request context existed.
+#[allow(dead_code)] // consumed by control-plane mutation helpers once wired
 pub async fn append_current_success_tx(
     tx: &mut Transaction<'_, Postgres>,
 ) -> Result<bool, sqlx::Error> {
@@ -151,6 +152,7 @@ pub async fn append_current_failure_pool(
     Ok(true)
 }
 
+#[allow(dead_code)] // consumed by control-plane mutation helpers once wired
 pub async fn append_tx(
     tx: &mut Transaction<'_, Postgres>,
     context: &AuditContext,
@@ -377,7 +379,11 @@ fn classify_path(
         "model-bindings" => nested_resource(parts, "model_binding"),
         "routes" => nested_resource(parts, "route"),
         "keys" => nested_resource(parts, "virtual_key"),
-        "control-plane" => ("control_plane", parts.get(1).copied(), parts.get(1).copied()),
+        "control-plane" => (
+            "control_plane",
+            parts.get(1).copied(),
+            parts.get(1).copied(),
+        ),
         "backup" => ("backup", parts.get(1).copied(), parts.get(1).copied()),
         "retention" => ("retention", parts.get(2).copied(), parts.get(1).copied()),
         "config" => ("config", None, parts.get(1).copied()),
@@ -397,9 +403,7 @@ fn classify_path(
         ("source", Some("connection-tests"), _) => "source.connection_test".to_owned(),
         ("source", Some("models"), &Method::PATCH) => "source_model.update".to_owned(),
         ("source", Some("confirm"), _) => "source_model.confirm".to_owned(),
-        ("account", Some("probe"), _) | ("health", Some("probe"), _) => {
-            "account.probe".to_owned()
-        }
+        ("account", Some("probe"), _) | ("health", Some("probe"), _) => "account.probe".to_owned(),
         ("control_plane", Some("import"), _) => "control_plane.import".to_owned(),
         ("backup", Some("import"), _) => "control_plane.import".to_owned(),
         ("config", Some("reload"), _) => "config.reload".to_owned(),
@@ -438,7 +442,7 @@ fn enabled_action(resource: &str, payload: Option<&Value>) -> String {
 /// credentials, tokens and prompt/response content out of the row.
 pub fn summarize_diff(value: &Value) -> Value {
     let mut fields = Map::new();
-    let mut sensitive = Vec::new();
+    let mut sensitive = Vec::<String>::new();
     collect_fields(value, "", &mut fields, &mut sensitive);
     if fields.len() > MAX_DIFF_FIELDS {
         fields.clear();
@@ -458,7 +462,7 @@ fn collect_fields(
     value: &Value,
     prefix: &str,
     fields: &mut Map<String, Value>,
-    sensitive: &mut Vec<Value>,
+    sensitive: &mut Vec<String>,
 ) {
     let Value::Object(object) = value else {
         if !prefix.is_empty() {
@@ -473,7 +477,7 @@ fn collect_fields(
             format!("{prefix}.{key}")
         };
         if is_sensitive_key(key) {
-            sensitive.push(Value::String(path));
+            sensitive.push(path);
             continue;
         }
         if value.is_object() {
@@ -500,9 +504,7 @@ fn json_type(value: &Value) -> &'static str {
 
 fn is_sensitive_key(key: &str) -> bool {
     let key = key.to_ascii_lowercase();
-    SENSITIVE_MARKERS
-        .iter()
-        .any(|marker| key.contains(marker))
+    SENSITIVE_MARKERS.iter().any(|marker| key.contains(marker))
 }
 
 /// Recursively redact arbitrary JSON used by legacy operational audit calls.
@@ -524,9 +526,12 @@ fn sanitize_value(value: Value, key: Option<&str>) -> Value {
                 })
                 .collect(),
         ),
-        Value::Array(values) => {
-            Value::Array(values.into_iter().map(|value| sanitize_value(value, None)).collect())
-        }
+        Value::Array(values) => Value::Array(
+            values
+                .into_iter()
+                .map(|value| sanitize_value(value, None))
+                .collect(),
+        ),
         Value::String(value) if value.len() > 1024 => {
             Value::String(value.chars().take(1024).collect())
         }

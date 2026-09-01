@@ -1,3 +1,4 @@
+mod audit;
 mod capabilities;
 mod config;
 mod control_plane;
@@ -27,7 +28,7 @@ use axum::{
     extract::{rejection::JsonRejection, Path, Query, State},
     http::{
         header::{CONTENT_DISPOSITION, CONTENT_TYPE},
-        HeaderMap, HeaderValue, Request, Response, StatusCode,
+        HeaderMap, HeaderValue, Method, Request, Response, StatusCode,
     },
     middleware::{self, Next},
     response::IntoResponse,
@@ -625,6 +626,10 @@ fn application(state: AppState) -> Router {
         .with_state(state.clone())
         .merge(discovery_api)
         .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            audit_middleware,
+        ))
+        .route_layer(middleware::from_fn_with_state(
             state.admin_auth.clone(),
             require_admin_auth,
         ));
@@ -638,6 +643,41 @@ fn application(state: AppState) -> Router {
         .with_state(state)
         .merge(admin_api)
         .layer(TraceLayer::new_for_http())
+}
+
+async fn audit_middleware(
+    State(state): State<AppState>,
+    request: Request<Body>,
+    next: Next,
+) -> Response<Body> {
+    let method = request.method().clone();
+    if method == Method::GET || method == Method::HEAD || method == Method::OPTIONS {
+        return next.run(request).await;
+    }
+    let (parts, body) = request.into_parts();
+    let bytes = axum::body::to_bytes(body, 4 * 1024 * 1024)
+        .await
+        .unwrap_or_default();
+    let payload: Option<Value> = serde_json::from_slice(&bytes).ok();
+    let context =
+        audit::context_from_request(&method, parts.uri.path(), &parts.headers, payload.as_ref());
+    let pool = state.db.as_ref().map(|db| db.pool().clone());
+    let request = Request::from_parts(parts, Body::from(bytes));
+    audit::scope(context.clone(), async move {
+        let response = next.run(request).await;
+        if !context.was_recorded() {
+            if let Some(pool) = &pool {
+                let status_str = response.status().as_u16().to_string();
+                if response.status().is_success() {
+                    let _ = audit::append_current_success_pool(pool).await;
+                } else {
+                    let _ = audit::append_current_failure_pool(pool, &status_str, None).await;
+                }
+            }
+        }
+        response
+    })
+    .await
 }
 
 async fn require_admin_auth(
