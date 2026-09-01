@@ -556,9 +556,9 @@ export function ModelsRoutesPage({ api, refreshRevision = 0, onBusyChange }: Mod
     <section className={styles.page} data-od-id="page-models-routes">
       <PageActions>
         <SegmentedTabs value={tab} label="模型与路由资源" options={[
-          { value: 'logical-models', label: 'Logical Models', count: data.logicalModels.length },
-          { value: 'bindings', label: 'Model Bindings', count: data.bindings.length },
-          { value: 'routes', label: 'Routes', count: data.routes.length },
+          { value: 'logical-models', label: '逻辑模型', count: data.logicalModels.length },
+          { value: 'bindings', label: '绑定', count: data.bindings.length },
+          { value: 'routes', label: '路由规则', count: data.routes.length },
         ]} onChange={setTab} />
         <div className={styles.rowActions}>
           <Button variant="secondary" onClick={query.reload} loading={query.refreshing}><IconRefreshCw size={14} />刷新</Button>

@@ -12,7 +12,7 @@ describe('gateway branding and attribution', () => {
   });
 
   it('uses the gateway browser tab title', () => {
-    expect(indexHtml).toContain('<title>my-ai-gateway Usage</title>');
+    expect(indexHtml).toContain('<title>My AI Gateway · 控制台</title>');
   });
 
   it('keeps the CPA Usage Keeper source and MIT attribution', () => {
