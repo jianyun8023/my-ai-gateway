@@ -10,6 +10,7 @@ mod ops;
 mod protocol;
 mod provider_preset;
 mod routing;
+mod secrets;
 mod source_url;
 mod stream_contract;
 mod transport;
@@ -100,6 +101,7 @@ struct AppState {
     control_plane: Option<control_plane::ControlPlane>,
     health: health::HealthRegistry,
     admin_auth: AdminAuth,
+    secrets: secrets::SecretResolver,
 }
 
 #[derive(Clone)]
@@ -233,6 +235,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         health::HealthConfig::from_env(),
     );
     health.restore().await?;
+    let secrets = secrets::SecretResolver::from_env().unwrap_or_else(|err| {
+        tracing::warn!(
+            ?err,
+            "credential master key unavailable; encrypted credentials will fail at request time"
+        );
+        secrets::SecretResolver::empty()
+    });
     let state = AppState {
         live: Arc::new(std::sync::RwLock::new(live)),
         http: transport::client(source_url_policy.clone())?,
@@ -240,6 +249,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         control_plane: Some(control_plane),
         health,
         admin_auth,
+        secrets,
     };
     spawn_health_probe_loop(state.clone());
     let app = application(state);
@@ -579,6 +589,11 @@ fn application(state: AppState) -> Router {
             get(get_account).put(update_account).delete(delete_account),
         )
         .route("/admin/accounts/{id}/enabled", put(set_account_enabled))
+        .route("/admin/credentials/encrypt", post(encrypt_credential))
+        .route(
+            "/admin/accounts/{id}/credentials/rotate",
+            post(rotate_account_credential),
+        )
         .route(
             "/admin/logical-models",
             get(list_logical_models).post(create_logical_model),
@@ -711,6 +726,117 @@ struct CreateKeyRequest {
     name: String,
     #[serde(default)]
     allowed_models: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct EncryptCredentialRequest {
+    source_id: String,
+    account_id: String,
+    plaintext: String,
+}
+
+async fn encrypt_credential(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<EncryptCredentialRequest>,
+) -> Response<Body> {
+    if !state.admin_auth.authorized(&headers) {
+        return error_response(
+            StatusCode::UNAUTHORIZED,
+            "unauthorized",
+            "missing or invalid admin key",
+        );
+    }
+    if !state.secrets.has_master_key() {
+        return error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "master_key_unavailable",
+            "credential master key is not configured",
+        );
+    }
+    let aad = secrets::SecretResolver::account_aad(&request.source_id, &request.account_id);
+    match state.secrets.encrypt(&request.plaintext, aad.as_bytes()) {
+        Ok(ciphertext) => Json(json!({
+            "data": {
+                "ciphertext": ciphertext,
+                "key_version": state.secrets.active_key_version(),
+            }
+        }))
+        .into_response(),
+        Err(err) => error_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            err.code(),
+            err.public_message(),
+        ),
+    }
+}
+
+async fn rotate_account_credential(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(account_id): Path<String>,
+) -> Response<Body> {
+    if !state.admin_auth.authorized(&headers) {
+        return error_response(
+            StatusCode::UNAUTHORIZED,
+            "unauthorized",
+            "missing or invalid admin key",
+        );
+    }
+    let Some(database) = &state.db else {
+        return error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "database_unavailable",
+            "database is not configured",
+        );
+    };
+    let row = sqlx::query_as::<_, (String, Option<String>)>(
+        "SELECT source_id, credential_ciphertext FROM accounts WHERE id=$1",
+    )
+    .bind(&account_id)
+    .fetch_optional(database.pool())
+    .await;
+    match row {
+        Ok(Some((source_id, Some(ciphertext)))) => {
+            match state
+                .secrets
+                .rotate_for_account(&source_id, &account_id, &ciphertext)
+            {
+                Ok(rotated) => {
+                    let _ = sqlx::query(
+                        "UPDATE accounts SET credential_ciphertext=$2, updated_at=NOW() WHERE id=$1",
+                    )
+                    .bind(&account_id)
+                    .bind(&rotated)
+                    .execute(database.pool())
+                    .await;
+                    Json(json!({
+                        "data": {
+                            "account_id": account_id,
+                            "key_version": state.secrets.active_key_version(),
+                        }
+                    }))
+                    .into_response()
+                }
+                Err(err) => error_response(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    err.code(),
+                    err.public_message(),
+                ),
+            }
+        }
+        Ok(Some((_, None))) => error_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "no_ciphertext",
+            "account does not have an encrypted credential",
+        ),
+        Ok(None) => error_response(StatusCode::NOT_FOUND, "not_found", "account not found"),
+        Err(_) => error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "database_error",
+            "failed to fetch account",
+        ),
+    }
 }
 
 async fn create_key(
@@ -2987,6 +3113,7 @@ async fn proxy(
         let attempt_started = Instant::now();
         let (response, attempt_status, attempt_success) = match forward_fallback(
             &config,
+            &state.secrets,
             &state.http,
             candidate.provider,
             candidate.account,
@@ -3130,6 +3257,7 @@ async fn proxy(
     let result_started = Instant::now();
     let result = forward_account(
         &config,
+        &state.secrets,
         &state.http,
         &route,
         provider,
@@ -3156,6 +3284,7 @@ async fn proxy(
             record_response_health(&state.health, &account.id, response.status()).await;
             let (response, mut fallback_attempts) = try_fallback(
                 &config,
+                &state.secrets,
                 &state.health,
                 &state.http,
                 &route,
@@ -3207,6 +3336,7 @@ async fn proxy(
                 .await;
             let (response, mut fallback_attempts) = try_fallback_error(
                 &config,
+                &state.secrets,
                 &state.health,
                 &state.http,
                 &route,
@@ -3446,7 +3576,8 @@ fn finalize_stream_usage(
 
 #[allow(clippy::too_many_arguments)]
 async fn forward_account(
-    config: &GatewayConfig,
+    _config: &GatewayConfig,
+    secrets: &secrets::SecretResolver,
     http: &transport::SourceHttpClient,
     route: &ResolvedRoute,
     provider: &config::ProviderConfig,
@@ -3456,7 +3587,7 @@ async fn forward_account(
     stream_config: &stream_contract::StreamConfig,
     request_started: Instant,
 ) -> Result<Response<Body>, transport::TransportError> {
-    let credential = config.credential_for(account);
+    let credential = resolve_credential(secrets, account);
     if route.mode == "adapter" {
         if route.adapter.as_deref() == Some("kimi_responses_adapter") {
             return embedded_kimi_adapter(
@@ -3697,6 +3828,7 @@ async fn select_fallback_candidate<'a>(
 #[allow(clippy::too_many_arguments)]
 async fn try_fallback(
     config: &GatewayConfig,
+    secrets: &secrets::SecretResolver,
     health: &health::HealthRegistry,
     http: &transport::SourceHttpClient,
     route: &ResolvedRoute,
@@ -3717,6 +3849,7 @@ async fn try_fallback(
     let started = Instant::now();
     match forward_fallback(
         config,
+        secrets,
         http,
         candidate.provider,
         candidate.account,
@@ -3772,6 +3905,7 @@ async fn try_fallback(
 #[allow(clippy::too_many_arguments)]
 async fn try_fallback_error(
     config: &GatewayConfig,
+    secrets: &secrets::SecretResolver,
     health: &health::HealthRegistry,
     http: &transport::SourceHttpClient,
     route: &ResolvedRoute,
@@ -3799,6 +3933,7 @@ async fn try_fallback_error(
     let started = Instant::now();
     match forward_fallback(
         config,
+        secrets,
         http,
         candidate.provider,
         candidate.account,
@@ -3860,7 +3995,8 @@ async fn try_fallback_error(
 
 #[allow(clippy::too_many_arguments)]
 async fn forward_fallback(
-    config: &GatewayConfig,
+    _config: &GatewayConfig,
+    secrets: &secrets::SecretResolver,
     http: &transport::SourceHttpClient,
     provider: &config::ProviderConfig,
     account: &config::AccountConfig,
@@ -3873,7 +4009,7 @@ async fn forward_fallback(
     stream_config: &stream_contract::StreamConfig,
     request_started: Instant,
 ) -> Result<Response<Body>, transport::TransportError> {
-    let credential = config.credential_for(account);
+    let credential = resolve_credential(secrets, account);
     if mode == "adapter" {
         if adapter == Some("kimi_responses_adapter") {
             return embedded_kimi_adapter(
@@ -3986,6 +4122,30 @@ fn supplied_key(headers: &HeaderMap) -> Option<&str> {
                 .get("x-api-key")
                 .and_then(|value| value.to_str().ok())
         })
+}
+
+fn resolve_credential(
+    secrets: &secrets::SecretResolver,
+    account: &config::AccountConfig,
+) -> Option<String> {
+    match secrets.resolve_account(
+        &account.provider_id,
+        &account.id,
+        account.credential_env.as_deref(),
+        account.credential_ciphertext.as_deref(),
+        account.credential.as_deref(),
+    ) {
+        Ok(lease) => Some(lease.as_str().to_owned()),
+        Err(secrets::SecretResolverError::CredentialUnavailable) => None,
+        Err(err) => {
+            tracing::warn!(
+                account_id = %account.id,
+                error = %err,
+                "credential resolution failed"
+            );
+            None
+        }
+    }
 }
 
 fn error_response(status: StatusCode, code: &str, message: &str) -> Response<Body> {
@@ -4112,6 +4272,8 @@ mod admin_auth_tests {
         ("PUT", "/admin/accounts/account-id"),
         ("DELETE", "/admin/accounts/account-id"),
         ("PUT", "/admin/accounts/account-id/enabled"),
+        ("POST", "/admin/credentials/encrypt"),
+        ("POST", "/admin/accounts/account-id/credentials/rotate"),
         ("GET", "/admin/logical-models"),
         ("POST", "/admin/logical-models"),
         ("GET", "/admin/logical-models/model-id"),
@@ -4163,6 +4325,7 @@ mod admin_auth_tests {
             control_plane: None,
             health: health::HealthRegistry::new(std::time::Duration::from_secs(1)),
             admin_auth,
+            secrets: secrets::SecretResolver::empty(),
         }
     }
 
@@ -4297,6 +4460,7 @@ mod health_api_tests {
             provider_id: "health-provider".into(),
             display_name: "Health Account".into(),
             credential_env: None,
+            credential_ciphertext: None,
             credential: None,
             enabled: true,
             weight: 100,
@@ -4318,6 +4482,7 @@ mod health_api_tests {
             control_plane: None,
             health: health::HealthRegistry::new(Duration::from_secs(1)),
             admin_auth: AdminAuth::test(),
+            secrets: secrets::SecretResolver::empty(),
         }
     }
 
@@ -4414,6 +4579,7 @@ mod audit_closeout_tests {
             provider_id: provider_id.into(),
             display_name: id.into(),
             credential_env: None,
+            credential_ciphertext: None,
             credential: None,
             enabled: true,
             weight: 100,
@@ -4474,6 +4640,7 @@ mod audit_closeout_tests {
             control_plane: None,
             health: health::HealthRegistry::new(std::time::Duration::from_secs(30)),
             admin_auth: AdminAuth::test(),
+            secrets: secrets::SecretResolver::empty(),
         }
     }
 
@@ -4704,6 +4871,7 @@ mod usage_api_tests {
             control_plane: None,
             health: health::HealthRegistry::new(std::time::Duration::from_secs(1)),
             admin_auth: AdminAuth::test(),
+            secrets: secrets::SecretResolver::empty(),
         }
     }
 
@@ -5045,6 +5213,7 @@ mod kimi_adapter_e2e_tests {
                 provider_id: "kimi".into(),
                 display_name: "Kimi test account".into(),
                 credential_env: None,
+                credential_ciphertext: None,
                 credential: Some("upstream-test-key".into()),
                 enabled: true,
                 weight: 100,
@@ -5075,6 +5244,7 @@ mod kimi_adapter_e2e_tests {
             control_plane: None,
             health: health::HealthRegistry::new(std::time::Duration::from_secs(1)),
             admin_auth: AdminAuth::test(),
+            secrets: secrets::SecretResolver::empty(),
         }
     }
 
@@ -5252,6 +5422,7 @@ mod ops_api_tests {
             control_plane: Some(control_plane),
             health: health::HealthRegistry::new(std::time::Duration::from_secs(1)),
             admin_auth: AdminAuth::test(),
+            secrets: secrets::SecretResolver::empty(),
         }
     }
 
@@ -5426,6 +5597,7 @@ mod stream_contract_e2e_tests {
                 provider_id: "native-e2e".into(),
                 display_name: "Native E2E".into(),
                 credential_env: None,
+                credential_ciphertext: None,
                 credential: Some("test-secret".into()),
                 enabled: true,
                 weight: 100,
@@ -5458,6 +5630,7 @@ mod stream_contract_e2e_tests {
             control_plane: None,
             health: health::HealthRegistry::new(Duration::from_secs(1)),
             admin_auth: AdminAuth::test(),
+            secrets: secrets::SecretResolver::empty(),
         }
     }
 

@@ -497,6 +497,7 @@ mod tests {
             provider_id: source_id.into(),
             display_name: format!("{id} display"),
             credential_env: Some("CAPABILITY_TEST_SECRET_ENV".into()),
+            credential_ciphertext: None,
             credential: Some("capability-test-secret-value".into()),
             enabled: true,
             weight: 100,
