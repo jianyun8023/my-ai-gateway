@@ -173,6 +173,7 @@ fn state(config: GatewayConfig, database: Option<db::Database>) -> AppState {
         control_plane: None,
         health: health::HealthRegistry::new(Duration::from_secs(1)),
         admin_auth: AdminAuth::test(),
+        secrets: secrets::SecretResolver::empty(),
     }
 }
 
@@ -335,6 +336,7 @@ async fn transport_error_path_uses_fallback_and_records_its_actual_model() {
         .unwrap();
     let (response, attempts) = try_fallback_error(
         &config,
+        &secrets::SecretResolver::empty(),
         &health::HealthRegistry::new(Duration::from_secs(1)),
         &transport::test_client().unwrap(),
         &resolved,
@@ -378,6 +380,7 @@ async fn fallback_transport_failure_is_retained_as_the_final_actual_attempt() {
         .unwrap();
     let (response, attempts) = try_fallback_error(
         &config,
+        &secrets::SecretResolver::empty(),
         &health::HealthRegistry::new(Duration::from_secs(1)),
         &transport::test_client().unwrap(),
         &resolved,
@@ -587,7 +590,7 @@ async fn postgres_db_first_source_attribution_covers_primary_fallback_stream_and
             let chunks = stream::once(async {
                 tokio::time::sleep(Duration::from_millis(15)).await;
                 Ok::<Bytes, std::io::Error>(Bytes::from_static(
-                    b"data: {\"usage\":{\"input_tokens\":2,\"output_tokens\":3}}\n\n",
+                    b"data: {\"usage\":{\"input_tokens\":2,\"output_tokens\":3}}\n\ndata: [DONE]\n\n",
                 ))
             });
             return Response::builder()
@@ -745,6 +748,7 @@ async fn postgres_db_first_source_attribution_covers_primary_fallback_stream_and
         control_plane: None,
         health: health::HealthRegistry::new(Duration::from_secs(30)),
         admin_auth: AdminAuth::test(),
+        secrets: secrets::SecretResolver::empty(),
     };
 
     let suffix = Uuid::new_v4().to_string();

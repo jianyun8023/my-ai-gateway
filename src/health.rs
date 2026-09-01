@@ -1122,6 +1122,7 @@ mod tests {
             control_plane: None,
             health: registry.clone(),
             admin_auth: crate::AdminAuth::test(),
+            secrets: crate::secrets::SecretResolver::empty(),
         };
         let response = crate::application(app_state)
             .oneshot(

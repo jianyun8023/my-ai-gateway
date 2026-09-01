@@ -1,6 +1,6 @@
 use crate::protocol::Protocol;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, env};
+use std::collections::HashMap;
 
 /// Features whose preservation can be declared by an adapter.
 #[allow(dead_code)]
@@ -342,7 +342,6 @@ pub struct AccountConfig {
     /// opaque ciphertext and is never serialized into a runtime snapshot.
     #[serde(default, skip_serializing)]
     pub credential_ciphertext: Option<String>,
-    #[serde(default)]
     #[serde(default, skip_serializing)]
     pub credential: Option<String>,
     #[serde(default = "default_true")]
@@ -672,13 +671,6 @@ impl GatewayConfig {
     }
     pub fn account(&self, id: &str) -> Option<&AccountConfig> {
         self.accounts.iter().find(|a| a.id == id)
-    }
-    pub fn credential_for(&self, account: &AccountConfig) -> Option<String> {
-        account
-            .credential_env
-            .as_deref()
-            .and_then(|name| env::var(name).ok())
-            .or_else(|| account.credential.clone())
     }
 }
 

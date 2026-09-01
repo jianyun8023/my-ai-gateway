@@ -893,6 +893,7 @@ struct SnapshotRow {
     account_id: String,
     account_display_name: String,
     credential_env: Option<String>,
+    credential_ciphertext: Option<String>,
     account_enabled: bool,
     source_enabled: bool,
     weight: i32,
@@ -911,7 +912,7 @@ async fn build_snapshot(
     generated_at: DateTime<Utc>,
 ) -> Result<RuntimeSnapshot, ControlPlaneError> {
     let rows = sqlx::query_as::<_, SnapshotRow>(
-        "SELECT r.id AS route_id,lm.public_name,lm.display_name,r.protocols AS route_protocols,r.allow_lossy_conversion,b.id AS binding_id,b.source_id,s.provider_preset_id,s.display_name AS source_display_name,s.base_url,s.endpoints,b.account_id,a.display_name AS account_display_name,a.credential_env,a.enabled AS account_enabled,s.enabled AS source_enabled,a.weight,b.upstream_model_id,b.protocol,cap.mode,cap.source_protocol,cap.adapter,cap.feature_capabilities FROM routes r JOIN logical_models lm ON lm.id=r.logical_model_id JOIN model_bindings b ON b.logical_model_id=lm.id JOIN sources s ON s.id=b.source_id JOIN accounts a ON a.id=b.account_id AND a.source_id=b.source_id JOIN source_models sm ON sm.source_id=b.source_id AND sm.upstream_model_id=b.upstream_model_id JOIN source_model_capabilities cap ON cap.source_id=b.source_id AND cap.upstream_model_id=b.upstream_model_id AND cap.protocol=b.protocol WHERE r.enabled AND lm.enabled AND lm.status='confirmed' AND b.enabled AND b.status='confirmed' AND sm.confirmation_status='confirmed' AND sm.availability_status='available' AND cap.status='confirmed' AND cap.mode IN ('native','adapter') ORDER BY r.id,b.protocol,b.priority DESC,CASE cap.mode WHEN 'native' THEN 0 ELSE 1 END,b.id",
+        "SELECT r.id AS route_id,lm.public_name,lm.display_name,r.protocols AS route_protocols,r.allow_lossy_conversion,b.id AS binding_id,b.source_id,s.provider_preset_id,s.display_name AS source_display_name,s.base_url,s.endpoints,b.account_id,a.display_name AS account_display_name,a.credential_env,a.credential_ciphertext,a.enabled AS account_enabled,s.enabled AS source_enabled,a.weight,b.upstream_model_id,b.protocol,cap.mode,cap.source_protocol,cap.adapter,cap.feature_capabilities FROM routes r JOIN logical_models lm ON lm.id=r.logical_model_id JOIN model_bindings b ON b.logical_model_id=lm.id JOIN sources s ON s.id=b.source_id JOIN accounts a ON a.id=b.account_id AND a.source_id=b.source_id JOIN source_models sm ON sm.source_id=b.source_id AND sm.upstream_model_id=b.upstream_model_id JOIN source_model_capabilities cap ON cap.source_id=b.source_id AND cap.upstream_model_id=b.upstream_model_id AND cap.protocol=b.protocol WHERE r.enabled AND lm.enabled AND lm.status='confirmed' AND b.enabled AND b.status='confirmed' AND sm.confirmation_status='confirmed' AND sm.availability_status='available' AND cap.status='confirmed' AND cap.mode IN ('native','adapter') ORDER BY r.id,b.protocol,b.priority DESC,CASE cap.mode WHEN 'native' THEN 0 ELSE 1 END,b.id",
     )
     .fetch_all(&mut **tx)
     .await?;
@@ -1049,6 +1050,7 @@ async fn build_snapshot(
                 provider_id: row.source_id.clone(),
                 display_name: row.account_display_name.clone(),
                 credential_env: row.credential_env.clone(),
+                credential_ciphertext: row.credential_ciphertext.clone(),
                 credential: None,
                 enabled: row.account_enabled && row.source_enabled,
                 weight: row.weight as u32,
@@ -2967,6 +2969,7 @@ mod tests {
             control_plane: Some(control_plane.clone()),
             health: health.clone(),
             admin_auth: crate::AdminAuth::test(),
+            secrets: crate::secrets::SecretResolver::empty(),
         };
         state.reload_snapshot(stable_snapshot.clone());
         assert_eq!(state.snapshot().revision, active_revision);

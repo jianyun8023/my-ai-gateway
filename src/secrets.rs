@@ -7,16 +7,13 @@
 //! plaintext in errors or debug output.
 
 use base64::{engine::general_purpose, Engine as _};
-use ring::{aead, rand::{SecureRandom, SystemRandom}};
+use ring::{
+    aead,
+    rand::{SecureRandom, SystemRandom},
+};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use std::{
-    collections::BTreeMap,
-    env,
-    fmt,
-    str,
-    sync::Arc,
-};
+use std::{collections::BTreeMap, env, fmt, str, sync::Arc};
 use zeroize::{Zeroize, Zeroizing};
 
 /// Primary environment variable containing the active credential master key.
@@ -92,6 +89,7 @@ impl std::error::Error for SecretResolverError {}
 
 /// A short-lived credential value.  Its backing bytes are zeroized on drop.
 /// The type intentionally has no `Serialize` implementation.
+#[allow(dead_code)]
 pub struct SecretLease(Zeroizing<Vec<u8>>);
 
 impl SecretLease {
@@ -107,6 +105,7 @@ impl SecretLease {
         str::from_utf8(&self.0).expect("validated secret lease is UTF-8")
     }
 
+    #[allow(dead_code)]
     pub fn as_bytes(&self) -> &[u8] {
         &self.0
     }
@@ -153,7 +152,10 @@ impl fmt::Debug for SecretResolver {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("SecretResolver")
             .field("active_version", &self.keyring.active_version)
-            .field("key_versions", &self.keyring.keys.keys().collect::<Vec<_>>())
+            .field(
+                "key_versions",
+                &self.keyring.keys.keys().collect::<Vec<_>>(),
+            )
             .finish()
     }
 }
@@ -164,6 +166,7 @@ impl Default for SecretResolver {
     }
 }
 
+#[allow(dead_code)]
 impl SecretResolver {
     /// Construct a resolver with no master key.  Environment references still
     /// work; ciphertext references fail closed with `MasterKeyUnavailable`.
@@ -179,11 +182,8 @@ impl SecretResolver {
     /// Construct a resolver from one master key.  The key is hashed to a
     /// fixed 256-bit AES key unless it is already exactly 32 bytes.
     pub fn from_master_key(master_key: impl AsRef<[u8]>) -> Self {
-        Self::from_keyring(
-            "v1",
-            [("v1".to_owned(), master_key.as_ref().to_vec())],
-        )
-        .expect("fixed v1 key version is valid")
+        Self::from_keyring("v1", [("v1".to_owned(), master_key.as_ref().to_vec())])
+            .expect("fixed v1 key version is valid")
     }
 
     /// Construct a resolver from a keyring.  `active_version` is used for new
@@ -367,11 +367,7 @@ impl SecretResolver {
 
     /// Re-encrypt an envelope with the current active key version.  Existing
     /// key versions remain valid for decryption, so rotation can be gradual.
-    pub fn rotate(
-        &self,
-        ciphertext: &str,
-        aad: &[u8],
-    ) -> Result<String, SecretResolverError> {
+    pub fn rotate(&self, ciphertext: &str, aad: &[u8]) -> Result<String, SecretResolverError> {
         let plaintext = self.decrypt(ciphertext, aad)?;
         self.encrypt(plaintext.as_str(), aad)
     }
@@ -500,18 +496,16 @@ fn validate_key_version(value: &str) -> Result<String, SecretResolverError> {
 }
 
 fn first_nonempty_env(names: &[&str]) -> Option<String> {
-    names.iter().find_map(|name| {
-        env::var(name)
-            .ok()
-            .filter(|value| !value.trim().is_empty())
-    })
+    names
+        .iter()
+        .find_map(|name| env::var(name).ok().filter(|value| !value.trim().is_empty()))
 }
 
 fn parse_keyring(raw: &str) -> Result<Vec<(String, Vec<u8>)>, SecretResolverError> {
     let raw = raw.trim();
     if raw.starts_with('{') {
-        let object: serde_json::Map<String, Value> = serde_json::from_str(raw)
-            .map_err(|_| SecretResolverError::InvalidMasterKeyConfig)?;
+        let object: serde_json::Map<String, Value> =
+            serde_json::from_str(raw).map_err(|_| SecretResolverError::InvalidMasterKeyConfig)?;
         let mut entries = Vec::with_capacity(object.len());
         for (version, value) in object {
             let value = value
@@ -550,9 +544,7 @@ fn parse_envelope(value: &str) -> Result<Envelope, SecretResolverError> {
     };
     // Canonical: gwenc:v1:key:nonce:ciphertext.  Accept v1:key:... and
     // enc:v1:key:... to make migration from early development snapshots safe.
-    if fields.len() == 5 && fields[0] == ENVELOPE_PREFIX {
-        fields.remove(0);
-    } else if fields.len() == 5 && fields[0] == "enc" {
+    if fields.len() == 5 && (fields[0] == ENVELOPE_PREFIX || fields[0] == "enc") {
         fields.remove(0);
     }
     if fields.len() != 4 || fields[0] != ENVELOPE_VERSION {
@@ -572,11 +564,16 @@ fn parse_envelope(value: &str) -> Result<Envelope, SecretResolverError> {
 }
 
 fn parse_json_envelope(value: &str) -> Result<Envelope, SecretResolverError> {
-    let object: serde_json::Map<String, Value> = serde_json::from_str(value)
-        .map_err(|_| SecretResolverError::InvalidCiphertext)?;
+    let object: serde_json::Map<String, Value> =
+        serde_json::from_str(value).map_err(|_| SecretResolverError::InvalidCiphertext)?;
     let version = object
         .get("version")
-        .and_then(|value| value.as_str().map(ToOwned::to_owned).or_else(|| value.as_u64().map(|v| format!("v{v}"))))
+        .and_then(|value| {
+            value
+                .as_str()
+                .map(ToOwned::to_owned)
+                .or_else(|| value.as_u64().map(|v| format!("v{v}")))
+        })
         .ok_or(SecretResolverError::InvalidCiphertext)?;
     let key_version = object
         .get("key_version")
@@ -658,7 +655,7 @@ mod tests {
         assert_eq!(value.as_str(), "cipher-secret");
         assert!(!format!("{resolver:?}").contains("cipher-secret"));
         assert!(!format!("{value:?}").contains("cipher-secret"));
-        assert_eq!(resolver.needs_rotation(&ciphertext).unwrap(), false);
+        assert!(!resolver.needs_rotation(&ciphertext).unwrap());
     }
 
     #[test]
@@ -679,11 +676,7 @@ mod tests {
 
     #[test]
     fn rotation_uses_active_key_and_keeps_previous_key_readable() {
-        let old = SecretResolver::from_keyring(
-            "old",
-            [("old", b"old-master".to_vec())],
-        )
-        .unwrap();
+        let old = SecretResolver::from_keyring("old", [("old", b"old-master".to_vec())]).unwrap();
         let original = old.encrypt("rotate-me", b"aad").unwrap();
         let rotated = SecretResolver::from_keyring(
             "new",
@@ -697,19 +690,27 @@ mod tests {
         let current = rotated.rotate(&original, b"aad").unwrap();
         assert!(current.starts_with("gwenc:v1:new:"));
         assert!(!rotated.needs_rotation(&current).unwrap());
-        assert_eq!(rotated.resolve_refs(None, Some(&current), None, b"aad").unwrap().as_str(), "rotate-me");
+        assert_eq!(
+            rotated
+                .resolve_refs(None, Some(&current), None, b"aad")
+                .unwrap()
+                .as_str(),
+            "rotate-me"
+        );
     }
 
     #[test]
     fn malformed_and_ambiguous_references_are_rejected() {
         let resolver = SecretResolver::empty();
         assert_eq!(
-            resolver.resolve_refs(Some("MISSING"), Some("v1:v1:a:b"), None, b"aad"),
-            Err(SecretResolverError::AmbiguousCredential)
+            resolver
+                .resolve_refs(Some("MISSING"), Some("v1:v1:a:b"), None, b"aad")
+                .unwrap_err(),
+            SecretResolverError::AmbiguousCredential
         );
         assert_eq!(
-            SecretResolver::validate_ciphertext("plain-secret"),
-            Err(SecretResolverError::InvalidCiphertext)
+            SecretResolver::validate_ciphertext("plain-secret").unwrap_err(),
+            SecretResolverError::InvalidCiphertext
         );
     }
 
@@ -728,7 +729,13 @@ mod tests {
         let resolver = SecretResolver::from_env().unwrap();
         assert_eq!(resolver.active_key_version(), "new");
         let ciphertext = resolver.encrypt("env-rotation", b"aad").unwrap();
-        assert_eq!(resolver.resolve_refs(None, Some(&ciphertext), None, b"aad").unwrap().as_str(), "env-rotation");
+        assert_eq!(
+            resolver
+                .resolve_refs(None, Some(&ciphertext), None, b"aad")
+                .unwrap()
+                .as_str(),
+            "env-rotation"
+        );
         restore_env(MASTER_KEYS_ENV, old);
         restore_env(ACTIVE_KEY_VERSION_ENV, old_active);
         restore_env(MASTER_KEY_ENV, old_primary);
