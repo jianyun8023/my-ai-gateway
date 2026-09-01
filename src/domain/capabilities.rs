@@ -1,6 +1,6 @@
-use crate::{
+use super::catalog::PublishedModel;
+use super::{
     config::{Capabilities, GatewayConfig, ProtocolMode},
-    control_plane::PublishedModel,
     protocol::Protocol,
     routing::{ResolvedBinding, ResolvedRoute, RouteResolutionError, RouteResolver},
 };
@@ -471,7 +471,7 @@ impl EffectiveProtocolCapability {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
+    use crate::domain::{
         config::{AccountConfig, CapabilityMode, ProviderConfig},
         routing::{RuntimeBinding, RuntimeRoute},
     };

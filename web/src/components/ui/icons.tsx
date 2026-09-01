@@ -649,3 +649,47 @@ export function IconSidebarSystem({ size = 20, ...props }: IconProps) {
     </svg>
   );
 }
+
+// Prototype-matching sidebar icons — exact SVG paths from ai-gateway-prototype.html
+
+/** 2×2 rounded rectangle grid — prototype "总览" icon */
+export function IconDashboardGrid({ size = 20, ...props }: IconProps) {
+  return (
+    <svg {...baseSvgProps} width={size} height={size} strokeWidth={1.8} {...props}>
+      <rect x="3" y="3" width="7" height="7" rx="1" />
+      <rect x="14" y="3" width="7" height="7" rx="1" />
+      <rect x="3" y="14" width="7" height="7" rx="1" />
+      <rect x="14" y="14" width="7" height="7" rx="1" />
+    </svg>
+  );
+}
+
+/** Three vertical bars — prototype "用量分析" bar-chart icon */
+export function IconBarChart({ size = 20, ...props }: IconProps) {
+  return (
+    <svg {...baseSvgProps} width={size} height={size} strokeWidth={1.8} {...props}>
+      <path d="M18 20V10M12 20V4M6 20v-6" />
+    </svg>
+  );
+}
+
+/** Three stacked layers — prototype "来源管理" layers icon */
+export function IconLayers({ size = 20, ...props }: IconProps) {
+  return (
+    <svg {...baseSvgProps} width={size} height={size} strokeWidth={1.8} {...props}>
+      <path d="M12 2L2 7l10 5 10-5-10-5Z" />
+      <path d="M2 17l10 5 10-5" />
+      <path d="M2 12l10 5 10-5" />
+    </svg>
+  );
+}
+
+/** Sun/asterisk with center circle — prototype "模型与路由" icon */
+export function IconSunAsterisk({ size = 20, ...props }: IconProps) {
+  return (
+    <svg {...baseSvgProps} width={size} height={size} strokeWidth={1.8} {...props}>
+      <circle cx="12" cy="12" r="3" />
+      <path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83" />
+    </svg>
+  );
+}

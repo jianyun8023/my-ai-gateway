@@ -1,4 +1,4 @@
-use crate::{
+use super::{
     config::{adapter_definition, Capabilities, CapabilityMode, GatewayConfig, ProtocolMode},
     protocol::Protocol,
 };
@@ -533,7 +533,7 @@ pub(crate) fn intersect_capabilities(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{
+    use crate::domain::config::{
         AccountConfig, ModelCapabilityOverride, ProtocolCapability, ProviderConfig, RouteConfig,
     };
     use std::collections::HashMap;

@@ -256,9 +256,9 @@ describe('production control-plane pages', () => {
     await renderPage('sources');
 
     expect(container.textContent).toContain('Source A');
-    expect(container.textContent).toContain('native');
-    expect(container.textContent).toContain('adapter');
-    expect(container.textContent).toContain('unsupported');
+    expect(container.textContent).toContain('原生');
+    expect(container.textContent).toContain('转换');
+    expect(container.textContent).toContain('—');
 
     const accountsTab = Array.from(container.querySelectorAll<HTMLButtonElement>('[role="tab"]'))
       .find((button) => button.textContent?.includes('Accounts'));
@@ -296,11 +296,10 @@ describe('production control-plane pages', () => {
     expect(container.textContent).toContain('Model A');
 
     const tabs = () => Array.from(container.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
-    await act(async () => tabs().find((button) => button.textContent?.includes('Model Bindings'))?.click());
+    await act(async () => tabs().find((button) => button.textContent?.includes('绑定'))?.click());
     expect(container.textContent).toContain('upstream-a');
-    expect(container.textContent).toContain('native');
 
-    await act(async () => tabs().find((button) => button.textContent?.includes('Routes'))?.click());
+    await act(async () => tabs().find((button) => button.textContent?.includes('路由规则'))?.click());
     expect(container.textContent).toContain('primary_then_weighted_fallback');
     expect(container.textContent).not.toMatch(/Random|Round-Robin/);
   });

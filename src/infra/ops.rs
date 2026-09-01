@@ -6,10 +6,8 @@
 //! every batch independently, which makes a cancelled or interrupted job safe
 //! to retry with the same operation id.
 
-use crate::{
-    control_plane::{ControlPlane, ControlPlaneError, RuntimeSnapshot},
-    db::Database,
-};
+use super::db::Database;
+use crate::control_plane::{ControlPlane, ControlPlaneError, RuntimeSnapshot};
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -2114,7 +2112,7 @@ async fn reset_sequences(tx: &mut Transaction<'_, Postgres>) -> Result<(), OpsEr
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{config::GatewayConfig, control_plane::ControlPlane};
+    use crate::{control_plane::ControlPlane, domain::config::GatewayConfig};
     use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
     use std::str::FromStr;
 
@@ -2194,10 +2192,14 @@ mod tests {
             .await
             .expect("migrate ops isolated schema");
         let repository = OpsRepository::from_database(&database);
-        let control_plane = ControlPlane::new(&database, "127.0.0.1:0");
-        crate::provider_preset::install_builtin_presets(&database.model_catalog())
-            .await
-            .expect("install built-in presets for export fixture");
+        let control_plane = ControlPlane::new(database.pool().clone(), "127.0.0.1:0");
+        crate::control_plane::model_catalog::install_builtin_presets(
+            &crate::control_plane::model_catalog::ModelCatalogRepository::new(
+                database.pool().clone(),
+            ),
+        )
+        .await
+        .expect("install built-in presets for export fixture");
 
         let policies = RETENTION_KEYS
             .iter()

@@ -402,7 +402,7 @@ impl SecretResolver {
     /// an already-valid in-memory snapshot.
     pub fn validate_config(
         &self,
-        config: &crate::config::GatewayConfig,
+        config: &crate::domain::config::GatewayConfig,
     ) -> Result<(), SecretResolverError> {
         for account in &config.accounts {
             if account

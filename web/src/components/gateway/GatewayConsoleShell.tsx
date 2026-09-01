@@ -6,16 +6,13 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import gatewayIcon from '@/assets/gateway-icon.svg';
 import { Button } from '@/components/ui/Button';
 import {
-  IconChartLine,
   IconMenu,
   IconRefreshCw,
-  IconSettings,
   IconX,
 } from '@/components/ui/icons';
-import type { GatewayConsoleSpace } from '@/lib/consoleNavigation';
+import type { ConsolePage, ConsoleNavSection } from '@/lib/consoleNavigation';
 import { useThemeStore } from '@/stores/useThemeStore';
 import styles from './GatewayConsoleShell.module.scss';
 
@@ -24,8 +21,9 @@ export const GATEWAY_ADMIN_KEY_STORAGE_KEY = 'my-ai-gateway-admin-key-v1';
 export interface GatewayConsoleNavItem {
   id: string;
   label: string;
-  shortLabel: string;
+  shortLabel?: string;
   icon: ReactNode;
+  badge?: string;
 }
 
 export interface GatewayConsoleContentContext {
@@ -37,16 +35,11 @@ export interface GatewayConsoleContentContext {
 }
 
 interface GatewayConsoleShellProps {
-  space: GatewayConsoleSpace;
-  navigationLabel: string;
-  navigationSection: string;
+  activePage: ConsolePage;
+  navigationSections: readonly ConsoleNavSection[];
   navigationItems: readonly GatewayConsoleNavItem[];
-  activeItem: string;
-  onNavigate: (item: string) => void;
-  onSpaceChange: (space: GatewayConsoleSpace) => void;
+  onNavigate: (page: string) => void;
   title: string;
-  shortTitle: string;
-  eyebrow: string;
   description: string;
   refreshable?: boolean;
   children: (context: GatewayConsoleContentContext) => ReactNode;
@@ -65,28 +58,23 @@ const persistAdminKey = (value: string) => {
     if (value) sessionStorage.setItem(GATEWAY_ADMIN_KEY_STORAGE_KEY, value);
     else sessionStorage.removeItem(GATEWAY_ADMIN_KEY_STORAGE_KEY);
   } catch {
-    // The key remains available in memory when browser storage is unavailable.
+    // in-memory fallback
   }
 };
 
 export function GatewayConsoleShell({
-  space,
-  navigationLabel,
-  navigationSection,
+  activePage,
+  navigationSections,
   navigationItems,
-  activeItem,
   onNavigate,
-  onSpaceChange,
   title,
-  shortTitle,
-  eyebrow,
   description,
   refreshable = false,
   children,
 }: GatewayConsoleShellProps) {
   const appliedAdminKeyRef = useRef(safeSessionRead());
   const [adminKeyDraft, setAdminKeyDraft] = useState('');
-  const [adminKeyConfigured, setAdminKeyConfigured] = useState(Boolean(appliedAdminKeyRef.current));
+  const [adminKeyConfigured, setAdminKeyConfigured] = useState(() => Boolean(safeSessionRead()));
   const [refreshRevision, setRefreshRevision] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -94,7 +82,6 @@ export function GatewayConsoleShell({
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const theme = useThemeStore((state) => state.theme);
   const setTheme = useThemeStore((state) => state.setTheme);
-  const localTimeZone = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone, []);
 
   const getAdminKey = useCallback(() => appliedAdminKeyRef.current, []);
   const clearAdminKey = useCallback(() => {
@@ -102,61 +89,52 @@ export function GatewayConsoleShell({
     setAdminKeyDraft('');
     setAdminKeyConfigured(false);
     persistAdminKey('');
-    setRefreshRevision((current) => current + 1);
+    setRefreshRevision((c) => c + 1);
   }, []);
   const closeMobileNav = useCallback((restoreFocus = false) => {
     setMobileNavOpen(false);
     if (restoreFocus) window.setTimeout(() => menuButtonRef.current?.focus(), 0);
   }, []);
 
-  useEffect(() => {
-    setMobileNavOpen(false);
-  }, [activeItem, space]);
+  useEffect(() => { setMobileNavOpen(false); }, [activePage]);
 
   useEffect(() => {
     if (!mobileNavOpen) return;
-    const previousOverflow = document.body.style.overflow;
-    const focusTimer = window.setTimeout(() => closeButtonRef.current?.focus(), 0);
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') closeMobileNav(true);
-    };
+    const prev = document.body.style.overflow;
+    const t = window.setTimeout(() => closeButtonRef.current?.focus(), 0);
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closeMobileNav(true); };
     document.body.style.overflow = 'hidden';
-    window.addEventListener('keydown', onKeyDown);
-    return () => {
-      window.clearTimeout(focusTimer);
-      window.removeEventListener('keydown', onKeyDown);
-      document.body.style.overflow = previousOverflow;
-    };
+    window.addEventListener('keydown', onKey);
+    return () => { window.clearTimeout(t); window.removeEventListener('keydown', onKey); document.body.style.overflow = prev; };
   }, [closeMobileNav, mobileNavOpen]);
 
   useEffect(() => {
-    const media = window.matchMedia?.('(max-width: 920px)');
-    if (!media) return;
-    const closeOnDesktop = () => {
-      if (!media.matches) setMobileNavOpen(false);
-    };
-    media.addEventListener('change', closeOnDesktop);
-    return () => media.removeEventListener('change', closeOnDesktop);
+    const mq = window.matchMedia?.('(max-width: 920px)');
+    if (!mq) return;
+    const close = () => { if (!mq.matches) setMobileNavOpen(false); };
+    mq.addEventListener('change', close);
+    return () => mq.removeEventListener('change', close);
   }, []);
 
   const applyAdminKey = () => {
-    const nextAdminKey = adminKeyDraft.trim();
-    appliedAdminKeyRef.current = nextAdminKey;
+    const k = adminKeyDraft.trim();
+    appliedAdminKeyRef.current = k;
     setAdminKeyDraft('');
-    setAdminKeyConfigured(Boolean(nextAdminKey));
-    persistAdminKey(nextAdminKey);
-    setRefreshRevision((current) => current + 1);
+    setAdminKeyConfigured(Boolean(k));
+    persistAdminKey(k);
+    setRefreshRevision((c) => c + 1);
   };
 
-  const navigate = (item: string) => {
+  const navigate = (id: string) => {
     setMobileNavOpen(false);
-    onNavigate(item);
+    onNavigate(id);
   };
 
-  const changeSpace = (nextSpace: GatewayConsoleSpace) => {
-    setMobileNavOpen(false);
-    onSpaceChange(nextSpace);
-  };
+  const navItemsById = useMemo(() => {
+    const map = new Map<string, GatewayConsoleNavItem>();
+    for (const item of navigationItems) map.set(item.id, item);
+    return map;
+  }, [navigationItems]);
 
   const contentContext = useMemo<GatewayConsoleContentContext>(() => ({
     getAdminKey,
@@ -167,51 +145,127 @@ export function GatewayConsoleShell({
   }), [adminKeyConfigured, clearAdminKey, getAdminKey, refreshRevision]);
 
   return (
-    <div className={styles.shell} data-space={space} data-od-id={`console-${space}`}>
+    <div className={styles.shell} data-od-id="console">
       <aside id="gateway-navigation" className={styles.sidebar} data-open={mobileNavOpen} data-od-id="sidebar" aria-label="控制台侧栏">
+        <button ref={closeButtonRef} type="button" className={styles.sidebarClose} aria-label="关闭导航" onClick={() => closeMobileNav(true)}>
+          <IconX size={18} />
+        </button>
+
+        {/* Brand — matches prototype: AG icon + AI Gateway + version */}
         <div className={styles.brand}>
-          <img src={gatewayIcon} alt="" />
-          <div><strong>AI Gateway</strong><small>my-ai-gateway</small></div>
-          <button ref={closeButtonRef} type="button" className={styles.sidebarClose} aria-label="关闭导航" onClick={() => closeMobileNav(true)}><IconX size={18} /></button>
+          <div className={styles.brandIcon}>AG</div>
+          <span className={styles.brandText}>AI Gateway</span>
+          <span className={styles.brandVersion}>v0.3</span>
         </div>
 
-        <div className={styles.spaceSwitch} role="group" aria-label="工作空间">
-          <button type="button" data-active={space === 'usage'} onClick={() => changeSpace('usage')}><IconChartLine size={16} /><span>Usage</span></button>
-          <button type="button" data-active={space === 'management'} onClick={() => changeSpace('management')}><IconSettings size={16} /><span>Management</span></button>
-        </div>
-
-        <nav aria-label={navigationLabel}>
-          <span className={styles.navSection}>{navigationSection}</span>
-          {navigationItems.map((item) => (
-            <button key={item.id} type="button" data-active={activeItem === item.id} aria-current={activeItem === item.id ? 'page' : undefined} onClick={() => navigate(item.id)}>
-              <span className={styles.navIcon}>{item.icon}</span>
-              <span><strong>{item.label}</strong><small>{item.shortLabel}</small></span>
-            </button>
+        {/* Flat navigation with section headers */}
+        <nav className={styles.sidebarNav} aria-label="主导航">
+          {navigationSections.map((section) => (
+            <div key={section.label}>
+              <span className={styles.navSection}>{section.label}</span>
+              {section.pages.map((pageId) => {
+                const item = navItemsById.get(pageId);
+                if (!item) return null;
+                const isActive = activePage === pageId;
+                return (
+                  <button
+                    key={pageId}
+                    type="button"
+                    className={`${styles.navItem} ${isActive ? styles.navItemActive : ''}`}
+                    aria-current={isActive ? 'page' : undefined}
+                    onClick={() => navigate(pageId)}
+                  >
+                    {item.icon}
+                    <span>{item.label}</span>
+                    {item.badge && <span className={styles.navBadge}>{item.badge}</span>}
+                  </button>
+                );
+              })}
+            </div>
           ))}
         </nav>
-        <div className={styles.sidebarFooter}><strong>UTC</strong><span>PostgreSQL 存储边界</span><small>{localTimeZone} 展示</small></div>
+
+        {/* Mobile-only admin key — visible in sidebar when topbar input is hidden */}
+        <div className={styles.mobileKeySection}>
+          <label className={styles.mobileKeyLabel}>
+            <span>Admin Key</span>
+            <input
+              autoComplete="off"
+              spellCheck={false}
+              type="password"
+              value={adminKeyDraft}
+              onChange={(e) => setAdminKeyDraft(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') applyAdminKey(); }}
+              placeholder="GATEWAY_ADMIN_KEY"
+            />
+          </label>
+          <Button size="sm" variant="secondary" onClick={applyAdminKey}>应用</Button>
+        </div>
+
+        {/* Footer — matches prototype: status dot + running info */}
+        <div className={styles.sidebarFooter}>
+          <div className={styles.statusDot} />
+          <span>网关运行中 · 端口 3100</span>
+        </div>
       </aside>
+
       <button type="button" className={styles.mobileOverlay} data-open={mobileNavOpen} aria-label="关闭导航遮罩" tabIndex={mobileNavOpen ? 0 : -1} onClick={() => closeMobileNav(true)} />
 
-      <section className={styles.workspace}>
+      <div className={styles.mainArea}>
+        {/* Topbar — matches prototype: title + endpoint + search + admin key */}
         <header className={styles.topbar} data-od-id="topbar">
-          <button ref={menuButtonRef} type="button" className={styles.mobileMenuButton} aria-label="打开导航" aria-controls="gateway-navigation" aria-expanded={mobileNavOpen} onClick={() => setMobileNavOpen(true)}><IconMenu size={20} /></button>
-          <div className={styles.topbarTitle}><strong>{title}</strong><small>{shortTitle}</small></div>
-          <div className={styles.headerActions}>
-            <label className={styles.keyInput}><span>Admin Key</span><input aria-label="Admin Key" autoComplete="off" spellCheck={false} type="password" required value={adminKeyDraft} onChange={(event) => setAdminKeyDraft(event.target.value)} placeholder="输入 GATEWAY_ADMIN_KEY" /><Button size="sm" variant="secondary" onClick={applyAdminKey}>应用</Button></label>
-            <Button size="sm" variant="ghost" onClick={() => setTheme(theme === 'dark' ? 'white' : 'dark')}>{theme === 'dark' ? '浅色' : '深色'}</Button>
-            {refreshable && <Button size="sm" variant="secondary" onClick={() => setRefreshRevision((current) => current + 1)} loading={refreshing}><IconRefreshCw size={14} />刷新</Button>}
+          <button ref={menuButtonRef} type="button" className={styles.mobileMenuBtn} aria-label="打开导航" aria-controls="gateway-navigation" aria-expanded={mobileNavOpen} onClick={() => setMobileNavOpen(true)}>
+            <IconMenu size={20} />
+          </button>
+          <span className={styles.topbarTitle}>{title}</span>
+          <div className={styles.topbarRight}>
+            <div className={styles.endpointDisplay}>
+              <div className={styles.endpointDot} />
+              <span>http://localhost:3100</span>
+            </div>
+            <div className={styles.topbarSearch}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /></svg>
+              搜索…
+              <kbd>⌘K</kbd>
+            </div>
+            <label className={styles.keyInput}>
+              <span>Admin Key</span>
+              <input
+                aria-label="Admin Key"
+                autoComplete="off"
+                spellCheck={false}
+                type="password"
+                required
+                value={adminKeyDraft}
+                onChange={(e) => setAdminKeyDraft(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') applyAdminKey(); }}
+                placeholder="GATEWAY_ADMIN_KEY"
+              />
+              <Button size="sm" variant="secondary" onClick={applyAdminKey}>应用</Button>
+            </label>
+            <Button size="sm" variant="ghost" onClick={() => setTheme(theme === 'dark' ? 'white' : 'dark')}>
+              {theme === 'dark' ? '☀' : '☽'}
+            </Button>
+            {refreshable && (
+              <Button size="sm" variant="secondary" onClick={() => setRefreshRevision((c) => c + 1)} loading={refreshing}>
+                <IconRefreshCw size={14} />
+              </Button>
+            )}
           </div>
         </header>
 
-        <main className={styles.main}>
-          <section className={styles.pageHeading}>
-            <div><span>{eyebrow}</span><h1>{title}</h1><p>{description} · 本地时区：{localTimeZone}</p></div>
-          </section>
+        {/* Content — matches prototype: simple h1 + description + content */}
+        <div className={styles.content}>
+          <div className={styles.pageHeader}>
+            <div>
+              <h1>{title}</h1>
+              <p className={styles.pageDesc}>{description}</p>
+            </div>
+          </div>
+          {/* eslint-disable-next-line react-hooks/refs -- render prop pattern; ref callbacks are memoized */}
           {children(contentContext)}
-        </main>
-        <footer className={styles.footer}>my-ai-gateway · UI interactions adapted from CPA Usage Keeper under the MIT License</footer>
-      </section>
+        </div>
+      </div>
     </div>
   );
 }
