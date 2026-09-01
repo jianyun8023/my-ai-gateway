@@ -1,4 +1,5 @@
 use std::{
+    env,
     sync::{
         atomic::{AtomicI64, Ordering},
         OnceLock,
@@ -8,6 +9,13 @@ use std::{
 
 use metrics::{counter, gauge, histogram};
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
+use opentelemetry::trace::TracerProvider as _;
+use opentelemetry_otlp::SpanExporter;
+use opentelemetry_sdk::{trace::SdkTracerProvider, Resource};
+use tracing_opentelemetry::OpenTelemetryLayer;
+use tracing_subscriber::{
+    fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Registry,
+};
 
 pub const METRIC_REQUESTS_TOTAL: &str = "gateway_requests_total";
 pub const METRIC_ATTEMPTS_TOTAL: &str = "gateway_upstream_attempts_total";
@@ -40,6 +48,85 @@ pub fn spawn_upkeep(handle: PrometheusHandle) {
         }
     });
 }
+
+/// Initializes the global tracing subscriber.
+///
+/// When `OTEL_EXPORTER_OTLP_ENDPOINT` is set, an OpenTelemetry tracing layer
+/// is added alongside the fmt layer, exporting spans via OTLP/gRPC.
+/// When not set, only the fmt layer is active (current default behavior).
+///
+/// Returns `Option<SdkTracerProvider>` — caller should call `shutdown()` on
+/// graceful exit when `Some`.
+pub fn init_tracing() -> Option<SdkTracerProvider> {
+    let fmt_layer = fmt::layer();
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+
+    match env::var("OTEL_EXPORTER_OTLP_ENDPOINT") {
+        Ok(endpoint) if !endpoint.is_empty() => {
+            let service_name = env::var("OTEL_SERVICE_NAME")
+                .unwrap_or_else(|_| "my-ai-gateway".to_string());
+
+            match init_otel_provider(&endpoint, &service_name) {
+                Ok(provider) => {
+                    let tracer = provider.tracer("my-ai-gateway");
+                    let otel_layer = OpenTelemetryLayer::new(tracer);
+
+                    Registry::default()
+                        .with(env_filter)
+                        .with(fmt_layer)
+                        .with(otel_layer)
+                        .init();
+
+                    tracing::info!(
+                        otel_endpoint = %endpoint,
+                        otel_service = %service_name,
+                        "OpenTelemetry tracing enabled"
+                    );
+                    Some(provider)
+                }
+                Err(err) => {
+                    Registry::default()
+                        .with(env_filter)
+                        .with(fmt_layer)
+                        .init();
+
+                    tracing::warn!(
+                        %err,
+                        "failed to initialize OpenTelemetry; falling back to fmt-only"
+                    );
+                    None
+                }
+            }
+        }
+        _ => {
+            Registry::default()
+                .with(env_filter)
+                .with(fmt_layer)
+                .init();
+            None
+        }
+    }
+}
+
+fn init_otel_provider(
+    _endpoint: &str,
+    service_name: &str,
+) -> Result<SdkTracerProvider, Box<dyn std::error::Error + Send + Sync>> {
+    let exporter = SpanExporter::builder().with_tonic().build()?;
+
+    let provider = SdkTracerProvider::builder()
+        .with_batch_exporter(exporter)
+        .with_resource(
+            Resource::builder()
+                .with_service_name(service_name.to_owned())
+                .build(),
+        )
+        .build();
+
+    Ok(provider)
+}
+
+// ── Prometheus metrics (unchanged) ──────────────────────────────────────
 
 pub fn record_request(
     protocol: &str,

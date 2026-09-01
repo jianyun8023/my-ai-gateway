@@ -179,7 +179,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if command_line.first().is_some_and(|value| value == "ops") {
         return run_ops_cli(&command_line[1..]).await;
     }
-    tracing_subscriber::fmt::init();
+    let _otel_provider = observability::init_tracing();
     let database = db::Database::connect_from_env()
         .await?
         .ok_or("DATABASE_URL is required for the DB-first runtime")?;
@@ -3198,6 +3198,11 @@ async fn reload_config_inner(state: &AppState) -> Response<Body> {
     }
 }
 
+#[tracing::instrument(name = "gateway.proxy", skip_all, fields(
+    otel.kind = "server",
+    request_id,
+    protocol = %protocol,
+))]
 async fn proxy(
     state: AppState,
     headers: HeaderMap,
@@ -3207,6 +3212,7 @@ async fn proxy(
     let started = Instant::now();
     let stream_config = stream_contract::StreamConfig::from_env();
     let request_id = Uuid::new_v4().to_string();
+    tracing::Span::current().record("request_id", request_id.as_str());
     let live = state.snapshot();
     let config = live.config;
     let resolver = live.resolver;
@@ -3847,6 +3853,11 @@ fn finalize_stream_usage(
 }
 
 #[allow(clippy::too_many_arguments)]
+#[tracing::instrument(name = "gateway.forward", skip_all, fields(
+    source_id = %route.source_id,
+    account_id = %account.id,
+    upstream_model = %route.upstream_model_id,
+))]
 async fn forward_account(
     _config: &GatewayConfig,
     secrets: &secrets::SecretResolver,
@@ -4098,6 +4109,7 @@ async fn select_fallback_candidate<'a>(
 }
 
 #[allow(clippy::too_many_arguments)]
+#[tracing::instrument(name = "gateway.fallback", skip_all, fields(model = %model, protocol = %protocol))]
 async fn try_fallback(
     config: &GatewayConfig,
     secrets: &secrets::SecretResolver,
@@ -4195,6 +4207,7 @@ async fn try_fallback(
 }
 
 #[allow(clippy::too_many_arguments)]
+#[tracing::instrument(name = "gateway.fallback_error", skip_all, fields(model = %model, protocol = %protocol))]
 async fn try_fallback_error(
     config: &GatewayConfig,
     secrets: &secrets::SecretResolver,
