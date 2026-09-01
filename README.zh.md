@@ -27,6 +27,10 @@ MiniMax、DeepSeek 等原生支持三协议的 Provider 不进入转换器。Kim
 - ProviderPreset（当前内置最新版本为 `@2`）、连接测试、模型发现、差异预览、编辑和批量确认 API 已实现；预设升级不会改写既有 Source 快照，已验证的 Responses `web_search` 与 Kimi Adapter `tool_streaming` 能力按版本声明。
 - `/admin/capabilities` 从当前 DB runtime snapshot 输出三协议有效能力矩阵和完整转换链。
 - 账号健康状态以 PostgreSQL 为事实来源，支持被动失败冷却、主动连接探测、stale/过期放行、指数退避、重启恢复和人工启停。
+- AES-256-GCM 凭据信封加密（`gwenc:v1` 格式），支持多版本 keyring 和渐进式轮换；Admin 加密/轮换端点已集成。
+- Admin 写操作审计日志，事务内原子记录成功、独立记录失败；diff 自动脱敏敏感字段。
+- Virtual Key 轮换、scopes 权限更新和 key_group 分组。
+- Prometheus 指标采集（请求/attempt/Token/延迟/TTFT/冷却/snapshot/活跃流），`/metrics` 端点可用。
 
 完整设计和当前进度见 [`docs/ai-gateway-design.md`](docs/ai-gateway-design.md) 与 [`docs/todo.md`](docs/todo.md)。管理 API 契约见 [`docs/admin-api.md`](docs/admin-api.md)。
 
@@ -205,10 +209,7 @@ CSV/JSON 导出复用 events 的筛选和排序，并有 10,000 行保护上限�
 
 ## 安全边界
 
-当前版本已经具备凭据响应脱敏、正文默认不落库、Virtual Key 哈希存储、Admin API fail-closed，以及 Provider URL allowlist、解析后 IP 校验和重定向限制。仍待完成的生产安全工作包括：
-
-- 统一 Secret Resolver 与凭据信封加密（#47）；
-- Admin 写操作审计日志（#48）。
+当前版本已经具备凭据响应脱敏、正文默认不落库、Virtual Key 哈希存储、Admin API fail-closed、Provider URL allowlist 与 SSRF 防护、统一 Secret Resolver 与 AES-256-GCM 凭据信封加密（#47）、Admin 写操作审计日志（#48）和 Prometheus 指标采集。
 
 `GATEWAY_ADMIN_KEY` 与数据面 `GATEWAY_API_KEY` 完全分离。未设置 Admin Key 时网关仍可启动，但所有 Admin API 请求固定返回 `401`；数据面 Key 和 PostgreSQL Virtual Key 都不能调用管理接口。Provider Base URL 默认拒绝私网、loopback、link-local、云元数据地址和不安全重定向，私网自托管来源必须通过服务端 allowlist 显式放行。
 

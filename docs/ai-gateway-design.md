@@ -441,9 +441,11 @@ Kimi Adapter：
 ### Virtual Key 与统计 API
 
 - `POST /admin/keys` 创建 Virtual Key；
-- `GET /admin/keys` 查询 Key；
-- `POST /admin/keys/:id/revoke` 撤销 Key；
-- Key 使用 SHA-256 哈希存储，原始值只在创建时返回；
+- `GET /admin/keys` 查询 Key 列表；
+- `GET /admin/keys/:id` 查询单个 Key 详情；
+- `POST /admin/keys/:id/rotate` 轮换 Key，支持 `overlap_secs` 平滑过渡、`scopes` 权限和 `key_group` 分组；
+- `POST /admin/keys/:id/revoke` 或 `DELETE /admin/keys/:id` 撤销 Key；
+- Key 使用 SHA-256 哈希存储，原始值只在创建/轮换时返回；
 - 支持 `allowed_models` 模型白名单；
 - 成功鉴权后更新 `last_used_at`；
 - `GET /admin/usage/summary` 返回逻辑请求、上游尝试、重试、成功/失败、延迟和 Token 汇总。
@@ -459,6 +461,34 @@ v1 响应 envelope 固定如下：summary 为 `{version, timezone, range, data}`
 
 聚合中的 `logical_requests`、成功/失败、延迟和 Token 来自筛选后的 `usage_events`，因此每个逻辑请求和最终 Usage 只累计一次。`upstream_attempts` 来自这些逻辑请求关联的 `usage_event_attempts`；`retries` 来自逻辑事件的重试计数。Provider、Source、Client Source、Account、协议等筛选先选择逻辑请求，再统计其关联 attempt，避免把失败 fallback 的 Token 当成已确认 Usage。每个 attempt 独立保存 `provider_id` 与 `source_id`，使同 Provider 多 Source 和跨 Provider fallback 都可审计；逻辑事件成功时归因成功 attempt，全部失败时归因最终实际 attempt。`usage_source=missing` 的请求保留请求数但 Token 为零。
 
+### Secret Resolver 与凭据加密
+
+- AES-256-GCM 信封加密，格式 `gwenc:v1:key_version:nonce:ciphertext`；
+- 多版本 keyring 支持渐进式轮换，旧版本仍可解密；
+- 环境变量引用（`credential_env`）和加密密文（`credential_ciphertext`）二选一，同时配置则拒绝；
+- `POST /admin/credentials/encrypt` 加密原始凭据；
+- `POST /admin/accounts/:id/credentials/rotate` 以当前活跃密钥版本重加密账号凭据；
+- 启动时从 `GATEWAY_CREDENTIAL_MASTER_KEY` 或 `GATEWAY_CREDENTIAL_MASTER_KEYS` 加载 keyring；
+- `SecretLease` 使用 `Zeroizing<Vec<u8>>` 内存保护，Debug/Display 输出脱敏。
+
+### Admin 审计日志
+
+- 请求级 `AuditContext`，通过 `tokio::task_local` 在事务中共享；
+- `audit_logs` 表记录 `operation_id`、`action`、`actor`、`status`、`result`、`diff`、`resource_type/id`；
+- 成功写入在控制面事务内原子记录，失败写入在事务回滚后独立记录；
+- diff 只保留字段名和类型，不保留标量值；敏感字段（credential、token、prompt 等 14 类）自动标记并排除；
+- Admin 路由中间件已接入，自动从请求方法、路径和 payload 推导 `action`、`resource_type` 和 `resource_id`。
+
+### Prometheus 可观测性
+
+- `GET /metrics` 返回 Prometheus 文本格式指标；
+- 请求级：`gateway_requests_total`（protocol/model/status/mode）、`gateway_request_duration_seconds`；
+- 上游级：`gateway_upstream_attempts_total`（protocol/source/account/status/fallback）；
+- Token 级：`gateway_tokens_total`（model/direction）；
+- 流式：`gateway_time_to_first_token_seconds`、`gateway_active_streams`；
+- 运维：`gateway_health_cooldowns_total`、`gateway_snapshot_revision`；
+- 非流式和流式路径均已接入 `record_proxy_request`；5 秒 upkeep 周期。
+
 ### 部署
 
 - [Dockerfile](../Dockerfile)；
@@ -470,11 +500,7 @@ v1 响应 envelope 固定如下：summary 为 `{version, timezone, range, data}`
 
 ### 7.1 Virtual Key 正式系统
 
-已完成数据库-backed Key 创建、列表、撤销和模型白名单鉴权。仍待完成：
-
-- Key 轮换；
-- Key 分组和路由白名单；
-- 更完整的 Admin Session 与审计。
+已完成数据库-backed Key 创建、列表、查询、撤销、轮换和模型白名单鉴权。Key 轮换支持 `overlap_secs` 平滑窗口、scopes 权限更新和 `key_group` 分组；migration 0015 新增 `virtual_key_rotations`、`scopes`、`key_group`、`revoked_by` 等字段。Admin Session 当前使用独立的 `GATEWAY_ADMIN_KEY` fail closed 保护。
 
 ### 7.2 PostgreSQL 持久化剩余项
 
@@ -531,12 +557,11 @@ CPA Usage Keeper 只复用 React 页面和交互，不复用其 Go 后端、SQLi
 
 生产化剩余范围均有独立 Issue：
 
-- 健康状态持久化与主动探测（#52）；
-- SSE 心跳、取消和流式超时契约（#54）已完成：三协议原生与 Kimi Adapter 共享可配置心跳、连接/首事件/空闲/总时限和取消清理；
 - 健康状态持久化与主动探测（#52）已完成；
-- Prometheus/OpenTelemetry（#50）；
-- Secret Resolver 与凭据信封加密（#47）；
-- Admin 写操作审计日志（#48）；
+- SSE 心跳、取消和流式超时契约（#54）已完成：三协议原生与 Kimi Adapter 共享可配置心跳、连接/首事件/空闲/总时限和取消清理；
+- Prometheus 指标采集与 `/metrics` 端点（#50，PR #77）已完成：`gateway_requests_total`、`gateway_upstream_attempts_total`、`gateway_tokens_total`、`gateway_request_duration_seconds`、`gateway_time_to_first_token_seconds`、`gateway_health_cooldowns_total`、`gateway_snapshot_revision`、`gateway_active_streams`；OpenTelemetry tracing 导出可后置；
+- Secret Resolver 与凭据信封加密（#47，PR #73）已完成：AES-256-GCM 信封加密、多版本 keyring、运行时凭据路径和 Admin 加密/轮换端点已集成；
+- Admin 写操作审计日志（#48，PR #74）已完成：请求级 AuditContext、diff 脱敏、事务内/独立审计记录和 Admin 路由中间件已接入；
 - 数据保留、清理、备份和恢复（#53，第一版已完成；后续仅按运行反馈加固）。
 
 Provider URL allowlist、解析后 IP 校验、重定向限制和 SSRF 防护（#46）已经完成。Admin API 只接受独立的 `GATEWAY_ADMIN_KEY`，未配置时请求级 fail closed 返回 `401`，不会回退到数据面 Key。

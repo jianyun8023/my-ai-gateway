@@ -21,42 +21,27 @@
 - [x] 首选账号固定优先、账号级模型重写、跨 Source/Provider native fallback、统一加权选择和持久化健康冷却/探测
 - [x] 展示 DB-first 三协议有效能力矩阵（#43；关闭 #24）
 - [x] 完成 Source 接入、模型发现差异和确认流（#45；关闭 #6）
-- [x] Virtual Key 轮换、权限更新和静态 Key 迁移（#51；PR #75）
-- [x] 统一 Secret Resolver 与凭据信封加密（#47；PR #73）
-- [x] Admin 写操作审计日志（#48；PR #74）
 - [x] 健康状态持久化与主动探测（#52）
 - [x] SSE 心跳、取消和流式超时契约（#54）
 - [x] 完整落地 AI Gateway 生产控制台原型（#60）
 - [x] Token 时序、模型与来源分布为核心的用量分析（#8）
 - [x] Kimi 非流式 Adapter Usage 入库、ProviderPreset 能力版本和 opt-in Live Smoke（#62；PR #72）
+- [x] 统一 Secret Resolver 与凭据信封加密（#47；PR #73）——AES-256-GCM 信封加密、多版本 keyring、环境/密文/内联三选一、运行时凭据路径和 Admin 加密/轮换端点已集成
+- [x] Admin 写操作审计日志（#48；PR #74）——请求级 AuditContext、diff 脱敏、事务内记录和 fallback 独立记录，中间件已接入所有 Admin 路由
+- [x] Virtual Key 轮换、权限更新和静态 Key 迁移（#51；PR #75）——rotate/revoke/scopes 端点、DB 层事务和 migration 0015 已集成
+- [x] Prometheus 指标采集与 `/metrics` 端点（#50；PR #77）——请求/attempt/Token/延迟/TTFT/冷却/snapshot/活跃流指标已接入非流式和流式路径
 
 ## 当前开放任务
 
 ### 可观测性
 
-- [ ] Prometheus 与 OpenTelemetry（#50；PR #77 等待 CI）
+- [ ] OpenTelemetry tracing 导出（#50 剩余范围）——Prometheus 指标已就绪，OTel span/trace 导出尚未实现，可后置不阻塞 v0.1.0
 
-### 管理端
+### 验收与收口
 
-- [x] 建立控制面管理 UI 外壳与独立 Management 空间（#42）
-- [x] 展示 DB-first 三协议有效能力矩阵（#43）
-- [x] 完成 Source 接入、模型发现差异和确认流（#45）
-
-### 用量与运行时
-
-- [x] 将 Usage 的 Provider 归因与 Source 维度真正解耦（#56）
-- [x] Virtual Key 轮换、权限更新和静态 Key 迁移（#51）
-- [x] 健康状态持久化与主动探测（#52）
-- [x] SSE 心跳、取消和流式超时契约（#54）
-
-### 安全、质量与运维
-
-- [x] Admin API fail closed，并与下游鉴权完全分离（#44）
-- [x] Provider URL allowlist 与 SSRF 防护（#46）
-- [x] 统一 Secret Resolver 与凭据信封加密（#47）
-- [x] Admin 写操作审计日志（#48）
-- [x] GitHub Actions 全量验证门禁（#49）
-- [x] 数据保留、清理、备份与恢复（#53）
+- [ ] 浏览器验收 #43/#45/#52/#54/#60 相关的 Web 页面功能
+- [ ] 真实 Provider 联调复验（三家 Provider 在 #73/#74/#75/#77 之后的完整重跑）
+- [ ] 打 v0.1.0 Release tag
 
 ## Epic 状态
 
@@ -64,6 +49,6 @@
 - #6 已关闭：后端模型目录和发现链 + Web UI (#45) 全部完成。
 - #8 已关闭：Usage 三主导航 + Provider/Source 归因 + 验收证据。
 - #24 已关闭：后端 API + Web 有效能力矩阵 (#43) 完成。
-- #1 待 #50 合并后可关闭。
+- #1 待 OTel 和最终验收后关闭。
 
 本文件的主线状态同步和中文 README 修正由 #55 完成。
