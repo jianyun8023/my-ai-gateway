@@ -19,7 +19,7 @@ use std::{
     fmt::Write as _,
     net::SocketAddr,
     sync::Arc,
-    time::{Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use axum::{
@@ -515,6 +515,8 @@ fn application(state: AppState) -> Router {
     );
     let admin_api = Router::new()
         .route("/admin/keys", get(list_keys).post(create_key))
+        .route("/admin/keys/{id}", get(get_key).delete(revoke_key))
+        .route("/admin/keys/{id}/rotate", post(rotate_key))
         .route("/admin/keys/{id}/revoke", post(revoke_key))
         .route("/admin/usage/summary", get(usage_summary))
         .route("/admin/usage/timeseries", get(usage_timeseries))
@@ -763,6 +765,96 @@ async fn list_keys(State(state): State<AppState>, headers: HeaderMap) -> Respons
     }
 }
 
+async fn get_key(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+) -> Response<Body> {
+    if !state.admin_auth.authorized(&headers) {
+        return error_response(
+            StatusCode::UNAUTHORIZED,
+            "unauthorized",
+            "admin key required",
+        );
+    }
+    let Some(database) = &state.db else {
+        return error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "database_unavailable",
+            "DATABASE_URL is not configured",
+        );
+    };
+    match database.get_virtual_key(id).await {
+        Ok(Some(key)) => (StatusCode::OK, Json(json!({"data": key}))).into_response(),
+        Ok(None) => error_response(
+            StatusCode::NOT_FOUND,
+            "key_not_found",
+            "virtual key not found",
+        ),
+        Err(error) => error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "key_get_failed",
+            &error.to_string(),
+        ),
+    }
+}
+
+#[derive(Deserialize, Default)]
+struct RotateKeyRequest {
+    #[serde(default)]
+    overlap_secs: u64,
+    expires_at: Option<chrono::DateTime<chrono::Utc>>,
+    name: Option<String>,
+    allowed_models: Option<Vec<String>>,
+    scopes: Option<Vec<String>>,
+    key_group: Option<Option<String>>,
+}
+
+async fn rotate_key(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+    payload: Result<Json<RotateKeyRequest>, JsonRejection>,
+) -> Response<Body> {
+    if !state.admin_auth.authorized(&headers) {
+        return error_response(
+            StatusCode::UNAUTHORIZED,
+            "unauthorized",
+            "admin key required",
+        );
+    }
+    let Some(database) = &state.db else {
+        return error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "database_unavailable",
+            "DATABASE_URL is not configured",
+        );
+    };
+    let request = match payload {
+        Ok(Json(request)) => request,
+        Err(error) => {
+            return error_response(StatusCode::BAD_REQUEST, "invalid_json", &error.to_string());
+        }
+    };
+    if let Some(scopes) = &request.scopes {
+        if let Err(message) = db::validate_virtual_key_scopes(scopes) {
+            return error_response(StatusCode::BAD_REQUEST, "key_validation_failed", &message);
+        }
+    }
+    let options = db::VirtualKeyRotationOptions {
+        overlap: Duration::from_secs(request.overlap_secs),
+        expires_at: request.expires_at,
+        name: request.name,
+        allowed_models: request.allowed_models,
+        scopes: request.scopes,
+        key_group: request.key_group,
+    };
+    match database.rotate_virtual_key(id, &options).await {
+        Ok(rotation) => (StatusCode::OK, Json(json!(rotation))).into_response(),
+        Err(error) => virtual_key_error_response(error),
+    }
+}
+
 async fn revoke_key(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -792,6 +884,27 @@ async fn revoke_key(
         Err(error) => error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
             "key_revoke_failed",
+            &error.to_string(),
+        ),
+    }
+}
+
+fn virtual_key_error_response(error: db::VirtualKeyError) -> Response<Body> {
+    match error {
+        db::VirtualKeyError::NotFound => error_response(
+            StatusCode::NOT_FOUND,
+            "key_not_found",
+            "virtual key not found",
+        ),
+        db::VirtualKeyError::Conflict(message) => {
+            error_response(StatusCode::CONFLICT, "key_conflict", &message)
+        }
+        db::VirtualKeyError::Validation(message) => {
+            error_response(StatusCode::BAD_REQUEST, "key_validation_failed", &message)
+        }
+        db::VirtualKeyError::Database(error) => error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "key_operation_failed",
             &error.to_string(),
         ),
     }
@@ -4049,6 +4162,9 @@ mod admin_auth_tests {
     const ADMIN_API_ROUTES: &[(&str, &str)] = &[
         ("GET", "/admin/keys"),
         ("POST", "/admin/keys"),
+        ("GET", "/admin/keys/1"),
+        ("DELETE", "/admin/keys/1"),
+        ("POST", "/admin/keys/1/rotate"),
         ("POST", "/admin/keys/1/revoke"),
         ("GET", "/admin/usage/summary"),
         ("GET", "/admin/usage/timeseries"),

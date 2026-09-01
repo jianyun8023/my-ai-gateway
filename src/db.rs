@@ -89,6 +89,7 @@ pub const VIRTUAL_KEY_INVOKE_SCOPE: &str = "gateway:invoke";
 pub const VIRTUAL_KEY_MODELS_SCOPE: &str = "gateway:models:read";
 
 #[derive(Debug, Clone, Default)]
+#[allow(dead_code)]
 pub struct VirtualKeyUpdate {
     pub name: Option<String>,
     pub allowed_models: Option<Vec<String>>,
@@ -119,6 +120,7 @@ pub struct VirtualKeyRotation {
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
+#[allow(dead_code)]
 pub struct StaticVirtualKeyMigration {
     pub id: i64,
     pub key_prefix: String,
@@ -1049,7 +1051,8 @@ impl Database {
         let prefix = raw.chars().take(11).collect::<String>();
         let hash = hash_key(&raw);
         let scopes = scopes_json(scopes);
-        let allowed_models = serde_json::to_value(allowed_models).unwrap_or_else(|_| Value::Array(vec![]));
+        let allowed_models =
+            serde_json::to_value(allowed_models).unwrap_or_else(|_| Value::Array(vec![]));
         let row = sqlx::query_as::<_, (i64,)>(
             "INSERT INTO virtual_keys
              (name,key_prefix,key_hash,allowed_models,scopes,key_group,expires_at,origin)
@@ -1071,8 +1074,16 @@ impl Database {
     pub async fn list_virtual_keys(&self) -> Result<Vec<VirtualKeyRecord>, sqlx::Error> {
         let query = virtual_key_select("FROM virtual_keys ORDER BY id DESC");
         sqlx::query_as::<_, VirtualKeyRecord>(&query)
-        .fetch_all(&self.pool)
-        .await
+            .fetch_all(&self.pool)
+            .await
+    }
+
+    pub async fn get_virtual_key(&self, id: i64) -> Result<Option<VirtualKeyRecord>, sqlx::Error> {
+        let query = virtual_key_select("FROM virtual_keys WHERE id=$1");
+        sqlx::query_as::<_, VirtualKeyRecord>(&query)
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await
     }
 
     pub async fn revoke_virtual_key(&self, id: i64) -> Result<bool, sqlx::Error> {
@@ -1090,6 +1101,7 @@ impl Database {
     /// Update mutable metadata and permissions in one atomic statement. The
     /// `CASE` flags preserve the distinction between an omitted field and an
     /// explicit null used to clear expiry/group metadata.
+    #[allow(dead_code)]
     pub async fn update_virtual_key(
         &self,
         id: i64,
@@ -1152,10 +1164,10 @@ impl Database {
         let mut tx = self.pool.begin().await?;
         let query = virtual_key_select("FROM virtual_keys WHERE id=$1 FOR UPDATE");
         let old = sqlx::query_as::<_, VirtualKeyRecord>(&query)
-        .bind(id)
-        .fetch_optional(&mut *tx)
-        .await?
-        .ok_or(VirtualKeyError::NotFound)?;
+            .bind(id)
+            .fetch_optional(&mut *tx)
+            .await?
+            .ok_or(VirtualKeyError::NotFound)?;
         if !old.enabled || old.revoked_at.is_some() {
             return Err(VirtualKeyError::Conflict(
                 "virtual key is disabled or revoked".into(),
@@ -1240,6 +1252,7 @@ impl Database {
 
     /// Import the configured legacy static key as a normal database-backed
     /// credential. This operation is idempotent and never returns the raw key.
+    #[allow(dead_code)]
     pub async fn migrate_static_virtual_key(
         &self,
         raw: &str,
