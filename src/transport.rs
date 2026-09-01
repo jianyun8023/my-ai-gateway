@@ -467,6 +467,7 @@ mod tests {
             provider_id: "provider".into(),
             display_name: "Native account".into(),
             credential_env: None,
+            credential_ciphertext: None,
             credential: None,
             enabled: true,
             weight: 100,

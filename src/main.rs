@@ -11,6 +11,7 @@ mod protocol;
 mod provider_preset;
 mod routing;
 mod source_url;
+mod secrets;
 mod stream_contract;
 mod transport;
 mod usage;
@@ -4278,6 +4279,7 @@ mod health_api_tests {
             provider_id: "health-provider".into(),
             display_name: "Health Account".into(),
             credential_env: None,
+            credential_ciphertext: None,
             credential: None,
             enabled: true,
             weight: 100,
@@ -4395,6 +4397,7 @@ mod audit_closeout_tests {
             provider_id: provider_id.into(),
             display_name: id.into(),
             credential_env: None,
+            credential_ciphertext: None,
             credential: None,
             enabled: true,
             weight: 100,
@@ -5025,6 +5028,7 @@ mod kimi_adapter_e2e_tests {
                 provider_id: "kimi".into(),
                 display_name: "Kimi test account".into(),
                 credential_env: None,
+                credential_ciphertext: None,
                 credential: Some("upstream-test-key".into()),
                 enabled: true,
                 weight: 100,
@@ -5390,6 +5394,7 @@ mod stream_contract_e2e_tests {
                 provider_id: "native-e2e".into(),
                 display_name: "Native E2E".into(),
                 credential_env: None,
+                credential_ciphertext: None,
                 credential: Some("test-secret".into()),
                 enabled: true,
                 weight: 100,

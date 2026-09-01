@@ -94,6 +94,7 @@ fn account(id: &str, credential: &str, upstream_model: &str) -> config::AccountC
         provider_id: "runtime-provider".into(),
         display_name: id.into(),
         credential_env: None,
+        credential_ciphertext: None,
         credential: Some(credential.into()),
         enabled: true,
         weight: 100,

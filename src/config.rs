@@ -338,7 +338,12 @@ pub struct AccountConfig {
     pub display_name: String,
     #[serde(default)]
     pub credential_env: Option<String>,
+    /// Application-layer envelope.  This is retained in memory only as an
+    /// opaque ciphertext and is never serialized into a runtime snapshot.
+    #[serde(default, skip_serializing)]
+    pub credential_ciphertext: Option<String>,
     #[serde(default)]
+    #[serde(default, skip_serializing)]
     pub credential: Option<String>,
     #[serde(default = "default_true")]
     pub enabled: bool,
