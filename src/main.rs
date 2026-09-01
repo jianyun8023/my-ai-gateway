@@ -3,15 +3,7 @@ mod control_plane;
 mod domain;
 mod infra;
 mod proxy;
-
-// Re-exports: keep crate-internal paths stable after the directory restructure.
-pub(crate) use domain::{capabilities, config, protocol, provider_preset, routing};
-pub(crate) use infra::{audit, db, health, observability, ops, secrets, source_url};
-pub(crate) use proxy::{stream as stream_contract, transport, usage};
-
-pub(crate) use api::discovery as discovery_api;
-pub(crate) use api::state::*;
-pub(crate) use control_plane::{model_catalog, model_discovery};
+mod state;
 
 use std::{net::SocketAddr, sync::Arc};
 
@@ -23,27 +15,35 @@ use axum::{
     routing::{get, post, put},
     Router,
 };
-use config::GatewayConfig;
 use serde_json::{json, Value};
 use tower_http::{services::ServeDir, trace::TraceLayer};
 
-// Additional imports used by integration test modules.
+use domain::config::GatewayConfig;
+use domain::provider_preset;
+use infra::{audit, db, health, observability, ops, secrets, source_url};
+use proxy::transport;
+use state::{error_response, AdminAuth, AppState, LiveConfig};
+
 #[cfg(test)]
 use api::{
     admin::admin_capabilities_response,
     health_admin::admin_health,
-    proxy::{finalize_stream_usage, models, proxy as proxy_fn, responses, try_fallback_error},
+    proxy::{models, responses},
     usage::{csv_field, parse_usage_query, usage_events_csv},
 };
+#[cfg(test)]
+use proxy::service::proxy as proxy_fn;
 #[cfg(test)]
 use axum::{
     body::Bytes,
     http::{header::CONTENT_TYPE, HeaderMap, HeaderValue},
 };
 #[cfg(test)]
-use protocol::Protocol;
+use domain::{config, protocol::Protocol};
 #[cfg(test)]
-use routing::RouteResolver;
+use proxy::usage;
+#[cfg(test)]
+use state::{key_digest, key_matches_digest, supplied_key, EnvRestore, ENV_LOCK, TEST_ADMIN_KEY};
 #[cfg(test)]
 use tower::ServiceExt;
 #[cfg(test)]
@@ -403,9 +403,9 @@ async fn run_health_probes_once(state: &AppState) {
 }
 
 fn application(state: AppState) -> Router {
-    use api::{admin, health_admin, keys, ops, proxy, usage};
+    use api::{admin, discovery, health_admin, keys, ops, proxy, usage};
 
-    let discovery_api = discovery_api::auxiliary_router_with_health(
+    let discovery_router = discovery::auxiliary_router_with_health(
         state.db.clone(),
         state.http.clone(),
         state.admin_auth.clone(),
@@ -585,7 +585,7 @@ fn application(state: AppState) -> Router {
             get(admin::resolve_route),
         )
         .with_state(state.clone())
-        .merge(discovery_api)
+        .merge(discovery_router)
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             audit_middleware,
@@ -665,10 +665,6 @@ async fn require_admin_auth(
 // - api::admin       — control-plane CRUD, capabilities, config reload
 // - api::health_admin — health management endpoints
 // - api::discovery   — provider preset and model discovery
-
-#[cfg(test)]
-#[path = "api/runtime_usage_tests.rs"]
-mod runtime_usage_tests;
 
 #[cfg(test)]
 mod admin_auth_tests {

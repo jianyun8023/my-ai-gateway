@@ -10,9 +10,10 @@ use axum::{
 };
 use serde_json::{json, Value};
 
-use crate::ops;
+use crate::infra::ops;
 
-use super::state::{error_response, ops_error_response, ops_repository, AppState};
+use super::helpers::{ops_error_response, ops_repository};
+use crate::state::{error_response, AppState};
 
 pub(crate) async fn list_retention_policies(
     State(state): State<AppState>,

@@ -7,12 +7,16 @@ use axum::{
 };
 use serde_json::json;
 
-use crate::{capabilities, control_plane, protocol::Protocol};
-
-use super::state::{
-    admin_control_plane, admin_result, control_plane_error, delete_result, error_response,
-    json_payload, mutation_result, AppState, LiveConfig,
+use crate::{
+    control_plane,
+    domain::{capabilities, protocol::Protocol},
 };
+
+use super::helpers::{
+    admin_control_plane, admin_result, control_plane_error, delete_result, json_payload,
+    mutation_result,
+};
+use crate::state::{error_response, AppState, LiveConfig};
 
 pub(crate) async fn list_sources(
     State(state): State<AppState>,

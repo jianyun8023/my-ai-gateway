@@ -1,10 +1,8 @@
-use crate::{
-    model_catalog::{
-        CapabilitySupport, CatalogError, CatalogMetadata, MetadataField, MetadataValues,
-        ModelCatalogRepository, ModelPresetInput, ProviderPresetInput, ProviderPresetRecord,
-        SourceProtocolMode, SourceRecord,
-    },
-    protocol::Protocol,
+use super::protocol::Protocol;
+use crate::control_plane::model_catalog::{
+    CapabilitySupport, CatalogError, CatalogMetadata, MetadataField, MetadataValues,
+    ModelCatalogRepository, ModelPresetInput, ProviderPresetInput, ProviderPresetRecord,
+    SourceProtocolMode, SourceRecord,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -831,8 +829,8 @@ mod tests {
                 .values()
                 .all(|source| matches!(
                     source,
-                    crate::model_catalog::MetadataSource::Preset
-                        | crate::model_catalog::MetadataSource::Unknown
+                    crate::control_plane::model_catalog::MetadataSource::Preset
+                        | crate::control_plane::model_catalog::MetadataSource::Unknown
                 )));
         }
     }

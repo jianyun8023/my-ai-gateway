@@ -1,6 +1,6 @@
 #[cfg(test)]
-use crate::config::{AccountConfig, GatewayConfig, ProviderConfig, RouteConfig};
-use crate::{model_catalog::ModelCatalogRepository, protocol::Protocol};
+use crate::domain::config::{AccountConfig, GatewayConfig, ProviderConfig, RouteConfig};
+use crate::{control_plane::model_catalog::ModelCatalogRepository, domain::protocol::Protocol};
 use chrono::{DateTime, TimeZone, Utc};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -1654,13 +1654,13 @@ pub fn validate_virtual_key_scopes(scopes: &[String]) -> Result<(), String> {
 mod tests {
     use super::*;
     use crate::{
-        model_catalog::{
+        control_plane::model_catalog::{
             CapabilitySupport, CatalogMetadata, CatalogStatus, LogicalModelInput, MetadataField,
             MetadataSource, MetadataValues, ModelBindingInput, ModelCatalogRepository,
             ModelPresetInput, ModelPresetRef, ProviderPresetInput, SourceInput,
             SourceModelCapabilityInput, SourceModelRefresh, SourceProtocolMode,
         },
-        protocol::Protocol,
+        domain::protocol::Protocol,
     };
     use serde_json::json;
     use sqlx::postgres::PgConnectOptions;

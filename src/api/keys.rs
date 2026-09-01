@@ -10,9 +10,10 @@ use axum::{
 use serde::Deserialize;
 use serde_json::json;
 
-use crate::{db, secrets};
+use crate::infra::{db, secrets};
 
-use super::state::{error_response, virtual_key_error_response, AppState};
+use super::helpers::virtual_key_error_response;
+use crate::state::{error_response, AppState};
 
 #[derive(Deserialize)]
 pub(crate) struct CreateKeyRequest {

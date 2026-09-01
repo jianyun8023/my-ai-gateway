@@ -12,9 +12,9 @@ use axum::{
 };
 use serde_json::{json, Value};
 
-use crate::db;
+use crate::infra::db;
 
-use super::state::{error_response, AppState};
+use crate::state::{error_response, AppState};
 
 #[derive(Debug)]
 pub(crate) struct UsageQuery {

@@ -1,4 +1,4 @@
-use crate::protocol::Protocol;
+use super::protocol::Protocol;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 

@@ -9,7 +9,7 @@ use futures_util::{stream, StreamExt};
 use serde_json::Value;
 use std::time::Instant;
 
-use crate::stream_contract::{is_gateway_heartbeat, SseEventTracker, StreamTermination};
+use super::stream::{is_gateway_heartbeat, SseEventTracker, StreamTermination, HEARTBEAT_MARKER};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct UsageReport {
@@ -118,14 +118,14 @@ fn without_gateway_heartbeats(chunk: &Bytes) -> Vec<u8> {
     if is_gateway_heartbeat(chunk) {
         return Vec::new();
     }
-    if !String::from_utf8_lossy(chunk).contains(crate::stream_contract::HEARTBEAT_MARKER) {
+    if !String::from_utf8_lossy(chunk).contains(HEARTBEAT_MARKER) {
         return chunk.to_vec();
     }
     let text = String::from_utf8_lossy(chunk);
     let mut filtered = String::with_capacity(text.len());
     for line in text.split_inclusive('\n') {
         let content = line.trim_end_matches(['\r', '\n']);
-        if content.trim() == crate::stream_contract::HEARTBEAT_MARKER {
+        if content.trim() == HEARTBEAT_MARKER {
             continue;
         }
         filtered.push_str(line);
@@ -133,11 +133,9 @@ fn without_gateway_heartbeats(chunk: &Bytes) -> Vec<u8> {
     if !text.ends_with('\n')
         && text
             .rsplit_once('\n')
-            .is_some_and(|(_, tail)| tail.trim() == crate::stream_contract::HEARTBEAT_MARKER)
+            .is_some_and(|(_, tail)| tail.trim() == HEARTBEAT_MARKER)
     {
-        filtered = filtered
-            .trim_end_matches(crate::stream_contract::HEARTBEAT_MARKER)
-            .to_owned();
+        filtered = filtered.trim_end_matches(HEARTBEAT_MARKER).to_owned();
     }
     filtered.into_bytes()
 }
@@ -603,8 +601,8 @@ mod tests {
 
     #[tokio::test]
     async fn gateway_timeout_frame_keeps_specific_termination_reason() {
-        let frame = crate::stream_contract::gateway_error_frame(
-            crate::protocol::Protocol::OpenAiResponses,
+        let frame = crate::proxy::stream::gateway_error_frame(
+            crate::domain::protocol::Protocol::OpenAiResponses,
             StreamTermination::IdleTimeout,
         );
         let source = stream::iter([Ok::<Bytes, std::io::Error>(frame)]);
@@ -654,8 +652,8 @@ data: {"response":{"error":{"code":"gateway_first_event_timeout"}}}
 
     #[test]
     fn chat_gateway_error_followed_by_done_keeps_timeout_reason() {
-        let frame = crate::stream_contract::gateway_error_frame(
-            crate::protocol::Protocol::OpenAiChatCompletions,
+        let frame = crate::proxy::stream::gateway_error_frame(
+            crate::domain::protocol::Protocol::OpenAiChatCompletions,
             StreamTermination::TotalTimeout,
         );
         let mut tracker = SseEventTracker::default();

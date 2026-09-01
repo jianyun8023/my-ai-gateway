@@ -1,17 +1,18 @@
+use super::model_catalog::{
+    CatalogError, ConnectionTestInput, ConnectionTestRecord, DiscoveryApplyInput,
+    DiscoveryApplyResult, DiscoveryDiff, DiscoveryFailureInput, DiscoveryRunRecord, MetadataValues,
+    ModelCatalogRepository, ModelPresetRef, SourceModelRefresh, SourceProtocolMode, SourceRecord,
+};
 use crate::{
-    model_catalog::{
-        CatalogError, ConnectionTestInput, ConnectionTestRecord, DiscoveryApplyInput,
-        DiscoveryApplyResult, DiscoveryDiff, DiscoveryFailureInput, DiscoveryRunRecord,
-        MetadataValues, ModelCatalogRepository, ModelPresetRef, SourceModelRefresh,
-        SourceProtocolMode, SourceRecord,
+    domain::{
+        protocol::Protocol,
+        provider_preset::{
+            CredentialHeaderTemplate, DiscoveryParser, DiscoveryPreset, HttpMethod,
+            ProviderPresetDefinition, SourceAuthConfig, SourceProtocolCapability,
+        },
     },
-    protocol::Protocol,
-    provider_preset::{
-        CredentialHeaderTemplate, DiscoveryParser, DiscoveryPreset, HttpMethod,
-        ProviderPresetDefinition, SourceAuthConfig, SourceProtocolCapability,
-    },
-    source_url::{reqwest_error_is_policy_violation, SourceUrlPolicyError},
-    transport::SourceHttpClient,
+    infra::source_url::{reqwest_error_is_policy_violation, SourceUrlPolicyError},
+    proxy::transport::SourceHttpClient,
 };
 use bytes::BytesMut;
 use chrono::{DateTime, Utc};
@@ -104,7 +105,7 @@ impl From<CatalogError> for DiscoveryServiceError {
 pub struct DiscoveryExecution {
     pub run: DiscoveryRunRecord,
     pub diff: DiscoveryDiff,
-    pub models: Vec<crate::model_catalog::SourceModelRecord>,
+    pub models: Vec<super::model_catalog::SourceModelRecord>,
 }
 
 impl From<DiscoveryApplyResult> for DiscoveryExecution {
@@ -840,13 +841,15 @@ fn elapsed_ms(started: Instant) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::control_plane::model_catalog::{
+        CatalogAvailability, CatalogStatus, MetadataField, SourceInput,
+    };
     use crate::{
-        db::Database,
-        model_catalog::{CatalogAvailability, CatalogStatus, MetadataField, SourceInput},
-        provider_preset::{
+        domain::provider_preset::{
             builtin_provider_presets, install_builtin_presets, ProviderPresetDefinition,
         },
-        transport,
+        infra::db::Database,
+        proxy::transport,
     };
     use axum::{
         body::{to_bytes, Body},
@@ -1139,11 +1142,11 @@ mod tests {
             .confirm_source_models(
                 &fixture.source_id,
                 &[
-                    crate::model_catalog::SourceModelConfirmation {
+                    crate::control_plane::model_catalog::SourceModelConfirmation {
                         upstream_model_id: "custom-model".into(),
                         user_overrides: MetadataValues::default(),
                     },
-                    crate::model_catalog::SourceModelConfirmation {
+                    crate::control_plane::model_catalog::SourceModelConfirmation {
                         upstream_model_id: "deepseek-v4-flash".into(),
                         user_overrides: MetadataValues::default(),
                     },
@@ -1180,7 +1183,7 @@ mod tests {
         );
         assert_eq!(
             metadata.field_sources[&MetadataField::ContextWindow],
-            crate::model_catalog::MetadataSource::User
+            crate::control_plane::model_catalog::MetadataSource::User
         );
         assert_eq!(custom.confirmation_status, CatalogStatus::Confirmed);
 

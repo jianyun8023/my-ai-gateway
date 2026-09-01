@@ -1,14 +1,21 @@
+use super::model_catalog::{CatalogAvailability, CatalogStatus, SourceProtocolMode};
 use crate::{
-    config::{
-        adapter_definition, AccountConfig, Capabilities, CapabilityMode, GatewayConfig,
-        ProtocolCapability, ProtocolCapabilityMatrix, ProtocolMode, ProviderConfig, RouteConfig,
+    domain::{
+        config::{
+            adapter_definition, AccountConfig, Capabilities, CapabilityMode, GatewayConfig,
+            ProtocolCapability, ProtocolCapabilityMatrix, ProtocolMode, ProviderConfig,
+            RouteConfig,
+        },
+        protocol::Protocol,
+        provider_preset::ProviderPresetDefinition,
+        routing::{
+            intersect_capabilities, join_endpoint, RouteResolver, RuntimeBinding, RuntimeRoute,
+        },
     },
-    db::Database,
-    model_catalog::{CatalogAvailability, CatalogStatus, SourceProtocolMode},
-    protocol::Protocol,
-    provider_preset::ProviderPresetDefinition,
-    routing::{intersect_capabilities, join_endpoint, RouteResolver, RuntimeBinding, RuntimeRoute},
-    source_url::{SourceUrlPolicy, SourceUrlPolicyError},
+    infra::{
+        db::Database,
+        source_url::{SourceUrlPolicy, SourceUrlPolicyError},
+    },
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -2958,19 +2965,19 @@ mod tests {
             .expect("reload restored snapshot");
         assert!(active_snapshot.revision > stable_snapshot.revision);
 
-        let health = crate::health::HealthRegistry::new(Duration::from_secs(60));
+        let health = crate::infra::health::HealthRegistry::new(Duration::from_secs(60));
         let active_revision = active_snapshot.revision;
-        let state = crate::AppState {
-            live: Arc::new(std::sync::RwLock::new(crate::LiveConfig::from_snapshot(
-                active_snapshot,
-            ))),
-            http: crate::transport::test_client().expect("HTTP client"),
+        let state = crate::state::AppState {
+            live: Arc::new(std::sync::RwLock::new(
+                crate::state::LiveConfig::from_snapshot(active_snapshot),
+            )),
+            http: crate::proxy::transport::test_client().expect("HTTP client"),
             db: Some(database.clone()),
             control_plane: Some(control_plane.clone()),
             health: health.clone(),
-            admin_auth: crate::AdminAuth::test(),
-            secrets: crate::secrets::SecretResolver::empty(),
-            prometheus_handle: crate::observability::prometheus_handle(),
+            admin_auth: crate::state::AdminAuth::test(),
+            secrets: crate::infra::secrets::SecretResolver::empty(),
+            prometheus_handle: crate::infra::observability::prometheus_handle(),
         };
         state.reload_snapshot(stable_snapshot.clone());
         assert_eq!(state.snapshot().revision, active_revision);
@@ -3051,7 +3058,10 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .uri("/admin/accounts")
-                    .header("authorization", format!("Bearer {}", crate::TEST_ADMIN_KEY))
+                    .header(
+                        "authorization",
+                        format!("Bearer {}", crate::state::TEST_ADMIN_KEY),
+                    )
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -3068,7 +3078,10 @@ mod tests {
                     .method("POST")
                     .uri("/admin/sources")
                     .header("content-type", "application/json")
-                    .header("authorization", format!("Bearer {}", crate::TEST_ADMIN_KEY))
+                    .header(
+                        "authorization",
+                        format!("Bearer {}", crate::state::TEST_ADMIN_KEY),
+                    )
                     .body(Body::from(
                         json!({
                             "id":"source-api",

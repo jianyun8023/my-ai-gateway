@@ -1,6 +1,27 @@
-use super::*;
-use axum::{body::to_bytes, extract::Request, http::header, Router};
+use crate::{
+    control_plane,
+    domain::{
+        config::{self, GatewayConfig},
+        protocol::Protocol,
+        provider_preset,
+        routing::RouteResolver,
+    },
+    infra::{db, health, observability, secrets, source_url},
+    proxy::{
+        service::{finalize_stream_usage, proxy as proxy_fn, try_fallback_error},
+        stream::{StreamConfig, StreamTermination},
+        transport, usage,
+    },
+    state::{AdminAuth, AppState, LiveConfig},
+};
+use axum::{
+    body::{to_bytes, Body, Bytes},
+    extract::Request,
+    http::{header, HeaderMap, HeaderValue, Response, StatusCode},
+    Router,
+};
 use futures_util::stream;
+use serde_json::{json, Value};
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use std::{
     collections::HashMap,
@@ -8,6 +29,7 @@ use std::{
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
+use uuid::Uuid;
 
 #[derive(Clone, Debug)]
 struct RecordedRequest {
@@ -174,7 +196,7 @@ fn state(config: GatewayConfig, database: Option<db::Database>) -> AppState {
         health: health::HealthRegistry::new(Duration::from_secs(1)),
         admin_auth: AdminAuth::test(),
         secrets: secrets::SecretResolver::empty(),
-        prometheus_handle: crate::observability::prometheus_handle(),
+        prometheus_handle: observability::prometheus_handle(),
     }
 }
 
@@ -346,7 +368,7 @@ async fn transport_error_path_uses_fallback_and_records_its_actual_model() {
         &HeaderMap::new(),
         Bytes::from_static(br#"{"model":"logical-model","messages":[]}"#),
         transport::TransportError::Request,
-        &stream_contract::StreamConfig::default(),
+        &StreamConfig::default(),
         Instant::now(),
     )
     .await;
@@ -390,7 +412,7 @@ async fn fallback_transport_failure_is_retained_as_the_final_actual_attempt() {
         &HeaderMap::new(),
         Bytes::from_static(br#"{"model":"logical-model","messages":[]}"#),
         transport::TransportError::Request,
-        &stream_contract::StreamConfig::default(),
+        &StreamConfig::default(),
         Instant::now(),
     )
     .await;
@@ -459,7 +481,7 @@ fn failed_stream_keeps_ttft_absent_and_never_estimates_tokens() {
             captured: Vec::new(),
             ttft_ms: None,
             failed: true,
-            termination: stream_contract::StreamTermination::UpstreamError,
+            termination: StreamTermination::UpstreamError,
         },
     );
     assert_eq!(event.ttft_ms, None);
@@ -475,30 +497,22 @@ fn failed_stream_keeps_ttft_absent_and_never_estimates_tokens() {
 fn stream_termination_reasons_have_stable_usage_statuses_and_summaries() {
     let cases = [
         (
-            stream_contract::StreamTermination::EmptyStream,
+            StreamTermination::EmptyStream,
             599,
             "upstream stream ended without an event",
         ),
         (
-            stream_contract::StreamTermination::ClientCancelled,
+            StreamTermination::ClientCancelled,
             499,
             "client disconnected",
         ),
         (
-            stream_contract::StreamTermination::FirstEventTimeout,
+            StreamTermination::FirstEventTimeout,
             504,
             "first event timeout",
         ),
-        (
-            stream_contract::StreamTermination::IdleTimeout,
-            504,
-            "upstream idle timeout",
-        ),
-        (
-            stream_contract::StreamTermination::TotalTimeout,
-            504,
-            "stream total timeout",
-        ),
+        (StreamTermination::IdleTimeout, 504, "upstream idle timeout"),
+        (StreamTermination::TotalTimeout, 504, "stream total timeout"),
     ];
     for (termination, status, summary) in cases {
         let mut event = usage_event();
@@ -714,7 +728,7 @@ async fn postgres_db_first_source_attribution_covers_primary_fallback_stream_and
     let control_plane = control_plane::ControlPlane::with_url_policy(
         &database,
         "127.0.0.1:0",
-        crate::source_url::test_policy(),
+        source_url::test_policy(),
     );
     provider_preset::install_builtin_presets(&database.model_catalog())
         .await
@@ -750,7 +764,7 @@ async fn postgres_db_first_source_attribution_covers_primary_fallback_stream_and
         health: health::HealthRegistry::new(Duration::from_secs(30)),
         admin_auth: AdminAuth::test(),
         secrets: secrets::SecretResolver::empty(),
-        prometheus_handle: crate::observability::prometheus_handle(),
+        prometheus_handle: observability::prometheus_handle(),
     };
 
     let suffix = Uuid::new_v4().to_string();

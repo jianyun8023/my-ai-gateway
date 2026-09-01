@@ -1,9 +1,13 @@
-use crate::{
-    config::{AccountConfig, ProviderConfig},
-    protocol::Protocol,
-    source_url::{reqwest_error_is_policy_violation, SourceUrlPolicy, SourceUrlPolicyError},
-    stream_contract::{self, StreamConfig, StreamTermination},
+use super::{
+    stream::{self, StreamConfig, StreamTermination},
     usage::{usage_for_json_response, UsageReport},
+};
+use crate::{
+    domain::{
+        config::{AccountConfig, ProviderConfig},
+        protocol::Protocol,
+    },
+    infra::source_url::{reqwest_error_is_policy_violation, SourceUrlPolicy, SourceUrlPolicyError},
 };
 use axum::{
     body::Body,
@@ -294,8 +298,7 @@ pub async fn forward_url_with_config(
     }
     let stream = upstream.bytes_stream();
     let body = Body::from_stream(stream.map_err(|error| std::io::Error::other(error.to_string())));
-    let body =
-        stream_contract::wrap_native_body(body, protocol, stream_config.clone(), request_started);
+    let body = stream::wrap_native_body(body, protocol, stream_config.clone(), request_started);
     let mut response = Response::new(body);
     *response.status_mut() = status;
     for (name, value) in &upstream_headers {
@@ -375,7 +378,7 @@ pub fn client(policy: Arc<SourceUrlPolicy>) -> Result<SourceHttpClient, reqwest:
 
 #[cfg(test)]
 pub fn test_client() -> Result<SourceHttpClient, reqwest::Error> {
-    client(crate::source_url::test_policy())
+    client(crate::infra::source_url::test_policy())
 }
 
 fn map_reqwest_error(error: reqwest::Error) -> TransportError {

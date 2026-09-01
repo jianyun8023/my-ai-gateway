@@ -1,4 +1,4 @@
-use crate::{config::adapter_definition, protocol::Protocol};
+use crate::domain::{config::adapter_definition, protocol::Protocol};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

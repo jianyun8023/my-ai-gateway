@@ -8,11 +8,10 @@ use axum::{
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::{control_plane, health, protocol::Protocol};
+use crate::{control_plane, domain::protocol::Protocol, infra::health};
 
-use super::state::{
-    control_plane_error, error_response, json_payload, probe_error_response, AppState,
-};
+use super::helpers::{control_plane_error, json_payload, probe_error_response};
+use crate::state::{error_response, AppState};
 
 pub(crate) async fn admin_health(
     State(state): State<AppState>,

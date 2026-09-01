@@ -1,8 +1,8 @@
+use super::db::{AccountHealthRow, Database};
 use crate::{
-    db::{AccountHealthRow, Database},
-    model_discovery::{DiscoveryServiceError, ModelDiscoveryService},
-    protocol::Protocol,
-    transport::SourceHttpClient,
+    control_plane::model_discovery::{DiscoveryServiceError, ModelDiscoveryService},
+    domain::protocol::Protocol,
+    proxy::transport::SourceHttpClient,
 };
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use serde::Serialize;
@@ -498,7 +498,10 @@ impl HealthRegistry {
 
     /// Apply the result of the shared ProviderPreset connection-test service.
     /// Model discovery never calls this method.
-    pub async fn apply_connection_test(&self, record: &crate::model_catalog::ConnectionTestRecord) {
+    pub async fn apply_connection_test(
+        &self,
+        record: &crate::control_plane::model_catalog::ConnectionTestRecord,
+    ) {
         let Some(account_id) = record.account_id.as_deref() else {
             return;
         };
@@ -593,7 +596,7 @@ impl ProbeError {
 pub struct ProbeOutcome {
     pub account_id: String,
     pub protocol: Protocol,
-    pub connection_test: crate::model_catalog::ConnectionTestRecord,
+    pub connection_test: crate::control_plane::model_catalog::ConnectionTestRecord,
     pub health: AccountHealth,
 }
 
@@ -759,11 +762,11 @@ fn unknown_health(available: bool, source: &str) -> AccountHealth {
 mod tests {
     use super::*;
     use crate::{
-        model_catalog::SourceInput,
-        provider_preset::{
+        control_plane::model_catalog::SourceInput,
+        domain::provider_preset::{
             builtin_provider_presets, install_builtin_presets, ProviderPresetDefinition,
         },
-        transport,
+        proxy::transport,
     };
     use axum::{
         body::{to_bytes, Body},
@@ -1097,7 +1100,7 @@ mod tests {
             .await
             .expect("create probe account");
 
-        let _environment_lock = crate::ENV_LOCK.lock().await;
+        let _environment_lock = crate::state::ENV_LOCK.lock().await;
         let previous = std::env::var_os("HEALTH_PROBE_TEST_KEY");
         std::env::set_var("HEALTH_PROBE_TEST_KEY", "probe-secret");
         let registry = HealthRegistry::with_database_config(
@@ -1107,23 +1110,23 @@ mod tests {
                 ..HealthConfig::default()
             },
         );
-        let empty_config = crate::config::GatewayConfig {
+        let empty_config = crate::domain::config::GatewayConfig {
             listen_addr: "127.0.0.1:0".into(),
             providers: Vec::new(),
             accounts: Vec::new(),
             routes: Vec::new(),
         };
-        let app_state = crate::AppState {
-            live: Arc::new(std::sync::RwLock::new(crate::LiveConfig::legacy(Arc::new(
-                empty_config,
-            )))),
+        let app_state = crate::state::AppState {
+            live: Arc::new(std::sync::RwLock::new(crate::state::LiveConfig::legacy(
+                Arc::new(empty_config),
+            ))),
             http: transport::test_client().expect("probe HTTP client"),
             db: Some(database.clone()),
             control_plane: None,
             health: registry.clone(),
-            admin_auth: crate::AdminAuth::test(),
-            secrets: crate::secrets::SecretResolver::empty(),
-            prometheus_handle: crate::observability::prometheus_handle(),
+            admin_auth: crate::state::AdminAuth::test(),
+            secrets: crate::infra::secrets::SecretResolver::empty(),
+            prometheus_handle: crate::infra::observability::prometheus_handle(),
         };
         let response = crate::application(app_state)
             .oneshot(

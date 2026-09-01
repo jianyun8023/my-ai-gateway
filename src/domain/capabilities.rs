@@ -1,9 +1,9 @@
-use crate::{
+use super::{
     config::{Capabilities, GatewayConfig, ProtocolMode},
-    control_plane::PublishedModel,
     protocol::Protocol,
     routing::{ResolvedBinding, ResolvedRoute, RouteResolutionError, RouteResolver},
 };
+use crate::control_plane::PublishedModel;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use std::{collections::BTreeMap, error::Error, fmt};
@@ -471,7 +471,7 @@ impl EffectiveProtocolCapability {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
+    use crate::domain::{
         config::{AccountConfig, CapabilityMode, ProviderConfig},
         routing::{RuntimeBinding, RuntimeRoute},
     };

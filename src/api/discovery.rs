@@ -1,14 +1,15 @@
 use crate::{
-    db::Database,
-    model_catalog::{
+    control_plane::model_catalog::{
         CatalogAvailability, CatalogError, CatalogStatus, MetadataValues, SourceModelConfirmation,
     },
-    model_discovery::{DiscoveryServiceError, ModelDiscoveryService},
-    protocol::Protocol,
-    provider_preset::{provider_preset_diff, ProviderPresetDefinition},
-    source_url::SourceUrlPolicyError,
-    transport::SourceHttpClient,
-    AdminAuth,
+    control_plane::model_discovery::{DiscoveryServiceError, ModelDiscoveryService},
+    domain::{
+        protocol::Protocol,
+        provider_preset::{provider_preset_diff, ProviderPresetDefinition},
+    },
+    infra::{db::Database, source_url::SourceUrlPolicyError},
+    proxy::transport::SourceHttpClient,
+    state::AdminAuth,
 };
 use axum::{
     body::{Body, Bytes},
@@ -29,15 +30,15 @@ struct DiscoveryApiState {
     database: Option<Database>,
     http: SourceHttpClient,
     admin_auth: AdminAuth,
-    health: Option<crate::health::HealthRegistry>,
+    health: Option<crate::infra::health::HealthRegistry>,
 }
 
 #[cfg(test)]
 pub fn router(database: Option<Database>, http: SourceHttpClient) -> Router {
     let health = database.clone().map(|database| {
-        crate::health::HealthRegistry::with_database_config(
+        crate::infra::health::HealthRegistry::with_database_config(
             database,
-            crate::health::HealthConfig::default(),
+            crate::infra::health::HealthConfig::default(),
         )
     });
     router_inner(database, http, AdminAuth::test(), true, health)
@@ -59,7 +60,7 @@ pub fn auxiliary_router_with_health(
     database: Option<Database>,
     http: SourceHttpClient,
     admin_auth: AdminAuth,
-    health: crate::health::HealthRegistry,
+    health: crate::infra::health::HealthRegistry,
 ) -> Router {
     router_inner(database, http, admin_auth, false, Some(health))
 }
@@ -69,7 +70,7 @@ fn router_inner(
     http: SourceHttpClient,
     admin_auth: AdminAuth,
     include_source_collection: bool,
-    health: Option<crate::health::HealthRegistry>,
+    health: Option<crate::infra::health::HealthRegistry>,
 ) -> Router {
     let state = DiscoveryApiState {
         database,
@@ -212,7 +213,7 @@ async fn create_source(
         }
         endpoints.insert(protocol, endpoint);
     }
-    let input = crate::model_catalog::SourceInput {
+    let input = crate::control_plane::model_catalog::SourceInput {
         id: request.id,
         display_name: request.display_name,
         provider_preset_id: preset.id,
@@ -493,7 +494,7 @@ fn authorized_database(state: &DiscoveryApiState, headers: &HeaderMap) -> Option
 fn authorized_repository(
     state: &DiscoveryApiState,
     headers: &HeaderMap,
-) -> Option<crate::model_catalog::ModelCatalogRepository> {
+) -> Option<crate::control_plane::model_catalog::ModelCatalogRepository> {
     authorized_database(state, headers).map(|database| database.model_catalog())
 }
 
@@ -597,9 +598,10 @@ fn api_error(status: StatusCode, kind: &str, message: &str) -> Response<Body> {
 mod tests {
     use super::*;
     use crate::{
-        model_catalog::{MetadataField, SourceModelRefresh},
-        provider_preset::{install_builtin_presets, BUILTIN_PROVIDER_PRESET_VERSION},
-        transport,
+        control_plane::model_catalog::{MetadataField, SourceModelRefresh},
+        domain::provider_preset::{install_builtin_presets, BUILTIN_PROVIDER_PRESET_VERSION},
+        proxy::transport,
+        state::TEST_ADMIN_KEY,
     };
     use axum::{body::to_bytes, http::Request};
     use chrono::Utc;
@@ -624,7 +626,7 @@ mod tests {
             .method(method)
             .uri(uri)
             .header("content-type", "application/json")
-            .header("authorization", format!("Bearer {}", crate::TEST_ADMIN_KEY))
+            .header("authorization", format!("Bearer {}", TEST_ADMIN_KEY))
             .body(Body::from(body.to_string()))
             .expect("admin API request")
     }
