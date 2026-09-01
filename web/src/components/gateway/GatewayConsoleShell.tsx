@@ -185,6 +185,23 @@ export function GatewayConsoleShell({
           ))}
         </nav>
 
+        {/* Mobile-only admin key — visible in sidebar when topbar input is hidden */}
+        <div className={styles.mobileKeySection}>
+          <label className={styles.mobileKeyLabel}>
+            <span>Admin Key</span>
+            <input
+              autoComplete="off"
+              spellCheck={false}
+              type="password"
+              value={adminKeyDraft}
+              onChange={(e) => setAdminKeyDraft(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') applyAdminKey(); }}
+              placeholder="GATEWAY_ADMIN_KEY"
+            />
+          </label>
+          <Button size="sm" variant="secondary" onClick={applyAdminKey}>应用</Button>
+        </div>
+
         {/* Footer — matches prototype: status dot + running info */}
         <div className={styles.sidebarFooter}>
           <div className={styles.statusDot} />

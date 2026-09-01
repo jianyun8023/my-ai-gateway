@@ -145,6 +145,34 @@
   border-radius: 99px;
 }
 
+/* Mobile-only admin key — hidden on desktop, shown inside sidebar on ≤600px */
+.mobileKeySection {
+  display: none;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border-color);
+  gap: 8px;
+  align-items: flex-end;
+}
+.mobileKeyLabel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  > input {
+    padding: 6px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg);
+    font-size: 13px;
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    width: 100%;
+  }
+}
+
 /* Sidebar footer — status dot + info */
 .sidebarFooter {
   padding: 12px 16px;
@@ -361,6 +389,8 @@
   .topbar { padding: 0 16px; gap: 10px; }
   .topbarSearch { display: none; }
   .endpointDisplay { font-size: 11px; padding: 4px 8px; }
+  .keyInput > span { display: none; }
+  .keyInput input { width: 120px; }
 
   .pageHeader { flex-direction: column; align-items: flex-start; gap: 12px; }
   .pageHeader h1 { font-size: 22px; }
@@ -371,14 +401,13 @@
   .shell { --keeper-card-radius: var(--radius); --keeper-card-padding: 16px; --keeper-card-header-padding-x: 16px; --keeper-card-header-padding-top: 16px; --keeper-card-header-padding-bottom: 12px; }
 
   .content { padding: 12px; }
-  .topbar { height: 48px; }
+  .topbar { height: 48px; gap: 6px; }
   .endpointDisplay { display: none; }
+  .keyInput { display: none; }
+  .mobileKeySection { display: flex; }
 
   .pageHeader h1 { font-size: 20px; }
   .pageDesc { font-size: 12px; }
-
-  .keyInput > span { display: none; }
-  .keyInput input { width: 100px; }
 }
 
 /* ─── responsive: small phone ≤ 380px ──────────────────────── */
