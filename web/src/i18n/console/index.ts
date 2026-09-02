@@ -10,6 +10,7 @@ import { models as enModels } from './en/models';
 import { discovery as enDiscovery } from './en/discovery';
 import { capabilities as enCapabilities } from './en/capabilities';
 import { settings as enSettings } from './en/settings';
+import { values as enValues } from './en/values';
 import { common as zhCommon } from './zh/common';
 import { errors as zhErrors } from './zh/errors';
 import { shell as zhShell } from './zh/shell';
@@ -19,6 +20,7 @@ import { models as zhModels } from './zh/models';
 import { discovery as zhDiscovery } from './zh/discovery';
 import { capabilities as zhCapabilities } from './zh/capabilities';
 import { settings as zhSettings } from './zh/settings';
+import { values as zhValues } from './zh/values';
 
 const en = {
   common: enCommon,
@@ -30,6 +32,7 @@ const en = {
   discovery: enDiscovery,
   capabilities: enCapabilities,
   settings: enSettings,
+  values: enValues,
 };
 
 const zh = {
@@ -42,6 +45,7 @@ const zh = {
   discovery: zhDiscovery,
   capabilities: zhCapabilities,
   settings: zhSettings,
+  values: zhValues,
 };
 
 // 只在内存中聚合完毕后整体注册一次,避免多次 addResourceBundle 覆盖。

@@ -767,7 +767,7 @@ export function SourcesPage({ api, refreshRevision = 0, onBusyChange }: SourcesP
                   <td><code>{account.source_id}</code></td>
                   <td><StatusPill tone={account.credential_configured ? 'success' : 'danger'}>{t(credentialKey(account))}</StatusPill></td>
                   <td><span className={styles.mono}>{account.weight}</span></td>
-                  <td><StatusPill tone={account.health_status === 'healthy' ? 'success' : account.health_status === 'unknown' ? 'accent' : 'warning'}>{account.health_status || 'unknown'}</StatusPill></td>
+                  <td><StatusPill tone={account.health_status === 'healthy' ? 'success' : account.health_status === 'unknown' ? 'accent' : 'warning'}>{t(`values.health.${account.health_status || 'unknown'}`, { defaultValue: account.health_status || 'unknown' })}</StatusPill></td>
                   <td>{formatDateTime(account.cooldown_until)}</td>
                   <td><Toggle label={t('sources.table.toggle_aria', { id: account.id })} checked={account.enabled} disabled={mutationBusy} onChange={(enabled) => void mutate(() => api.setAccountEnabled(account.id, enabled), t(enabled ? 'sources.table.account_toggle_enabled' : 'sources.table.account_toggle_disabled', { name: account.id }))} /></td>
                   <td><div className={styles.rowActions}>

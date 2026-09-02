@@ -141,6 +141,7 @@ export const usage = {
     success: 'Success',
     failure: 'Failure',
     retries_fallback: '{{count}} · fallback',
+    fallback_only: 'fallback',
   },
 
   // —— 事件详情抽屉 ——

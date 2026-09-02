@@ -9,6 +9,7 @@ import {
 } from 'react';
 import type { AdminErrorShape, GatewayProtocol } from '@/admin-api';
 import { useTranslation } from 'react-i18next';
+import { currentIntlLocale } from '@/i18n/intl';
 import { Button } from '@/components/ui/Button';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { Modal } from '@/components/ui/Modal';
@@ -29,7 +30,7 @@ export const formatDateTime = (value?: string | null): string => {
   if (!value) return '—';
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return value;
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat(currentIntlLocale(), {
     dateStyle: 'medium',
     timeStyle: 'medium',
   }).format(parsed);

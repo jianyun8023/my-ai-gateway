@@ -86,6 +86,11 @@ export function GatewayConsoleShell({
   const setTheme = useThemeStore((state) => state.setTheme);
   const { t } = useTranslation('console');
 
+  // 网关服务入口:开发态走本机后端,生产态展示部署来源(替代写死的 localhost 占位)。
+  const gatewayEndpoint = import.meta.env.DEV
+    ? (import.meta.env.VITE_API_PROXY_TARGET as string | undefined)?.trim() || 'http://127.0.0.1:8787'
+    : window.location.origin;
+
   const getAdminKey = useCallback(() => appliedAdminKeyRef.current, []);
   const clearAdminKey = useCallback(() => {
     appliedAdminKeyRef.current = '';
@@ -213,7 +218,7 @@ export function GatewayConsoleShell({
         {/* Footer — matches prototype: status dot + running info */}
         <div className={styles.sidebarFooter}>
           <div className={styles.statusDot} />
-          <span>{t('shell.running_status', { port: '3100' })}</span>
+          <span>{t('shell.running_status')}</span>
         </div>
       </aside>
 
@@ -229,7 +234,7 @@ export function GatewayConsoleShell({
           <div className={styles.topbarRight}>
             <div className={styles.endpointDisplay}>
               <div className={styles.endpointDot} />
-              <span>{t('shell.endpoint_display')}</span>
+              <span>{gatewayEndpoint}</span>
             </div>
             <div className={styles.topbarSearch}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /></svg>
