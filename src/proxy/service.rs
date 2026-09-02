@@ -564,13 +564,93 @@ fn finish_proxy(
 }
 
 fn client_source_from_headers(headers: &HeaderMap) -> String {
-    headers
+    if let Some(value) = headers
         .get("x-client-source")
         .and_then(|value| value.to_str().ok())
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .unwrap_or("unknown")
-        .to_owned()
+    {
+        return value.to_owned();
+    }
+    if let Some(value) = headers
+        .get(axum::http::header::USER_AGENT)
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        if let Some(product) = known_client_user_agent(value) {
+            return product.to_owned();
+        }
+    }
+    "unknown".to_owned()
+}
+
+/// Recognised upstream products and the canonical `client_source` value
+/// they map to.  Prefixes are matched case-sensitively against the first
+/// whitespace-delimited token of the User-Agent (parenthesised comments
+/// stripped first).  Order matters only when one prefix is a prefix of
+/// another — entries are kept short and distinct so the linear walk is
+/// sufficient.
+///
+/// Sources verified against upstream source code:
+///   * `Kimi Code CLI`  — `kimi-code-cli/<ver>` set in
+///     `MoonshotAI/kimi-code/apps/kimi-code/src/constant/app.ts`
+///     (`CLI_USER_AGENT_PRODUCT = "kimi-code-cli"`) and emitted by
+///     `packages/oauth/src/identity.ts::createKimiUserAgent`.
+///   * `Anthropic SDK Python`  — `Anthropic/Python <ver>` /
+///     `AsyncAnthropic/Python <ver>` emitted by
+///     `anthropics/anthropic-sdk-python/src/anthropic/_base_client.py`
+///     (property `user_agent`).
+///   * `Anthropic SDK JS`  — `Anthropic/JS <ver>` from
+///     `anthropics/anthropic-sdk-typescript/src/client.ts` (`getUserAgent`).
+///   * `Anthropic SDK Go`  — `Anthropic/Go <ver>` from
+///     `anthropics/anthropic-sdk-go/internal/requestconfig/requestconfig.go`.
+///   * `OpenAI SDK Python`  — `OpenAI/Python <ver>` /
+///     `AsyncOpenAI/Python <ver>` from
+///     `openai/openai-python/src/openai/_base_client.py`.
+///   * `OpenAI SDK Go`  — `OpenAI/Go <ver>` from
+///     `openai/openai-go/internal/requestconfig/requestconfig.go`.
+///   * `OpenAI Codex CLI`  — `codex_app_server_daemon/<ver> (...) codex_cli_rs/<ver>`
+///     from `openai/codex/codex-rs/app-server-daemon/src/client.rs`
+///     (round-trip user-agent parser).
+///
+/// Entries without a verifiable upstream source are deliberately omitted
+/// from this table; extend it only after confirming the format in source.
+const KNOWN_CLIENT_USER_AGENTS: &[(&str, &str)] = &[
+    // Kimi Code CLI / Kimi Code web UI — both ship `kimi-code-cli/<ver>`
+    // (the web UI is the same product with a `(web)` suffix in the UA
+    // parenthesised comment, which we strip before matching).
+    ("kimi-code-cli", "kimi-code-cli"),
+    // OpenAI Codex CLI — both product tokens seen in the daemon UA.
+    ("codex_app_server_daemon", "codex-cli"),
+    ("codex_cli_rs", "codex-cli"),
+    // Official Anthropic SDKs — Stainless-generated, format `<Brand>/<Lang>`
+    // with `Async<Brand>/<Lang>` for async clients.
+    ("AsyncAnthropic/", "anthropic-sdk"),
+    ("Anthropic/", "anthropic-sdk"),
+    // Official OpenAI SDKs — same Stainless shape as Anthropic.
+    ("AsyncOpenAI/", "openai-sdk"),
+    ("OpenAI/", "openai-sdk"),
+];
+
+/// Map a User-Agent string to a stable `client_source` identifier when the
+/// upstream product is recognised.  Unknown agents return `None` and the
+/// caller falls back to `unknown`.
+fn known_client_user_agent(user_agent: &str) -> Option<&'static str> {
+    let head = user_agent
+        .split_once('(')
+        .map(|(h, _)| h)
+        .unwrap_or(user_agent);
+    let product = head.split_whitespace().next()?.trim_end_matches('/');
+    if product.is_empty() {
+        return None;
+    }
+    for (prefix, label) in KNOWN_CLIENT_USER_AGENTS {
+        if product == *prefix || product.starts_with(prefix) {
+            return Some(*label);
+        }
+    }
+    None
 }
 
 fn warn_degraded_route(request_id: &str, route: &ResolvedRoute) {
@@ -696,7 +776,12 @@ pub(crate) fn finalize_stream_usage(
             attempt.success = false;
         }
     }
-    let report = usage::usage_for_sse_response(event.success, request_body, &observation.captured);
+    let report = usage::usage_for_sse_response(
+        &event.request_id,
+        event.success,
+        request_body,
+        &observation.captured,
+    );
     event.input_tokens = report.input_tokens;
     event.output_tokens = report.output_tokens;
     event.reasoning_tokens = report.reasoning_tokens;
@@ -1270,5 +1355,124 @@ async fn record_response_health(
             .await;
     } else if status.is_success() {
         health.mark_success(account_id).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{client_source_from_headers, known_client_user_agent};
+    use axum::http::{HeaderMap, HeaderValue};
+
+    fn header(headers: &mut HeaderMap, name: &'static str, value: &str) {
+        headers.insert(name, HeaderValue::from_str(value).unwrap());
+    }
+
+    #[test]
+    fn explicit_x_client_source_takes_precedence_over_user_agent() {
+        let mut headers = HeaderMap::new();
+        header(&mut headers, "x-client-source", "my-business-app");
+        header(&mut headers, "user-agent", "kimi-code-cli/1.2.3");
+        assert_eq!(client_source_from_headers(&headers), "my-business-app");
+    }
+
+    #[test]
+    fn empty_x_client_source_falls_through_to_user_agent() {
+        let mut headers = HeaderMap::new();
+        header(&mut headers, "x-client-source", "   ");
+        header(&mut headers, "user-agent", "kimi-code-cli/1.2.3");
+        assert_eq!(client_source_from_headers(&headers), "kimi-code-cli");
+    }
+
+    #[test]
+    fn user_agent_identifies_kimi_code_cli() {
+        let mut headers = HeaderMap::new();
+        header(&mut headers, "user-agent", "kimi-code-cli/1.2.3 (web)");
+        assert_eq!(client_source_from_headers(&headers), "kimi-code-cli");
+    }
+
+    #[test]
+    fn user_agent_identifies_anthropic_sdk_across_languages() {
+        let cases = [
+            "Anthropic/Python 0.39.0",
+            "AsyncAnthropic/Python 0.39.0",
+            "Anthropic/JS 0.30.0",
+            "Anthropic/Go 0.20.0",
+        ];
+        for ua in cases {
+            let mut headers = HeaderMap::new();
+            header(&mut headers, "user-agent", ua);
+            assert_eq!(
+                client_source_from_headers(&headers),
+                "anthropic-sdk",
+                "ua={ua}"
+            );
+        }
+    }
+
+    #[test]
+    fn user_agent_identifies_openai_sdk_across_languages() {
+        let cases = [
+            "OpenAI/Python 1.68.0",
+            "AsyncOpenAI/Python 1.68.0",
+            "OpenAI/Go 1.0.0",
+        ];
+        for ua in cases {
+            let mut headers = HeaderMap::new();
+            header(&mut headers, "user-agent", ua);
+            assert_eq!(
+                client_source_from_headers(&headers),
+                "openai-sdk",
+                "ua={ua}"
+            );
+        }
+    }
+
+    #[test]
+    fn user_agent_identifies_codex_cli() {
+        let mut headers = HeaderMap::new();
+        header(
+            &mut headers,
+            "user-agent",
+            "codex_app_server_daemon/1.2.3 (Linux 6.8.0; x86_64) codex_cli_rs/1.2.3",
+        );
+        assert_eq!(client_source_from_headers(&headers), "codex-cli");
+        let mut headers = HeaderMap::new();
+        header(&mut headers, "user-agent", "codex_cli_rs/1.2.3");
+        assert_eq!(client_source_from_headers(&headers), "codex-cli");
+    }
+
+    #[test]
+    fn unknown_user_agent_falls_back_to_unknown() {
+        let mut headers = HeaderMap::new();
+        header(&mut headers, "user-agent", "curl/8.7.1");
+        assert_eq!(client_source_from_headers(&headers), "unknown");
+    }
+
+    #[test]
+    fn no_client_headers_at_all_returns_unknown() {
+        let headers = HeaderMap::new();
+        assert_eq!(client_source_from_headers(&headers), "unknown");
+    }
+
+    #[test]
+    fn known_client_user_agent_handles_product_with_paren_suffix() {
+        assert_eq!(
+            known_client_user_agent("kimi-code-cli/1.2.3 (web)"),
+            Some("kimi-code-cli")
+        );
+        assert_eq!(
+            known_client_user_agent("Anthropic/Python 0.39 (foo bar)"),
+            Some("anthropic-sdk")
+        );
+        assert_eq!(known_client_user_agent(""), None);
+        assert_eq!(known_client_user_agent("(no product)"), None);
+    }
+
+    #[test]
+    fn known_client_user_agent_does_not_match_unrelated_brands() {
+        // Anthropic-Oxide / OpenAI-Compat must not be matched by the
+        // `Anthropic/` / `OpenAI/` prefixes (those require a trailing `/`).
+        assert_eq!(known_client_user_agent("Anthropic-Oxide/0.1"), None);
+        assert_eq!(known_client_user_agent("OpenAI-Compat/1.0"), None);
     }
 }
