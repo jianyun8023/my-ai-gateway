@@ -16,7 +16,7 @@ use crate::infra::db;
 use crate::infra::health;
 use crate::infra::observability;
 use crate::infra::secrets;
-use crate::state::{authorized_with_db, error_response, resolve_credential, AppState};
+use crate::state::{authorized_with_db, data_plane_error_response, resolve_credential, AppState};
 
 use super::stream;
 use super::transport;
@@ -48,10 +48,12 @@ pub(crate) async fn proxy(
                 "default",
                 started,
                 false,
-                error_response(
+                data_plane_error_response(
+                    protocol,
                     StatusCode::BAD_REQUEST,
                     "invalid_json",
                     "request body must be valid JSON",
+                    &request_id,
                 ),
             );
         }
@@ -88,10 +90,12 @@ pub(crate) async fn proxy(
                 model,
                 started,
                 is_streamed,
-                error_response(
+                data_plane_error_response(
+                    protocol,
                     StatusCode::UNAUTHORIZED,
                     "unauthorized",
                     "invalid or revoked virtual key",
+                    &request_id,
                 ),
             );
         }
@@ -109,7 +113,13 @@ pub(crate) async fn proxy(
                 model,
                 started,
                 is_streamed,
-                error_response(status, &error.code, &error.message),
+                data_plane_error_response(
+                    protocol,
+                    status,
+                    &error.code,
+                    &error.message,
+                    &request_id,
+                ),
             );
         }
     };
@@ -120,10 +130,12 @@ pub(crate) async fn proxy(
             model,
             started,
             is_streamed,
-            error_response(
+            data_plane_error_response(
+                protocol,
                 StatusCode::BAD_GATEWAY,
                 "provider_not_found",
                 "route references an unknown provider",
+                &request_id,
             ),
         );
     };
@@ -133,10 +145,12 @@ pub(crate) async fn proxy(
             model,
             started,
             is_streamed,
-            error_response(
+            data_plane_error_response(
+                protocol,
                 StatusCode::BAD_GATEWAY,
                 "account_not_found",
                 "route references an unknown account",
+                &request_id,
             ),
         );
     };
@@ -150,7 +164,8 @@ pub(crate) async fn proxy(
                 model,
                 started,
                 is_streamed,
-                error_response(
+                data_plane_error_response(
+                    protocol,
                     StatusCode::SERVICE_UNAVAILABLE,
                     if account.enabled {
                         "account_cooling_down"
@@ -158,6 +173,7 @@ pub(crate) async fn proxy(
                         "account_disabled"
                     },
                     "primary account is unavailable and no fallback succeeded",
+                    &request_id,
                 ),
             );
         };
@@ -231,7 +247,7 @@ pub(crate) async fn proxy(
                         )
                     };
                 (
-                    error_response(status, code, message),
+                    data_plane_error_response(protocol, status, code, message, &request_id),
                     error.status_code(),
                     false,
                 )
@@ -426,6 +442,7 @@ pub(crate) async fn proxy(
                 error,
                 &stream_config,
                 started,
+                &request_id,
             )
             .await;
             attempts.append(&mut fallback_attempts);
@@ -1057,15 +1074,18 @@ pub(crate) async fn try_fallback_error(
     first_error: transport::TransportError,
     stream_config: &stream::StreamConfig,
     request_started: Instant,
+    request_id: &str,
 ) -> (Response<Body>, Vec<db::UsageAttempt>) {
     let mut attempts = Vec::new();
     let Some(candidate) = select_fallback_candidate(config, health, route, model, protocol).await
     else {
         return (
-            error_response(
+            data_plane_error_response(
+                protocol,
                 transport_error_status(&first_error),
                 "upstream_request_failed",
                 first_error.message(),
+                request_id,
             ),
             attempts,
         );
@@ -1143,10 +1163,12 @@ pub(crate) async fn try_fallback_error(
                 )
                 .await;
             (
-                error_response(
+                data_plane_error_response(
+                    protocol,
                     transport_error_status(&error),
                     "upstream_request_failed",
                     error.message(),
+                    request_id,
                 ),
                 attempts,
             )

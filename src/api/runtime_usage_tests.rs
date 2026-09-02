@@ -370,6 +370,7 @@ async fn transport_error_path_uses_fallback_and_records_its_actual_model() {
         transport::TransportError::Request,
         &StreamConfig::default(),
         Instant::now(),
+        "test-request-id",
     )
     .await;
     assert_eq!(response.status(), StatusCode::OK);
@@ -414,6 +415,7 @@ async fn fallback_transport_failure_is_retained_as_the_final_actual_attempt() {
         transport::TransportError::Request,
         &StreamConfig::default(),
         Instant::now(),
+        "test-request-id",
     )
     .await;
     assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
