@@ -533,7 +533,7 @@ ProviderPreset/模型发现回归使用真实 PostgreSQL 与 mock 上游，覆�
 
 已完成 OpenAI Chat/Responses、Anthropic Messages 的非流式 JSON usage 提取、SSE 末事件解析、reasoning/cached token 映射和异步落库。成功响应缺少已确认 usage 时可以使用 `tiktoken-rs` 的 `cl100k_base` 估算并标记为 `estimated`；失败 JSON/SSE 不再估算，固定记录 `missing` 和 0 Token。
 
-UsageEvent 已记录实际 `upstream_model_id`、`route_id`、`streamed`、脱敏 `error_summary`、最终 `source_id`、独立 `client_source` 和 `ttft_ms`。流式 TTFT 从逻辑请求开始计到首个非空 Provider body chunk（网关心跳和纯 SSE comment 不计入），不预取、不缓冲，也不改变 SSE 顺序或背压；空流和无法观察首块的失败保持 `NULL`。每个 fallback attempt 另存实际 Source、账号、上游模型、状态和耗时。
+UsageEvent 已记录实际 `upstream_model_id`、`route_id`、`streamed`、脱敏 `error_summary`、最终 `source_id`、独立 `client_source` 和 `ttft_ms`。流式 TTFT 从逻辑请求开始计到首个非空 Provider body chunk（网关心跳和纯 SSE comment 不计入），不预取、不缓冲，也不改变 SSE 顺序或背压；空流和无法观察首块的失败保持 `NULL`。每个 fallback attempt 另存实际 Source、账号、上游模型、状态和耗时。migration 0019 新增 `usage_events.fallback_reason`：主账号在前置不可用（`account_disabled` / `account_cooling_down` / `account_unhealthy` / `account_unavailable`）或主路径尝试失败（retryable HTTP 状态 `upstream_http_<status>` 如 429、`upstream_transport_error`）时，事件记录该白名单原因码，使 Request Events 能解释“为什么响应模型不是请求的逻辑模型”；未发生 fallback 保持 NULL。
 
 Provider 与 Source 已使用独立运行时身份：Provider 按 Source 固化的 ProviderPreset 聚合，Source 保留每次实际 Binding/attempt 的具体来源；组合筛选不会重复逻辑请求或 Token。
 

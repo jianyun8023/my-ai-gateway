@@ -459,6 +459,7 @@ fn usage_event() -> db::UsageEvent {
         route_id: Some("route".into()),
         streamed: true,
         error_summary: None,
+        fallback_reason: None,
     }
 }
 
