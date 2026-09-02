@@ -158,7 +158,7 @@ test('Codex output files are reduced to owner-only permissions', () => {
   }
 })
 
-test('search flag is placed before the exec subcommand', () => {
+test('search and skip-git-repo-check flags are placed after the exec subcommand', () => {
   const args = buildCodexArgs({
     model: 'k3',
     workspace: '/tmp/codex-workspace',
@@ -167,11 +167,31 @@ test('search flag is placed before the exec subcommand', () => {
     search: true,
     skipGitRepoCheck: true,
   })
-  assert.equal(args[0], '--search')
-  assert.equal(args[1], '--skip-git-repo-check')
-  assert.equal(args[2], 'exec')
+  // Codex CLI >=0.149 rejects global flags placed before the subcommand.
+  // `--search` and `--skip-git-repo-check` must come right after `exec`,
+  // before the per-subcommand flag set (`--strict-config`, ...).
+  assert.equal(args[0], 'exec')
+  assert.equal(args[1], '--search')
+  assert.equal(args[2], '--skip-git-repo-check')
+  assert.equal(args[3], '--strict-config')
   assert.ok(args.includes('--strict-config'))
   assert.ok(args.includes('--skip-git-repo-check'))
+  assert.ok(args.includes('--search'))
+})
+
+test('default flags omit search and skip-git-repo-check when not requested', () => {
+  const args = buildCodexArgs({
+    model: 'k3',
+    workspace: '/tmp/codex-workspace',
+    outputPath: '/tmp/codex-final.txt',
+    prompt: 'tool',
+    search: false,
+    skipGitRepoCheck: false,
+  })
+  assert.equal(args[0], 'exec')
+  assert.ok(!args.includes('--search'))
+  assert.ok(!args.includes('--skip-git-repo-check'))
+  assert.ok(args.includes('--strict-config'))
 })
 
 test('tool events and final canary are summarized without retaining body text', () => {

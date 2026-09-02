@@ -200,11 +200,15 @@ export function buildCodexConfig({ model, baseUrl, clientSource }) {
 }
 
 export function buildCodexArgs({ model, workspace, outputPath, prompt, search = false, skipGitRepoCheck = false }) {
-  const args = []
+  // Codex CLI >=0.149 rejects global flags placed before the subcommand
+  // (`error: unexpected argument '--skip-git-repo-check' found` with
+  // `tip: 'exec --skip-git-repo-check' exists`).  Place every global
+  // flag (--search, --skip-git-repo-check) immediately after `exec`,
+  // before the per-subcommand flag set.
+  const args = ['exec']
   if (search) args.push('--search')
   if (skipGitRepoCheck) args.push('--skip-git-repo-check')
   args.push(
-    'exec',
     '--strict-config',
     '--ephemeral',
     '--json',
