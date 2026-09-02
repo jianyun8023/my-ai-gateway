@@ -154,7 +154,19 @@ pub(crate) async fn proxy(
             ),
         );
     };
-    let primary_unavailable = !account.enabled || !state.health.is_available(&account.id).await;
+    let mut fallback_reason: Option<String> = None;
+    let primary_unavailable = if !account.enabled {
+        fallback_reason = Some("account_disabled".into());
+        true
+    } else {
+        let health = state.health.get_health(&account.id).await;
+        if health.available {
+            false
+        } else {
+            fallback_reason = Some(primary_unavailable_reason(&health));
+            true
+        }
+    };
     if primary_unavailable {
         let Some(candidate) =
             select_fallback_candidate(&config, &state.health, &route, model, protocol).await
@@ -296,6 +308,7 @@ pub(crate) async fn proxy(
                 route_id: Some(route.route_id.clone()),
                 streamed: is_streamed,
                 error_summary,
+                fallback_reason: fallback_reason.clone(),
             };
             let attempts = vec![db::UsageAttempt {
                 attempt_no: 0,
@@ -364,6 +377,7 @@ pub(crate) async fn proxy(
                 success: false,
                 latency_ms: result_started.elapsed().as_millis() as i64,
             });
+            fallback_reason = Some(format!("upstream_http_{}", response.status().as_u16()));
             record_response_health(
                 &state.health,
                 &route.source_id,
@@ -420,6 +434,7 @@ pub(crate) async fn proxy(
                 success: false,
                 latency_ms: result_started.elapsed().as_millis() as i64,
             });
+            fallback_reason = Some("upstream_transport_error".into());
             state
                 .health
                 .mark_failure_with_details(
@@ -525,6 +540,11 @@ pub(crate) async fn proxy(
             route_id: Some(route.route_id.clone()),
             streamed: is_streamed,
             error_summary: error_summary.clone(),
+            fallback_reason: if attempts.len() > 1 {
+                fallback_reason.clone()
+            } else {
+                None
+            },
         };
         if is_event_stream(&response) {
             return wrap_stream_usage(
@@ -544,6 +564,22 @@ pub(crate) async fn proxy(
         }
     }
     finish_proxy(protocol, model, started, is_streamed, response)
+}
+
+/// Map an unusable primary account to the persisted `fallback_reason` code.
+/// Only called when `health.available == false` (cooldown / unhealthy / stale
+/// with residual failures / unknown with no row); the `disabled` status covers
+/// account or source being turned off in the control plane.
+fn primary_unavailable_reason(health: &health::AccountHealth) -> String {
+    if health.status == "disabled" {
+        "account_disabled".into()
+    } else {
+        match health.status.as_str() {
+            "cooling_down" => "account_cooling_down".into(),
+            "unhealthy" => "account_unhealthy".into(),
+            _ => "account_unavailable".into(),
+        }
+    }
 }
 
 fn finish_proxy(

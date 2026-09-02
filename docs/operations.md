@@ -183,3 +183,26 @@ cargo run -- ops control-plane-import --input control-plane.json --replace
 **计费口径**：跨厂商聚合需要 `input_tokens + output_tokens + cached_tokens`，把 `reasoning_tokens` 按厂商账单规则单算。下游报表若只读 `total_tokens`，对有缓存命中的长会话会大幅低估。CSV 导出（`/admin/usage/export`）与 JSON（`/admin/usage/events`、`/admin/usage/summary`）的 `total_tokens` 字段都按本约定。
 
 `usage_source` 标记 token 数来源：`upstream` 表示上游 usage 字段直接解析；`parsed` 表示从 SSE 流中最后一个含 usage 的事件解析；`estimated` 表示上游未报告，由 tiktoken 对请求体/响应体估算；`missing` 表示请求失败且无可用 usage。`estimated` 与 `missing` 行的 `total_tokens` 含义同上，但数值仅为粗估，**不可作为计费值**（Issue #98）。
+
+## Usage 事件回退原因
+
+`usage_events.fallback_reason`（migration 0019，Issue #103）记录请求为何由 fallback 账号完成而不是请求的逻辑模型对应的主账号；`NULL` 表示未发生回退（主账号完成或单次尝试）。取值是数据面生成的白名单原因码，用于在 Request Events 中解释“响应模型为什么不是请求的模型”：
+
+| 值 | 含义 |
+| --- | --- |
+| `account_disabled` | 主账号或 Source 被停用，请求未发出即回退。 |
+| `account_cooling_down` | 主账号处于冷却中（如上游 429 用量熔断触发指数退避），请求未发出即回退。 |
+| `account_unhealthy` | 主账号冷却过期但连续失败尚未恢复，请求未发出即回退。 |
+| `account_unavailable` | 无健康记录或健康读取失败等，请求未发出即回退。 |
+| `upstream_http_<status>` | 主账号已尝试但返回 retryable 状态（408/425/429/5xx），如 `upstream_http_429`。 |
+| `upstream_transport_error` | 主账号已尝试但连接层失败（超时/连接错误）。 |
+
+查询示例如下：
+
+```sql
+SELECT created_at, logical_model, source_id, account_id, upstream_model_id,
+       status_code, success, fallback_reason
+FROM usage_events
+WHERE logical_model = 'MiniMax-M3' AND fallback_reason IS NOT NULL
+ORDER BY created_at DESC LIMIT 20;
+```

@@ -1714,6 +1714,7 @@ mod usage_api_tests {
             route_id: Some("test-route".into()),
             streamed: false,
             error_summary: None,
+            fallback_reason: None,
         };
         let attempts = [
             db::UsageAttempt {
