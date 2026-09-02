@@ -23,6 +23,11 @@ use crate::domain::protocol::Protocol;
 pub const HEARTBEAT_FRAME: &[u8] = b": gateway-heartbeat\n\n";
 pub const HEARTBEAT_MARKER: &str = ": gateway-heartbeat";
 
+/// OpenAI Chat Completions termination frame.  Native providers that omit the
+/// `data: [DONE]` sentinel (for example MiniMax) still need it appended so
+/// strict OpenAI clients can detect end-of-stream.
+pub const CHAT_DONE_FRAME: &[u8] = b"data: [DONE]\n\n";
+
 /// Process-level streaming policy.  A zero duration disables that limit.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StreamConfig {
@@ -262,6 +267,14 @@ impl SseEventTracker {
 
     pub fn terminal(&self) -> Option<StreamTermination> {
         self.terminal
+    }
+
+    /// Mark a clean OpenAI Chat Completions end-of-stream that arrived without
+    /// the provider sending the `data: [DONE]` sentinel.  The caller has
+    /// already injected the termination frame into the outgoing byte stream,
+    /// so the tracker should agree it completed successfully.
+    pub fn mark_completed_after_eof(&mut self) {
+        merge_terminal(&mut self.terminal, Some(StreamTermination::Completed));
     }
 
     pub fn saw_sse_frame(&self) -> bool {
@@ -674,7 +687,23 @@ async fn next_native(mut state: NativeState) -> Option<(Result<Bytes, io::Error>
                                 state.queue_failure(StreamTermination::EmptyStream)
                             }
                             None if state.tracker.saw_sse_frame() => {
-                                state.queue_failure(StreamTermination::UpstreamError)
+                                if state.protocol == Protocol::OpenAiChatCompletions {
+                                    // Some Chat Completions upstreams (notably MiniMax)
+                                    // close the stream cleanly without sending the
+                                    // OpenAI-mandated `data: [DONE]` sentinel.  Inject
+                                    // one so strict clients can detect end-of-stream
+                                    // and report the request as completed rather than
+                                    // emitting a misleading `gateway_upstream_error`.
+                                    state
+                                        .tracker
+                                        .mark_completed_after_eof();
+                                    state
+                                        .pending
+                                        .push_back(Ok(Bytes::from_static(CHAT_DONE_FRAME)));
+                                    state.finish_after_pending = true;
+                                } else {
+                                    state.queue_failure(StreamTermination::UpstreamError)
+                                }
                             }
                             None => state.finish_after_pending = true,
                         }
@@ -810,6 +839,71 @@ mod tests {
         assert_eq!(body.next().await.unwrap().unwrap(), first);
         assert_eq!(body.next().await.unwrap().unwrap(), second);
         assert!(body.next().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn chat_completions_without_done_marker_gets_appended_done() {
+        // MiniMax closes its Chat Completions stream cleanly after the usage
+        // chunk without sending the OpenAI-mandated `data: [DONE]` sentinel.
+        let config = StreamConfig {
+            heartbeat_interval: Duration::ZERO,
+            connection_timeout: Duration::ZERO,
+            first_event_timeout: Duration::ZERO,
+            idle_timeout: Duration::ZERO,
+            total_timeout: Duration::ZERO,
+        };
+        let source = stream::iter([Ok::<Bytes, io::Error>(Bytes::from_static(
+            b"data: {\"choices\":[{\"delta\":{\"content\":\"hi\"},\"finish_reason\":\"length\"}]}\n\n\
+              data: {\"usage\":{\"total_tokens\":5}}\n\n",
+        ))]);
+        let body = wrap_native_body(
+            Body::from_stream(source),
+            Protocol::OpenAiChatCompletions,
+            config,
+            Instant::now(),
+        );
+        let mut body = body.into_data_stream();
+        let mut text = String::new();
+        while let Some(chunk) = body.next().await {
+            text.push_str(&String::from_utf8_lossy(&chunk.unwrap()));
+        }
+        assert!(!text.contains("gateway_"), "no gateway error: {text}");
+        assert!(
+            text.ends_with("data: [DONE]\n\n"),
+            "stream must end with a synthetic [DONE]: {text}"
+        );
+        assert_eq!(text.matches("data: [DONE]").count(), 1);
+    }
+
+    #[tokio::test]
+    async fn chat_completions_with_upstream_done_marker_is_not_duplicated() {
+        // DeepSeek already sends `data: [DONE]`; the gateway must keep the
+        // provider bytes untouched instead of appending a second sentinel.
+        let config = StreamConfig {
+            heartbeat_interval: Duration::ZERO,
+            connection_timeout: Duration::ZERO,
+            first_event_timeout: Duration::ZERO,
+            idle_timeout: Duration::ZERO,
+            total_timeout: Duration::ZERO,
+        };
+        let upstream = Bytes::from_static(
+            b"data: {\"choices\":[{\"delta\":{\"content\":\"hi\"},\"finish_reason\":\"stop\"}]}\n\n\
+              data: [DONE]\n\n",
+        );
+        let source = stream::iter([Ok::<Bytes, io::Error>(upstream.clone())]);
+        let body = wrap_native_body(
+            Body::from_stream(source),
+            Protocol::OpenAiChatCompletions,
+            config,
+            Instant::now(),
+        );
+        let mut body = body.into_data_stream();
+        let mut text = String::new();
+        while let Some(chunk) = body.next().await {
+            text.push_str(&String::from_utf8_lossy(&chunk.unwrap()));
+        }
+        assert_eq!(text, String::from_utf8_lossy(&upstream));
+        assert_eq!(text.matches("data: [DONE]").count(), 1);
     }
 
     #[tokio::test]
