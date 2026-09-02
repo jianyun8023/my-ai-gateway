@@ -9,8 +9,7 @@ export const shell = {
   open_nav: '打开导航',
   mobile_key_label: 'Admin Key',
   mobile_key_apply: '应用',
-  running_status: '网关运行中 · 端口 {{port}}',
-  endpoint_display: 'http://localhost:3100',
+  running_status: '网关运行中',
 
   // 导航分组
   section: {

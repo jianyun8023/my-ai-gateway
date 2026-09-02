@@ -302,7 +302,7 @@ describe('production control-plane pages', () => {
     expect(container.textContent).toContain('upstream-a');
 
     await act(async () => tabs().find((button) => button.textContent?.includes('路由规则'))?.click());
-    expect(container.textContent).toContain('primary_then_weighted_fallback');
+    expect(container.textContent).toContain('固定主选 → 加权回退');
     expect(container.textContent).not.toMatch(/Random|Round-Robin/);
   });
 

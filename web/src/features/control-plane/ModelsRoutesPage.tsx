@@ -124,7 +124,7 @@ function RuntimeBindingSummary({ cells }: { cells: ResolvedBindingCell[] }) {
     <span className={styles.runtimeSummary}>
       {cells.map(({ routeId, cell }) => (
         <span key={`${routeId}:${cell.protocol_in}`}>
-          <StatusPill tone={cell.mode === 'native' ? 'success' : 'warning'}>{cell.mode}</StatusPill>
+          <StatusPill tone={cell.mode === 'native' ? 'success' : 'warning'}>{t(`values.mode.${cell.mode}`, { defaultValue: cell.mode })}</StatusPill>
           <small>{PROTOCOL_LABELS[cell.protocol_in]} → {cell.protocol_upstream ? PROTOCOL_LABELS[cell.protocol_upstream] : t('common.unknown')}</small>
           <StatusPill tone={cell.selection === 'primary' ? 'accent' : 'muted'}>{t('models.state.selection', { rank: cell.selection_rank })}</StatusPill>
         </span>
@@ -197,7 +197,7 @@ function LogicalModelForm({
         <TextField label={t('models.field.public_name')} value={publicName} disabled={busy} onChange={(event) => setPublicName(event.target.value)} autoComplete="off" />
         <TextField label={t('models.field.display_name')} value={displayName} disabled={busy} onChange={(event) => setDisplayName(event.target.value)} autoComplete="off" />
         <SelectField label={t('models.field.catalog_status')} value={status} disabled={busy} onChange={(event) => setStatus(event.target.value as CatalogStatus)}>
-          {statusOptions(record).map((option) => <option key={option} value={option}>{option}</option>)}
+          {statusOptions(record).map((option) => <option key={option} value={option}>{t(`values.status.${option}`)}</option>)}
         </SelectField>
         <div className={styles.fullWidth}><CheckboxField checked={enabled} disabled={busy} onChange={setEnabled} label={t('models.field.enable_lm')} /></div>
       </FormGrid>
@@ -318,10 +318,10 @@ function BindingForm({
         <SelectField label={t('models.field.source_model')} value={upstreamModelId} disabled={busy || modelsLoading || sourceModels.length === 0} onChange={(event) => setUpstreamModelId(event.target.value)}>
           {modelsLoading && <option value="">{t('models.binding_form.source_model_loading')}</option>}
           {!modelsLoading && sourceModels.length === 0 && <option value="">{t('models.binding_form.no_source_model')}</option>}
-          {sourceModels.map((model) => <option key={model.upstream_model_id} value={model.upstream_model_id}>{model.upstream_model_id} · {model.confirmation_status}/{model.availability_status}</option>)}
+          {sourceModels.map((model) => <option key={model.upstream_model_id} value={model.upstream_model_id}>{model.upstream_model_id} · {t(`values.status.${model.confirmation_status}`, { defaultValue: model.confirmation_status })}/{t(`values.availability.${model.availability_status}`, { defaultValue: model.availability_status })}</option>)}
         </SelectField>
         <SelectField label={t('models.field.binding_status')} value={status} disabled={busy} onChange={(event) => setStatus(event.target.value as CatalogStatus)}>
-          {statusOptions(record).map((option) => <option key={option} value={option}>{option}</option>)}
+          {statusOptions(record).map((option) => <option key={option} value={option}>{t(`values.status.${option}`)}</option>)}
         </SelectField>
         <TextField label={t('models.field.priority')} hint={t('models.binding_form.priority_hint')} type="number" step={1} value={priority} disabled={busy} onChange={(event) => setPriority(Number(event.target.value))} />
         <div className={styles.field}><label>{t('models.field.binding_id')}</label><StatusPill>{record?.id ?? t('models.binding_form.binding_id_auto')}</StatusPill></div>
@@ -433,7 +433,7 @@ function EntityDetailDrawer({
           <DetailItem label={t('models.field.lm_id')}><code>{target.record.id}</code></DetailItem>
           <DetailItem label={t('models.field.public_name')}><code>{target.record.public_name}</code></DetailItem>
           <DetailItem label={t('models.field.display_name')}>{target.record.display_name}</DetailItem>
-          <DetailItem label={t('common.status')}><StatusPill tone={statusTone(target.record.status)}>{target.record.status}</StatusPill></DetailItem>
+          <DetailItem label={t('common.status')}><StatusPill tone={statusTone(target.record.status)}>{t(`values.status.${target.record.status}`, { defaultValue: target.record.status })}</StatusPill></DetailItem>
           <DetailItem label={t('models.field.enabled')}>{String(target.record.enabled)}</DetailItem>
           <DetailItem label={t('common.updated_at')}>{formatDateTime(target.record.updated_at)}</DetailItem>
         </DetailList>}
@@ -444,7 +444,7 @@ function EntityDetailDrawer({
           <DetailItem label={t('models.field.upstream_model')}><code>{target.record.upstream_model_id}</code></DetailItem>
           <DetailItem label={t('models.field.protocol')}><ProtocolPill protocol={target.record.protocol} /></DetailItem>
           <DetailItem label={t('models.field.priority')}>{target.record.priority}</DetailItem>
-          <DetailItem label={t('common.status')}><StatusPill tone={statusTone(target.record.status)}>{target.record.status}</StatusPill></DetailItem>
+          <DetailItem label={t('common.status')}><StatusPill tone={statusTone(target.record.status)}>{t(`values.status.${target.record.status}`, { defaultValue: target.record.status })}</StatusPill></DetailItem>
           <DetailItem label={t('models.field.enabled')}>{String(target.record.enabled)}</DetailItem>
         </DetailList>}
         {target.kind === 'route' && <DetailList>
@@ -452,7 +452,7 @@ function EntityDetailDrawer({
           <DetailItem label={t('models.field.lm')}><code>{target.record.logical_model_id}</code></DetailItem>
           <DetailItem label={t('models.field.public_name')}><code>{target.record.public_name}</code></DetailItem>
           <DetailItem label={t('models.field.protocols')}><span className={styles.inlineActions}>{target.record.protocols.map((protocol) => <ProtocolPill key={protocol} protocol={protocol} />)}</span></DetailItem>
-          <DetailItem label={t('models.field.strategy')}><code>{target.record.strategy}</code></DetailItem>
+          <DetailItem label={t('models.field.strategy')}><code>{t(`values.strategy.${target.record.strategy}`, { defaultValue: target.record.strategy })}</code></DetailItem>
           <DetailItem label={t('models.field.lossy_value')}>{target.record.allow_lossy_conversion ? t('models.state.lossy_allowed') : t('models.state.lossy_blocked')}</DetailItem>
           <DetailItem label={t('models.field.enabled')}>{String(target.record.enabled)}</DetailItem>
         </DetailList>}
@@ -463,7 +463,7 @@ function EntityDetailDrawer({
           <div className={styles.runtimeList}>{routeRows.map((row) => (
             <div key={`${row.source.source_id}:${row.account.account_id}:${row.upstream_model_id}`}>
               <span><strong>{row.source.display_name ?? row.source.source_id}</strong><small>{row.account.display_name ?? row.account.account_id} · {row.upstream_model_id}</small></span>
-              <div>{row.protocols.map((cell) => <StatusPill key={cell.protocol_in} tone={cell.status === 'unroutable' ? 'muted' : cell.mode === 'native' ? 'success' : 'warning'}>{PROTOCOL_LABELS[cell.protocol_in]} · {cell.status === 'routable' ? cell.mode : t('models.state.unroutable')}</StatusPill>)}</div>
+              <div>{row.protocols.map((cell) => <StatusPill key={cell.protocol_in} tone={cell.status === 'unroutable' ? 'muted' : cell.mode === 'native' ? 'success' : 'warning'}>{PROTOCOL_LABELS[cell.protocol_in]} · {cell.status === 'routable' ? t(`values.mode.${cell.mode}`, { defaultValue: cell.mode }) : t('models.state.unroutable')}</StatusPill>)}</div>
             </div>
           ))}</div>
         )}
@@ -603,7 +603,7 @@ export function ModelsRoutesPage({ api, refreshRevision = 0, onBusyChange }: Mod
               <tr key={model.id} data-clickable="true" onClick={() => setDetailTarget({ kind: 'logical-model', record: model })}>
                 <td><span className={styles.primaryText}><strong>{model.display_name}</strong><small><code>{model.id}</code></small></span></td>
                 <td><code>{model.public_name}</code></td>
-                <td><StatusPill tone={statusTone(model.status)}>{model.status}</StatusPill></td>
+                <td><StatusPill tone={statusTone(model.status)}>{t(`values.status.${model.status}`, { defaultValue: model.status })}</StatusPill></td>
                 <td>{data.bindings.filter((binding) => binding.logical_model_id === model.id).length}</td>
                 <td>{data.routes.filter((route) => route.logical_model_id === model.id).length}</td>
                 <td onClick={(event) => event.stopPropagation()}><Toggle label={t('models.table.toggle_aria', { id: model.id })} checked={model.enabled} disabled={mutationBusy} onChange={(enabled) => void mutate(() => api.setLogicalModelEnabled(model.id, enabled), t(enabled ? 'models.table.toggle_enabled' : 'models.table.toggle_disabled', { name: model.id }))} /></td>
@@ -634,7 +634,7 @@ export function ModelsRoutesPage({ api, refreshRevision = 0, onBusyChange }: Mod
                   <td><ProtocolPill protocol={binding.protocol} /></td>
                   <td><strong className={styles.mono}>{binding.priority}</strong></td>
                   <td><RuntimeBindingSummary cells={runtimeCells} /></td>
-                  <td><StatusPill tone={statusTone(binding.status)}>{binding.status}</StatusPill></td>
+                  <td><StatusPill tone={statusTone(binding.status)}>{t(`values.status.${binding.status}`, { defaultValue: binding.status })}</StatusPill></td>
                   <td onClick={(event) => event.stopPropagation()}><Toggle label={t('models.table.toggle_aria', { id: binding.id })} checked={binding.enabled} disabled={mutationBusy} onChange={(enabled) => void mutate(() => api.setModelBindingEnabled(binding.id, enabled), t(enabled ? 'models.table.binding_toggle_enabled' : 'models.table.binding_toggle_disabled', { name: binding.id }))} /></td>
                   <td onClick={(event) => event.stopPropagation()}><div className={styles.rowActions}>
                     <IconButton label={t('models.table.view_aria', { id: binding.id })} onClick={() => setDetailTarget({ kind: 'binding', record: binding })}><IconEye size={16} /></IconButton>
@@ -662,7 +662,7 @@ export function ModelsRoutesPage({ api, refreshRevision = 0, onBusyChange }: Mod
                   <td><code>{route.logical_model_id}</code></td>
                   <td><span className={styles.inlineActions}>{route.protocols.map((protocol) => <ProtocolPill key={protocol} protocol={protocol} />)}</span></td>
                   <td>{route.strategy === 'primary_then_weighted_fallback'
-                    ? <code className={styles.routeStrategy}>{route.strategy}</code>
+                    ? <code className={styles.routeStrategy} title={route.strategy}>{t('values.strategy.primary_then_weighted_fallback')}</code>
                     : <StatusPill tone="danger">{t('models.table.runtime_unsupported', { strategy: route.strategy })}</StatusPill>}</td>
                   <td><span className={styles.inlineActions}><StatusPill tone={runtimeRows.length > 0 ? 'success' : 'muted'}>{runtimeRows.length > 0 ? `${runtimeRows.length} ${t('models.state.published')}` : t('models.state.not_published')}</StatusPill>{adapterCount > 0 && <StatusPill tone="warning">{t('models.table.runtime_adapter_cells', { count: adapterCount })}</StatusPill>}</span></td>
                   <td><StatusPill tone={route.allow_lossy_conversion ? 'warning' : 'muted'}>{route.allow_lossy_conversion ? t('models.state.lossy_allowed') : t('models.state.lossy_blocked')}</StatusPill></td>

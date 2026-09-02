@@ -9,8 +9,7 @@ export const shell = {
   open_nav: 'Open navigation',
   mobile_key_label: 'Admin Key',
   mobile_key_apply: 'Apply',
-  running_status: 'Gateway running · port {{port}}',
-  endpoint_display: 'http://localhost:3100',
+  running_status: 'Gateway running',
 
   // 导航分组
   section: {

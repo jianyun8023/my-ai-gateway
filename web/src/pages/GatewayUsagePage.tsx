@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
+import { currentIntlLocale } from '@/i18n/intl';
 import type { TFunction } from 'i18next';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Bar, Doughnut, Line } from 'react-chartjs-2';
@@ -144,20 +145,20 @@ const toLocalInputValue = (iso: string): string => {
 
 const fromLocalInputValue = (value: string): string => new Date(value).toISOString();
 
-const formatNumber = (value: number): string => new Intl.NumberFormat(undefined, {
+const formatNumber = (value: number): string => new Intl.NumberFormat(currentIntlLocale(), {
   notation: value >= 100_000 ? 'compact' : 'standard',
   maximumFractionDigits: 1,
 }).format(value);
 
 const formatTime = (value: string): string => {
   if (!value) return '—';
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat(currentIntlLocale(), {
     dateStyle: 'short',
     timeStyle: 'medium',
   }).format(new Date(value));
 };
 
-const formatBucket = (value: string): string => new Intl.DateTimeFormat(undefined, {
+const formatBucket = (value: string): string => new Intl.DateTimeFormat(currentIntlLocale(), {
   month: 'short',
   day: 'numeric',
   hour: '2-digit',
@@ -403,7 +404,8 @@ function Analysis({ breakdowns, summary }: { breakdowns: Partial<Record<UsageBre
 }
 
 function UsageBadge({ source }: { source: string }) {
-  return <span className={styles.usageBadge} data-source={source}>{source}</span>;
+  const { t } = useTranslation('console');
+  return <span className={styles.usageBadge} data-source={source}>{t(`usage.usage_source.${source}`, { defaultValue: source })}</span>;
 }
 
 const renderEventCell = (event: UsageEventViewModel, column: EventColumn, t: TFunction) => {
@@ -418,7 +420,9 @@ const renderEventCell = (event: UsageEventViewModel, column: EventColumn, t: TFu
     case 'status': return <span className={styles.statusBadge} data-success={event.success}>{event.statusCode || '—'} · {event.success ? t('usage.event.success') : t('usage.event.failure')}</span>;
     case 'retries': {
       if (!event.fallback) return String(event.retryCount);
-      const label = t('usage.event.retries_fallback', { count: event.retryCount });
+      const label = event.retryCount > 0
+        ? t('usage.event.retries_fallback', { count: event.retryCount })
+        : t('usage.event.fallback_only');
       return event.fallbackReason
         ? <span title={formatFallbackReason(t, event.fallbackReason)}>{label}</span>
         : label;
@@ -501,7 +505,7 @@ function EventDetails({ event, onClose, client }: { event: UsageEventViewModel; 
           <div><span>{t('usage.field.protocol')}</span><strong>{event.protocolIn} → {event.protocolUpstream}</strong></div>
           <div><span>{t('usage.field.usage_source')}</span><strong><UsageBadge source={event.usageSource} /></strong></div>
           <div><span>{t('usage.field.latency')}</span><strong>{formatNumber(event.latencyMs)} ms</strong></div>
-          <div><span>{t('usage.field.retries')}</span><strong>{event.fallback ? t('usage.event.retries_fallback', { count: event.retryCount }) : String(event.retryCount)}</strong></div>
+          <div><span>{t('usage.field.retries')}</span><strong>{event.fallback ? (event.retryCount > 0 ? t('usage.event.retries_fallback', { count: event.retryCount }) : t('usage.event.fallback_only')) : String(event.retryCount)}</strong></div>
           {event.fallbackReason && (
             <div><span>{t('usage.field.fallback_reason')}</span><strong title={event.fallbackReason}>{formatFallbackReason(t, event.fallbackReason)}</strong></div>
           )}
