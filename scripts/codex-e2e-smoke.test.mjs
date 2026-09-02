@@ -9,10 +9,13 @@ import {
   buildCodexConfig,
   classifyCodexFailure,
   diagnosticStage,
+  evaluateMultiTurnToolResult,
   evaluateSearchResult,
   evaluateToolResult,
   gatewayAdminBaseUrl,
   loadCaseManifest,
+  multiTurnToolTurn1Prompt,
+  multiTurnToolTurn2Prompt,
   parseArguments,
   parseCodexJsonLines,
   preflightGatewayModel,
@@ -29,9 +32,13 @@ const cases = loadCaseManifest()
 
 test('default selection keeps high-cost search opt-in', () => {
   const selected = selectCases(cases, parseArguments([]))
-  assert.deepEqual(selected.map((item) => item.id), ['codex.tool'])
+  // The default profile is `cost=low`, which now includes both
+  // codex.tool and codex.multi_turn_tool; the web_search case stays
+  // opt-in behind `--include-search`.
+  assert.deepEqual(selected.map((item) => item.id), ['codex.tool', 'codex.multi_turn_tool'])
   assert.deepEqual(selectCases(cases, parseArguments(['--include-search'])).map((item) => item.id), [
     'codex.tool',
+    'codex.multi_turn_tool',
     'codex.web_search',
   ])
 })
@@ -250,4 +257,75 @@ test('search requires a completed event and an official Rust Blog source', () =>
   const summary = summarizeCodexEvents(events)
   assert.equal(evaluateSearchResult('SEARCH_E2E_OK:1.98.0:https://blog.rust-lang.org/releases/latest/', summary).passed, true)
   assert.equal(evaluateSearchResult('SEARCH_E2E_OK:1.98.0:https://example.com/', summary).passed, false)
+})
+
+test('multi-turn tool prompts do not embed the runtime canary', () => {
+  const turn1 = multiTurnToolTurn1Prompt()
+  const turn2 = multiTurnToolTurn2Prompt('placeholder-final-message')
+  assert.ok(turn1.includes('CANARY.txt'), 'turn 1 prompt must reference CANARY.txt')
+  assert.ok(turn2.includes('CANARY.txt'), 'turn 2 prompt must reference CANARY.txt')
+  // The canary shape is `codex-gateway-<8 bytes hex>`; assert neither
+  // prompt source contains the prefix.
+  assert.ok(!turn1.includes('codex-gateway-'), 'turn 1 prompt must not embed the canary prefix')
+  assert.ok(!turn2.includes('codex-gateway-'), 'turn 2 prompt must not embed the canary prefix')
+  // Turn 2 wraps the previous final message verbatim — the prompt must
+  // not sanitise or redact it; tests rely on the previous final being
+  // echoed through so the model can quote it back.
+  assert.ok(
+    turn2.includes('"""placeholder-final-message"""'),
+    'turn 2 prompt must embed the turn-1 final message so context propagation is testable',
+  )
+})
+
+test('multi-turn tool recall evaluator only accepts the exact canary answer', () => {
+  const canary = 'codex-gateway-0123456789abcdef'
+  const passing = evaluateMultiTurnToolResult(`CODEX_GATEWAY_E2E_OK:${canary}\n`, canary)
+  assert.equal(passing.passed, true)
+  assert.equal(passing.reason, 'multi-turn recall matched the canary')
+
+  const trimmed = evaluateMultiTurnToolResult(`CODEX_GATEWAY_E2E_OK:${canary}`, canary)
+  assert.equal(trimmed.passed, true)
+
+  const wrong = evaluateMultiTurnToolResult(`CODEX_GATEWAY_E2E_OK:codex-gateway-deadbeef`, canary)
+  assert.equal(wrong.passed, false)
+  assert.match(wrong.reason, /did not match the canary/)
+
+  const polluted = evaluateMultiTurnToolResult(`CODEX_GATEWAY_E2E_OK:${canary} trailing prose`, canary)
+  assert.equal(polluted.passed, false)
+})
+
+test('multi-turn tool case is in the manifest and is selected by default', () => {
+  const cases = loadCaseManifest()
+  const multiTurn = cases.find((c) => c.id === 'codex.multi_turn_tool')
+  assert.ok(multiTurn, 'manifest must register codex.multi_turn_tool')
+  assert.equal(multiTurn.kind, 'multi_turn_tool')
+  assert.equal(multiTurn.cost, 'low')
+
+  const selected = selectCases(cases, { cases: [], includeSearch: false })
+  assert.ok(
+    selected.some((c) => c.id === 'codex.multi_turn_tool'),
+    'multi-turn tool case must be selected under the default low-cost profile',
+  )
+})
+
+test('multi-turn tool case can be addressed explicitly via --case', () => {
+  const cases = loadCaseManifest()
+  const selected = selectCases(cases, { cases: ['codex.multi_turn_tool'], includeSearch: false })
+  assert.deepEqual(selected.map((c) => c.id), ['codex.multi_turn_tool'])
+})
+
+test('multi-turn tool prompt reuse is invariant across calls', () => {
+  // Multi-turn case must keep the same prompt shape on every invocation;
+  // a flake here would invalidate Codex session continuity contracts.
+  assert.equal(multiTurnToolTurn1Prompt(), multiTurnToolTurn1Prompt())
+  assert.equal(
+    multiTurnToolTurn2Prompt('alpha'),
+    multiTurnToolTurn2Prompt('alpha'),
+  )
+  // The turn-2 prompt must reflect the prior final verbatim, including
+  // surrounding whitespace, so callers can rely on identical contract.
+  assert.equal(
+    multiTurnToolTurn2Prompt('  spaced  '),
+    multiTurnToolTurn2Prompt('  spaced  '),
+  )
 })

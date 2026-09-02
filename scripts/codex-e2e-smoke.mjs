@@ -45,7 +45,7 @@ export function loadCaseManifest(manifestPath = defaultManifestPath) {
     check(typeof testCase.id === 'string' && testCase.id.length > 0, 'Codex E2E case id is required')
     check(!ids.has(testCase.id), `duplicate Codex E2E case id: ${testCase.id}`)
     ids.add(testCase.id)
-    check(['tool', 'search'].includes(testCase.kind), `invalid Codex E2E kind for ${testCase.id}`)
+    check(['tool', 'search', 'multi_turn_tool'].includes(testCase.kind), `invalid Codex E2E kind for ${testCase.id}`)
     check(['low', 'high'].includes(testCase.cost), `invalid Codex E2E cost for ${testCase.id}`)
     check(typeof testCase.description === 'string' && testCase.description.length > 0, `description is required for ${testCase.id}`)
   }
@@ -490,7 +490,42 @@ function searchPrompt() {
   return 'Use live web search, not shell commands or prior knowledge. Find the latest stable Rust release announced on the official Rust Blog. Return exactly one line in this format: SEARCH_E2E_OK:<version>:<official source URL>'
 }
 
+/// Prompt for the first turn of the multi-turn tool round-trip case.
+/// Instructs Codex to call the shell tool to read CANARY.txt and then
+/// emit the exact file contents so the next turn can quote them back.
+/// The canary value is generated at runtime and intentionally is not
+/// embedded in the prompt source — see codex-e2e-smoke.test.mjs.
+export function multiTurnToolTurn1Prompt() {
+  return [
+    'You MUST invoke the shell tool to read CANARY.txt (it lives in the current working directory).',
+    'After the shell call completes, print the exact file contents to stdout with no extra text, no commentary, and no code fences.',
+    'Do not call any other tool. Do not answer with anything besides the canary value.',
+  ].join(' ')
+}
+
+export function multiTurnToolTurn2Prompt(turn1Final) {
+  return [
+    'In a previous Codex turn you invoked the shell tool to read CANARY.txt.',
+    `The previous turn ended with the following assistant message: """${turn1Final.trim()}"""`,
+    'What is the exact content of CANARY.txt? Answer with `CODEX_GATEWAY_E2E_OK:<contents>` and nothing else.',
+  ].join(' ')
+}
+
+export function evaluateMultiTurnToolResult(finalText, canary) {
+  const expected = `CODEX_GATEWAY_E2E_OK:${canary}`
+  const passed = finalText.trim() === expected
+  return {
+    passed,
+    expected,
+    final_text: finalText,
+    reason: passed ? 'multi-turn recall matched the canary' : 'multi-turn recall did not match the canary',
+  }
+}
+
 async function runCase(context, testCase, options, runId, canary) {
+  if (testCase.kind === 'multi_turn_tool') {
+    return runMultiTurnToolCase(context, testCase, options, runId, canary)
+  }
   const clientSource = `codex-e2e-${runId}-${testCase.id.replaceAll('.', '-')}`
   const configPath = path.join(options.home, 'config.toml')
   writeFileSync(configPath, buildCodexConfig({
@@ -563,6 +598,118 @@ async function runCase(context, testCase, options, runId, canary) {
     exit_code: result.code,
     invalid_json_lines: parsed.invalidLines,
     event_summary: summary,
+    evaluation,
+    usage,
+  }
+}
+
+/// Drives the multi-turn tool round-trip case.  Spawns Codex twice in
+/// sequence against the same workspace and the same `client_source`:
+/// turn 1 instructs Codex to read CANARY.txt and echo its contents
+/// verbatim; turn 2 injects the previous assistant message into the
+/// prompt and asks Codex to recall the canary by emitting
+/// `CODEX_GATEWAY_E2E_OK:<canary>`.
+///
+/// This is a deliberately simplified multi-turn contract: rather than
+/// driving a true Codex session (which would require dropping
+/// `--ephemeral` and switching to `codex resume`), the runner threads
+/// the previous final message into the second prompt.  That is enough
+/// to exercise the openai-compatible conversation context propagation
+/// through the gateway while keeping the runner hermetic and
+/// deterministic for CI.
+async function runMultiTurnToolCase(context, testCase, options, runId, canary) {
+  const clientSource = `codex-e2e-${runId}-${testCase.id.replaceAll('.', '-')}`
+  const configPath = path.join(options.home, 'config.toml')
+  writeFileSync(configPath, buildCodexConfig({
+    model: options.model,
+    baseUrl: context.gatewayBaseUrl,
+    clientSource,
+  }), { mode: 0o600 })
+  secureFile(configPath)
+
+  const turn1OutputPath = path.join(options.home, `.last-message-${testCase.id.replaceAll('.', '-')}-turn-1.txt`)
+  const turn2OutputPath = path.join(options.home, `.last-message-${testCase.id.replaceAll('.', '-')}-turn-2.txt`)
+  const baseArgs = {
+    model: options.model,
+    workspace: options.workspace,
+    skipGitRepoCheck: !isGitWorkspace(options.workspace),
+  }
+  const env = sanitizeCodexEnvironment(process.env, {
+    home: options.home,
+    stateDirectory: path.join(options.home, 'state'),
+    apiKey: context.dataKey,
+  })
+
+  const startedAt = nowMilliseconds()
+  const turn1Args = buildCodexArgs({ ...baseArgs, outputPath: turn1OutputPath, prompt: multiTurnToolTurn1Prompt() })
+  const turn1Process = await runProcess(options.codexCli, turn1Args, env, options.workspace, options.timeoutMs)
+  const turn1Parsed = parseCodexJsonLines(turn1Process.stdout)
+  const turn1Summary = summarizeCodexEvents(turn1Parsed.events, canary)
+  let turn1Final = ''
+  try { turn1Final = readFileSync(turn1OutputPath, 'utf8') } catch {}
+
+  const turn2Args = buildCodexArgs({
+    ...baseArgs,
+    outputPath: turn2OutputPath,
+    prompt: multiTurnToolTurn2Prompt(turn1Final || ''),
+  })
+  const turn2Process = await runProcess(options.codexCli, turn2Args, env, options.workspace, options.timeoutMs)
+  const turn2Parsed = parseCodexJsonLines(turn2Process.stdout)
+  const turn2Summary = summarizeCodexEvents(turn2Parsed.events, canary)
+  let turn2Final = ''
+  try { turn2Final = readFileSync(turn2OutputPath, 'utf8') } catch {}
+
+  const evaluation = evaluateMultiTurnToolResult(turn2Final, canary)
+  const usage = options.skipUsageCheck
+    ? null
+    : await adminUsageEvent(context.adminBaseUrl, process.env.CODEX_GATEWAY_ADMIN_KEY, clientSource, options.timeoutMs)
+  if (!options.keepOutput) {
+    rmSync(turn1OutputPath, { force: true })
+    rmSync(turn2OutputPath, { force: true })
+  }
+
+  const diagnostics = {
+    turn_1: {
+      exit_code: turn1Process.code,
+      signal: turn1Process.signal,
+      timed_out: turn1Process.timedOut,
+      process_error: turn1Process.error,
+      invalid_json_lines: turn1Parsed.invalidLines,
+      event_summary: turn1Summary,
+      final_text: turn1Final,
+    },
+    turn_2: {
+      exit_code: turn2Process.code,
+      signal: turn2Process.signal,
+      timed_out: turn2Process.timedOut,
+      process_error: turn2Process.error,
+      invalid_json_lines: turn2Parsed.invalidLines,
+      event_summary: turn2Summary,
+      final_text: turn2Final,
+    },
+    evaluation,
+    usage,
+  }
+  diagnostics.diagnostic_stage = evaluation.passed
+    ? 'multi_turn_recall_passed'
+    : 'multi_turn_recall_failed'
+
+  check(turn1Process.code === 0 && !turn1Process.timedOut && !turn1Process.error, 'Codex CLI turn 1 failed', diagnostics)
+  check(turn2Process.code === 0 && !turn2Process.timedOut && !turn2Process.error, 'Codex CLI turn 2 failed', diagnostics)
+  check(turn1Parsed.invalidLines === 0, 'Codex CLI turn 1 emitted non-JSON stdout lines', diagnostics)
+  check(turn2Parsed.invalidLines === 0, 'Codex CLI turn 2 emitted non-JSON stdout lines', diagnostics)
+  check(turn1Summary.canary_seen, 'Codex CLI turn 1 did not successfully read CANARY.txt', diagnostics)
+  check(evaluation.passed, 'Codex CLI turn 2 did not recall the canary from the injected context', diagnostics)
+  if (usage) check(usage.passed, 'Codex Usage event was not persisted with tokens', diagnostics)
+
+  return {
+    model: options.model,
+    kind: testCase.kind,
+    duration_ms: duration(startedAt),
+    turn_1_exit_code: turn1Process.code,
+    turn_2_exit_code: turn2Process.code,
+    turn_1_invalid_json_lines: turn1Parsed.invalidLines,
+    turn_2_invalid_json_lines: turn2Parsed.invalidLines,
     evaluation,
     usage,
   }

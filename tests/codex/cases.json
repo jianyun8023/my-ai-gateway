@@ -6,6 +6,12 @@
     "description": "Codex CLI calls the local shell, reads a canary, and returns its exact value."
   },
   {
+    "id": "codex.multi_turn_tool",
+    "kind": "multi_turn_tool",
+    "cost": "low",
+    "description": "Codex CLI reads a canary in turn 1, then recalls it verbatim when prompted in turn 2 with the previous turn's message injected."
+  },
+  {
     "id": "codex.web_search",
     "kind": "search",
     "cost": "high",
