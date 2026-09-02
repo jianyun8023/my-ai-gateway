@@ -3,12 +3,14 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from '@/App';
+import { setTestLanguage } from '@/test/setup';
 
 describe('GatewayUsagePage mobile navigation', () => {
   let container: HTMLDivElement;
   let root: ReturnType<typeof createRoot>;
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    await setTestLanguage('zh');
     globalThis.IS_REACT_ACT_ENVIRONMENT = true;
     window.location.hash = '#overview';
     document.body.style.overflow = '';

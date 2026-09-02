@@ -2,6 +2,7 @@
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { setTestLanguage } from '@/test/setup';
 import { IconDashboardGrid } from '@/components/ui/icons';
 import { GatewayConsoleShell, GATEWAY_ADMIN_KEY_STORAGE_KEY } from './GatewayConsoleShell';
 
@@ -9,7 +10,8 @@ describe('GatewayConsoleShell Admin key boundary', () => {
   let container: HTMLDivElement;
   let root: ReturnType<typeof createRoot>;
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    await setTestLanguage('zh');
     globalThis.IS_REACT_ACT_ENVIRONMENT = true;
     localStorage.clear();
     sessionStorage.clear();

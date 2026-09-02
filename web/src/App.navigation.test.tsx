@@ -2,6 +2,7 @@
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { setTestLanguage } from '@/test/setup';
 import App from './App';
 
 describe('App console routing', () => {
@@ -9,13 +10,15 @@ describe('App console routing', () => {
   let root: ReturnType<typeof createRoot>;
 
   beforeAll(async () => {
+    await setTestLanguage('zh');
     await Promise.all([
       import('./pages/GatewayManagementPage'),
       import('./pages/GatewayUsagePage'),
     ]);
   });
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    await setTestLanguage('zh');
     globalThis.IS_REACT_ACT_ENVIRONMENT = true;
     localStorage.clear();
     sessionStorage.clear();

@@ -3,14 +3,15 @@ import { useTranslation } from 'react-i18next';
 import i18n, { isSupportedLanguage, persistLanguage, type SupportedLanguage } from '@/i18n';
 import styles from './LanguageSwitcher.module.scss';
 
+// 目前仅支持 en / zh 简体。aria/title 文案经 console 命名空间提供,
+// 供控制台与遗留页(LoginPage/UsagePage 等)共用。
 const LANGUAGE_OPTIONS: ReadonlyArray<{ value: SupportedLanguage; label: string }> = [
   { value: 'en', label: 'EN' },
-  { value: 'zh', label: '中' },
-  { value: 'zh-TW', label: '繁' }
+  { value: 'zh', label: '中文' },
 ];
 
 export function LanguageSwitcher({ className = '' }: { className?: string }) {
-  const { t } = useTranslation();
+  const { t } = useTranslation('console');
   const currentLanguage = isSupportedLanguage(i18n.language) ? i18n.language : 'en';
 
   const handleLanguageChange = useCallback(async (language: SupportedLanguage) => {
@@ -20,18 +21,19 @@ export function LanguageSwitcher({ className = '' }: { className?: string }) {
   }, [currentLanguage]);
 
   const switcherClassName = `${styles.languageSwitcher} ${className}`.trim();
+  const switchAria = t('common.language_switch');
 
   return (
-    <div className={switcherClassName} role="group" aria-label={t('usage_stats.language_switch')}>
+    <div className={switcherClassName} role="group" aria-label={switchAria}>
       {LANGUAGE_OPTIONS.map((option) => (
         <button
           key={option.value}
           type="button"
           className={`${styles.languagePill} ${currentLanguage === option.value ? styles.languagePillActive : ''}`.trim()}
           onClick={() => void handleLanguageChange(option.value)}
-          aria-label={`${t('usage_stats.language_switch')} ${option.label}`}
+          aria-label={`${switchAria} ${option.label}`}
           aria-pressed={currentLanguage === option.value}
-          title={t('usage_stats.language_switch')}
+          title={switchAria}
         >
           {option.label}
         </button>

@@ -1,5 +1,6 @@
 import { StrictMode, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
+import './i18n/console';
 import App from './App';
 import faviconUrl from './assets/gateway-icon.svg';
 import './styles/reset.scss';

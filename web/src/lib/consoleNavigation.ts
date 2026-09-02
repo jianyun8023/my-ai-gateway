@@ -2,8 +2,9 @@
  * Flat console navigation matching the prototype design.
  *
  * All pages are accessed via a single-level hash: #overview, #analysis, etc.
- * The sidebar groups them into sections (监控, 配置, 系统) visually,
- * but routing is flat — no space prefix.
+ * The sidebar groups them into sections visually (labels are resolved from
+ * the console i18n namespace by the app shell), but routing is flat — no
+ * space prefix.
  */
 
 export const CONSOLE_PAGES = [
@@ -13,18 +14,10 @@ export const CONSOLE_PAGES = [
 
 export type ConsolePage = typeof CONSOLE_PAGES[number];
 
-export type ConsoleSection = '监控' | '配置' | '系统';
-
 export interface ConsoleNavSection {
-  label: ConsoleSection;
+  label: string;
   pages: readonly ConsolePage[];
 }
-
-export const CONSOLE_SECTIONS: readonly ConsoleNavSection[] = [
-  { label: '监控', pages: ['overview', 'analysis', 'events'] },
-  { label: '配置', pages: ['sources', 'models'] },
-  { label: '系统', pages: ['settings'] },
-];
 
 export const DEFAULT_PAGE: ConsolePage = 'overview';
 

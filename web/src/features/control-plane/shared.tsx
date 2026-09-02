@@ -8,6 +8,7 @@ import {
   type TextareaHTMLAttributes,
 } from 'react';
 import type { AdminErrorShape, GatewayProtocol } from '@/admin-api';
+import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { Modal } from '@/components/ui/Modal';
@@ -84,6 +85,7 @@ export function Toggle({
   label: string;
   disabled?: boolean;
 }) {
+  const { t } = useTranslation('console');
   return (
     <label className={styles.toggle} aria-label={label}>
       <input
@@ -93,7 +95,7 @@ export function Toggle({
         onChange={(event) => onChange(event.target.checked)}
       />
       <span aria-hidden="true"><i /></span>
-      <em>{checked ? 'Enabled' : 'Disabled'}</em>
+      <em>{t(checked ? 'common.enabled' : 'common.disabled')}</em>
     </label>
   );
 }
@@ -140,28 +142,30 @@ export function TableScroll({ children, label }: PropsWithChildren<{ label: stri
   return <div className={styles.tableScroll} role="region" aria-label={label} tabIndex={0}>{children}</div>;
 }
 
-export function LoadingState({ label = '正在加载…' }: { label?: string }) {
+export function LoadingState({ label }: { label?: string }) {
+  const { t } = useTranslation('console');
+  const text = label ?? t('common.loading');
   return (
     <div className={styles.loadingState} role="status" aria-live="polite" aria-busy="true">
       <LoadingSpinner size={22} />
-      <span>{label}</span>
+      <span>{text}</span>
     </div>
   );
 }
 
 export function ErrorState({ error, onRetry }: { error: AdminErrorShape; onRetry?: () => void }) {
+  const { t } = useTranslation('console');
   const unauthorized = error.status === 401 || error.code === 'unauthorized';
   return (
     <div className={styles.errorState} role="alert" data-unauthorized={unauthorized}>
       <IconTriangleAlert size={18} />
       <div>
-        <strong>{unauthorized ? 'Admin Key 未通过验证' : 'Admin API 请求失败'}</strong>
-        <span>{error.message}</span>
+        <strong>{unauthorized ? t('errors.admin_key_invalid') : t('errors.admin_api_failed')}</strong>
         {error.code && <code>{error.code}</code>}
       </div>
       {onRetry && (
         <Button size="sm" variant="secondary" onClick={onRetry}>
-          <IconRefreshCw size={14} />重试
+          <IconRefreshCw size={14} />{t('common.retry')}
         </Button>
       )}
     </div>
@@ -169,12 +173,13 @@ export function ErrorState({ error, onRetry }: { error: AdminErrorShape; onRetry
 }
 
 export function SuccessNotice({ message, onDismiss }: { message?: string; onDismiss?: () => void }) {
+  const { t } = useTranslation('console');
   if (!message) return null;
   return (
     <div className={styles.successNotice} role="status" aria-live="polite">
       <IconCircleCheck size={17} />
       <span>{message}</span>
-      {onDismiss && <button type="button" onClick={onDismiss} aria-label="关闭成功提示">关闭</button>}
+      {onDismiss && <button type="button" onClick={onDismiss} aria-label={t('common.close_notice_aria')}>{t('common.close')}</button>}
     </div>
   );
 }
@@ -317,6 +322,7 @@ export function ConfirmDialog({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
+  const { t } = useTranslation('console');
   return (
     <Modal
       open={open}
@@ -326,7 +332,7 @@ export function ConfirmDialog({
       width={480}
       footer={(
         <>
-          <Button variant="secondary" onClick={onCancel} disabled={busy}>取消</Button>
+          <Button variant="secondary" onClick={onCancel} disabled={busy}>{t('common.cancel')}</Button>
           <Button variant={danger ? 'danger' : 'primary'} onClick={onConfirm} loading={busy}>{confirmLabel}</Button>
         </>
       )}

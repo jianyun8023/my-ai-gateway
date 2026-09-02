@@ -3,7 +3,7 @@ import { initReactI18next } from 'react-i18next';
 
 const LANGUAGE_STORAGE_KEY = 'cpa-usage-keeper-language';
 const DEFAULT_LANGUAGE = 'en';
-export const SUPPORTED_LANGUAGES = ['en', 'zh', 'zh-TW'] as const;
+export const SUPPORTED_LANGUAGES = ['en', 'zh'] as const;
 
 export type SupportedLanguage = (typeof SUPPORTED_LANGUAGES)[number];
 
@@ -11,10 +11,23 @@ export const isSupportedLanguage = (language: string | null): language is Suppor
   SUPPORTED_LANGUAGES.includes(language as SupportedLanguage)
 );
 
+/** 浏览器 Accept-Language 探测:zh* → 简体中文,en* → English,其它回退 en。 */
+const detectBrowserLanguage = (): SupportedLanguage => {
+  if (typeof navigator === 'undefined') return DEFAULT_LANGUAGE;
+  const candidates = navigator.languages.length > 0 ? navigator.languages : [navigator.language];
+  for (const candidate of candidates) {
+    const lower = candidate.toLowerCase();
+    if (lower.startsWith('zh')) return 'zh';
+    if (lower.startsWith('en')) return 'en';
+  }
+  return DEFAULT_LANGUAGE;
+};
+
 const getInitialLanguage = (): SupportedLanguage => {
   if (typeof window === 'undefined') return DEFAULT_LANGUAGE;
   const saved = window.localStorage.getItem(LANGUAGE_STORAGE_KEY);
-  return isSupportedLanguage(saved) ? saved : DEFAULT_LANGUAGE;
+  if (saved === 'en' || saved === 'zh') return saved;
+  return detectBrowserLanguage();
 };
 
 const resources = {
@@ -466,6 +479,7 @@ const resources = {
         credentials_refresh_error_not_found: 'This credential is no longer available.',
         credentials_refresh_error_invalid: 'This credential cannot be refreshed.',
         credentials_refresh_error_failed: 'Quota refresh failed. Please try again later.',
+        credentials_refresh_single: 'Refresh quota for {{name}}',
         credentials_inspection_open: 'Inspect',
         credentials_inspection_title: 'Auth Files Inspection',
         credentials_inspection_total: 'Available accounts',
@@ -941,8 +955,8 @@ const resources = {
         export_busy: '已有两个请求事件导出正在进行，请稍后重试。',
         import_invalid: '导入文件无效',
         import_success: '导入完成：新增 {{added}}，跳过 {{skipped}}，总计 {{total}}，失败 {{failed}}',
-        back_to_cpa: '返回CPA',
-        back_to_cpa_aria: '返回CPA管理界面',
+        back_to_cpa: '返回 CPA',
+        back_to_cpa_aria: '返回 CPA 管理界面',
         tabs_aria_label: '用量页面分区',
         tab_overview: '概览',
         tab_analysis: '分析',
@@ -1217,13 +1231,13 @@ const resources = {
         credentials_quota_history_window_monthly: '每月',
         credentials_quota_history_metric_selector: '效率指标',
         credentials_quota_history_tokens_per_point: '每 1% Token',
-        credentials_quota_history_cost_per_point: '每 1% Cost',
+        credentials_quota_history_cost_per_point: '每 1% 成本',
         credentials_quota_history_current_title: '当前周期效率',
         credentials_quota_history_cycle_range: '周期范围 {{start}} → {{end}}',
         credentials_quota_history_observed_range: '观察范围 {{start}} → {{end}}',
         credentials_quota_history_no_current: '当前窗口没有进行中的周期。',
         credentials_quota_history_no_transition: '这个周期尚未记录到百分比变化样本。',
-        credentials_quota_history_cost_unavailable: '部分用量缺少当前价格，暂时无法计算 Cost 效率。',
+        credentials_quota_history_cost_unavailable: '部分用量缺少当前价格,暂时无法计算成本效率。',
         credentials_quota_history_direct: '单百分点样本',
         credentials_quota_history_cross: '多百分点均摊',
         credentials_quota_history_cross_points: '{{count}} 个百分点均摊',
@@ -1234,7 +1248,7 @@ const resources = {
         credentials_quota_history_estimated_unused: '估算未用',
         credentials_quota_history_unused_percentage: '未用百分比',
         credentials_quota_history_records_title: '最近 30 天周期记录',
-        credentials_quota_history_records_subtitle: '包含当前进行中的周期；Cost 按当前定价回算。',
+        credentials_quota_history_records_subtitle: '包含当前进行中的周期；成本按当前定价回算。',
         credentials_quota_history_cycle_count: '{{count}} 个周期',
         credentials_quota_history_no_records: '最近 30 天没有已记录的周期。',
         credentials_quota_history_status_current: '进行中',
@@ -1310,6 +1324,7 @@ const resources = {
         credentials_refresh_error_not_found: '该凭证已不可用。',
         credentials_refresh_error_invalid: '该凭证无法刷新。',
         credentials_refresh_error_failed: '限额刷新失败，请稍后重试。',
+        credentials_refresh_single: '刷新 {{name}} 的限额',
         credentials_inspection_open: '巡检',
         credentials_inspection_title: '认证文件巡检',
         credentials_inspection_total: '可用账号总数',
@@ -1785,8 +1800,8 @@ const resources = {
         export_busy: '已有兩個請求事件匯出正在進行，請稍後再試。',
         import_invalid: '匯入檔案無效',
         import_success: '匯入完成：新增 {{added}}，略過 {{skipped}}，總計 {{total}}，失敗 {{failed}}',
-        back_to_cpa: '返回CPA',
-        back_to_cpa_aria: '返回CPA管理介面',
+        back_to_cpa: '返回 CPA',
+        back_to_cpa_aria: '返回 CPA 管理介面',
         tabs_aria_label: '用量頁面分區',
         tab_overview: '總覽',
         tab_analysis: '分析',
@@ -2061,13 +2076,13 @@ const resources = {
         credentials_quota_history_window_monthly: '每月',
         credentials_quota_history_metric_selector: '效率指標',
         credentials_quota_history_tokens_per_point: '每 1% Token',
-        credentials_quota_history_cost_per_point: '每 1% Cost',
+        credentials_quota_history_cost_per_point: '每 1% 成本',
         credentials_quota_history_current_title: '目前週期效率',
         credentials_quota_history_cycle_range: '週期範圍 {{start}} → {{end}}',
         credentials_quota_history_observed_range: '觀察範圍 {{start}} → {{end}}',
         credentials_quota_history_no_current: '目前視窗沒有進行中的週期。',
         credentials_quota_history_no_transition: '這個週期尚未記錄到百分比變化樣本。',
-        credentials_quota_history_cost_unavailable: '部分用量缺少目前價格，暫時無法計算 Cost 效率。',
+        credentials_quota_history_cost_unavailable: '部分用量缺少目前價格,暫時無法計算成本效率。',
         credentials_quota_history_direct: '單百分點樣本',
         credentials_quota_history_cross: '多百分點均攤',
         credentials_quota_history_cross_points: '{{count}} 個百分點均攤',
@@ -2078,7 +2093,7 @@ const resources = {
         credentials_quota_history_estimated_unused: '估算未用',
         credentials_quota_history_unused_percentage: '未用百分比',
         credentials_quota_history_records_title: '最近 30 天週期記錄',
-        credentials_quota_history_records_subtitle: '包含目前進行中的週期；Cost 按目前定價回算。',
+        credentials_quota_history_records_subtitle: '包含目前進行中的週期；成本按目前定價回算。',
         credentials_quota_history_cycle_count: '{{count}} 個週期',
         credentials_quota_history_no_records: '最近 30 天沒有已記錄的週期。',
         credentials_quota_history_status_current: '進行中',
@@ -2154,6 +2169,7 @@ const resources = {
         credentials_refresh_error_not_found: '此憑證已不可用。',
         credentials_refresh_error_invalid: '此憑證無法重新整理。',
         credentials_refresh_error_failed: '限額重新整理失敗，請稍後再試。',
+        credentials_refresh_single: '重新整理 {{name}} 的限額',
         credentials_inspection_open: '巡檢',
         credentials_inspection_title: '認證檔案巡檢',
         credentials_inspection_total: '可用帳號總數',
