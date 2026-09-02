@@ -1,0 +1,23 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: my-ai-gateway-ingress
+  labels:
+    app: my-ai-gateway
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: ai-gateway.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: my-ai-gateway
+                port:
+                  number: 8787
+  tls:
+    - hosts:
+        - ai-gateway.example.com
+      secretName: my-ai-gateway-tls

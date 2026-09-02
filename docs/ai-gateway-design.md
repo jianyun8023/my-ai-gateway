@@ -496,6 +496,7 @@ v1 响应 envelope 固定如下：summary 为 `{version, timezone, range, data}`
 - [docker-compose.yml](../docker-compose.yml)；
 - [.env.compose.example](../.env.compose.example)；
 - [Docker Compose 部署说明](deployment.md)；
+- [Kubernetes / K3s 部署参考](kubernetes.md)；
 - 多阶段前端/Rust 构建和精简运行时镜像，运行时使用非 root 用户并提供 `/healthz` 容器健康检查；
 - PostgreSQL 16；
 - Gateway + PostgreSQL 单机部署结构，PostgreSQL 使用命名卷持久化，默认不向宿主机发布数据库端口。

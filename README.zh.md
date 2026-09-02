@@ -119,6 +119,10 @@ Compose 环境文件中的 Provider 凭据会传入 Gateway 容器，变量名�
 凭据写入 JSON、镜像或 Git。该 Compose 文件默认适合单机开发/内部部署，生产环境仍需配置 TLS、网络边界、备份和受控
 Secret 注入。
 
+### Kubernetes / K3s
+
+仓库提供脱敏的 Kustomize 部署基线，默认只部署 Gateway 并连接已有 PostgreSQL。完整的外部 Secret、Ingress、控制面初始化、升级和回滚说明见 [`docs/kubernetes.md`](docs/kubernetes.md)，清单位于 [`deploy/kubernetes/`](deploy/kubernetes/)。
+
 ## 调用网关
 
 正式客户端使用 PostgreSQL-backed Virtual Key；静态 `GATEWAY_API_KEY` 只保留为过渡兼容入口。三类协议入口接受 `Authorization: Bearer ...`；兼容客户端也可以使用 `x-api-key`。

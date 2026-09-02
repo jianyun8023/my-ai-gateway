@@ -1,8 +1,10 @@
-# Docker Compose 部署
+# 部署参考
 
-本文是当前仓库的单机部署说明。Compose 负责运行 Gateway 和 PostgreSQL 16；Gateway 镜像在本机构建，数据库数据保存在命名卷中。应用启动时会自动执行内置 migration，并从 PostgreSQL 控制面加载运行时 snapshot。
+本文包含当前仓库的 Docker Compose 单机部署和 Kubernetes/K3s 部署参考。Compose 负责运行 Gateway 和 PostgreSQL 16；Kubernetes 清单只部署 Gateway，连接已有 PostgreSQL。应用启动时会自动执行内置 migration，并从 PostgreSQL 控制面加载运行时 snapshot。
 
 这套配置适合开发、测试和受控的内部部署。对公网提供服务前，还需要在网关前配置 TLS、访问边界、日志/指标采集、备份和 Secret 管理。
+
+Kubernetes/K3s 的完整清单、外部 Secret、Ingress、升级和回滚说明见 [`kubernetes.md`](kubernetes.md)。
 
 ## 准备环境文件
 
@@ -87,3 +89,9 @@ docker compose --env-file .env.compose exec -T postgres \
 ```
 
 物理 dump 可能包含数据库中的加密凭据和全部历史，必须按高敏感备份保护。迁移到新环境时，优先使用脱敏控制面导出或恢复到新库，不要直接覆盖现有生产卷。
+
+## Kubernetes / K3s
+
+仓库提供 [`deploy/kubernetes/`](../deploy/kubernetes/) 作为脱敏 Kustomize 基线。它默认使用 `apps` 命名空间、`8787` 端口、Traefik Ingress 和 GHCR `main` 镜像，并依赖外部创建的数据库 Secret、Provider Secret 与 GHCR 拉取 Secret。
+
+不要直接把真实 Secret 写入该目录；请按 [`docs/kubernetes.md`](kubernetes.md) 准备外部资源后再应用清单。K3s 的实际集群入口、域名和 Argo CD 操作记录在本机私有的 `.private/k3s-deployment.md`，不会进入 Git。

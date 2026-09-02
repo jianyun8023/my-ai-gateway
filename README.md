@@ -104,6 +104,10 @@ curl http://127.0.0.1:8787/healthz
 
 完整的启动、升级、备份和恢复说明见 [`docs/deployment.md`](docs/deployment.md) 与 [`docs/operations.md`](docs/operations.md)。
 
+### Kubernetes / K3s
+
+仓库提供脱敏的 Kustomize 部署基线，默认部署 Gateway 并连接已有 PostgreSQL；清单、外部 Secret、Ingress、升级和回滚说明见 [`docs/kubernetes.md`](docs/kubernetes.md)，清单位于 [`deploy/kubernetes/`](deploy/kubernetes/)。
+
 ### 预构建镜像
 
 GitHub Actions 会向 GitHub Container Registry 发布同时支持 `linux/amd64` 和 `linux/arm64` 的多架构镜像：
