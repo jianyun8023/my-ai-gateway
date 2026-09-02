@@ -2405,7 +2405,7 @@ impl ControlPlane {
 mod tests {
     use super::*;
     use crate::infra::db::Database;
-    use crate::state::{AppState, EnvRestore};
+    use crate::state::{AppState, EnvRestore, TEST_ADMIN_KEY};
     use axum::{
         body::{to_bytes, Body},
         extract::State,
@@ -2419,8 +2419,17 @@ mod tests {
     /// env state cleared so the unit tests stay hermetic.
     async fn invoke_models_for_test(state: &AppState) -> Value {
         let _environment_lock = crate::state::ENV_LOCK.lock().await;
-        let _unset = EnvRestore::unset("GATEWAY_API_KEY");
-        let response = crate::models(State(state.clone()), HeaderMap::new()).await;
+        // PR #86 (/v1/models now requires data-plane auth) makes a bare
+        // HeaderMap fail with a 401 envelope whose body has no `data` field.
+        // Seed the static admin key the handler accepts; EnvRestore cleans up
+        // when the call returns so subsequent tests still see an empty env.
+        let _admin = EnvRestore::set("GATEWAY_API_KEY", TEST_ADMIN_KEY);
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            axum::http::header::AUTHORIZATION,
+            axum::http::HeaderValue::from_static("Bearer test-admin-key"),
+        );
+        let response = crate::models(State(state.clone()), headers).await;
         let body = to_bytes(response.into_body(), 64 * 1024)
             .await
             .expect("models response body");
