@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 pub const PROVIDER_PRESET_SCHEMA_VERSION: u32 = 1;
 /// The latest built-in provider preset record version.  Record versions are
 /// immutable snapshots; bumping this value never rewrites an existing Source.
-pub const BUILTIN_PROVIDER_PRESET_VERSION: i32 = 2;
+pub const BUILTIN_PROVIDER_PRESET_VERSION: i32 = 3;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -279,23 +279,74 @@ pub fn builtin_provider_presets() -> Result<Vec<ProviderPresetInput>, CatalogErr
         CapabilitySupport::Supported,
     );
 
+    // v3 splits the Responses web_search capability into search action and
+    // source/citation visibility.  Native Providers that ship their own
+    // `/v1/responses` endpoint (MiniMax, DeepSeek) currently return no
+    // `web_search_call.action.sources` and no `url_citation` annotations on
+    // `message.output_text`, even when the client opts in via
+    // `include: ["web_search_call.action.sources"]` (issue #85).  The
+    // embedded Kimi adapter, by contrast, reconstructs sources from
+    // Anthropic `web_search_tool_result` and exposes them natively.
+    let mut deepseek_v3 = deepseek_v2.clone();
+    mark_protocol_feature(
+        &mut deepseek_v3,
+        Protocol::OpenAiResponses,
+        "web_search_citations",
+        CapabilitySupport::Unsupported,
+    );
+    mark_protocol_feature(
+        &mut deepseek_v3,
+        Protocol::OpenAiResponses,
+        "web_search_sources",
+        CapabilitySupport::Unsupported,
+    );
+    let mut minimax_v3 = minimax_v2.clone();
+    mark_protocol_feature(
+        &mut minimax_v3,
+        Protocol::OpenAiResponses,
+        "web_search_citations",
+        CapabilitySupport::Unsupported,
+    );
+    mark_protocol_feature(
+        &mut minimax_v3,
+        Protocol::OpenAiResponses,
+        "web_search_sources",
+        CapabilitySupport::Unsupported,
+    );
+    let mut kimi_v3 = kimi_v2.clone();
+    mark_protocol_feature(
+        &mut kimi_v3,
+        Protocol::OpenAiResponses,
+        "web_search_citations",
+        CapabilitySupport::Supported,
+    );
+    mark_protocol_feature(
+        &mut kimi_v3,
+        Protocol::OpenAiResponses,
+        "web_search_sources",
+        CapabilitySupport::Supported,
+    );
+
     [
         (deepseek_id, deepseek_name, 1, deepseek_definition),
         (minimax_id, minimax_name, 1, minimax_definition),
         (kimi_id, kimi_name, 1, kimi_definition),
+        (deepseek_id, deepseek_name, 2, deepseek_v2),
+        (minimax_id, minimax_name, 2, minimax_v2),
+        (kimi_id, kimi_name, 2, kimi_v2),
         (
             deepseek_id,
             deepseek_name,
             BUILTIN_PROVIDER_PRESET_VERSION,
-            deepseek_v2,
+            deepseek_v3,
         ),
         (
             minimax_id,
             minimax_name,
             BUILTIN_PROVIDER_PRESET_VERSION,
-            minimax_v2,
+            minimax_v3,
         ),
-        (kimi_id, kimi_name, BUILTIN_PROVIDER_PRESET_VERSION, kimi_v2),
+        (kimi_id, kimi_name, BUILTIN_PROVIDER_PRESET_VERSION, kimi_v3),
     ]
     .into_iter()
     .map(|(id, display_name, version, definition)| {
@@ -679,11 +730,11 @@ mod tests {
     #[test]
     fn builtins_are_versioned_complete_and_explicit_about_discovery() {
         let presets = builtin_provider_presets().expect("valid builtins");
-        assert_eq!(presets.len(), 6);
+        assert_eq!(presets.len(), 9);
         for preset in &presets {
             assert!(matches!(
                 preset.version,
-                1 | BUILTIN_PROVIDER_PRESET_VERSION
+                1 | 2 | BUILTIN_PROVIDER_PRESET_VERSION
             ));
             let definition: ProviderPresetDefinition =
                 serde_json::from_value(preset.definition.clone()).unwrap();
@@ -717,6 +768,16 @@ mod tests {
                 ["tool_streaming"],
             CapabilitySupport::Supported
         );
+        assert_eq!(
+            kimi_v2_definition.protocols[&Protocol::OpenAiResponses].default_capabilities
+                ["web_search_citations"],
+            CapabilitySupport::Supported
+        );
+        assert_eq!(
+            kimi_v2_definition.protocols[&Protocol::OpenAiResponses].default_capabilities
+                ["web_search_sources"],
+            CapabilitySupport::Supported
+        );
         for provider_id in ["deepseek", "minimax"] {
             let preset = presets
                 .iter()
@@ -729,6 +790,18 @@ mod tests {
             assert_eq!(
                 definition.protocols[&Protocol::OpenAiResponses].default_capabilities["web_search"],
                 CapabilitySupport::Supported
+            );
+            assert_eq!(
+                definition.protocols[&Protocol::OpenAiResponses].default_capabilities
+                    ["web_search_citations"],
+                CapabilitySupport::Unsupported,
+                "{provider_id} v3 must mark citations as unsupported (issue #85)"
+            );
+            assert_eq!(
+                definition.protocols[&Protocol::OpenAiResponses].default_capabilities
+                    ["web_search_sources"],
+                CapabilitySupport::Unsupported,
+                "{provider_id} v3 must mark sources as unsupported (issue #85)"
             );
         }
     }
