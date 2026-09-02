@@ -149,7 +149,7 @@ impl AppState {
 pub(crate) async fn authorized_with_db(
     state: &AppState,
     headers: &HeaderMap,
-    model: &str,
+    model: Option<&str>,
 ) -> Option<Option<i64>> {
     if let Ok(expected) = std::env::var("GATEWAY_API_KEY") {
         if supplied_key(headers)
