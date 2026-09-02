@@ -1024,7 +1024,7 @@ mod health_api_tests {
 #[cfg(test)]
 mod audit_closeout_tests {
     use super::*;
-    use axum::{body::to_bytes, extract::Request, Router};
+    use axum::{body::to_bytes, extract::Request, http::header, Router};
     use std::{
         collections::HashMap,
         io::Write,
@@ -1246,6 +1246,168 @@ mod audit_closeout_tests {
         assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
         let body = json_body(response).await;
         assert_eq!(body["error"]["code"], "lossy_conversion_not_allowed");
+    }
+
+    fn empty_routes_config() -> GatewayConfig {
+        GatewayConfig {
+            listen_addr: "127.0.0.1:0".into(),
+            providers: vec![provider("audit-provider", "https://unused.invalid".into())],
+            accounts: vec![account("audit-primary", "audit-provider")],
+            routes: vec![],
+        }
+    }
+
+    fn anthropic_unauthorized_request() -> Request<Body> {
+        // Configure `GATEWAY_API_KEY=correct` and send a wrong bearer so
+        // `authorized_with_db` rejects without falling through to the DB.
+        Request::builder()
+            .method("POST")
+            .uri("/v1/messages")
+            .header(CONTENT_TYPE, "application/json")
+            .header(header::AUTHORIZATION, "Bearer wrong-key")
+            .body(Body::from(r#"{"model":"audit-model","messages":[]}"#))
+            .expect("anthropic unauthorized request")
+    }
+
+    fn openai_chat_unauthorized_request() -> Request<Body> {
+        Request::builder()
+            .method("POST")
+            .uri("/v1/chat/completions")
+            .header(CONTENT_TYPE, "application/json")
+            .header(header::AUTHORIZATION, "Bearer wrong-key")
+            .body(Body::from(r#"{"model":"audit-model","messages":[]}"#))
+            .expect("openai chat unauthorized request")
+    }
+
+    fn openai_responses_unauthorized_request() -> Request<Body> {
+        Request::builder()
+            .method("POST")
+            .uri("/v1/responses")
+            .header(CONTENT_TYPE, "application/json")
+            .header(header::AUTHORIZATION, "Bearer wrong-key")
+            .body(Body::from(r#"{"model":"audit-model","input":"hello"}"#))
+            .expect("openai responses unauthorized request")
+    }
+
+    async fn assert_data_plane_error_envelope(
+        response: Response<Body>,
+        expected_status: StatusCode,
+        expected_code: &str,
+        body_asserts: impl FnOnce(&Value),
+    ) {
+        assert_eq!(response.status(), expected_status);
+        // Capture the request_id header before the response body is consumed.
+        let header_request_id = response
+            .headers()
+            .get("x-request-id")
+            .expect("x-request-id header missing on data-plane error")
+            .to_str()
+            .expect("x-request-id header must be ASCII")
+            .to_owned();
+        let body = json_body(response).await;
+        let body_request_id = body["request_id"]
+            .as_str()
+            .expect("top-level request_id must be present on data-plane errors")
+            .to_owned();
+        assert!(
+            Uuid::parse_str(&body_request_id).is_ok(),
+            "request_id must be a UUID: {body_request_id}"
+        );
+        assert_eq!(body_request_id, header_request_id);
+        // Either the legacy `error.code` (Anthropic/OpenAI envelopes) or the
+        // top-level `code` (admin envelope, not used here) is acceptable.
+        let envelope_code = body["error"]["code"].as_str().unwrap_or_default();
+        assert_eq!(envelope_code, expected_code);
+        body_asserts(&body);
+    }
+
+    #[tokio::test]
+    async fn data_plane_anthropic_messages_401_uses_sdk_standard_envelope() {
+        let _environment_lock = ENV_LOCK.lock().await;
+        // Set the gateway key and send a wrong bearer so the data-plane auth
+        // layer rejects without falling through to the DB.
+        let _key = EnvRestore::set("GATEWAY_API_KEY", "audit-correct-key");
+        let response = application(state(empty_routes_config()))
+            .oneshot(anthropic_unauthorized_request())
+            .await
+            .expect("anthropic unauthorized response");
+        assert_data_plane_error_envelope(
+            response,
+            StatusCode::UNAUTHORIZED,
+            "unauthorized",
+            |body| {
+                assert_eq!(body["type"], "error");
+                assert_eq!(body["error"]["type"], "authentication_error");
+                assert!(body["error"]["message"].is_string());
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn data_plane_anthropic_messages_404_uses_sdk_standard_envelope() {
+        let _environment_lock = ENV_LOCK.lock().await;
+        let _key = EnvRestore::set("GATEWAY_API_KEY", "audit-anthropic-404");
+        let response = application(state(empty_routes_config()))
+            .oneshot(proxy_request("/v1/messages"))
+            .await
+            .expect("anthropic not-found response");
+        assert_data_plane_error_envelope(
+            response,
+            StatusCode::NOT_FOUND,
+            "route_not_found",
+            |body| {
+                assert_eq!(body["type"], "error");
+                assert_eq!(body["error"]["type"], "not_found_error");
+                assert!(body["error"]["message"].is_string());
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn data_plane_openai_chat_401_keeps_envelope_and_attaches_request_id() {
+        let _environment_lock = ENV_LOCK.lock().await;
+        let _key = EnvRestore::set("GATEWAY_API_KEY", "audit-correct-key");
+        let response = application(state(empty_routes_config()))
+            .oneshot(openai_chat_unauthorized_request())
+            .await
+            .expect("openai chat unauthorized response");
+        assert_data_plane_error_envelope(
+            response,
+            StatusCode::UNAUTHORIZED,
+            "unauthorized",
+            |body| {
+                // OpenAI envelopes stay as-is for client compatibility; only
+                // the optional top-level request_id and x-request-id header
+                // are added on top.
+                assert_eq!(body["error"]["type"], "unauthorized");
+                assert!(body["error"]["message"].is_string());
+                assert!(body["type"].is_null(), "no top-level type for OpenAI");
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn data_plane_openai_responses_401_keeps_envelope_and_attaches_request_id() {
+        let _environment_lock = ENV_LOCK.lock().await;
+        let _key = EnvRestore::set("GATEWAY_API_KEY", "audit-correct-key");
+        let response = application(state(empty_routes_config()))
+            .oneshot(openai_responses_unauthorized_request())
+            .await
+            .expect("openai responses unauthorized response");
+        assert_data_plane_error_envelope(
+            response,
+            StatusCode::UNAUTHORIZED,
+            "unauthorized",
+            |body| {
+                assert_eq!(body["error"]["type"], "unauthorized");
+                assert!(body["error"]["message"].is_string());
+                assert!(body["type"].is_null(), "no top-level type for OpenAI");
+            },
+        )
+        .await;
     }
 
     async fn spawn_fallback_upstream() -> String {
@@ -1761,6 +1923,10 @@ mod kimi_adapter_e2e_tests {
 
     #[tokio::test]
     async fn embedded_kimi_adapter_non_stream_preserves_thinking_and_web_search() {
+        let _environment_lock = ENV_LOCK.lock().await;
+        // Force the "no auth configured" path so other tests that set
+        // `GATEWAY_API_KEY` cannot make this request return 401.
+        let _unset = EnvRestore::unset("GATEWAY_API_KEY");
         let (base, recorded) = spawn_mock_upstream(|_, headers| {
             assert_eq!(
                 headers.get("authorization").and_then(|v| v.to_str().ok()),
@@ -1801,6 +1967,8 @@ mod kimi_adapter_e2e_tests {
 
     #[tokio::test]
     async fn embedded_kimi_adapter_stream_translates_sse_events() {
+        let _environment_lock = ENV_LOCK.lock().await;
+        let _unset = EnvRestore::unset("GATEWAY_API_KEY");
         let (base, recorded) = spawn_mock_upstream(|body, headers| {
             if body.is_empty() {
                 return Response::builder()
