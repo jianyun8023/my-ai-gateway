@@ -4,6 +4,7 @@ import type {
   ModelMetadataValues,
 } from '@/admin-api';
 import { MODEL_METADATA_FIELDS } from '@/admin-api';
+import { useTranslation } from 'react-i18next';
 import { SelectField, StatusPill, TextField } from './shared';
 import styles from './ControlPlane.module.scss';
 
@@ -21,20 +22,20 @@ const FEATURE_FIELDS = [
 const NUMBER_FIELDS = ['context_window', 'max_input_tokens', 'max_output_tokens'] as const;
 const MODALITY_FIELDS = ['input_modalities', 'output_modalities'] as const;
 
-const METADATA_LABELS: Record<ModelMetadataField, string> = {
-  logical_model_name: '建议逻辑模型名',
-  display_name: '显示名称',
-  context_window: 'Context window',
-  max_input_tokens: 'Max input tokens',
-  max_output_tokens: 'Max output tokens',
-  input_modalities: '输入模态',
-  output_modalities: '输出模态',
-  tools: 'Tools',
-  thinking: 'Thinking',
-  web_search: 'Web Search',
-  structured_output: 'Structured Output',
-  streaming: 'Streaming',
-  usage: 'Usage',
+const METADATA_LABEL_KEYS: Record<ModelMetadataField, string> = {
+  logical_model_name: 'settings.metadata.field.logical_model_name',
+  display_name: 'settings.metadata.field.display_name',
+  context_window: 'settings.metadata.field.context_window',
+  max_input_tokens: 'settings.metadata.field.max_input_tokens',
+  max_output_tokens: 'settings.metadata.field.max_output_tokens',
+  input_modalities: 'settings.metadata.field.input_modalities',
+  output_modalities: 'settings.metadata.field.output_modalities',
+  tools: 'settings.metadata.field.tools',
+  thinking: 'settings.metadata.field.thinking',
+  web_search: 'settings.metadata.field.web_search',
+  structured_output: 'settings.metadata.field.structured_output',
+  streaming: 'settings.metadata.field.streaming',
+  usage: 'settings.metadata.field.usage',
 };
 
 const toDraftValue = (field: ModelMetadataField, value: unknown): string => {
@@ -72,9 +73,10 @@ export const metadataFromDraft = (
 };
 
 function FieldLabel({ field, source }: { field: ModelMetadataField; source?: MetadataSource }) {
+  const { t } = useTranslation('console');
   return (
     <span className={styles.metadataFieldLabel}>
-      <span>{METADATA_LABELS[field]}</span>
+      <span>{t(METADATA_LABEL_KEYS[field])}</span>
       <StatusPill tone={source === 'user' ? 'accent' : source === 'preset' ? 'success' : source === 'upstream' ? 'warning' : 'muted'}>
         {source ?? 'unknown'}
       </StatusPill>
@@ -93,6 +95,8 @@ export function ModelMetadataFields({
   disabled?: boolean;
   onChange: (field: ModelMetadataField, value: string) => void;
 }) {
+  const { t } = useTranslation('console');
+  const fieldLabel = (field: ModelMetadataField) => t(METADATA_LABEL_KEYS[field]);
   return (
     <div className={styles.formGrid}>
       {(['logical_model_name', 'display_name'] as const).map((field) => (
@@ -100,7 +104,7 @@ export function ModelMetadataFields({
           <FieldLabel field={field} source={fieldSources[field]} />
           <TextField
             label=""
-            aria-label={METADATA_LABELS[field]}
+            aria-label={fieldLabel(field)}
             value={draft[field]}
             disabled={disabled}
             onChange={(event) => onChange(field, event.target.value)}
@@ -114,7 +118,7 @@ export function ModelMetadataFields({
           <FieldLabel field={field} source={fieldSources[field]} />
           <TextField
             label=""
-            aria-label={METADATA_LABELS[field]}
+            aria-label={fieldLabel(field)}
             type="number"
             min={1}
             step={1}
@@ -131,7 +135,7 @@ export function ModelMetadataFields({
           <FieldLabel field={field} source={fieldSources[field]} />
           <TextField
             label=""
-            aria-label={METADATA_LABELS[field]}
+            aria-label={fieldLabel(field)}
             value={draft[field]}
             disabled={disabled}
             onChange={(event) => onChange(field, event.target.value)}
@@ -145,15 +149,15 @@ export function ModelMetadataFields({
           <FieldLabel field={field} source={fieldSources[field]} />
           <SelectField
             label=""
-            aria-label={METADATA_LABELS[field]}
+            aria-label={fieldLabel(field)}
             value={draft[field] || 'unknown'}
             disabled={disabled}
             onChange={(event) => onChange(field, event.target.value)}
             className={styles.metadataField}
           >
-            <option value="unknown">unknown</option>
-            <option value="supported">supported</option>
-            <option value="unsupported">unsupported</option>
+            <option value="unknown">{t('settings.metadata.feature.unknown')}</option>
+            <option value="supported">{t('settings.metadata.feature.supported')}</option>
+            <option value="unsupported">{t('settings.metadata.feature.unsupported')}</option>
           </SelectField>
         </div>
       ))}

@@ -250,6 +250,20 @@
   gap: 12px;
 }
 
+/* Language switcher — desktop copy lives in the topbar; the sidebar drawer
+   shows its own copy below 920px where the topbar runs out of room. */
+.topbarLanguage {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.sidebarLanguageArea {
+  display: none;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border-color);
+}
+
 .endpointDisplay {
   display: flex;
   align-items: center;
@@ -388,6 +402,8 @@
 
   .topbar { padding: 0 16px; gap: 10px; }
   .topbarSearch { display: none; }
+  .topbarLanguage { display: none; }
+  .sidebarLanguageArea { display: flex; }
   .endpointDisplay { font-size: 11px; padding: 4px 8px; }
   .keyInput > span { display: none; }
   .keyInput input { width: 120px; }

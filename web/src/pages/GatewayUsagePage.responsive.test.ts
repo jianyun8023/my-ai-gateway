@@ -12,11 +12,10 @@ describe('GatewayUsagePage prototype adaptation', () => {
   it('uses the sidebar shell with flat navigation matching the prototype', () => {
     expect(shellSource).toContain('className={styles.sidebar}');
     expect(shellSource).toContain('navItemsById');
-    expect(appSource).toContain("'总览'");
-    expect(appSource).toContain("'用量分析'");
-    expect(appSource).toContain("'来源管理'");
-    expect(appSource).toContain("'模型与路由'");
-    expect(appSource).toContain("'系统设置'");
+    // 导航标签已迁移到 console i18n(shell.nav.*),按当前语言渲染全部六个扁平页面。
+    for (const pageId of ['overview', 'analysis', 'events', 'sources', 'models', 'settings']) {
+      expect(appSource).toContain(`t('shell.nav.${pageId}')`);
+    }
     expect(pageSource).not.toMatch(/Round-Robin/);
   });
 
@@ -25,7 +24,7 @@ describe('GatewayUsagePage prototype adaptation', () => {
     expect(shellStyles).toContain('@media (max-width: 600px)');
     expect(shellStyles).toContain('@media (max-width: 380px)');
     expect(shellStyles).toContain('@media (prefers-reduced-motion: reduce)');
-    expect(shellSource).toContain('aria-label="打开导航"');
+    expect(shellSource).toContain('aria-controls="gateway-navigation"');
     expect(shellSource).toContain("e.key === 'Escape'");
     expect(shellSource).toContain("document.body.style.overflow = 'hidden'");
     expect(styles).toMatch(/\.eventTable \{ overflow-x: auto; \}/);

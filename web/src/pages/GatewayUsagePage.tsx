@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Bar, Doughnut, Line } from 'react-chartjs-2';
 import '@/lib/chartjs';
@@ -7,6 +9,7 @@ import { Card } from '@/components/ui/Card';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { GatewayUsageClient, type GatewayUsageFilters, type UsageBreakdownDimension, type UsageBreakdownItem, type UsageEventViewModel, type UsageOverviewViewModel, type UsageSummaryViewModel } from '@/gateway-usage';
 import type { GatewayUsageTab } from '@/lib/consoleNavigation';
+import { useLocalizedApiError } from '@/hooks/useLocalizedApiError';
 import styles from './GatewayUsagePage.module.scss';
 
 const FILTER_STORAGE_KEY = 'my-ai-gateway-usage-filters-v2';
@@ -30,18 +33,18 @@ const EVENT_COLUMNS = [
 type EventColumn = typeof EVENT_COLUMNS[number];
 
 const EVENT_COLUMN_LABELS: Record<EventColumn, string> = {
-  time: '时间',
-  logicalModel: 'Logical model',
-  upstreamModel: 'Upstream model',
-  provider: 'Provider',
-  sourceAccount: 'Source / Account',
-  clientSource: 'Client Source',
-  protocol: '协议',
-  status: '状态',
-  retries: '重试',
-  latency: '延迟',
-  tokens: 'Token',
-  usageSource: 'Usage source',
+  time: 'usage.field.time',
+  logicalModel: 'usage.field.logical_model',
+  upstreamModel: 'usage.field.upstream_model',
+  provider: 'usage.field.provider',
+  sourceAccount: 'usage.field.source_account',
+  clientSource: 'usage.field.client_source',
+  protocol: 'usage.field.protocol',
+  status: 'usage.field.status',
+  retries: 'usage.field.retries',
+  latency: 'usage.field.latency',
+  tokens: 'usage.field.tokens',
+  usageSource: 'usage.field.usage_source',
 };
 
 const DEFAULT_VISIBLE_COLUMNS: EventColumn[] = [
@@ -167,6 +170,7 @@ interface FilterBarProps {
 }
 
 function FilterBar({ draft, onChange, onApply, loading }: FilterBarProps) {
+  const { t } = useTranslation('console');
   const update = (field: keyof GatewayUsageFilters, value: string) => onChange({
     ...draft,
     [field]: value || undefined,
@@ -177,26 +181,26 @@ function FilterBar({ draft, onChange, onApply, loading }: FilterBarProps) {
   };
 
   return (
-    <section className={styles.filters} aria-label="用量筛选">
+    <section className={styles.filters} aria-label={t('usage.filter.aria')}>
       <div className={styles.filterPresets}>
-        <Button size="sm" variant="ghost" onClick={() => setPreset(DAY_MS)}>24 小时</Button>
-        <Button size="sm" variant="ghost" onClick={() => setPreset(7 * DAY_MS)}>7 天</Button>
-        <Button size="sm" variant="ghost" onClick={() => setPreset(30 * DAY_MS)}>30 天</Button>
+        <Button size="sm" variant="ghost" onClick={() => setPreset(DAY_MS)}>{t('usage.filter.preset_24h')}</Button>
+        <Button size="sm" variant="ghost" onClick={() => setPreset(7 * DAY_MS)}>{t('usage.filter.preset_7d')}</Button>
+        <Button size="sm" variant="ghost" onClick={() => setPreset(30 * DAY_MS)}>{t('usage.filter.preset_30d')}</Button>
       </div>
-      <label>从<input type="datetime-local" value={toLocalInputValue(draft.from)} onChange={(event) => update('from', fromLocalInputValue(event.target.value))} /></label>
-      <label>到<input type="datetime-local" value={toLocalInputValue(draft.to)} onChange={(event) => update('to', fromLocalInputValue(event.target.value))} /></label>
-      <label>Logical model<input value={draft.logicalModel ?? ''} onChange={(event) => update('logicalModel', event.target.value)} placeholder="全部" /></label>
-      <label>Upstream model<input value={draft.upstreamModel ?? ''} onChange={(event) => update('upstreamModel', event.target.value)} placeholder="全部" /></label>
-      <label>Provider<input value={draft.provider ?? ''} onChange={(event) => update('provider', event.target.value)} placeholder="全部" /></label>
-      <label>Source ID<input value={draft.sourceId ?? ''} onChange={(event) => update('sourceId', event.target.value)} placeholder="全部" /></label>
-      <label>Client Source<input value={draft.clientSource ?? ''} onChange={(event) => update('clientSource', event.target.value)} placeholder="全部" /></label>
-      <label>Account<input value={draft.account ?? ''} onChange={(event) => update('account', event.target.value)} placeholder="全部" /></label>
-      <label>入站协议<input value={draft.protocolIn ?? ''} onChange={(event) => update('protocolIn', event.target.value)} placeholder="全部" /></label>
-      <label>上游协议<input value={draft.protocolUpstream ?? ''} onChange={(event) => update('protocolUpstream', event.target.value)} placeholder="全部" /></label>
-      <label>Virtual Key ID<input inputMode="numeric" value={draft.virtualKey ?? ''} onChange={(event) => update('virtualKey', event.target.value)} placeholder="全部" /></label>
-      <label>状态<select value={draft.status ?? ''} onChange={(event) => update('status', event.target.value)}><option value="">全部</option><option value="success">成功</option><option value="failure">失败</option></select></label>
-      <label>Usage source<select value={draft.usageSource ?? ''} onChange={(event) => update('usageSource', event.target.value)}><option value="">全部</option><option value="upstream">upstream</option><option value="parsed">parsed</option><option value="estimated">estimated</option><option value="missing">missing</option></select></label>
-      <Button className={styles.applyFilters} variant="secondary" onClick={onApply} loading={loading}>应用筛选</Button>
+      <label>{t('usage.filter.from')}<input type="datetime-local" value={toLocalInputValue(draft.from)} onChange={(event) => update('from', fromLocalInputValue(event.target.value))} /></label>
+      <label>{t('usage.filter.to')}<input type="datetime-local" value={toLocalInputValue(draft.to)} onChange={(event) => update('to', fromLocalInputValue(event.target.value))} /></label>
+      <label>{t('usage.field.logical_model')}<input value={draft.logicalModel ?? ''} onChange={(event) => update('logicalModel', event.target.value)} placeholder={t('common.all')} /></label>
+      <label>{t('usage.field.upstream_model')}<input value={draft.upstreamModel ?? ''} onChange={(event) => update('upstreamModel', event.target.value)} placeholder={t('common.all')} /></label>
+      <label>{t('usage.field.provider')}<input value={draft.provider ?? ''} onChange={(event) => update('provider', event.target.value)} placeholder={t('common.all')} /></label>
+      <label>{t('usage.field.source_id')}<input value={draft.sourceId ?? ''} onChange={(event) => update('sourceId', event.target.value)} placeholder={t('common.all')} /></label>
+      <label>{t('usage.field.client_source')}<input value={draft.clientSource ?? ''} onChange={(event) => update('clientSource', event.target.value)} placeholder={t('common.all')} /></label>
+      <label>{t('usage.field.account')}<input value={draft.account ?? ''} onChange={(event) => update('account', event.target.value)} placeholder={t('common.all')} /></label>
+      <label>{t('usage.field.protocol_in')}<input value={draft.protocolIn ?? ''} onChange={(event) => update('protocolIn', event.target.value)} placeholder={t('common.all')} /></label>
+      <label>{t('usage.field.protocol_upstream')}<input value={draft.protocolUpstream ?? ''} onChange={(event) => update('protocolUpstream', event.target.value)} placeholder={t('common.all')} /></label>
+      <label>{t('usage.field.virtual_key_id')}<input inputMode="numeric" value={draft.virtualKey ?? ''} onChange={(event) => update('virtualKey', event.target.value)} placeholder={t('common.all')} /></label>
+      <label>{t('usage.field.status')}<select value={draft.status ?? ''} onChange={(event) => update('status', event.target.value)}><option value="">{t('common.all')}</option><option value="success">{t('usage.filter.status_success')}</option><option value="failure">{t('usage.filter.status_failure')}</option></select></label>
+      <label>{t('usage.field.usage_source')}<select value={draft.usageSource ?? ''} onChange={(event) => update('usageSource', event.target.value)}><option value="">{t('common.all')}</option><option value="upstream">{t('usage.usage_source.upstream')}</option><option value="parsed">{t('usage.usage_source.parsed')}</option><option value="estimated">{t('usage.usage_source.estimated')}</option><option value="missing">{t('usage.usage_source.missing')}</option></select></label>
+      <Button className={styles.applyFilters} variant="secondary" onClick={onApply} loading={loading}>{t('usage.filter.apply')}</Button>
     </section>
   );
 }
@@ -213,13 +217,13 @@ function Stat({ label, value, hint, tone }: { label: string; value: string; hint
 
 type TrendMetric = 'total' | 'input' | 'output' | 'reasoning' | 'cached' | 'requests';
 
-const TREND_METRICS: Array<{ value: TrendMetric; label: string }> = [
-  { value: 'total', label: 'Total Token' },
-  { value: 'input', label: 'Input Token' },
-  { value: 'output', label: 'Output Token' },
-  { value: 'reasoning', label: 'Reasoning Token' },
-  { value: 'cached', label: 'Cached Token' },
-  { value: 'requests', label: '逻辑请求' },
+const TREND_METRICS: Array<{ value: TrendMetric; labelKey: string }> = [
+  { value: 'total', labelKey: 'usage.metric.total' },
+  { value: 'input', labelKey: 'usage.metric.input' },
+  { value: 'output', labelKey: 'usage.metric.output' },
+  { value: 'reasoning', labelKey: 'usage.metric.reasoning' },
+  { value: 'cached', labelKey: 'usage.metric.cached' },
+  { value: 'requests', labelKey: 'usage.metric.requests' },
 ];
 
 function extractMetricData(data: UsageOverviewViewModel, metric: TrendMetric): number[] {
@@ -234,38 +238,40 @@ function extractMetricData(data: UsageOverviewViewModel, metric: TrendMetric): n
 }
 
 function TokenComposition({ summary }: { summary: UsageSummaryViewModel }) {
+  const { t } = useTranslation('console');
   const colors = makeChartColors();
   const rows = [
-    { label: 'Input', value: summary.tokens.input, color: colors[0] },
-    { label: 'Output', value: summary.tokens.output, color: colors[1] },
-    { label: 'Reasoning', value: summary.tokens.reasoning, color: colors[2] },
-    { label: 'Cached', value: summary.tokens.cached, color: colors[3] },
-  ];
+    { labelKey: 'usage.legend.input', value: summary.tokens.input, color: colors[0] },
+    { labelKey: 'usage.legend.output', value: summary.tokens.output, color: colors[1] },
+    { labelKey: 'usage.legend.reasoning', value: summary.tokens.reasoning, color: colors[2] },
+    { labelKey: 'usage.legend.cached', value: summary.tokens.cached, color: colors[3] },
+  ] as const;
   const compositionData = {
-    labels: rows.map((row) => row.label),
+    labels: rows.map((row) => t(row.labelKey)),
     datasets: [{ data: rows.map((row) => row.value), backgroundColor: rows.map((row) => row.color), borderWidth: 0 }],
   };
 
   return (
-    <Card title="Token 构成" subtitle="原始 Token 口径，不依赖价格配置">
+    <Card title={t('usage.composition.title')} subtitle={t('usage.composition.subtitle')}>
       <div className={styles.tokenComposition}>
         <div className={styles.chartSmall}><Doughnut data={compositionData} options={{ responsive: true, maintainAspectRatio: false, cutout: '70%', plugins: { legend: { display: false } } }} /></div>
-        <dl>{rows.map((row) => <div key={row.label}><dt><i style={{ background: row.color }} />{row.label}</dt><dd>{formatNumber(row.value)}</dd></div>)}</dl>
+        <dl>{rows.map((row) => <div key={row.labelKey}><dt><i style={{ background: row.color }} />{t(row.labelKey)}</dt><dd>{formatNumber(row.value)}</dd></div>)}</dl>
       </div>
     </Card>
   );
 }
 
 function ModelDistribution({ rows }: { rows: UsageBreakdownItem[] }) {
+  const { t } = useTranslation('console');
   const visibleRows = rows.slice(0, 6);
   const maxTokens = Math.max(...visibleRows.map((row) => row.tokens.total), 1);
 
   return (
-    <Card title="模型 Token 分布" subtitle="按 Logical model · Total Token 排序">
-      {visibleRows.length === 0 ? <EmptyState title="暂无模型分布" /> : (
+    <Card title={t('usage.distribution.title')} subtitle={t('usage.distribution.subtitle')}>
+      {visibleRows.length === 0 ? <EmptyState title={t('usage.distribution.empty')} /> : (
         <div className={styles.distributionList}>{visibleRows.map((row) => (
           <div key={row.key}>
-            <div><strong>{row.label}</strong><span>{formatNumber(row.logicalRequests)} 请求 · {formatNumber(row.tokens.total)} Token</span></div>
+            <div><strong>{row.label}</strong><span>{t('usage.value.requests_tokens', { count: formatNumber(row.logicalRequests), tokens: formatNumber(row.tokens.total) })}</span></div>
             <span className={styles.distributionTrack}><i style={{ width: `${Math.max(4, (row.tokens.total / maxTokens) * 100)}%` }} /></span>
           </div>
         ))}</div>
@@ -275,15 +281,16 @@ function ModelDistribution({ rows }: { rows: UsageBreakdownItem[] }) {
 }
 
 function Overview({ data, metric, onMetricChange }: { data: UsageOverviewViewModel; metric: TrendMetric; onMetricChange: (m: TrendMetric) => void }) {
+  const { t } = useTranslation('console');
   const { summary } = data;
   const hasData = summary.logicalRequests > 0 || summary.tokens.total > 0;
   if (!hasData) {
-    return <EmptyState title="当前范围暂无用量" description="调整时间范围或筛选条件后重试。Token 统计不依赖价格配置。" />;
+    return <EmptyState title={t('usage.empty.overview_title')} description={t('usage.empty.overview_desc')} />;
   }
   const colors = makeChartColors();
-  const metricLabel = TREND_METRICS.find((m) => m.value === metric)?.label ?? 'Total Token';
+  const metricLabel = t(TREND_METRICS.find((m) => m.value === metric)?.labelKey ?? 'usage.metric.total');
   const secondaryMetric = metric === 'requests' ? 'total' : 'requests';
-  const secondaryLabel = secondaryMetric === 'requests' ? '逻辑请求' : 'Total Token';
+  const secondaryLabel = t(TREND_METRICS.find((m) => m.value === secondaryMetric)?.labelKey ?? 'usage.metric.total');
   const trendData = {
     labels: data.timeseries.map((point) => formatBucket(point.bucket)),
     datasets: [
@@ -295,15 +302,15 @@ function Overview({ data, metric, onMetricChange }: { data: UsageOverviewViewMod
   return (
     <div className={styles.stack}>
       <div className={styles.statsGrid} data-od-id="kpi-row">
-        <Stat label="逻辑请求" value={formatNumber(summary.logicalRequests)} hint={`${formatNumber(summary.upstreamAttempts)} 次上游尝试 · ${formatNumber(summary.retries)} 次重试`} />
-        <Stat label="成功率" value={`${(summary.successRate * 100).toFixed(1)}%`} hint={`${summary.failedRequests} 次失败`} tone={summary.failedRequests > 0 ? 'warning' : 'success'} />
-        <Stat label="Total Token" value={formatNumber(summary.tokens.total)} hint="最终逻辑请求口径" />
-        <Stat label="平均延迟" value={formatDuration(summary.averageLatencyMs)} hint={`P95 ${formatDuration(summary.p95LatencyMs)}`} />
+        <Stat label={t('usage.stat.logical_requests')} value={formatNumber(summary.logicalRequests)} hint={t('usage.stat.upstream_attempts', { count: formatNumber(summary.upstreamAttempts), retries: formatNumber(summary.retries) })} />
+        <Stat label={t('usage.stat.success_rate')} value={`${(summary.successRate * 100).toFixed(1)}%`} hint={t('usage.stat.failures', { count: formatNumber(summary.failedRequests) })} tone={summary.failedRequests > 0 ? 'warning' : 'success'} />
+        <Stat label={t('usage.stat.total_tokens')} value={formatNumber(summary.tokens.total)} hint={t('usage.stat.final_accounting')} />
+        <Stat label={t('usage.stat.avg_latency')} value={formatDuration(summary.averageLatencyMs)} hint={t('usage.stat.p95', { value: formatDuration(summary.p95LatencyMs) })} />
       </div>
       <div className={styles.chartGrid}>
-        <Card title="用量趋势" subtitle="UTC 存储，按浏览器本地时区展示" data-od-id="token-trend" extra={
+        <Card title={t('usage.trend.title')} subtitle={t('usage.trend.subtitle')} data-od-id="token-trend" extra={
           <select value={metric} onChange={(e) => onMetricChange(e.target.value as TrendMetric)} className={styles.metricSelect}>
-            {TREND_METRICS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+            {TREND_METRICS.map((m) => <option key={m.value} value={m.value}>{t(m.labelKey)}</option>)}
           </select>
         }>
           <div className={styles.chartLarge}><Line data={trendData} options={{ responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, scales: { secondary: { position: 'right', grid: { display: false } } } }} /></div>
@@ -311,15 +318,15 @@ function Overview({ data, metric, onMetricChange }: { data: UsageOverviewViewMod
         <TokenComposition summary={summary} />
       </div>
       <div className={styles.overviewLowerGrid}>
-        <Card title="最近活动" subtitle="仅显示请求元数据，不包含 prompt / response 正文" data-od-id="recent-activity">
-          {data.recentEvents.length === 0 ? <EmptyState title="暂无最近请求" /> : (
+        <Card title={t('usage.recent.title')} subtitle={t('usage.recent.subtitle')} data-od-id="recent-activity">
+          {data.recentEvents.length === 0 ? <EmptyState title={t('usage.recent.empty')} /> : (
             <div className={styles.recentList}>{data.recentEvents.map((event) => (
               <div key={`${event.id}:${event.createdAt}`}>
                 <span className={styles.statusDot} data-success={event.success} />
                 <time>{formatTime(event.createdAt)}</time>
                 <strong>{event.logicalModel}</strong>
                 <span>{event.provider} · {event.sourceId} / {event.account}</span>
-                <em>{formatNumber(event.tokens.total)} Token</em>
+                <em>{t('usage.value.tokens', { count: formatNumber(event.tokens.total) })}</em>
               </div>
             ))}</div>
           )}
@@ -330,24 +337,25 @@ function Overview({ data, metric, onMetricChange }: { data: UsageOverviewViewMod
   );
 }
 
-const ANALYSIS_DIMENSIONS: Array<{ dimension: UsageBreakdownDimension; title: string }> = [
-  { dimension: 'logical_model', title: 'Logical model' },
-  { dimension: 'upstream_model', title: 'Upstream model' },
-  { dimension: 'provider', title: 'Provider' },
-  { dimension: 'source_id', title: 'Source' },
-  { dimension: 'client_source', title: 'Client Source' },
-  { dimension: 'account', title: 'Account' },
-  { dimension: 'protocol_in', title: '入站协议' },
-  { dimension: 'protocol_upstream', title: '上游协议' },
+const ANALYSIS_DIMENSIONS: Array<{ dimension: UsageBreakdownDimension; titleKey: string }> = [
+  { dimension: 'logical_model', titleKey: 'usage.field.logical_model' },
+  { dimension: 'upstream_model', titleKey: 'usage.field.upstream_model' },
+  { dimension: 'provider', titleKey: 'usage.field.provider' },
+  { dimension: 'source_id', titleKey: 'usage.field.source_id' },
+  { dimension: 'client_source', titleKey: 'usage.field.client_source' },
+  { dimension: 'account', titleKey: 'usage.field.account' },
+  { dimension: 'protocol_in', titleKey: 'usage.field.protocol_in' },
+  { dimension: 'protocol_upstream', titleKey: 'usage.field.protocol_upstream' },
 ];
 
 function BreakdownChart({ title, rows }: { title: string; rows: UsageBreakdownItem[] }) {
+  const { t } = useTranslation('console');
   const visibleRows = rows.slice(0, 8);
   return (
-    <Card title={title} subtitle="按 Total Token 排序">
-      {visibleRows.length === 0 ? <EmptyState title="暂无分布数据" /> : (
+    <Card title={title} subtitle={t('usage.breakdown.subtitle')}>
+      {visibleRows.length === 0 ? <EmptyState title={t('usage.breakdown.empty')} /> : (
         <div className={styles.breakdownChart}>
-          <Bar data={{ labels: visibleRows.map((item) => item.label), datasets: [{ label: 'Total Token', data: visibleRows.map((item) => item.tokens.total), backgroundColor: makeChartColors()[0], borderRadius: 6 }] }} options={{ indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }} />
+          <Bar data={{ labels: visibleRows.map((item) => item.label), datasets: [{ label: t('usage.legend.total'), data: visibleRows.map((item) => item.tokens.total), backgroundColor: makeChartColors()[0], borderRadius: 6 }] }} options={{ indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }} />
         </div>
       )}
     </Card>
@@ -355,18 +363,19 @@ function BreakdownChart({ title, rows }: { title: string; rows: UsageBreakdownIt
 }
 
 function Analysis({ breakdowns, summary }: { breakdowns: Partial<Record<UsageBreakdownDimension, UsageBreakdownItem[]>>; summary: UsageSummaryViewModel }) {
+  const { t } = useTranslation('console');
   const allRows = Object.values(breakdowns).flatMap((rows) => rows ?? []);
   const latencyRows = [...allRows].filter((row) => row.averageLatencyMs !== undefined).sort((a, b) => (b.averageLatencyMs ?? 0) - (a.averageLatencyMs ?? 0)).slice(0, 8);
-  if (allRows.length === 0 && summary.tokens.total === 0) return <EmptyState title="当前范围暂无分析数据" description="分布数据由网关 Usage breakdown API 提供。" />;
+  if (allRows.length === 0 && summary.tokens.total === 0) return <EmptyState title={t('usage.empty.analysis_title')} description={t('usage.empty.analysis_desc')} />;
   return (
     <div className={styles.stack}>
       <TokenComposition summary={summary} />
       <div className={styles.analysisGrid}>
-        {ANALYSIS_DIMENSIONS.map(({ dimension, title }) => <BreakdownChart key={dimension} title={title} rows={breakdowns[dimension] ?? []} />)}
-        <Card title="延迟诊断" subtitle="按聚合维度显示平均延迟">
-          {latencyRows.length === 0 ? <EmptyState title="暂无延迟聚合" /> : (
+        {ANALYSIS_DIMENSIONS.map(({ dimension, titleKey }) => <BreakdownChart key={dimension} title={t(titleKey)} rows={breakdowns[dimension] ?? []} />)}
+        <Card title={t('usage.latency.title')} subtitle={t('usage.latency.subtitle')}>
+          {latencyRows.length === 0 ? <EmptyState title={t('usage.latency.empty')} /> : (
             <div className={styles.breakdownChart}>
-              <Bar data={{ labels: latencyRows.map((item) => item.label), datasets: [{ label: '平均延迟（ms）', data: latencyRows.map((item) => item.averageLatencyMs ?? 0), backgroundColor: makeChartColors()[2], borderRadius: 6 }] }} options={{ responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }} />
+              <Bar data={{ labels: latencyRows.map((item) => item.label), datasets: [{ label: t('usage.latency.dataset'), data: latencyRows.map((item) => item.averageLatencyMs ?? 0), backgroundColor: makeChartColors()[2], borderRadius: 6 }] }} options={{ responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }} />
             </div>
           )}
         </Card>
@@ -379,7 +388,7 @@ function UsageBadge({ source }: { source: string }) {
   return <span className={styles.usageBadge} data-source={source}>{source}</span>;
 }
 
-const renderEventCell = (event: UsageEventViewModel, column: EventColumn) => {
+const renderEventCell = (event: UsageEventViewModel, column: EventColumn, t: TFunction) => {
   switch (column) {
     case 'time': return <time>{formatTime(event.createdAt)}</time>;
     case 'logicalModel': return <strong>{event.logicalModel}</strong>;
@@ -388,8 +397,8 @@ const renderEventCell = (event: UsageEventViewModel, column: EventColumn) => {
     case 'sourceAccount': return <span>{event.sourceId}<small>{event.account}</small></span>;
     case 'clientSource': return event.clientSource;
     case 'protocol': return <span>{event.protocolIn}<small>→ {event.protocolUpstream}</small></span>;
-    case 'status': return <span className={styles.statusBadge} data-success={event.success}>{event.statusCode || '—'} · {event.success ? '成功' : '失败'}</span>;
-    case 'retries': return event.fallback ? `${event.retryCount} · fallback` : String(event.retryCount);
+    case 'status': return <span className={styles.statusBadge} data-success={event.success}>{event.statusCode || '—'} · {event.success ? t('usage.event.success') : t('usage.event.failure')}</span>;
+    case 'retries': return event.fallback ? t('usage.event.retries_fallback', { count: event.retryCount }) : String(event.retryCount);
     case 'latency': return `${formatNumber(event.latencyMs)} ms`;
     case 'tokens': return formatNumber(event.tokens.total);
     case 'usageSource': return <UsageBadge source={event.usageSource} />;
@@ -408,6 +417,7 @@ interface UsageAttemptDetail {
 }
 
 function EventDetails({ event, onClose, client }: { event: UsageEventViewModel; onClose: () => void; client: GatewayUsageClient }) {
+  const { t } = useTranslation('console');
   const [attempts, setAttempts] = useState<UsageAttemptDetail[]>([]);
   const [loadingAttempts, setLoadingAttempts] = useState(true);
   const [loadedRequestId, setLoadedRequestId] = useState(event.requestId);
@@ -453,32 +463,32 @@ function EventDetails({ event, onClose, client }: { event: UsageEventViewModel; 
 
   return (
     <div className={styles.drawerBackdrop} role="presentation" onMouseDown={(mouseEvent) => mouseEvent.target === mouseEvent.currentTarget && onClose()}>
-      <aside className={styles.drawer} role="dialog" aria-modal="true" aria-label="请求事件详情" data-od-id="event-drawer">
-        <header><div><span>Request Event</span><h2>{event.requestId}</h2></div><Button variant="ghost" onClick={onClose}>关闭</Button></header>
+      <aside className={styles.drawer} role="dialog" aria-modal="true" aria-label={t('usage.detail.aria')} data-od-id="event-drawer">
+        <header><div><span>{t('usage.detail.kicker')}</span><h2>{event.requestId}</h2></div><Button variant="ghost" onClick={onClose}>{t('common.close')}</Button></header>
         <section className={styles.detailGrid}>
-          <div><span>时间</span><strong>{formatTime(event.createdAt)}</strong></div>
-          <div><span>状态</span><strong>{event.statusCode} · {event.success ? '成功' : '失败'}</strong></div>
-          <div><span>Logical model</span><strong>{event.logicalModel}</strong></div>
-          <div><span>Upstream model</span><strong>{event.upstreamModel}</strong></div>
-          <div><span>Provider</span><strong>{event.provider}</strong></div>
-          <div><span>Source</span><strong>{event.sourceId}</strong></div>
-          <div><span>Client Source</span><strong>{event.clientSource}</strong></div>
-          <div><span>Account</span><strong>{event.account}</strong></div>
-          <div><span>协议</span><strong>{event.protocolIn} → {event.protocolUpstream}</strong></div>
-          <div><span>Usage source</span><strong><UsageBadge source={event.usageSource} /></strong></div>
-          <div><span>延迟</span><strong>{formatNumber(event.latencyMs)} ms</strong></div>
-          <div><span>重试</span><strong>{event.retryCount}{event.fallback ? ' · fallback' : ''}</strong></div>
+          <div><span>{t('usage.field.time')}</span><strong>{formatTime(event.createdAt)}</strong></div>
+          <div><span>{t('usage.field.status')}</span><strong>{event.statusCode} · {event.success ? t('usage.event.success') : t('usage.event.failure')}</strong></div>
+          <div><span>{t('usage.field.logical_model')}</span><strong>{event.logicalModel}</strong></div>
+          <div><span>{t('usage.field.upstream_model')}</span><strong>{event.upstreamModel}</strong></div>
+          <div><span>{t('usage.field.provider')}</span><strong>{event.provider}</strong></div>
+          <div><span>{t('usage.field.source_id')}</span><strong>{event.sourceId}</strong></div>
+          <div><span>{t('usage.field.client_source')}</span><strong>{event.clientSource}</strong></div>
+          <div><span>{t('usage.field.account')}</span><strong>{event.account}</strong></div>
+          <div><span>{t('usage.field.protocol')}</span><strong>{event.protocolIn} → {event.protocolUpstream}</strong></div>
+          <div><span>{t('usage.field.usage_source')}</span><strong><UsageBadge source={event.usageSource} /></strong></div>
+          <div><span>{t('usage.field.latency')}</span><strong>{formatNumber(event.latencyMs)} ms</strong></div>
+          <div><span>{t('usage.field.retries')}</span><strong>{event.fallback ? t('usage.event.retries_fallback', { count: event.retryCount }) : String(event.retryCount)}</strong></div>
         </section>
-        <Card title="Token" subtitle="最终逻辑请求口径，不因 fallback 重复累计">
-          <div className={styles.tokenDetails}><span>Input <strong>{event.tokens.input}</strong></span><span>Output <strong>{event.tokens.output}</strong></span><span>Reasoning <strong>{event.tokens.reasoning}</strong></span><span>Cached <strong>{event.tokens.cached}</strong></span><span>Total <strong>{event.tokens.total}</strong></span></div>
+        <Card title={t('usage.detail.token_title')} subtitle={t('usage.detail.token_subtitle')}>
+          <div className={styles.tokenDetails}><span>{t('usage.legend.input')} <strong>{event.tokens.input}</strong></span><span>{t('usage.legend.output')} <strong>{event.tokens.output}</strong></span><span>{t('usage.legend.reasoning')} <strong>{event.tokens.reasoning}</strong></span><span>{t('usage.legend.cached')} <strong>{event.tokens.cached}</strong></span><span>{t('usage.legend.total')} <strong>{event.tokens.total}</strong></span></div>
         </Card>
-        <Card title="上游尝试" subtitle="失败尝试没有可确认 usage 时不会虚构 Token">
-          {loadingAttempts ? <div style={{ padding: '1rem', opacity: 0.6 }}>加载 attempt 明细…</div> : displayAttempts.length === 0 ? <EmptyState title="没有独立 attempt 明细" description="事件仍保留最终账号与 retry_count。" /> : (
+        <Card title={t('usage.detail.attempts_title')} subtitle={t('usage.detail.attempts_subtitle')}>
+          {loadingAttempts ? <div style={{ padding: '1rem', opacity: 0.6 }}>{t('usage.detail.attempts_loading')}</div> : displayAttempts.length === 0 ? <EmptyState title={t('usage.detail.attempts_empty_title')} description={t('usage.detail.attempts_empty_desc')} /> : (
             <ol className={styles.attemptList}>{displayAttempts.map((attempt) => <li key={attempt.attemptNo}><span>#{attempt.attemptNo + 1}</span><strong>{attempt.account}</strong><span>{attempt.sourceId} · {attempt.provider} · {attempt.upstreamModel}</span><span className={attempt.success ? styles.statusSuccess : styles.statusFailure}>{attempt.statusCode} · {attempt.latencyMs} ms</span></li>)}</ol>
           )}
         </Card>
-        {event.errorSummary && <Card title="脱敏错误摘要"><p className={styles.errorSummary}>{event.errorSummary}</p></Card>}
-        <p className={styles.noBodyNotice}>安全边界：此详情不读取或显示 prompt、response body 或请求日志正文。</p>
+        {event.errorSummary && <Card title={t('usage.detail.error_summary')}><p className={styles.errorSummary}>{event.errorSummary}</p></Card>}
+        <p className={styles.noBodyNotice}>{t('usage.detail.no_body_notice')}</p>
       </aside>
     </div>
   );
@@ -496,6 +506,7 @@ interface EventsTableProps {
 }
 
 function EventsTable({ events, hasMore, loadingMore, onLoadMore, visibleColumns, onVisibleColumnsChange, onExport, client }: EventsTableProps) {
+  const { t } = useTranslation('console');
   const parentRef = useRef<HTMLDivElement>(null);
   const [selectedEvent, setSelectedEvent] = useState<UsageEventViewModel>();
   // TanStack Virtual intentionally exposes imperative measurement helpers.
@@ -512,24 +523,24 @@ function EventsTable({ events, hasMore, loadingMore, onLoadMore, visibleColumns,
     if (hasMore && !loadingMore && lastIndex >= events.length - 5) onLoadMore();
   }, [events.length, hasMore, lastIndex, loadingMore, onLoadMore]);
 
-  if (events.length === 0) return <EmptyState title="当前范围没有请求事件" description="事件详情只包含元数据与脱敏错误摘要。" />;
+  if (events.length === 0) return <EmptyState title={t('usage.events.empty_title')} description={t('usage.events.empty_desc')} />;
 
   return (
-    <Card variant="flush" title="请求事件" subtitle="稳定游标分页 · 虚拟滚动" data-od-id="events-table" extra={<div className={styles.eventActions}><details><summary>列偏好</summary><div className={styles.columnMenu}>{EVENT_COLUMNS.map((column) => <label key={column}><input type="checkbox" checked={visibleColumns.includes(column)} onChange={() => onVisibleColumnsChange(visibleColumns.includes(column) ? visibleColumns.filter((item) => item !== column) : EVENT_COLUMNS.filter((item) => visibleColumns.includes(item) || item === column))} />{EVENT_COLUMN_LABELS[column]}</label>)}</div></details><Button size="sm" variant="secondary" onClick={() => onExport('csv')}>导出 CSV</Button><Button size="sm" variant="secondary" onClick={() => onExport('json')}>导出 JSON</Button></div>}>
+    <Card variant="flush" title={t('usage.events.title')} subtitle={t('usage.events.subtitle')} data-od-id="events-table" extra={<div className={styles.eventActions}><details><summary>{t('common.column_prefs')}</summary><div className={styles.columnMenu}>{EVENT_COLUMNS.map((column) => <label key={column}><input type="checkbox" checked={visibleColumns.includes(column)} onChange={() => onVisibleColumnsChange(visibleColumns.includes(column) ? visibleColumns.filter((item) => item !== column) : EVENT_COLUMNS.filter((item) => visibleColumns.includes(item) || item === column))} />{t(EVENT_COLUMN_LABELS[column])}</label>)}</div></details><Button size="sm" variant="secondary" onClick={() => onExport('csv')}>{t('common.export_csv')}</Button><Button size="sm" variant="secondary" onClick={() => onExport('json')}>{t('common.export_json')}</Button></div>}>
       <div className={styles.eventTable} style={{ '--event-columns': visibleColumns.length } as CSSProperties}>
-        <div className={styles.eventHeader}>{visibleColumns.map((column) => <span key={column}>{EVENT_COLUMN_LABELS[column]}</span>)}</div>
+        <div className={styles.eventHeader}>{visibleColumns.map((column) => <span key={column}>{t(EVENT_COLUMN_LABELS[column])}</span>)}</div>
         <div ref={parentRef} className={styles.eventScroll}>
           <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
             {virtualItems.map((virtualRow) => {
               const event = events[virtualRow.index];
               return (
                 <button key={`${event.id}:${event.createdAt}`} className={styles.eventRow} style={{ transform: `translateY(${virtualRow.start}px)` }} onClick={() => setSelectedEvent(event)}>
-                  {visibleColumns.map((column) => <span key={column}>{renderEventCell(event, column)}</span>)}
+                  {visibleColumns.map((column) => <span key={column}>{renderEventCell(event, column, t)}</span>)}
                 </button>
               );
             })}
           </div>
-          {loadingMore && <div className={styles.loadingMore}>加载更多事件…</div>}
+          {loadingMore && <div className={styles.loadingMore}>{t('common.load_more')}</div>}
         </div>
       </div>
       {selectedEvent && <EventDetails event={selectedEvent} onClose={() => setSelectedEvent(undefined)} client={client} />}
@@ -550,6 +561,13 @@ export function GatewayUsagePage({
   refreshRevision,
   onLoadingChange,
 }: GatewayUsagePageProps) {
+  const { t } = useTranslation('console');
+  const localizeError = useLocalizedApiError();
+  // 结构化接口错误(status/code)走 useLocalizedApiError 映射;无元数据的普通错误回退到页面业务文案。
+  const toLocalizedError = useCallback((error: unknown, fallback: string): string => {
+    const mapped = localizeError(error);
+    return mapped === t('errors.unknown') ? fallback : mapped;
+  }, [localizeError, t]);
   const getAdminKeyRef = useRef(getAdminKey);
   getAdminKeyRef.current = getAdminKey;
   const [client] = useState(() => new GatewayUsageClient({ getAdminKey: () => getAdminKeyRef.current() }));
@@ -594,14 +612,14 @@ export function GatewayUsagePage({
       }
     } catch (loadError) {
       if (signal?.aborted) return;
-      setError(loadError instanceof Error ? loadError.message : '加载用量数据失败');
+      setError(toLocalizedError(loadError, t('usage.error.load_failed')));
     } finally {
       if (!signal?.aborted) {
         setLoading(false);
         onLoadingChange?.(false);
       }
     }
-  }, [activeTab, client, filters, granularity, onLoadingChange]);
+  }, [activeTab, client, filters, granularity, onLoadingChange, t, toLocalizedError]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -613,7 +631,7 @@ export function GatewayUsagePage({
 
   const applyFilters = () => {
     if (new Date(draftFilters.from) >= new Date(draftFilters.to)) {
-      setError('开始时间必须早于结束时间');
+      setError(t('usage.error.invalid_range'));
       return;
     }
     localStorage.setItem(FILTER_STORAGE_KEY, JSON.stringify(draftFilters));
@@ -629,11 +647,11 @@ export function GatewayUsagePage({
       setNextCursor(page.nextCursor);
       setHasMore(page.hasMore);
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : '加载更多事件失败');
+      setError(toLocalizedError(loadError, t('usage.error.load_more_failed')));
     } finally {
       setLoadingMore(false);
     }
-  }, [client, filters, hasMore, loadingMore, nextCursor]);
+  }, [client, filters, hasMore, loadingMore, nextCursor, t, toLocalizedError]);
 
   const changeVisibleColumns = (columns: EventColumn[]) => {
     const normalized = normalizeVisibleEventColumns(columns);
@@ -651,7 +669,7 @@ export function GatewayUsagePage({
       anchor.click();
       URL.revokeObjectURL(url);
     } catch (exportError) {
-      setError(exportError instanceof Error ? exportError.message : '导出失败');
+      setError(toLocalizedError(exportError, t('errors.export_failed')));
     }
   };
 
@@ -660,16 +678,16 @@ export function GatewayUsagePage({
       <FilterBar draft={draftFilters} onChange={setDraftFilters} onApply={applyFilters} loading={loading} />
       {activeTab === 'overview' && (
         <div className={styles.granularityBar}>
-          <span>时间粒度</span>
+          <span>{t('usage.granularity.label')}</span>
           {(['auto', 'hour', 'day'] as const).map((g) => (
             <button key={g} data-active={granularity === g} onClick={() => setGranularity(g)}>
-              {g === 'auto' ? '自动' : g === 'hour' ? '小时' : '天'}
+              {g === 'auto' ? t('usage.granularity.auto') : g === 'hour' ? t('usage.granularity.hour') : t('usage.granularity.day')}
             </button>
           ))}
         </div>
       )}
-      {error && <div className={styles.errorBanner} role="alert"><span>{error}</span><Button size="sm" variant="secondary" onClick={() => void loadActiveTab()}>重试</Button></div>}
-      {loading && !error ? <div className={styles.loadingState} aria-busy="true">正在加载网关用量…</div> : (
+      {error && <div className={styles.errorBanner} role="alert"><span>{error}</span><Button size="sm" variant="secondary" onClick={() => void loadActiveTab()}>{t('common.retry')}</Button></div>}
+      {loading && !error ? <div className={styles.loadingState} aria-busy="true">{t('usage.page.loading')}</div> : (
         activeTab === 'overview'
           ? overview && <Overview data={overview} metric={trendMetric} onMetricChange={setTrendMetric} />
           : activeTab === 'analysis'

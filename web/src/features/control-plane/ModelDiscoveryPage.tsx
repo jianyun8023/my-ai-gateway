@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState, type FormEvent } from 'react';
+import { useTranslation } from 'react-i18next';
 import type {
   Account,
   AdminErrorShape,
@@ -14,6 +15,7 @@ import type {
   SourceModel,
 } from '@/admin-api';
 import { normalizeAdminError } from '@/admin-api';
+import { useLocalizedApiError } from '@/hooks/useLocalizedApiError';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Modal } from '@/components/ui/Modal';
@@ -81,15 +83,16 @@ const statusTone = (status: string) => {
 const metadataSummary = (model: SourceModel): string => {
   const displayName = typeof model.metadata.display_name === 'string' ? model.metadata.display_name : '';
   const logicalName = typeof model.metadata.logical_model_name === 'string' ? model.metadata.logical_model_name : '';
-  return displayName || logicalName || 'metadata 未命名';
+  return displayName || logicalName;
 };
 
-const metadataSourcesSummary = (model: SourceModel): string => {
+const metadataSourcesSummary = (model: SourceModel, sourceLabel: (source: string) => string): string => {
   const counts = new Map<string, number>();
   for (const source of Object.values(model.field_sources)) {
     if (source) counts.set(source, (counts.get(source) ?? 0) + 1);
   }
-  return [...counts.entries()].map(([source, count]) => `${source} ${count}`).join(' · ') || 'unknown';
+  const parts = [...counts.entries()].map(([source, count]) => `${sourceLabel(source)} ${count}`);
+  return parts.length > 0 ? parts.join(' · ') : sourceLabel('unknown');
 };
 
 function DiffColumn({
@@ -101,10 +104,11 @@ function DiffColumn({
   tone: 'success' | 'warning' | 'danger';
   entries: DiscoveryDiff['added'];
 }) {
+  const { t } = useTranslation('console');
   return (
     <section className={styles.diffColumn}>
       <header><h3>{title}</h3><StatusPill tone={tone}>{entries.length}</StatusPill></header>
-      {entries.length === 0 ? <span>无变化</span> : (
+      {entries.length === 0 ? <span>{t('discovery.diff_none')}</span> : (
         <ul>{entries.map((entry) => (
           <li key={entry.upstream_model_id}>
             <code>{entry.upstream_model_id}</code>
@@ -117,34 +121,35 @@ function DiffColumn({
 }
 
 function LatestRunPanel({ latest }: { latest: LatestDiscovery | null }) {
-  if (!latest) return <EmptyTable title="尚无 discovery run" description="运行发现后，这里会显示审计状态与稳定 diff。" />;
+  const { t } = useTranslation('console');
+  if (!latest) return <EmptyTable title={t('discovery.empty_run_title')} description={t('discovery.empty_run_desc')} />;
   const { run } = latest;
   const diff = latest.diff ?? run.diff ?? emptyDiff();
   return (
     <div className={styles.page}>
       <div className={styles.runHeader}>
         <span className={styles.primaryText}>
-          <strong><StatusPill tone={statusTone(run.status)}>{run.status}</StatusPill> run #{run.id}</strong>
-          <small>{formatDateTime(run.completed_at)} · {run.latency_ms} ms · {run.discovered_model_count} models</small>
+          <strong><StatusPill tone={statusTone(run.status)}>{run.status}</StatusPill> {t('discovery.run_badge', { id: run.id })}</strong>
+          <small>{formatDateTime(run.completed_at)} · {t('discovery.run_meta', { duration: run.latency_ms, count: run.discovered_model_count })}</small>
         </span>
         <span className={styles.primaryText}>
           <strong>{run.provider_preset_id}@{run.provider_preset_version}</strong>
-          <small>Account {run.account_id ?? 'none'} · HTTP {run.http_status ?? 'none'}</small>
+          <small>{t('discovery.account_http', { account: run.account_id ?? t('discovery.none'), http: run.http_status ?? t('discovery.none') })}</small>
         </span>
       </div>
       {run.status === 'unsupported' && (
-        <div className={styles.warningState} role="status"><IconTriangleAlert size={17} /><span><strong>该 ProviderPreset 明确不支持模型发现</strong>{run.error_message && <small>{run.error_code}: {run.error_message}</small>}</span></div>
+        <div className={styles.warningState} role="status"><IconTriangleAlert size={17} /><span><strong>{t('discovery.state_unsupported')}</strong>{run.error_message && <small>{run.error_code}: {run.error_message}</small>}</span></div>
       )}
       {run.status === 'failed' && (
-        <div className={styles.errorState} role="alert"><IconTriangleAlert size={17} /><div><strong>模型发现失败</strong><span>{run.error_message ?? '上游发现未成功'}</span>{run.error_code && <code>{run.error_code}</code>}</div></div>
+        <div className={styles.errorState} role="alert"><IconTriangleAlert size={17} /><div><strong>{t('discovery.state_failed')}</strong><span>{run.error_message ?? t('discovery.state_failed_desc')}</span>{run.error_code && <code>{run.error_code}</code>}</div></div>
       )}
       {run.status === 'succeeded' && run.discovered_model_count === 0 && (
-        <EmptyTable title="发现成功，但上游返回空模型列表" description="现有 SourceModel 未被虚构或自动删除。" />
+        <EmptyTable title={t('discovery.state_empty')} description={t('discovery.state_empty_desc')} />
       )}
       <div className={styles.diffGrid}>
-        <DiffColumn title="Added" tone="success" entries={diff.added} />
-        <DiffColumn title="Changed" tone="warning" entries={diff.changed} />
-        <DiffColumn title="Missing" tone="danger" entries={diff.missing} />
+        <DiffColumn title={t('discovery.diff_column.added')} tone="success" entries={diff.added} />
+        <DiffColumn title={t('discovery.diff_column.changed')} tone="warning" entries={diff.changed} />
+        <DiffColumn title={t('discovery.diff_column.missing')} tone="danger" entries={diff.missing} />
       </div>
     </div>
   );
@@ -161,6 +166,7 @@ function SourceModelEditor({
   error?: string;
   onSubmit: (metadata: ModelMetadataValues) => void;
 }) {
+  const { t } = useTranslation('console');
   const [draft, setDraft] = useState<MetadataDraft>(() => createMetadataDraft(model.metadata));
   const [dirty, setDirty] = useState<Set<ModelMetadataField>>(() => new Set());
   const [validationError, setValidationError] = useState('');
@@ -173,7 +179,7 @@ function SourceModelEditor({
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (dirty.size === 0) {
-      setValidationError('没有需要保存的字段变更。');
+      setValidationError(t('discovery.no_field_changes'));
       return;
     }
     const metadata = metadataFromDraft(draft, dirty);
@@ -181,7 +187,7 @@ function SourceModelEditor({
       .some((field) => metadata[field] !== undefined && metadata[field] !== null
         && (!Number.isFinite(metadata[field] as number) || (metadata[field] as number) <= 0));
     if (invalidNumber) {
-      setValidationError('Token 数值字段必须为空或大于 0。');
+      setValidationError(t('discovery.validate_tokens'));
       return;
     }
     setValidationError('');
@@ -192,7 +198,7 @@ function SourceModelEditor({
     <form id="source-model-editor-form" className={styles.page} onSubmit={submit}>
       <div className={styles.modelIdentity}>
         <code>{model.upstream_model_id}</code>
-        <span><StatusPill tone={statusTone(model.confirmation_status)}>{model.confirmation_status}</StatusPill><StatusPill tone={statusTone(model.availability_status)}>{model.availability_status}</StatusPill></span>
+        <span><StatusPill tone={statusTone(model.confirmation_status)}>{t(`discovery.confirm_state.${model.confirmation_status}`)}</StatusPill><StatusPill tone={statusTone(model.availability_status)}>{t(`discovery.availability_state.${model.availability_status}`)}</StatusPill></span>
       </div>
       <ModelMetadataFields draft={draft} fieldSources={model.field_sources} disabled={busy} onChange={change} />
       <FormError message={validationError || error} />
@@ -201,6 +207,8 @@ function SourceModelEditor({
 }
 
 export function ModelDiscoveryPage({ api, refreshRevision = 0, onBusyChange }: ModelDiscoveryPageProps) {
+  const { t } = useTranslation('console');
+  const localize = useLocalizedApiError();
   const [sourceId, setSourceId] = useState('');
   const [accountId, setAccountId] = useState('');
   const [confirmationFilter, setConfirmationFilter] = useState<CatalogStatus | ''>('pending');
@@ -229,6 +237,11 @@ export function ModelDiscoveryPage({ api, refreshRevision = 0, onBusyChange }: M
   const effectiveAccountId = enabledAccounts.some((account) => account.id === accountId)
     ? accountId
     : enabledAccounts[0]?.id ?? '';
+
+  const knownFieldSources = ['user', 'preset', 'upstream', 'unknown'] as const;
+  const fieldSourceLabel = (value: string): string => (
+    (knownFieldSources as readonly string[]).includes(value) ? t(`discovery.field_source.${value}`) : value
+  );
 
   const loadDiscovery = useCallback(async (signal: AbortSignal): Promise<DiscoveryView> => {
     if (!effectiveSourceId) return { latest: null, models: [] };
@@ -281,10 +294,10 @@ export function ModelDiscoveryPage({ api, refreshRevision = 0, onBusyChange }: M
     void runMutation(
       () => api.runDiscovery(effectiveSourceId, effectiveAccountId),
       (result) => result.run.status === 'unsupported'
-        ? `Discovery unsupported: ${result.run.error_code ?? 'discovery_unsupported'}`
+        ? t('discovery.message_unsupported', { code: result.run.error_code ?? 'discovery_unsupported' })
         : result.run.status === 'failed'
-          ? `Discovery 已记录失败 run #${result.run.id}。`
-          : `Discovery run #${result.run.id} 完成，发现 ${result.run.discovered_model_count} 个模型。`,
+          ? t('discovery.state_failed_recorded', { id: result.run.id })
+          : t('discovery.state_ok', { id: result.run.id, count: result.run.discovered_model_count }),
     );
   };
 
@@ -295,7 +308,7 @@ export function ModelDiscoveryPage({ api, refreshRevision = 0, onBusyChange }: M
         upstream_model_id: editingModel.upstream_model_id,
         metadata,
       }),
-      `SourceModel ${editingModel.upstream_model_id} 的用户字段已保存。`,
+      t('discovery.message_saved', { name: editingModel.upstream_model_id }),
     );
   };
 
@@ -306,7 +319,7 @@ export function ModelDiscoveryPage({ api, refreshRevision = 0, onBusyChange }: M
     if (!effectiveSourceId || models.length === 0) return;
     void runMutation(
       () => api.confirmSourceModels(effectiveSourceId, models),
-      `已确认 ${models.length} 个 SourceModel。`,
+      t('discovery.message_confirmed', { count: models.length }),
     );
   };
 
@@ -314,27 +327,27 @@ export function ModelDiscoveryPage({ api, refreshRevision = 0, onBusyChange }: M
     setSelectedModels(checked ? new Set(eligibleModels.map((model) => model.upstream_model_id)) : new Set());
   };
 
-  if (contextQuery.loading && !context) return <LoadingState label="正在加载发现上下文…" />;
+  if (contextQuery.loading && !context) return <LoadingState label={t('discovery.loading')} />;
   if (contextQuery.error && !context) return <ErrorState error={contextQuery.error} onRetry={contextQuery.reload} />;
   if (!context) return null;
-  if (context.sources.length === 0) return <EmptyTable title="没有可用于模型发现的 Source" description="先在 Sources 页面创建 Source 和 Account。" />;
+  if (context.sources.length === 0) return <EmptyTable title={t('discovery.no_sources_title')} description={t('discovery.no_sources_desc')} />;
 
   return (
     <section className={styles.page} data-od-id="page-model-discovery">
       <PageActions>
         <div className={styles.inlineActions}>
-          <SelectField label="Source" value={effectiveSourceId} onChange={(event) => changeSource(event.target.value)}>
+          <SelectField label={t('discovery.source')} value={effectiveSourceId} onChange={(event) => changeSource(event.target.value)}>
             {context.sources.map((item) => <option key={item.id} value={item.id}>{item.display_name} · {item.id}</option>)}
           </SelectField>
-          <SelectField label="Account" value={effectiveAccountId} disabled={enabledAccounts.length === 0} onChange={(event) => setAccountId(event.target.value)}>
-            {enabledAccounts.length === 0 && <option value="">无启用 Account</option>}
+          <SelectField label={t('discovery.account')} value={effectiveAccountId} disabled={enabledAccounts.length === 0} onChange={(event) => setAccountId(event.target.value)}>
+            {enabledAccounts.length === 0 && <option value="">{t('discovery.no_enabled_account')}</option>}
             {enabledAccounts.map((account) => <option key={account.id} value={account.id}>{account.display_name} · {account.id}</option>)}
           </SelectField>
         </div>
         <div className={styles.rowActions}>
-          <Button variant="secondary" onClick={() => { contextQuery.reload(); discoveryQuery.reload(); }} loading={contextQuery.refreshing || discoveryQuery.refreshing}><IconRefreshCw size={14} />刷新</Button>
+          <Button variant="secondary" onClick={() => { contextQuery.reload(); discoveryQuery.reload(); }} loading={contextQuery.refreshing || discoveryQuery.refreshing}><IconRefreshCw size={14} />{t('common.refresh')}</Button>
           <Button variant="primary" onClick={runDiscovery} loading={mutationBusy} disabled={!effectiveAccountId}>
-            <IconPlay size={14} />运行发现
+            <IconPlay size={14} />{t('discovery.run_button')}
           </Button>
         </div>
       </PageActions>
@@ -346,48 +359,48 @@ export function ModelDiscoveryPage({ api, refreshRevision = 0, onBusyChange }: M
       {discoveryDefinition?.support === 'unsupported' && !discovery?.latest && (
         <div className={styles.warningState} role="status">
           <IconTriangleAlert size={17} />
-          <span><strong>ProviderPreset 将 discovery 声明为 unsupported</strong><small>{discoveryDefinition.reason}</small></span>
+          <span><strong>{t('discovery.declares_unsupported')}</strong><small>{discoveryDefinition.reason}</small></span>
         </div>
       )}
 
-      <Card title="Latest run" subtitle="审计 run、上游结果与 added / changed / missing 差异" extra={<StatusPill tone="accent">{source?.provider_preset_id}@{source?.provider_preset_version}</StatusPill>}>
-        {discoveryQuery.loading && !discovery ? <LoadingState label="正在加载 latest run…" /> : discoveryQuery.error ? <ErrorState error={discoveryQuery.error} onRetry={discoveryQuery.reload} /> : <LatestRunPanel latest={discovery?.latest?.run.source_id === effectiveSourceId ? discovery.latest : null} />}
+      <Card title={t('discovery.latest_run_card')} subtitle={t('discovery.latest_run_subtitle')} extra={<StatusPill tone="accent">{source?.provider_preset_id}@{source?.provider_preset_version}</StatusPill>}>
+        {discoveryQuery.loading && !discovery ? <LoadingState label={t('discovery.loading_run')} /> : discoveryQuery.error ? <ErrorState error={discoveryQuery.error} onRetry={discoveryQuery.reload} /> : <LatestRunPanel latest={discovery?.latest?.run.source_id === effectiveSourceId ? discovery.latest : null} />}
       </Card>
 
       <FilterBar>
-        <label>确认状态<select value={confirmationFilter} onChange={(event) => { setConfirmationFilter(event.target.value as CatalogStatus | ''); setSelectedModels(new Set()); }}><option value="">全部</option><option value="pending">pending</option><option value="confirmed">confirmed</option><option value="unavailable">unavailable</option></select></label>
-        <label>可用状态<select value={availabilityFilter} onChange={(event) => { setAvailabilityFilter(event.target.value as CatalogAvailability | ''); setSelectedModels(new Set()); }}><option value="">全部</option><option value="unknown">unknown</option><option value="available">available</option><option value="unavailable">unavailable</option></select></label>
-        <span className={styles.filterMeta}>{visibleModels.length} 个 SourceModel</span>
+        <label>{t('discovery.confirmation_filter')}<select value={confirmationFilter} onChange={(event) => { setConfirmationFilter(event.target.value as CatalogStatus | ''); setSelectedModels(new Set()); }}><option value="">{t('common.all')}</option><option value="pending">{t('discovery.confirm_state.pending')}</option><option value="confirmed">{t('discovery.confirm_state.confirmed')}</option><option value="unavailable">{t('discovery.confirm_state.unavailable')}</option></select></label>
+        <label>{t('discovery.availability_filter')}<select value={availabilityFilter} onChange={(event) => { setAvailabilityFilter(event.target.value as CatalogAvailability | ''); setSelectedModels(new Set()); }}><option value="">{t('common.all')}</option><option value="unknown">{t('discovery.availability_state.unknown')}</option><option value="available">{t('discovery.availability_state.available')}</option><option value="unavailable">{t('discovery.availability_state.unavailable')}</option></select></label>
+        <span className={styles.filterMeta}>{t('discovery.source_model_count', { count: visibleModels.length })}</span>
       </FilterBar>
 
-      {discoveryQuery.loading && !discovery ? <LoadingState label="正在加载 SourceModel…" /> : visibleModels.length === 0 ? (
+      {discoveryQuery.loading && !discovery ? <LoadingState label={t('discovery.loading_models')} /> : visibleModels.length === 0 ? (
         <EmptyTable
-          title={discovery?.latest?.run.status === 'unsupported' ? '该 Source 不支持自动发现' : '当前筛选没有 SourceModel'}
-          description={discovery?.latest?.run.status === 'failed' ? '最近一次发现失败，既有 SourceModel 未被修改。' : '运行发现或调整筛选条件。'}
+          title={discovery?.latest?.run.status === 'unsupported' ? t('discovery.empty_no_auto') : t('discovery.empty_no_match')}
+          description={discovery?.latest?.run.status === 'failed' ? t('discovery.empty_no_match_desc') : t('discovery.empty_no_auto_desc')}
         />
       ) : (
-        <Card variant="flush" title="SourceModels" subtitle="确认只改变 SourceModel；不会创建 LogicalModel、Binding 或 Route" extra={(
+        <Card variant="flush" title={t('discovery.models_card')} subtitle={t('discovery.models_subtitle')} extra={(
           <div className={styles.rowActions}>
-            <StatusPill tone="warning">已选 {selectedModels.size}</StatusPill>
-            <Button size="sm" variant="secondary" onClick={() => setConfirmOpen(true)} disabled={selectedModels.size === 0 || mutationBusy}><IconCircleCheck size={14} />批量确认</Button>
+            <StatusPill tone="warning">{t('discovery.selected_count', { count: selectedModels.size })}</StatusPill>
+            <Button size="sm" variant="secondary" onClick={() => setConfirmOpen(true)} disabled={selectedModels.size === 0 || mutationBusy}><IconCircleCheck size={14} />{t('discovery.confirm_selected')}</Button>
           </div>
         )}>
-          <TableScroll label="SourceModel 表格">
+          <TableScroll label={t('discovery.table_aria')}>
             <table className={styles.table}>
-              <thead><tr><th><label className={styles.tableCheckbox}><input aria-label="选择全部可确认模型" type="checkbox" checked={eligibleModels.length > 0 && eligibleModels.every((model) => selectedModels.has(model.upstream_model_id))} onChange={(event) => toggleAll(event.target.checked)} /><span aria-hidden="true" /></label></th><th>Upstream model</th><th>确认</th><th>可用性</th><th>Metadata</th><th>字段来源</th><th>预设匹配</th><th>最近发现</th><th>操作</th></tr></thead>
+              <thead><tr><th><label className={styles.tableCheckbox}><input aria-label={t('discovery.select_all_aria')} type="checkbox" checked={eligibleModels.length > 0 && eligibleModels.every((model) => selectedModels.has(model.upstream_model_id))} onChange={(event) => toggleAll(event.target.checked)} /><span aria-hidden="true" /></label></th><th>{t('discovery.column.upstream_model')}</th><th>{t('discovery.column.confirmation')}</th><th>{t('discovery.column.availability')}</th><th>{t('discovery.column.metadata')}</th><th>{t('discovery.column.field_source')}</th><th>{t('discovery.column.preset_match')}</th><th>{t('discovery.column.last_discovered')}</th><th>{t('common.actions')}</th></tr></thead>
               <tbody>{visibleModels.map((model) => {
                 const eligible = model.confirmation_status === 'pending' && model.availability_status === 'available';
                 return (
                   <tr key={`${model.source_id}:${model.upstream_model_id}`}>
-                    <td><label className={styles.tableCheckbox}><input aria-label={`选择 ${model.upstream_model_id}`} type="checkbox" disabled={!eligible} checked={selectedModels.has(model.upstream_model_id)} onChange={(event) => setSelectedModels((current) => { const next = new Set(current); if (event.target.checked) next.add(model.upstream_model_id); else next.delete(model.upstream_model_id); return next; })} /><span aria-hidden="true" /></label></td>
+                    <td><label className={styles.tableCheckbox}><input aria-label={t('discovery.select_row_aria', { model: model.upstream_model_id })} type="checkbox" disabled={!eligible} checked={selectedModels.has(model.upstream_model_id)} onChange={(event) => setSelectedModels((current) => { const next = new Set(current); if (event.target.checked) next.add(model.upstream_model_id); else next.delete(model.upstream_model_id); return next; })} /><span aria-hidden="true" /></label></td>
                     <td><code>{model.upstream_model_id}</code></td>
-                    <td><StatusPill tone={statusTone(model.confirmation_status)}>{model.confirmation_status}</StatusPill></td>
-                    <td><StatusPill tone={statusTone(model.availability_status)}>{model.availability_status}</StatusPill></td>
-                    <td><span className={styles.primaryText}><strong>{metadataSummary(model)}</strong><small>context {String(model.metadata.context_window ?? 'unknown')}</small></span></td>
-                    <td><span className={styles.secondaryText}>{metadataSourcesSummary(model)}</span></td>
-                    <td>{model.matched_model_preset_id ? <code>{model.matched_model_preset_id}@{model.matched_model_preset_version}</code> : <StatusPill>none</StatusPill>}</td>
+                    <td><StatusPill tone={statusTone(model.confirmation_status)}>{t(`discovery.confirm_state.${model.confirmation_status}`)}</StatusPill></td>
+                    <td><StatusPill tone={statusTone(model.availability_status)}>{t(`discovery.availability_state.${model.availability_status}`)}</StatusPill></td>
+                    <td><span className={styles.primaryText}><strong>{metadataSummary(model) || t('discovery.unnamed_metadata')}</strong><small>context {String(model.metadata.context_window ?? 'unknown')}</small></span></td>
+                    <td><span className={styles.secondaryText}>{metadataSourcesSummary(model, fieldSourceLabel)}</span></td>
+                    <td>{model.matched_model_preset_id ? <code>{model.matched_model_preset_id}@{model.matched_model_preset_version}</code> : <StatusPill>{t('discovery.none')}</StatusPill>}</td>
                     <td>{formatDateTime(model.last_discovered_at)}</td>
-                    <td><Button size="sm" variant="ghost" onClick={() => setEditingModel(model)} disabled={model.confirmation_status !== 'pending'}><IconPencil size={14} />编辑</Button></td>
+                    <td><Button size="sm" variant="ghost" onClick={() => setEditingModel(model)} disabled={model.confirmation_status !== 'pending'}><IconPencil size={14} />{t('common.edit')}</Button></td>
                   </tr>
                 );
               })}</tbody>
@@ -398,25 +411,25 @@ export function ModelDiscoveryPage({ api, refreshRevision = 0, onBusyChange }: M
 
       <Modal
         open={Boolean(editingModel)}
-        title="编辑 pending SourceModel"
+        title={t('discovery.edit_pending_title')}
         width={760}
         onClose={() => !mutationBusy && setEditingModel(undefined)}
         closeDisabled={mutationBusy}
         footer={(
           <>
-            <Button variant="secondary" onClick={() => setEditingModel(undefined)} disabled={mutationBusy}>取消</Button>
-            <Button type="submit" form="source-model-editor-form" loading={mutationBusy}><IconPencil size={14} />保存用户字段</Button>
+            <Button variant="secondary" onClick={() => setEditingModel(undefined)} disabled={mutationBusy}>{t('common.cancel')}</Button>
+            <Button type="submit" form="source-model-editor-form" loading={mutationBusy}><IconPencil size={14} />{t('discovery.save_user_fields')}</Button>
           </>
         )}
       >
-        {editingModel && <SourceModelEditor key={`${editingModel.source_id}:${editingModel.upstream_model_id}`} model={editingModel} busy={mutationBusy} error={mutationError?.message} onSubmit={saveModel} />}
+        {editingModel && <SourceModelEditor key={`${editingModel.source_id}:${editingModel.upstream_model_id}`} model={editingModel} busy={mutationBusy} error={mutationError ? localize(mutationError) : undefined} onSubmit={saveModel} />}
       </Modal>
 
       <ConfirmDialog
         open={confirmOpen}
-        title="批量确认 SourceModel"
-        description={<>将确认当前选择的 {selectedModels.size} 个可用 pending SourceModel。此操作不会隐式创建 LogicalModel、Binding 或 Route。</>}
-        confirmLabel="确认模型"
+        title={t('discovery.batch_confirm_title')}
+        description={t('discovery.batch_confirm_desc', { count: selectedModels.size })}
+        confirmLabel={t('discovery.confirm_models')}
         busy={mutationBusy}
         onCancel={() => !mutationBusy && setConfirmOpen(false)}
         onConfirm={confirmSelected}

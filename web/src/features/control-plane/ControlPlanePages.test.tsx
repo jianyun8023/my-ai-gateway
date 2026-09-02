@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import '@/i18n';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { setTestLanguage } from '@/test/setup';
 import type { GatewayManagementPage as PageId } from '@/lib/consoleNavigation';
 import { GatewayManagementPage } from '@/pages/GatewayManagementPage';
 
@@ -219,6 +219,8 @@ const baseHandler = async (input: RequestInfo | URL) => {
 
 describe('production control-plane pages', () => {
   let container: HTMLDivElement;
+
+  beforeAll(() => setTestLanguage('zh'));
   let root: ReturnType<typeof createRoot>;
 
   beforeEach(() => {
@@ -258,13 +260,13 @@ describe('production control-plane pages', () => {
     expect(container.textContent).toContain('Source A');
     expect(container.textContent).toContain('原生');
     expect(container.textContent).toContain('转换');
-    expect(container.textContent).toContain('—');
+    expect(container.textContent).toContain('不支持');
 
     const accountsTab = Array.from(container.querySelectorAll<HTMLButtonElement>('[role="tab"]'))
-      .find((button) => button.textContent?.includes('Accounts'));
+      .find((button) => button.textContent?.includes('账号'));
     await act(async () => accountsTab?.click());
     expect(container.textContent).toContain('Account A');
-    expect(container.textContent).toContain('Configured');
+    expect(container.textContent).toContain('已配置');
     expect(container.textContent).not.toContain('PROVIDER_REFERENCE_ENV');
   });
 
@@ -274,9 +276,9 @@ describe('production control-plane pages', () => {
     expect(container.textContent).toContain('unsupported');
     expect(container.textContent).toContain('discovery_unsupported');
     expect(container.textContent).toContain('upstream-a');
-    expect(container.textContent).toContain('preset 1');
-    expect(container.textContent).toContain('upstream 1');
-    expect(container.textContent).toContain('unknown 1');
+    expect(container.textContent).toContain('预设 1');
+    expect(container.textContent).toContain('上游 1');
+    expect(container.textContent).toContain('未知 1');
   });
 
   it('renders fixed three-protocol runtime facts without inferring unroutable as supported', async () => {
@@ -287,7 +289,7 @@ describe('production control-plane pages', () => {
     expect(container.textContent).toContain('Messages');
     expect(container.textContent).toContain('primary #0');
     expect(container.textContent).toContain('fallback #1');
-    expect(container.textContent).toContain('degraded');
+    expect(container.textContent).toContain('降级');
     expect(container.textContent).toContain('route_not_found');
   });
 
@@ -318,7 +320,7 @@ describe('production control-plane pages', () => {
     await renderPage('settings', { adminKeyConfigured: true });
 
     const newKey = Array.from(container.querySelectorAll<HTMLButtonElement>('button'))
-      .find((button) => button.textContent?.includes('新建 Key'));
+      .find((button) => button.textContent?.includes('新建密钥'));
     await act(async () => {
       newKey?.click();
       await new Promise((resolve) => setTimeout(resolve, 0));
@@ -330,7 +332,7 @@ describe('production control-plane pages', () => {
       input.dispatchEvent(new Event('input', { bubbles: true }));
     });
     const create = Array.from(document.body.querySelectorAll<HTMLButtonElement>('button'))
-      .find((button) => button.textContent?.includes('创建 Key'));
+      .find((button) => button.textContent?.includes('创建密钥'));
     await act(async () => {
       create?.click();
       await new Promise((resolve) => setTimeout(resolve, 20));
@@ -362,7 +364,7 @@ describe('production control-plane pages', () => {
     await renderPage('settings', { adminKeyConfigured: true });
 
     const reveal = Array.from(container.querySelectorAll<HTMLButtonElement>('button'))
-      .find((button) => button.getAttribute('aria-label')?.includes('查看 personal-app API Key'));
+      .find((button) => button.getAttribute('aria-label')?.includes('查看 personal-app 的 API Key'));
     await act(async () => {
       reveal?.click();
       await new Promise((resolve) => setTimeout(resolve, 20));

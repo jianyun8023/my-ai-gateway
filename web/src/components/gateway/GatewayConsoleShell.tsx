@@ -12,8 +12,10 @@ import {
   IconRefreshCw,
   IconX,
 } from '@/components/ui/icons';
+import { LanguageSwitcher } from '@/components/ui/LanguageSwitcher';
 import type { ConsolePage, ConsoleNavSection } from '@/lib/consoleNavigation';
 import { useThemeStore } from '@/stores/useThemeStore';
+import { useTranslation } from 'react-i18next';
 import styles from './GatewayConsoleShell.module.scss';
 
 export const GATEWAY_ADMIN_KEY_STORAGE_KEY = 'my-ai-gateway-admin-key-v1';
@@ -82,6 +84,7 @@ export function GatewayConsoleShell({
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const theme = useThemeStore((state) => state.theme);
   const setTheme = useThemeStore((state) => state.setTheme);
+  const { t } = useTranslation('console');
 
   const getAdminKey = useCallback(() => appliedAdminKeyRef.current, []);
   const clearAdminKey = useCallback(() => {
@@ -146,20 +149,20 @@ export function GatewayConsoleShell({
 
   return (
     <div className={styles.shell} data-od-id="console">
-      <aside id="gateway-navigation" className={styles.sidebar} data-open={mobileNavOpen} data-od-id="sidebar" aria-label="控制台侧栏">
-        <button ref={closeButtonRef} type="button" className={styles.sidebarClose} aria-label="关闭导航" onClick={() => closeMobileNav(true)}>
+      <aside id="gateway-navigation" className={styles.sidebar} data-open={mobileNavOpen} data-od-id="sidebar" aria-label={t('shell.sidebar_aria')}>
+        <button ref={closeButtonRef} type="button" className={styles.sidebarClose} aria-label={t('shell.close_nav')} onClick={() => closeMobileNav(true)}>
           <IconX size={18} />
         </button>
 
         {/* Brand — matches prototype: AG icon + AI Gateway + version */}
         <div className={styles.brand}>
           <div className={styles.brandIcon}>AG</div>
-          <span className={styles.brandText}>AI Gateway</span>
+          <span className={styles.brandText}>{t('shell.brand_name')}</span>
           <span className={styles.brandVersion}>v0.3</span>
         </div>
 
         {/* Flat navigation with section headers */}
-        <nav className={styles.sidebarNav} aria-label="主导航">
+        <nav className={styles.sidebarNav} aria-label={t('shell.nav_aria')}>
           {navigationSections.map((section) => (
             <div key={section.label}>
               <span className={styles.navSection}>{section.label}</span>
@@ -185,10 +188,15 @@ export function GatewayConsoleShell({
           ))}
         </nav>
 
+        {/* Drawer language switch (≤920px topbar copy hidden) — visible inside the mobile sidebar */}
+        <div className={styles.sidebarLanguageArea}>
+          <LanguageSwitcher />
+        </div>
+
         {/* Mobile-only admin key — visible in sidebar when topbar input is hidden */}
         <div className={styles.mobileKeySection}>
           <label className={styles.mobileKeyLabel}>
-            <span>Admin Key</span>
+            <span>{t('shell.mobile_key_label')}</span>
             <input
               autoComplete="off"
               spellCheck={false}
@@ -196,42 +204,42 @@ export function GatewayConsoleShell({
               value={adminKeyDraft}
               onChange={(e) => setAdminKeyDraft(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') applyAdminKey(); }}
-              placeholder="GATEWAY_ADMIN_KEY"
+              placeholder={t('shell.admin_key_placeholder')}
             />
           </label>
-          <Button size="sm" variant="secondary" onClick={applyAdminKey}>应用</Button>
+          <Button size="sm" variant="secondary" onClick={applyAdminKey}>{t('shell.mobile_key_apply')}</Button>
         </div>
 
         {/* Footer — matches prototype: status dot + running info */}
         <div className={styles.sidebarFooter}>
           <div className={styles.statusDot} />
-          <span>网关运行中 · 端口 3100</span>
+          <span>{t('shell.running_status', { port: '3100' })}</span>
         </div>
       </aside>
 
-      <button type="button" className={styles.mobileOverlay} data-open={mobileNavOpen} aria-label="关闭导航遮罩" tabIndex={mobileNavOpen ? 0 : -1} onClick={() => closeMobileNav(true)} />
+      <button type="button" className={styles.mobileOverlay} data-open={mobileNavOpen} aria-label={t('shell.close_overlay')} tabIndex={mobileNavOpen ? 0 : -1} onClick={() => closeMobileNav(true)} />
 
       <div className={styles.mainArea}>
         {/* Topbar — matches prototype: title + endpoint + search + admin key */}
         <header className={styles.topbar} data-od-id="topbar">
-          <button ref={menuButtonRef} type="button" className={styles.mobileMenuBtn} aria-label="打开导航" aria-controls="gateway-navigation" aria-expanded={mobileNavOpen} onClick={() => setMobileNavOpen(true)}>
+          <button ref={menuButtonRef} type="button" className={styles.mobileMenuBtn} aria-label={t('shell.open_nav')} aria-controls="gateway-navigation" aria-expanded={mobileNavOpen} onClick={() => setMobileNavOpen(true)}>
             <IconMenu size={20} />
           </button>
           <span className={styles.topbarTitle}>{title}</span>
           <div className={styles.topbarRight}>
             <div className={styles.endpointDisplay}>
               <div className={styles.endpointDot} />
-              <span>http://localhost:3100</span>
+              <span>{t('shell.endpoint_display')}</span>
             </div>
             <div className={styles.topbarSearch}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /></svg>
-              搜索…
-              <kbd>⌘K</kbd>
+              {t('shell.search')}
+              <kbd>{t('shell.search_hint')}</kbd>
             </div>
             <label className={styles.keyInput}>
-              <span>Admin Key</span>
+              <span>{t('shell.admin_key_label')}</span>
               <input
-                aria-label="Admin Key"
+                aria-label={t('shell.admin_key_label')}
                 autoComplete="off"
                 spellCheck={false}
                 type="password"
@@ -239,13 +247,16 @@ export function GatewayConsoleShell({
                 value={adminKeyDraft}
                 onChange={(e) => setAdminKeyDraft(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') applyAdminKey(); }}
-                placeholder="GATEWAY_ADMIN_KEY"
+                placeholder={t('shell.admin_key_placeholder')}
               />
-              <Button size="sm" variant="secondary" onClick={applyAdminKey}>应用</Button>
+              <Button size="sm" variant="secondary" onClick={applyAdminKey}>{t('common.apply')}</Button>
             </label>
             <Button size="sm" variant="ghost" onClick={() => setTheme(theme === 'dark' ? 'white' : 'dark')}>
               {theme === 'dark' ? '☀' : '☽'}
             </Button>
+            <div className={styles.topbarLanguage}>
+              <LanguageSwitcher />
+            </div>
             {refreshable && (
               <Button size="sm" variant="secondary" onClick={() => setRefreshRevision((c) => c + 1)} loading={refreshing}>
                 <IconRefreshCw size={14} />

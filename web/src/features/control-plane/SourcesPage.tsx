@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useTranslation } from 'react-i18next';
+import { useLocalizedApiError } from '@/hooks/useLocalizedApiError';
 import type {
   Account,
   AccountWriteInput,
@@ -82,15 +84,12 @@ const protocolModeTone = (mode: SourceProtocolMode | undefined) => {
   return 'accent' as const;
 };
 
-const protocolModeLabel = (mode: SourceProtocolMode | undefined) => {
-  if (mode === 'native') return '原生';
-  if (mode === 'adapter') return '转换';
-  if (mode === 'unsupported') return '—';
-  return '未知';
-};
+const protocolModeKey = (mode: SourceProtocolMode | undefined) => (
+  `sources.mode.${mode === 'native' || mode === 'adapter' || mode === 'unsupported' ? mode : 'unknown'}`
+);
 
-const credentialLabel = (account: Account) => (
-  account.credential_configured ? 'Configured' : 'Not configured'
+const credentialKey = (account: Account) => (
+  account.credential_configured ? 'sources.credential.configured' : 'sources.credential.not_configured'
 );
 
 const presetEndpoints = (preset?: ProviderPreset): Partial<Record<GatewayProtocol, string>> => {
@@ -150,6 +149,7 @@ function SourceForm({
   error?: string;
   onSubmit: (input: SourceCreateInput | SourceWriteInput) => void;
 }) {
+  const { t } = useTranslation('console');
   const orderedPresets = useMemo(
     () => [...presets].sort((left, right) => left.id.localeCompare(right.id) || right.version - left.version),
     [presets],
@@ -214,11 +214,11 @@ function SourceForm({
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (!id.trim() || !displayName.trim() || !presetKey || !baseUrl.trim()) {
-      setValidationError('ID、显示名称、ProviderPreset 和 Base URL 均为必填项。');
+      setValidationError(t('sources.form.validate_required_source'));
       return;
     }
     if (!selectedPreset && !record) {
-      setValidationError('请选择有效的 ProviderPreset 版本。');
+      setValidationError(t('sources.form.validate_preset'));
       return;
     }
     const invalidAdapter = GATEWAY_PROTOCOLS.some((protocol) => {
@@ -227,26 +227,26 @@ function SourceForm({
         && (!capability.source_protocol || !capability.adapter?.trim());
     });
     if (invalidAdapter) {
-      setValidationError('Adapter 模式必须同时指定上游协议和 Adapter 名称。');
+      setValidationError(t('sources.form.validate_adapter_mode'));
       return;
     }
     let parsedHeaders: unknown;
     try {
       parsedHeaders = JSON.parse(defaultHeaders || '{}');
     } catch {
-      setValidationError('默认 Header 必须是有效的 JSON 对象。');
+      setValidationError(t('sources.form.validate_headers_json'));
       return;
     }
     if (!parsedHeaders || typeof parsedHeaders !== 'object' || Array.isArray(parsedHeaders)) {
-      setValidationError('默认 Header 必须是 JSON 对象。');
+      setValidationError(t('sources.form.validate_headers_object'));
       return;
     }
     if (!authHeader.trim()) {
-      setValidationError('凭据 Header 不能为空。');
+      setValidationError(t('sources.form.validate_headers_nonempty'));
       return;
     }
     if (!Object.values(parsedHeaders).every((value) => typeof value === 'string')) {
-      setValidationError('默认 Header 的值必须是字符串。');
+      setValidationError(t('sources.form.validate_headers_string'));
       return;
     }
     const authConfig = {
@@ -284,17 +284,17 @@ function SourceForm({
   return (
     <form id="source-editor-form" className={styles.page} onSubmit={submit}>
       <FormGrid>
-        <TextField label="Source ID" value={id} disabled={Boolean(record) || busy} onChange={(event) => setId(event.target.value)} autoComplete="off" />
-        <TextField label="显示名称" value={displayName} disabled={busy} onChange={(event) => setDisplayName(event.target.value)} autoComplete="off" />
-        <SelectField label="ProviderPreset" value={presetKey} disabled={Boolean(record) || busy || orderedPresets.length === 0} onChange={(event) => selectPreset(event.target.value)}>
-          {orderedPresets.length === 0 && <option value="">无可用预设</option>}
+        <TextField label={t('sources.field.source_id')} value={id} disabled={Boolean(record) || busy} onChange={(event) => setId(event.target.value)} autoComplete="off" />
+        <TextField label={t('sources.field.display_name')} value={displayName} disabled={busy} onChange={(event) => setDisplayName(event.target.value)} autoComplete="off" />
+        <SelectField label={t('sources.field.provider_preset')} value={presetKey} disabled={Boolean(record) || busy || orderedPresets.length === 0} onChange={(event) => selectPreset(event.target.value)}>
+          {orderedPresets.length === 0 && <option value="">{t('sources.form.no_preset')}</option>}
           {orderedPresets.map((preset) => <option key={`${preset.id}@${preset.version}`} value={`${preset.id}@${preset.version}`}>{preset.display_name} · {preset.id}@{preset.version}</option>)}
         </SelectField>
-        <TextField label="Base URL" type="url" value={baseUrl} disabled={busy} onChange={(event) => setBaseUrl(event.target.value)} autoComplete="off" />
+        <TextField label={t('sources.field.base_url')} type="url" value={baseUrl} disabled={busy} onChange={(event) => setBaseUrl(event.target.value)} autoComplete="off" />
         {(['openai_chat_completions', 'openai_responses', 'anthropic_messages'] as const).map((protocol) => (
           <TextField
             key={protocol}
-            label={`${PROTOCOL_LABELS[protocol]} endpoint`}
+            label={t('sources.form.endpoint_hint', { protocol: PROTOCOL_LABELS[protocol] })}
             value={endpoints[protocol] ?? ''}
             disabled={busy}
             onChange={(event) => setEndpoints((current) => ({ ...current, [protocol]: event.target.value }))}
@@ -302,10 +302,10 @@ function SourceForm({
           />
         ))}
         <div className={styles.fullWidth}>
-          <CheckboxField checked={enabled} disabled={busy} onChange={setEnabled} label="启用 Source" />
+          <CheckboxField checked={enabled} disabled={busy} onChange={setEnabled} label={t('sources.field.enable_source')} />
         </div>
       </FormGrid>
-      <DrawerSection title="三协议能力声明">
+      <DrawerSection title={t('sources.form.section_capabilities')}>
         <div className={styles.protocolCapabilityEditor}>
           {GATEWAY_PROTOCOLS.map((protocol) => {
             const capability = capabilities[protocol];
@@ -313,15 +313,15 @@ function SourceForm({
             return (
               <div key={protocol}>
                 <strong>{PROTOCOL_LABELS[protocol]}</strong>
-                <SelectField label="Mode" value={mode} disabled={busy} onChange={(event) => changeCapabilityMode(protocol, event.target.value as SourceProtocolMode)}>
-                  <option value="native">native</option>
-                  <option value="adapter">adapter</option>
-                  <option value="unsupported">unsupported</option>
-                  <option value="unknown" disabled>unknown</option>
+                <SelectField label={t('sources.form.mode')} value={mode} disabled={busy} onChange={(event) => changeCapabilityMode(protocol, event.target.value as SourceProtocolMode)}>
+                  <option value="native">{t('sources.mode.native')}</option>
+                  <option value="adapter">{t('sources.mode.adapter')}</option>
+                  <option value="unsupported">{t('sources.mode.unsupported')}</option>
+                  <option value="unknown" disabled>{t('sources.mode.unknown')}</option>
                 </SelectField>
                 {mode === 'adapter' && (
                   <>
-                    <SelectField label="Upstream protocol" value={capability?.source_protocol ?? ''} disabled={busy} onChange={(event) => setCapabilities((current) => ({
+                    <SelectField label={t('sources.form.upstream_protocol')} value={capability?.source_protocol ?? ''} disabled={busy} onChange={(event) => setCapabilities((current) => ({
                       ...current,
                       [protocol]: {
                         ...current[protocol],
@@ -332,7 +332,7 @@ function SourceForm({
                     }))}>
                       {GATEWAY_PROTOCOLS.filter((candidate) => candidate !== protocol).map((candidate) => <option key={candidate} value={candidate}>{PROTOCOL_LABELS[candidate]}</option>)}
                     </SelectField>
-                    <TextField label="Adapter" value={capability?.adapter ?? ''} disabled={busy} onChange={(event) => setCapabilities((current) => ({
+                    <TextField label={t('sources.form.adapter')} value={capability?.adapter ?? ''} disabled={busy} onChange={(event) => setCapabilities((current) => ({
                       ...current,
                       [protocol]: {
                         ...current[protocol],
@@ -348,11 +348,11 @@ function SourceForm({
           })}
         </div>
       </DrawerSection>
-      <DrawerSection title="认证模板">
+      <DrawerSection title={t('sources.form.section_auth')}>
         <FormGrid>
-          <TextField label="凭据 Header" value={authHeader} disabled={busy} onChange={(event) => setAuthHeader(event.target.value)} autoComplete="off" spellCheck={false} />
-          <TextField label="Header Prefix" value={authPrefix} disabled={busy} onChange={(event) => setAuthPrefix(event.target.value)} autoComplete="off" spellCheck={false} />
-          <TextAreaField label="默认 Headers JSON" value={defaultHeaders} disabled={busy} onChange={(event) => setDefaultHeaders(event.target.value)} spellCheck={false} />
+          <TextField label={t('sources.form.credential_headers')} value={authHeader} disabled={busy} onChange={(event) => setAuthHeader(event.target.value)} autoComplete="off" spellCheck={false} />
+          <TextField label={t('sources.form.header_prefix')} value={authPrefix} disabled={busy} onChange={(event) => setAuthPrefix(event.target.value)} autoComplete="off" spellCheck={false} />
+          <TextAreaField label={t('sources.form.default_headers')} value={defaultHeaders} disabled={busy} onChange={(event) => setDefaultHeaders(event.target.value)} spellCheck={false} />
         </FormGrid>
       </DrawerSection>
       <FormError message={validationError || error} />
@@ -373,6 +373,7 @@ function AccountForm({
   error?: string;
   onSubmit: (input: AccountWriteInput) => void;
 }) {
+  const { t } = useTranslation('console');
   const [id, setId] = useState(record?.id ?? '');
   const [sourceId, setSourceId] = useState(record?.source_id ?? sources[0]?.id ?? '');
   const [displayName, setDisplayName] = useState(record?.display_name ?? '');
@@ -386,11 +387,11 @@ function AccountForm({
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (!id.trim() || !sourceId || !displayName.trim() || !credentialEnv.trim()) {
-      setValidationError('ID、Source、显示名称和凭据环境变量均为必填项。');
+      setValidationError(t('sources.form.validate_required_account'));
       return;
     }
     if (!Number.isInteger(weight) || weight <= 0) {
-      setValidationError('权重必须是正整数。');
+      setValidationError(t('sources.form.validate_weight'));
       return;
     }
     setValidationError('');
@@ -408,19 +409,19 @@ function AccountForm({
   return (
     <form id="account-editor-form" className={styles.page} onSubmit={submit}>
       <FormGrid>
-        <TextField label="Account ID" value={id} disabled={Boolean(record) || busy} onChange={(event) => setId(event.target.value)} autoComplete="off" />
-        <TextField label="显示名称" value={displayName} disabled={busy} onChange={(event) => setDisplayName(event.target.value)} autoComplete="off" />
-        <SelectField label="Source" value={sourceId} disabled={busy} onChange={(event) => setSourceId(event.target.value)}>
+        <TextField label={t('sources.field.account_id')} value={id} disabled={Boolean(record) || busy} onChange={(event) => setId(event.target.value)} autoComplete="off" />
+        <TextField label={t('sources.field.display_name')} value={displayName} disabled={busy} onChange={(event) => setDisplayName(event.target.value)} autoComplete="off" />
+        <SelectField label={t('sources.field.source')} value={sourceId} disabled={busy} onChange={(event) => setSourceId(event.target.value)}>
           {sources.map((source) => <option key={source.id} value={source.id}>{source.display_name} · {source.id}</option>)}
         </SelectField>
-        <TextField label="凭据环境变量" hint={record ? '现有引用不会回显；如需保存请重新输入环境变量名。' : '仅提交环境变量名，不提交凭据值。'} value={credentialEnv} disabled={busy} onChange={(event) => setCredentialEnv(event.target.value)} autoComplete="off" spellCheck={false} />
-        <TextField label="Fallback 权重" type="number" min={1} step={1} value={weight} disabled={busy} onChange={(event) => setWeight(Number(event.target.value))} />
+        <TextField label={t('sources.field.credential_env')} hint={record ? t('sources.form.credential_env_hint_no_echo') : t('sources.form.credential_env_hint_name_only')} value={credentialEnv} disabled={busy} onChange={(event) => setCredentialEnv(event.target.value)} autoComplete="off" spellCheck={false} />
+        <TextField label={t('sources.field.fallback_weight')} type="number" min={1} step={1} value={weight} disabled={busy} onChange={(event) => setWeight(Number(event.target.value))} />
         <div className={styles.field}>
-          <label>凭据状态</label>
-          <StatusPill tone={record?.credential_configured ? 'success' : 'muted'}>{record ? credentialLabel(record) : '提交后验证'}</StatusPill>
+          <label>{t('sources.field.credential_status')}</label>
+          <StatusPill tone={record?.credential_configured ? 'success' : 'muted'}>{record ? t(credentialKey(record)) : t('sources.form.verify_on_submit')}</StatusPill>
         </div>
         <div className={styles.fullWidth}>
-          <CheckboxField checked={enabled} disabled={busy} onChange={setEnabled} label="启用 Account" />
+          <CheckboxField checked={enabled} disabled={busy} onChange={setEnabled} label={t('sources.field.enable_account')} />
         </div>
       </FormGrid>
       <FormError message={validationError || error} />
@@ -441,6 +442,7 @@ function SourceDetailDrawer({
   onClose: () => void;
   onEdit: () => void;
 }) {
+  const { t } = useTranslation('console');
   const [open, setOpen] = useState(true);
   const [diff, setDiff] = useState<ProviderPresetDiff>();
   const [diffError, setDiffError] = useState<AdminErrorShape>();
@@ -501,27 +503,27 @@ function SourceDetailDrawer({
       open={open}
       variant="drawer"
       width={540}
-      title="Source 详情"
+      title={t('sources.detail.title_source')}
       onClose={() => setOpen(false)}
       footer={(
         <>
-          <Button variant="secondary" onClick={() => setOpen(false)}>关闭</Button>
-          <Button variant="primary" onClick={onEdit}><IconPencil size={14} />编辑 Source</Button>
+          <Button variant="secondary" onClick={() => setOpen(false)}>{t('common.close')}</Button>
+          <Button variant="primary" onClick={onEdit}><IconPencil size={14} />{t('sources.modal.edit_source')}</Button>
         </>
       )}
     >
-      <DrawerSection title="基本信息">
+      <DrawerSection title={t('sources.detail.basic_info')}>
         <DetailList>
-          <DetailItem label="Source"><span className={styles.mono}>{source.id}</span></DetailItem>
-          <DetailItem label="显示名称">{source.display_name}</DetailItem>
-          <DetailItem label="ProviderPreset"><span className={styles.mono}>{source.provider_preset_id}@{source.provider_preset_version}</span></DetailItem>
-          <DetailItem label="Base URL"><span className={styles.mono}>{source.base_url}</span></DetailItem>
-          <DetailItem label="状态"><StatusPill tone={source.enabled ? 'success' : 'muted'}>{source.enabled ? 'Enabled' : 'Disabled'}</StatusPill></DetailItem>
-          <DetailItem label="更新时间">{formatDateTime(source.updated_at)}</DetailItem>
+          <DetailItem label={t('sources.field.source')}><span className={styles.mono}>{source.id}</span></DetailItem>
+          <DetailItem label={t('sources.field.display_name')}>{source.display_name}</DetailItem>
+          <DetailItem label={t('sources.field.provider_preset')}><span className={styles.mono}>{source.provider_preset_id}@{source.provider_preset_version}</span></DetailItem>
+          <DetailItem label={t('sources.field.base_url')}><span className={styles.mono}>{source.base_url}</span></DetailItem>
+          <DetailItem label={t('common.status')}><StatusPill tone={source.enabled ? 'success' : 'muted'}>{source.enabled ? t('common.enabled') : t('common.disabled')}</StatusPill></DetailItem>
+          <DetailItem label={t('common.updated_at')}>{formatDateTime(source.updated_at)}</DetailItem>
         </DetailList>
       </DrawerSection>
 
-      <DrawerSection title="协议快照">
+      <DrawerSection title={t('sources.detail.protocol_snapshot')}>
         <DetailList>
           {(['openai_chat_completions', 'openai_responses', 'anthropic_messages'] as const).map((protocol) => {
             const capability = source.protocol_capabilities[protocol];
@@ -529,8 +531,8 @@ function SourceDetailDrawer({
             return (
               <DetailItem key={protocol} label={PROTOCOL_LABELS[protocol]}>
                 <span className={styles.inlineActions}>
-                  <StatusPill tone={protocolModeTone(capability?.mode)}>{protocolModeLabel(capability?.mode)}</StatusPill>
-                  <span className={styles.mono}>{source.endpoints[endpointProtocol] ?? 'endpoint 未配置'}{capability?.source_protocol && <small className={styles.blockMeta}>upstream endpoint</small>}</span>
+                  <StatusPill tone={protocolModeTone(capability?.mode)}>{t(protocolModeKey(capability?.mode))}</StatusPill>
+                  <span className={styles.mono}>{source.endpoints[endpointProtocol] ?? t('sources.detail.endpoint_unset')}{capability?.source_protocol && <small className={styles.blockMeta}>{t('sources.detail.upstream_endpoint')}</small>}</span>
                   {capability?.source_protocol && <span className={styles.secondaryText}>← {PROTOCOL_LABELS[capability.source_protocol]}</span>}
                 </span>
               </DetailItem>
@@ -539,18 +541,18 @@ function SourceDetailDrawer({
         </DetailList>
       </DrawerSection>
 
-      <DrawerSection title="ProviderPreset 差异">
-        {diffLoading ? <LoadingState label="正在比较预设…" /> : diffError ? <ErrorState error={diffError} onRetry={() => void loadDiff(new AbortController().signal)} /> : !diff || diff.changes.length === 0 ? (
-          <EmptyTable title="当前快照与最新预设一致" />
+      <DrawerSection title={t('sources.detail.preset_diff')}>
+        {diffLoading ? <LoadingState label={t('sources.detail.preset_comparing')} /> : diffError ? <ErrorState error={diffError} onRetry={() => void loadDiff(new AbortController().signal)} /> : !diff || diff.changes.length === 0 ? (
+          <EmptyTable title={t('sources.detail.preset_same')} />
         ) : (
           <div className={styles.page}>
             <div className={styles.inlineActions}>
-              <StatusPill tone="accent">v{diff.source_version} → v{diff.latest_version}</StatusPill>
-              <span className={styles.secondaryText}>{diff.changes.length} 项差异</span>
+              <StatusPill tone="accent">{t('sources.detail.preset_versions', { from: diff.source_version, to: diff.latest_version })}</StatusPill>
+              <span className={styles.secondaryText}>{t('sources.detail.diff_count', { count: diff.changes.length })}</span>
             </div>
-            <TableScroll label="ProviderPreset 差异">
+            <TableScroll label={t('sources.detail.preset_diff')}>
               <table className={styles.table}>
-                <thead><tr><th>Path</th><th>类型</th><th>原值</th><th>新值</th></tr></thead>
+                <thead><tr><th>{t('sources.detail.diff_path')}</th><th>{t('sources.detail.diff_type')}</th><th>{t('sources.detail.diff_old')}</th><th>{t('sources.detail.diff_new')}</th></tr></thead>
                 <tbody>{diff.changes.map((change) => (
                   <tr key={`${change.kind}:${change.path}`}>
                     <td><code>{change.path}</code></td>
@@ -565,14 +567,14 @@ function SourceDetailDrawer({
         )}
       </DrawerSection>
 
-      <DrawerSection title="三协议连接测试">
-        {enabledAccounts.length === 0 ? <EmptyTable title="没有可用 Account" description="先创建并启用属于此 Source 的 Account。" /> : (
+      <DrawerSection title={t('sources.detail.connection_test')}>
+        {enabledAccounts.length === 0 ? <EmptyTable title={t('sources.detail.test_no_account')} description={t('sources.detail.test_no_account_desc')} /> : (
           <div className={styles.page}>
             <FormGrid>
-              <SelectField label="Account" value={accountId} disabled={Boolean(testBusy)} onChange={(event) => setAccountId(event.target.value)}>
+              <SelectField label={t('common.account')} value={accountId} disabled={Boolean(testBusy)} onChange={(event) => setAccountId(event.target.value)}>
                 {enabledAccounts.map((account) => <option key={account.id} value={account.id}>{account.display_name} · {account.id}</option>)}
               </SelectField>
-              <TextField label="测试模型（可选）" value={testModel} disabled={Boolean(testBusy)} onChange={(event) => setTestModel(event.target.value)} autoComplete="off" />
+              <TextField label={t('sources.detail.test_model')} value={testModel} disabled={Boolean(testBusy)} onChange={(event) => setTestModel(event.target.value)} autoComplete="off" />
             </FormGrid>
             {testError && <ErrorState error={testError} />}
             <div className={styles.protocolTestGrid}>
@@ -584,13 +586,13 @@ function SourceDetailDrawer({
                     <ProtocolPill protocol={protocol} />
                     {result && (
                       <span className={styles.primaryText}>
-                        <strong>{succeeded ? <><IconCircleCheck size={14} /> succeeded</> : <><IconTriangleAlert size={14} /> {result.status}</>}</strong>
-                        <small>{result.mode} · {PROTOCOL_LABELS[result.upstream_protocol]} · {result.http_status ?? 'no HTTP'} · {result.latency_ms} ms</small>
+                        <strong>{succeeded ? <><IconCircleCheck size={14} /> {t('sources.detail.test_ok')}</> : <><IconTriangleAlert size={14} /> {result.status === 'failed' ? t('sources.detail.test_failed') : result.status}</>}</strong>
+                        <small>{t(protocolModeKey(result.mode))} · {PROTOCOL_LABELS[result.upstream_protocol]} · {result.http_status ?? t('sources.detail.test_no_http')} · {result.latency_ms} ms</small>
                         {result.error_code && <small>{result.error_code}: {result.error_message}</small>}
                       </span>
                     )}
                     <Button size="sm" variant="secondary" loading={testBusy === protocol} disabled={Boolean(testBusy && testBusy !== protocol)} onClick={() => void runTest(protocol)}>
-                      <IconPlay size={14} />测试
+                      <IconPlay size={14} />{t('sources.detail.test_button')}
                     </Button>
                   </div>
                 );
@@ -604,6 +606,8 @@ function SourceDetailDrawer({
 }
 
 export function SourcesPage({ api, refreshRevision = 0, onBusyChange }: SourcesPageProps) {
+  const { t } = useTranslation('console');
+  const localizeError = useLocalizedApiError();
   const [tab, setTab] = useState<SourcesTab>('sources');
   const [editor, setEditor] = useState<Editor>();
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget>();
@@ -649,7 +653,9 @@ export function SourcesPage({ api, refreshRevision = 0, onBusyChange }: SourcesP
       () => record
         ? api.updateSource(record.id, input as SourceWriteInput)
         : api.createSource(input as SourceCreateInput),
-      record ? `Source ${record.id} 已更新。` : `Source ${input.id} 已创建。`,
+      record
+        ? t('sources.message.source_updated', { name: record.id })
+        : t('sources.message.source_created', { name: input.id }),
     );
   };
 
@@ -657,7 +663,9 @@ export function SourcesPage({ api, refreshRevision = 0, onBusyChange }: SourcesP
     const record = editor?.kind === 'account' ? editor.record : undefined;
     void mutate(
       () => record ? api.updateAccount(record.id, input) : api.createAccount(input),
-      record ? `Account ${record.id} 已更新。` : `Account ${input.id} 已创建。`,
+      record
+        ? t('sources.message.account_updated', { name: record.id })
+        : t('sources.message.account_created', { name: input.id }),
     );
   };
 
@@ -667,30 +675,34 @@ export function SourcesPage({ api, refreshRevision = 0, onBusyChange }: SourcesP
       () => deleteTarget.kind === 'source'
         ? api.deleteSource(deleteTarget.record.id)
         : api.deleteAccount(deleteTarget.record.id),
-      `${deleteTarget.kind === 'source' ? 'Source' : 'Account'} ${deleteTarget.record.id} 已删除。`,
+      deleteTarget.kind === 'source'
+        ? t('sources.message.source_deleted', { name: deleteTarget.record.id })
+        : t('sources.message.account_deleted', { name: deleteTarget.record.id }),
     );
   };
 
-  if (query.loading && !data) return <LoadingState label="正在加载 Sources 与 Accounts…" />;
+  if (query.loading && !data) return <LoadingState label={t('sources.loading')} />;
   if (query.error && !data) return <ErrorState error={query.error} onRetry={query.reload} />;
   if (!data) return null;
+
+  const formErrorMessage = mutationError ? localizeError(mutationError) : undefined;
 
   return (
     <section className={styles.page} data-od-id="page-sources">
       <PageActions>
         <SegmentedTabs
           value={tab}
-          label="Source 管理资源"
+          label={t('sources.region_aria')}
           options={[
-            { value: 'sources', label: 'Sources', count: data.sources.length },
-            { value: 'accounts', label: 'Accounts', count: data.accounts.length },
+            { value: 'sources', label: t('sources.tab.sources'), count: data.sources.length },
+            { value: 'accounts', label: t('sources.tab.accounts'), count: data.accounts.length },
           ]}
           onChange={setTab}
         />
         <div className={styles.rowActions}>
-          <Button variant="secondary" onClick={query.reload} loading={query.refreshing}><IconRefreshCw size={14} />刷新</Button>
+          <Button variant="secondary" onClick={query.reload} loading={query.refreshing}><IconRefreshCw size={14} />{t('common.refresh')}</Button>
           <Button variant="primary" onClick={() => setEditor(tab === 'sources' ? { kind: 'source' } : { kind: 'account' })} disabled={tab === 'accounts' && data.sources.length === 0}>
-            <IconPlus size={14} />{tab === 'sources' ? '新增 Source' : '新增 Account'}
+            <IconPlus size={14} />{tab === 'sources' ? t('sources.add_source') : t('sources.add_account')}
           </Button>
         </div>
       </PageActions>
@@ -700,26 +712,34 @@ export function SourcesPage({ api, refreshRevision = 0, onBusyChange }: SourcesP
       {mutationError && !editor && !deleteTarget && <ErrorState error={mutationError} />}
 
       {tab === 'sources' ? (
-        data.sources.length === 0 ? <EmptyTable title="尚未配置 Source" description="从 ProviderPreset 创建第一个 Source。" /> : (
-          <Card variant="flush" title="Sources" subtitle="ProviderPreset 快照、协议 endpoint 与运行期开关彼此独立">
-            <TableScroll label="Sources 表格">
+        data.sources.length === 0 ? <EmptyTable title={t('sources.empty.sources_title')} description={t('sources.empty.sources_desc')} /> : (
+          <Card variant="flush" title={t('sources.card.sources_title')} subtitle={t('sources.card.sources_subtitle')}>
+            <TableScroll label={t('sources.table.sources_region')}>
               <table className={styles.table}>
-                <thead><tr><th>Source</th><th>ProviderPreset</th><th>Base URL</th><th>Chat</th><th>Responses</th><th>Messages</th><th>Accounts</th><th>状态</th><th>操作</th></tr></thead>
+                <thead><tr>
+                  <th>{t('sources.field.source')}</th>
+                  <th>{t('sources.field.provider_preset')}</th>
+                  <th>{t('sources.field.base_url')}</th>
+                  {GATEWAY_PROTOCOLS.map((protocol) => <th key={protocol}>{PROTOCOL_LABELS[protocol]}</th>)}
+                  <th>{t('sources.tab.accounts')}</th>
+                  <th>{t('common.status')}</th>
+                  <th>{t('common.actions')}</th>
+                </tr></thead>
                 <tbody>{data.sources.map((source) => (
                   <tr key={source.id} data-clickable="true" onClick={() => setSelectedSourceId(source.id)}>
                     <td><span className={styles.primaryText}><strong>{source.display_name}</strong><small className={styles.mono}>{source.id}</small></span></td>
                     <td><code>{source.provider_preset_id}@{source.provider_preset_version}</code></td>
                     <td><code>{source.base_url}</code></td>
-                    {(['openai_chat_completions', 'openai_responses', 'anthropic_messages'] as const).map((protocol) => (
-                      <td key={protocol}><StatusPill tone={protocolModeTone(source.protocol_capabilities[protocol]?.mode)}>{protocolModeLabel(source.protocol_capabilities[protocol]?.mode)}</StatusPill></td>
+                    {GATEWAY_PROTOCOLS.map((protocol) => (
+                      <td key={protocol}><StatusPill tone={protocolModeTone(source.protocol_capabilities[protocol]?.mode)}>{t(protocolModeKey(source.protocol_capabilities[protocol]?.mode))}</StatusPill></td>
                     ))}
                     <td><span className={styles.mono}>{data.accounts.filter((account) => account.source_id === source.id).length}</span></td>
-                    <td onClick={(event) => event.stopPropagation()}><Toggle label={`${source.id} 启停`} checked={source.enabled} disabled={mutationBusy} onChange={(enabled) => void mutate(() => api.setSourceEnabled(source.id, enabled), `Source ${source.id} 已${enabled ? '启用' : '停用'}。`)} /></td>
+                    <td onClick={(event) => event.stopPropagation()}><Toggle label={t('sources.table.toggle_aria', { id: source.id })} checked={source.enabled} disabled={mutationBusy} onChange={(enabled) => void mutate(() => api.setSourceEnabled(source.id, enabled), t(enabled ? 'sources.table.toggle_enabled' : 'sources.table.toggle_disabled', { name: source.id }))} /></td>
                     <td onClick={(event) => event.stopPropagation()}><div className={styles.rowActions}>
-                      <IconButton label={`查看 ${source.id}`} onClick={() => setSelectedSourceId(source.id)}><IconEye size={16} /></IconButton>
-                      <IconButton label={`编辑 ${source.id}`} onClick={() => setEditor({ kind: 'source', record: source })}><IconPencil size={16} /></IconButton>
-                      <IconButton label={`${source.enabled ? '停用' : '启用'} ${source.id}`} disabled={mutationBusy} onClick={() => void mutate(() => api.setSourceEnabled(source.id, !source.enabled), `Source ${source.id} 已${source.enabled ? '停用' : '启用'}。`)}><IconPower size={16} /></IconButton>
-                      <IconButton label={`删除 ${source.id}`} className={styles.dangerIcon} onClick={() => setDeleteTarget({ kind: 'source', record: source })}><IconTrash2 size={16} /></IconButton>
+                      <IconButton label={t('sources.table.view_aria', { id: source.id })} onClick={() => setSelectedSourceId(source.id)}><IconEye size={16} /></IconButton>
+                      <IconButton label={t('sources.table.edit_aria', { id: source.id })} onClick={() => setEditor({ kind: 'source', record: source })}><IconPencil size={16} /></IconButton>
+                      <IconButton label={`${source.enabled ? t('common.disable') : t('common.enable')} ${source.id}`} disabled={mutationBusy} onClick={() => void mutate(() => api.setSourceEnabled(source.id, !source.enabled), t(source.enabled ? 'sources.table.toggle_disabled' : 'sources.table.toggle_enabled', { name: source.id }))}><IconPower size={16} /></IconButton>
+                      <IconButton label={t('sources.table.delete_aria', { id: source.id })} className={styles.dangerIcon} onClick={() => setDeleteTarget({ kind: 'source', record: source })}><IconTrash2 size={16} /></IconButton>
                     </div></td>
                   </tr>
                 ))}</tbody>
@@ -727,24 +747,33 @@ export function SourcesPage({ api, refreshRevision = 0, onBusyChange }: SourcesP
             </TableScroll>
           </Card>
         )
-      ) : data.accounts.length === 0 ? <EmptyTable title="尚未配置 Account" description="Account 独立关联到一个 Source。" /> : (
-        <Card variant="flush" title="Accounts" subtitle="凭据只以服务端环境变量或密文引用提交，界面不展示秘密">
-          <TableScroll label="Accounts 表格">
+      ) : data.accounts.length === 0 ? <EmptyTable title={t('sources.empty.accounts_title')} description={t('sources.empty.accounts_desc')} /> : (
+        <Card variant="flush" title={t('sources.card.accounts_title')} subtitle={t('sources.card.accounts_subtitle')}>
+          <TableScroll label={t('sources.table.accounts_region')}>
             <table className={styles.table}>
-              <thead><tr><th>Account</th><th>Source</th><th>凭据</th><th>Fallback 权重</th><th>健康状态</th><th>Cooldown</th><th>状态</th><th>操作</th></tr></thead>
+              <thead><tr>
+                <th>{t('common.account')}</th>
+                <th>{t('sources.field.source')}</th>
+                <th>{t('sources.table.header_credentials')}</th>
+                <th>{t('sources.table.header_fallback_weight')}</th>
+                <th>{t('sources.table.header_health')}</th>
+                <th>{t('sources.table.header_cooldown')}</th>
+                <th>{t('common.status')}</th>
+                <th>{t('common.actions')}</th>
+              </tr></thead>
               <tbody>{data.accounts.map((account) => (
                 <tr key={account.id}>
                   <td><span className={styles.primaryText}><strong>{account.display_name}</strong><small className={styles.mono}>{account.id}</small></span></td>
                   <td><code>{account.source_id}</code></td>
-                  <td><StatusPill tone={account.credential_configured ? 'success' : 'danger'}>{credentialLabel(account)}</StatusPill></td>
+                  <td><StatusPill tone={account.credential_configured ? 'success' : 'danger'}>{t(credentialKey(account))}</StatusPill></td>
                   <td><span className={styles.mono}>{account.weight}</span></td>
                   <td><StatusPill tone={account.health_status === 'healthy' ? 'success' : account.health_status === 'unknown' ? 'accent' : 'warning'}>{account.health_status || 'unknown'}</StatusPill></td>
                   <td>{formatDateTime(account.cooldown_until)}</td>
-                  <td><Toggle label={`${account.id} 启停`} checked={account.enabled} disabled={mutationBusy} onChange={(enabled) => void mutate(() => api.setAccountEnabled(account.id, enabled), `Account ${account.id} 已${enabled ? '启用' : '停用'}。`)} /></td>
+                  <td><Toggle label={t('sources.table.toggle_aria', { id: account.id })} checked={account.enabled} disabled={mutationBusy} onChange={(enabled) => void mutate(() => api.setAccountEnabled(account.id, enabled), t(enabled ? 'sources.table.account_toggle_enabled' : 'sources.table.account_toggle_disabled', { name: account.id }))} /></td>
                   <td><div className={styles.rowActions}>
-                    <IconButton label={`编辑 ${account.id}`} onClick={() => setEditor({ kind: 'account', record: account })}><IconPencil size={16} /></IconButton>
-                    <IconButton label={`${account.enabled ? '停用' : '启用'} ${account.id}`} disabled={mutationBusy} onClick={() => void mutate(() => api.setAccountEnabled(account.id, !account.enabled), `Account ${account.id} 已${account.enabled ? '停用' : '启用'}。`)}><IconPower size={16} /></IconButton>
-                    <IconButton label={`删除 ${account.id}`} className={styles.dangerIcon} onClick={() => setDeleteTarget({ kind: 'account', record: account })}><IconTrash2 size={16} /></IconButton>
+                    <IconButton label={t('sources.table.edit_aria', { id: account.id })} onClick={() => setEditor({ kind: 'account', record: account })}><IconPencil size={16} /></IconButton>
+                    <IconButton label={`${account.enabled ? t('common.disable') : t('common.enable')} ${account.id}`} disabled={mutationBusy} onClick={() => void mutate(() => api.setAccountEnabled(account.id, !account.enabled), t(account.enabled ? 'sources.table.account_toggle_disabled' : 'sources.table.account_toggle_enabled', { name: account.id }))}><IconPower size={16} /></IconButton>
+                    <IconButton label={t('sources.table.delete_aria', { id: account.id })} className={styles.dangerIcon} onClick={() => setDeleteTarget({ kind: 'account', record: account })}><IconTrash2 size={16} /></IconButton>
                   </div></td>
                 </tr>
               ))}</tbody>
@@ -770,29 +799,29 @@ export function SourcesPage({ api, refreshRevision = 0, onBusyChange }: SourcesP
       <Modal
         open={Boolean(editor)}
         title={editor?.kind === 'source'
-          ? editor.record ? '编辑 Source' : '新增 Source'
-          : editor?.record ? '编辑 Account' : '新增 Account'}
+          ? editor.record ? t('sources.modal.edit_source') : t('sources.modal.new_source')
+          : editor?.record ? t('sources.modal.edit_account') : t('sources.modal.new_account')}
         onClose={() => !mutationBusy && setEditor(undefined)}
         closeDisabled={mutationBusy}
         width={680}
         footer={editor && (
           <>
-            <Button variant="secondary" onClick={() => setEditor(undefined)} disabled={mutationBusy}>取消</Button>
+            <Button variant="secondary" onClick={() => setEditor(undefined)} disabled={mutationBusy}>{t('common.cancel')}</Button>
             <Button type="submit" form={editor.kind === 'source' ? 'source-editor-form' : 'account-editor-form'} loading={mutationBusy}>
-              {editor.record ? '保存更改' : '创建'}
+              {editor.record ? t('common.save_changes') : t('common.create')}
             </Button>
           </>
         )}
       >
-        {editor?.kind === 'source' && <SourceForm key={editor.record?.id ?? 'new-source'} record={editor.record} presets={data.presets} busy={mutationBusy} error={mutationError?.message} onSubmit={submitSource} />}
-        {editor?.kind === 'account' && <AccountForm key={editor.record?.id ?? 'new-account'} record={editor.record} sources={data.sources} busy={mutationBusy} error={mutationError?.message} onSubmit={submitAccount} />}
+        {editor?.kind === 'source' && <SourceForm key={editor.record?.id ?? 'new-source'} record={editor.record} presets={data.presets} busy={mutationBusy} error={formErrorMessage} onSubmit={submitSource} />}
+        {editor?.kind === 'account' && <AccountForm key={editor.record?.id ?? 'new-account'} record={editor.record} sources={data.sources} busy={mutationBusy} error={formErrorMessage} onSubmit={submitAccount} />}
       </Modal>
 
       <ConfirmDialog
         open={Boolean(deleteTarget)}
-        title={deleteTarget?.kind === 'source' ? '删除 Source' : '删除 Account'}
-        description={deleteTarget ? <div className={styles.page}>确认删除 <code className={styles.mono}>{deleteTarget.record.id}</code>？有关联资源时，后端会拒绝并返回结构化错误。<FormError message={mutationError?.message} /></div> : null}
-        confirmLabel="删除"
+        title={deleteTarget?.kind === 'source' ? t('sources.confirm.delete_source_title') : t('sources.confirm.delete_account_title')}
+        description={deleteTarget ? <div className={styles.page}>{t(deleteTarget.kind === 'source' ? 'sources.confirm.delete_source_body' : 'sources.confirm.delete_account_body', { id: deleteTarget.record.id })}<FormError message={formErrorMessage} /></div> : null}
+        confirmLabel={t('common.delete')}
         danger
         busy={mutationBusy}
         onCancel={() => !mutationBusy && setDeleteTarget(undefined)}
