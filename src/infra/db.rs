@@ -1376,7 +1376,7 @@ impl Database {
     pub async fn authenticate_virtual_key(
         &self,
         raw: &str,
-        model: &str,
+        model: Option<&str>,
     ) -> Result<Option<i64>, sqlx::Error> {
         self.authenticate_virtual_key_with_scope(raw, model, VIRTUAL_KEY_INVOKE_SCOPE)
             .await
@@ -1385,7 +1385,7 @@ impl Database {
     pub async fn authenticate_virtual_key_with_scope(
         &self,
         raw: &str,
-        model: &str,
+        model: Option<&str>,
         required_scope: &str,
     ) -> Result<Option<i64>, sqlx::Error> {
         let hash = hash_key(raw);
@@ -1681,12 +1681,16 @@ fn scopes_json(scopes: &[String]) -> Value {
     }
 }
 
-fn allowed_models_allow(value: &Value, model: &str) -> bool {
+fn allowed_models_allow(value: &Value, model: Option<&str>) -> bool {
     let allowed = value.as_array().cloned().unwrap_or_default();
+    // Catalogue endpoints (`/v1/models`) pass `None` to skip the model
+    // whitelist entirely; the virtual key only needs to satisfy the
+    // required scope (typically `gateway:invoke`).
     allowed.is_empty()
+        || model.is_none()
         || allowed
             .iter()
-            .any(|item| item.as_str() == Some(model) || item.as_str() == Some("*"))
+            .any(|item| item.as_str() == model || item.as_str() == Some("*"))
 }
 
 fn scope_allow(value: &Value, required: &str) -> bool {
@@ -2037,7 +2041,7 @@ mod tests {
             .expect("create virtual key fixture");
         assert_eq!(
             database
-                .authenticate_virtual_key(&virtual_key, &logical_model)
+                .authenticate_virtual_key(&virtual_key, Some(&logical_model))
                 .await
                 .expect("authenticate virtual key fixture"),
             Some(virtual_key_id)

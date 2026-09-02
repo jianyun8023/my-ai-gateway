@@ -2405,14 +2405,27 @@ impl ControlPlane {
 mod tests {
     use super::*;
     use crate::infra::db::Database;
+    use crate::state::{AppState, EnvRestore};
     use axum::{
         body::{to_bytes, Body},
         extract::State,
-        http::{Request, StatusCode},
+        http::{HeaderMap, Request, StatusCode},
     };
     use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
     use std::{str::FromStr, time::Duration};
     use tower::ServiceExt;
+
+    /// Drive `/v1/models` through the production handler with the fail-open
+    /// env state cleared so the unit tests stay hermetic.
+    async fn invoke_models_for_test(state: &AppState) -> Value {
+        let _environment_lock = crate::state::ENV_LOCK.lock().await;
+        let _unset = EnvRestore::unset("GATEWAY_API_KEY");
+        let response = crate::models(State(state.clone()), HeaderMap::new()).await;
+        let body = to_bytes(response.into_body(), 64 * 1024)
+            .await
+            .expect("models response body");
+        serde_json::from_slice(&body).expect("models response JSON")
+    }
 
     #[test]
     fn source_validation_uses_server_policy_and_does_not_echo_blocked_targets() {
@@ -3023,15 +3036,15 @@ mod tests {
         assert!(messages_cell["mode"].is_null());
         assert_eq!(messages_cell["error"]["code"], "route_not_found");
 
-        let model_response = crate::models(State(state.clone())).await.0;
-        assert!(model_response["data"]
+        let model_payload = invoke_models_for_test(&state).await;
+        assert!(model_payload["data"]
             .as_array()
             .unwrap()
             .iter()
             .any(|model| model["id"] == "logical-b"));
         health.mark_failure("account-b").await;
-        let model_response = crate::models(State(state.clone())).await.0;
-        assert!(!model_response["data"]
+        let model_payload = invoke_models_for_test(&state).await;
+        assert!(!model_payload["data"]
             .as_array()
             .unwrap()
             .iter()

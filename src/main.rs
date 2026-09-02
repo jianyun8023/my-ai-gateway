@@ -1410,6 +1410,100 @@ mod audit_closeout_tests {
         .await;
     }
 
+    fn models_request(authorization: Option<&str>) -> Request<Body> {
+        let mut builder = Request::builder()
+            .method("GET")
+            .uri("/v1/models")
+            .header(CONTENT_TYPE, "application/json");
+        if let Some(key) = authorization {
+            builder = builder.header(header::AUTHORIZATION, format!("Bearer {key}"));
+        }
+        builder.body(Body::empty()).expect("models request")
+    }
+
+    #[tokio::test]
+    async fn data_plane_models_rejects_unauthenticated_requests() {
+        let _environment_lock = ENV_LOCK.lock().await;
+        // Configure the static key but send no Authorization header so the
+        // gateway fails closed the same way the three POST endpoints do.
+        // (Without `GATEWAY_API_KEY` and without a DB the proxy is
+        // fail-open by design — see `authorized_with_db` — so we cannot
+        // exercise the 401 path with no env wiring at all.)
+        let _key = EnvRestore::set("GATEWAY_API_KEY", "audit-models-correct");
+        let response = application(state(empty_routes_config()))
+            .oneshot(models_request(None))
+            .await
+            .expect("models unauthorized response");
+        assert_data_plane_error_envelope(
+            response,
+            StatusCode::UNAUTHORIZED,
+            "unauthorized",
+            |body| {
+                assert_eq!(body["error"]["type"], "unauthorized");
+                assert!(body["error"]["message"].is_string());
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn data_plane_models_rejects_invalid_bearer() {
+        let _environment_lock = ENV_LOCK.lock().await;
+        let _key = EnvRestore::set("GATEWAY_API_KEY", "audit-models-correct");
+        let response = application(state(empty_routes_config()))
+            .oneshot(models_request(Some("wrong-key")))
+            .await
+            .expect("models wrong-bearer response");
+        assert_data_plane_error_envelope(
+            response,
+            StatusCode::UNAUTHORIZED,
+            "unauthorized",
+            |body| {
+                assert_eq!(body["error"]["type"], "unauthorized");
+                assert!(body["error"]["message"].is_string());
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn data_plane_models_accepts_valid_bearer() {
+        let _environment_lock = ENV_LOCK.lock().await;
+        let _key = EnvRestore::set("GATEWAY_API_KEY", "audit-models-correct");
+        let response = application(state(empty_routes_config()))
+            .oneshot(models_request(Some("audit-models-correct")))
+            .await
+            .expect("models authorized response");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get("x-request-id"),
+            None,
+            "200 models response must not carry an error envelope's x-request-id"
+        );
+        let body: Value = serde_json::from_slice(
+            &to_bytes(response.into_body(), 64 * 1024)
+                .await
+                .expect("models authorized body"),
+        )
+        .expect("models authorized JSON");
+        assert_eq!(body["object"], "list");
+        assert!(body["data"].is_array());
+        // Assert the OpenAI catalogue shape, not the contents.  Production
+        // deployments with at least one healthy Binding will see entries;
+        // the fixture here may have one or zero depending on the runtime
+        // snapshot, so the data length is intentionally not asserted.
+        assert!(
+            body["data"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|model| model.get("id").is_some()
+                    && model["object"] == "model"
+                    && model["owned_by"] == "gateway"),
+            "every model entry must follow the OpenAI catalogue shape"
+        );
+    }
+
     async fn spawn_fallback_upstream() -> String {
         let app = Router::new().fallback(|| async {
             Response::builder()

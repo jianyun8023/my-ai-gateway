@@ -82,7 +82,7 @@ pub(crate) async fn proxy(
         );
     }
 
-    let virtual_key_id = match authorized_with_db(&state, &headers, model).await {
+    let virtual_key_id = match authorized_with_db(&state, &headers, Some(model)).await {
         Some(virtual_key_id) => virtual_key_id,
         None => {
             return finish_proxy(

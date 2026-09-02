@@ -1,15 +1,16 @@
 use axum::{
     body::{Body, Bytes},
     extract::State,
-    http::{header::CONTENT_TYPE, HeaderMap, Response},
+    http::{header::CONTENT_TYPE, HeaderMap, Response, StatusCode},
     response::IntoResponse,
     Json,
 };
 use serde_json::{json, Value};
+use uuid::Uuid;
 
 use crate::domain::protocol::Protocol;
 use crate::proxy::service as proxy_service;
-use crate::state::AppState;
+use crate::state::{authorized_with_db, data_plane_error_response, AppState};
 
 pub(crate) async fn healthz(State(state): State<AppState>) -> Json<Value> {
     let live = state.snapshot();
@@ -25,7 +26,21 @@ pub(crate) async fn metrics_handler(State(state): State<AppState>) -> impl IntoR
     )
 }
 
-pub(crate) async fn models(State(state): State<AppState>) -> Json<Value> {
+pub(crate) async fn models(State(state): State<AppState>, headers: HeaderMap) -> Response<Body> {
+    let request_id = Uuid::new_v4().to_string();
+    if authorized_with_db(&state, &headers, None).await.is_none() {
+        // Mirror the OpenAI Chat Completions data-plane envelope so clients
+        // see a uniform 401 shape across all `/v1/*` endpoints.  `None` for
+        // model skips the virtual-key `allowed_models` whitelist because the
+        // model catalogue endpoint does not address a single model.
+        return data_plane_error_response(
+            Protocol::OpenAiChatCompletions,
+            StatusCode::UNAUTHORIZED,
+            "unauthorized",
+            "invalid or revoked virtual key",
+            &request_id,
+        );
+    }
     let live = state.snapshot();
     let mut data = Vec::new();
     for model in live.models.iter() {
@@ -44,7 +59,7 @@ pub(crate) async fn models(State(state): State<AppState>) -> Json<Value> {
             data.push(json!({"id":model.id,"object":"model","owned_by":"gateway"}));
         }
     }
-    Json(json!({"object":"list","data":data}))
+    Json(json!({"object":"list","data":data})).into_response()
 }
 
 pub(crate) async fn chat_completions(
