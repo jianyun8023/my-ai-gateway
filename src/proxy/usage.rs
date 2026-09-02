@@ -215,6 +215,50 @@ pub fn estimate(input: &[u8], output: &[u8]) -> UsageReport {
     }
 }
 
+/// Scan a captured OpenAI Chat Completions stream for `<think>...</think>`
+/// blocks emitted by MiniMax and return their token count.  MiniMax-M3
+/// embeds the model's reasoning directly inside `delta.content` and never
+/// reports it under `output_tokens_details.reasoning_tokens`, so the
+/// generic `extract_sse` always sees `usage:null` chunks (issue #99).
+///
+/// The scanner is byte-oriented so it stays allocation-light on large
+/// streams; it only materialises the concatenated text between the matching
+/// tags and tokenises that substring once.
+pub fn minimax_chat_thinking_tokens(captured: &[u8]) -> i64 {
+    let tokenizer = match tiktoken_rs::cl100k_base() {
+        Ok(t) => t,
+        Err(_) => return 0,
+    };
+    let haystack = String::from_utf8_lossy(captured);
+    let mut total: i64 = 0;
+    let mut cursor = 0usize;
+    while let Some(open_rel) = haystack[cursor..].find("<think>") {
+        let open_abs = cursor + open_rel + "<think>".len();
+        let Some(close_rel) = haystack[open_abs..].find("</think>") else {
+            break;
+        };
+        let close_abs = open_abs + close_rel;
+        let text = &haystack[open_abs..close_abs];
+        total += tokenizer.encode_with_special_tokens(text).len() as i64;
+        cursor = close_abs + "</think>".len();
+    }
+    total
+}
+
+fn merge_thinking_into_report(report: &mut UsageReport, captured: &[u8]) {
+    let reasoning = minimax_chat_thinking_tokens(captured);
+    if reasoning <= 0 {
+        return;
+    }
+    if report.reasoning_tokens == 0 {
+        report.reasoning_tokens = reasoning;
+    }
+    // `total_tokens` excludes `reasoning_tokens` per the documented contract
+    // (see migrations/0018_document_token_count_semantics.sql), so do not
+    // touch the total here.  Downstream billing that wants to count
+    // thinking tokens adds `reasoning_tokens` on top of `total_tokens`.
+}
+
 impl UsageReport {
     pub fn missing() -> Self {
         Self {
@@ -355,14 +399,117 @@ pub fn extract_sse(text: &str) -> Option<UsageReport> {
 
 /// Resolve usage after an SSE response ends. A failed stream with no
 /// provider-confirmed usage remains missing instead of inventing tokens.
-pub fn usage_for_sse_response(success: bool, request: &[u8], captured: &[u8]) -> UsageReport {
-    extract_sse(&String::from_utf8_lossy(captured)).unwrap_or_else(|| {
+///
+/// When `extract_sse` returns `None` and we have to fall back to the
+/// tiktoken-based `estimate`, log a `tracing::warn!` with the captured
+/// bytes' head/tail and total length so the next estimated `usage_events`
+/// row can be diagnosed after the fact (issue #98).
+pub fn usage_for_sse_response(
+    request_id: &str,
+    success: bool,
+    request: &[u8],
+    captured: &[u8],
+) -> UsageReport {
+    let text = String::from_utf8_lossy(captured);
+    let mut report = extract_sse(&text).unwrap_or_else(|| {
+        log_sse_extraction_failure(request_id, success, captured);
         if success {
             estimate(request, captured)
         } else {
             UsageReport::missing()
         }
-    })
+    });
+    // MiniMax-M3 emits thinking text inside delta.content wrapped in
+    // `<think>...</think>` and never reports reasoning_tokens upstream.
+    // Scan the captured stream and credit those tokens so per-vendor
+    // reasoning usage is not silently zero (issue #99).
+    merge_thinking_into_report(&mut report, captured);
+    report
+}
+
+fn log_sse_extraction_failure(request_id: &str, success: bool, captured: &[u8]) {
+    const PREVIEW: usize = 192;
+    let head_end = captured.len().min(PREVIEW);
+    let tail_start = captured.len().saturating_sub(PREVIEW);
+    let head = &captured[..head_end];
+    let tail = &captured[tail_start..];
+    let count_lines = text::count_lines(captured);
+    let count_data = text::count_data_lines(captured);
+    tracing::warn!(
+        request_id = %request_id,
+        success,
+        captured_len = captured.len(),
+        line_count = count_lines,
+        data_line_count = count_data,
+        head_base64 = %text::encode_base64(head),
+        tail_base64 = %text::encode_base64(tail),
+        "SSE usage extraction failed: extract_sse returned None; falling back to tiktoken estimate"
+    );
+}
+
+mod text {
+    pub fn count_lines(bytes: &[u8]) -> usize {
+        let mut count = 0usize;
+        let mut last_was_newline = true;
+        for byte in bytes {
+            if *byte == b'\n' {
+                count += 1;
+                last_was_newline = true;
+            } else if !last_was_newline {
+                // No-op: continues an existing line.
+            } else {
+                last_was_newline = false;
+            }
+        }
+        if !last_was_newline && !bytes.is_empty() {
+            count += 1;
+        }
+        count
+    }
+
+    pub fn count_data_lines(bytes: &[u8]) -> usize {
+        String::from_utf8_lossy(bytes)
+            .lines()
+            .filter(|line| line.trim_start().starts_with("data:"))
+            .count()
+    }
+
+    pub fn encode_base64(bytes: &[u8]) -> String {
+        const TABLE: &[u8; 64] =
+            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+        let mut i = 0;
+        while i + 3 <= bytes.len() {
+            let b0 = bytes[i];
+            let b1 = bytes[i + 1];
+            let b2 = bytes[i + 2];
+            out.push(TABLE[(b0 >> 2) as usize] as char);
+            out.push(TABLE[(((b0 & 0b0000_0011) << 4) | (b1 >> 4)) as usize] as char);
+            out.push(TABLE[(((b1 & 0b0000_1111) << 2) | (b2 >> 6)) as usize] as char);
+            out.push(TABLE[(b2 & 0b0011_1111) as usize] as char);
+            i += 3;
+        }
+        let remaining = &bytes[i..];
+        match remaining.len() {
+            1 => {
+                let b0 = remaining[0];
+                out.push(TABLE[(b0 >> 2) as usize] as char);
+                out.push(TABLE[((b0 & 0b0000_0011) << 4) as usize] as char);
+                out.push('=');
+                out.push('=');
+            }
+            2 => {
+                let b0 = remaining[0];
+                let b1 = remaining[1];
+                out.push(TABLE[(b0 >> 2) as usize] as char);
+                out.push(TABLE[(((b0 & 0b0000_0011) << 4) | (b1 >> 4)) as usize] as char);
+                out.push(TABLE[((b1 & 0b0000_1111) << 2) as usize] as char);
+                out.push('=');
+            }
+            _ => {}
+        }
+        out
+    }
 }
 
 #[cfg(test)]
@@ -467,6 +614,7 @@ mod tests {
     #[test]
     fn failed_sse_without_usage_is_missing_and_has_zero_tokens() {
         let report = usage_for_sse_response(
+            "test-failed-sse",
             false,
             br#"{"model":"m","stream":true}"#,
             b"event: error\ndata: {\"error\":{\"message\":\"failed\"}}\n\n",
@@ -478,6 +626,7 @@ mod tests {
     #[test]
     fn parsed_sse_usage_keeps_the_query_contract_source() {
         let report = usage_for_sse_response(
+            "test-parsed-sse",
             true,
             br#"{"model":"m","stream":true}"#,
             b"data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":2,\"output_tokens\":3}}}\n\n",
