@@ -2359,3 +2359,640 @@ mod stream_contract_e2e_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod multi_turn_tool_tests {
+    //! End-to-end coverage for multi-turn tool use across the three data-plane
+    //! protocols.
+    //!
+    //! Each test drives two independent logical requests through the gateway
+    //! against a mock upstream that emits a tool call on the first turn and
+    //! a final assistant message on the second.  The tests assert:
+    //!
+    //! 1. The first-turn response carries the tool-call payload
+    //!    (`tool_calls` / `function_call` / `tool_use`) back to the client.
+    //! 2. The second-turn request body reaching the mock upstream still
+    //!    references the call id emitted on the first turn, which is the
+    //!    openai-compatible contract for preserving conversation context
+    //!    across rounds.
+    //! 3. The second-turn response carries the final assistant text.
+
+    use super::*;
+    use crate::{
+        api::proxy::{chat_completions, messages},
+        domain::config,
+        http,
+        infra::{health, observability, secrets},
+    };
+    use axum::{
+        body::{to_bytes, Body},
+        extract::Request,
+        http::{header, Response, StatusCode},
+        Router,
+    };
+    use serde_json::{json, Value};
+    use std::{
+        collections::HashMap,
+        sync::{Arc, Mutex},
+        time::Duration,
+    };
+    use tower::ServiceExt;
+
+    /// Body of an inbound request captured at the mock upstream, kept small
+    /// to keep multi-turn assertions readable.
+    #[derive(Clone, Debug)]
+    struct RecordedTurn {
+        body: Value,
+    }
+
+    fn json_response(status: StatusCode, payload: Value) -> Response<Body> {
+        Response::builder()
+            .status(status)
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&payload).expect("encode json"),
+            ))
+            .expect("build mock upstream response")
+    }
+
+    /// Spin up a mock upstream that, on the first request, returns the
+    /// `first_turn` response, and on every subsequent request returns
+    /// `subsequent_turn`.  Both bodies are recorded so tests can assert the
+    /// second-turn body carries the call id from the first turn.
+    async fn spawn_round_trip_upstream(
+        first_turn: Response<Body>,
+        subsequent_turn: Response<Body>,
+    ) -> (String, Arc<Mutex<Vec<RecordedTurn>>>) {
+        let recorded: Arc<Mutex<Vec<RecordedTurn>>> = Arc::new(Mutex::new(Vec::new()));
+        // Bodies are not Clone; preserve status / headers per turn and
+        // reconstruct the response inside the closure on each request.
+        let first_status = first_turn.status();
+        let subsequent_status = subsequent_turn.status();
+        let first_bytes = to_bytes(first_turn.into_body(), 1024 * 1024)
+            .await
+            .expect("read first-turn body");
+        let subsequent_bytes = to_bytes(subsequent_turn.into_body(), 1024 * 1024)
+            .await
+            .expect("read subsequent-turn body");
+        let first_bytes = Arc::new(first_bytes);
+        let subsequent_bytes = Arc::new(subsequent_bytes);
+        let app = Router::new().fallback({
+            let recorded = recorded.clone();
+            let first_bytes = first_bytes.clone();
+            let subsequent_bytes = subsequent_bytes.clone();
+            move |request: Request| {
+                let recorded = recorded.clone();
+                let first_bytes = first_bytes.clone();
+                let subsequent_bytes = subsequent_bytes.clone();
+                async move {
+                    let body_bytes = to_bytes(request.into_body(), 4 * 1024 * 1024)
+                        .await
+                        .expect("read mock upstream body");
+                    let body: Value =
+                        serde_json::from_slice(&body_bytes).expect("decode mock upstream body");
+                    let mut guard = recorded.lock().expect("recorded lock");
+                    let is_first = guard.is_empty();
+                    guard.push(RecordedTurn { body });
+                    let (status, payload) = if is_first {
+                        (first_status, Bytes::clone(&first_bytes))
+                    } else {
+                        (subsequent_status, Bytes::clone(&subsequent_bytes))
+                    };
+                    drop(guard);
+                    Response::builder()
+                        .status(status)
+                        .header(header::CONTENT_TYPE, "application/json")
+                        .body(Body::from(payload))
+                        .expect("build mock upstream response")
+                }
+            }
+        });
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind round-trip upstream");
+        let address = listener.local_addr().expect("round-trip upstream address");
+        tokio::spawn(async move {
+            axum::serve(listener, app)
+                .await
+                .expect("serve round-trip upstream")
+        });
+        (format!("http://{address}"), recorded)
+    }
+
+    fn round_trip_state(base_url: String) -> AppState {
+        let config = Arc::new(config::GatewayConfig {
+            listen_addr: "127.0.0.1:0".into(),
+            providers: vec![config::ProviderConfig {
+                id: "round-trip".into(),
+                name: "Round trip provider".into(),
+                base_url,
+                models: vec!["k3".into()],
+                native_protocols: vec![
+                    Protocol::OpenAiChatCompletions,
+                    Protocol::OpenAiResponses,
+                    Protocol::AnthropicMessages,
+                ],
+                endpoints: HashMap::from([
+                    (
+                        Protocol::OpenAiChatCompletions,
+                        "/v1/chat/completions".into(),
+                    ),
+                    (Protocol::OpenAiResponses, "/v1/responses".into()),
+                    (Protocol::AnthropicMessages, "/v1/messages".into()),
+                ]),
+                capabilities: config::Capabilities::native(),
+                protocol_capabilities: HashMap::new(),
+                model_overrides: HashMap::new(),
+            }],
+            accounts: vec![config::AccountConfig {
+                id: "round-trip-account".into(),
+                provider_id: "round-trip".into(),
+                display_name: "Round trip account".into(),
+                credential_env: None,
+                credential_ciphertext: None,
+                credential: Some("round-trip-key".into()),
+                enabled: true,
+                weight: 100,
+                protocol_capabilities: HashMap::new(),
+                capabilities: None,
+                model_overrides: HashMap::new(),
+                model_map: HashMap::new(),
+            }],
+            routes: vec![config::RouteConfig {
+                id: "round-trip-route".into(),
+                model: "k3".into(),
+                provider_id: "round-trip".into(),
+                protocols: vec![
+                    Protocol::OpenAiChatCompletions,
+                    Protocol::OpenAiResponses,
+                    Protocol::AnthropicMessages,
+                ],
+                primary_account_id: "round-trip-account".into(),
+                fallback_accounts: vec![],
+                strategy: "primary_then_weighted_fallback".into(),
+                mode: "native".into(),
+                adapter: None,
+                allow_lossy_conversion: false,
+            }],
+        });
+        AppState {
+            live: Arc::new(std::sync::RwLock::new(LiveConfig::legacy(config))),
+            http: http::test_client().expect("round-trip HTTP client"),
+            db: None,
+            control_plane: None,
+            health: health::HealthRegistry::new(Duration::from_secs(1)),
+            admin_auth: AdminAuth::test(),
+            secrets: secrets::SecretResolver::empty(),
+            prometheus_handle: observability::prometheus_handle(),
+        }
+    }
+
+    /// Async JSON body parser used inside `#[tokio::test]` bodies.
+    async fn json_body_async(response: Response<Body>) -> Value {
+        let body_bytes = to_bytes(response.into_body(), 4 * 1024 * 1024)
+            .await
+            .expect("round-trip response body");
+        serde_json::from_slice(&body_bytes).expect("round-trip response JSON")
+    }
+
+    #[tokio::test]
+    async fn chat_completions_multi_turn_tool_use_preserves_context() {
+        // Anchor the gateway data-plane key so concurrent tests that mutate
+        // `GATEWAY_API_KEY` cannot flip this test into a 401.
+        let _environment_lock = ENV_LOCK.lock().await;
+        let _key = EnvRestore::set("GATEWAY_API_KEY", "round-trip-key");
+        let first_turn = json_response(
+            StatusCode::OK,
+            json!({
+                "id": "chatcmpl-tool-1",
+                "object": "chat.completion",
+                "model": "k3",
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": null,
+                        "tool_calls": [{
+                            "id": "call_TOKYO_1",
+                            "type": "function",
+                            "function": {
+                                "name": "lookup_weather",
+                                "arguments": "{\"city\":\"Tokyo\"}"
+                            }
+                        }]
+                    },
+                    "finish_reason": "tool_calls"
+                }],
+                "usage": {"prompt_tokens": 12, "completion_tokens": 5, "total_tokens": 17}
+            }),
+        );
+        let subsequent_turn = json_response(
+            StatusCode::OK,
+            json!({
+                "id": "chatcmpl-final-2",
+                "object": "chat.completion",
+                "model": "k3",
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": "Tokyo is sunny, 23°C."
+                    },
+                    "finish_reason": "stop"
+                }],
+                "usage": {"prompt_tokens": 38, "completion_tokens": 7, "total_tokens": 45}
+            }),
+        );
+        let (base_url, recorded) = spawn_round_trip_upstream(first_turn, subsequent_turn).await;
+        let state = round_trip_state(base_url);
+
+        let first_request = Request::builder()
+            .method("POST")
+            .uri("/v1/chat/completions")
+            .header(header::CONTENT_TYPE, "application/json")
+            .header(header::AUTHORIZATION, "Bearer round-trip-key")
+            .body(Body::from(
+                serde_json::to_vec(&json!({
+                    "model": "k3",
+                    "messages": [
+                        {"role": "user", "content": "What's the weather in Tokyo?"}
+                    ],
+                    "tools": [{
+                        "type": "function",
+                        "function": {
+                            "name": "lookup_weather",
+                            "description": "Return the current weather for a city.",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {"city": {"type": "string"}},
+                                "required": ["city"]
+                            }
+                        }
+                    }]
+                }))
+                .expect("encode chat turn 1"),
+            ))
+            .expect("build chat turn 1 request");
+        let first_response = axum::Router::new()
+            .route("/{*path}", axum::routing::any(chat_completions))
+            .with_state(state.clone())
+            .oneshot(first_request)
+            .await
+            .expect("chat turn 1 response");
+        assert_eq!(first_response.status(), StatusCode::OK);
+        let first_body = json_body_async(first_response).await;
+        let first_tool_calls = first_body["choices"][0]["message"]["tool_calls"]
+            .as_array()
+            .expect("tool_calls array");
+        assert_eq!(first_tool_calls.len(), 1);
+        let call_id = first_tool_calls[0]["id"].as_str().expect("tool call id");
+        assert_eq!(call_id, "call_TOKYO_1");
+        let tool_args: Value = serde_json::from_str(
+            first_tool_calls[0]["function"]["arguments"]
+                .as_str()
+                .expect("tool arguments string"),
+        )
+        .expect("decode tool arguments");
+        assert_eq!(tool_args["city"], "Tokyo");
+
+        // The client "executes" the tool locally and feeds the result back
+        // alongside the original messages.  This mirrors the
+        // chatFunctionRoundTrip shape used by scripts/live-provider-smoke.mjs.
+        let second_request = Request::builder()
+            .method("POST")
+            .uri("/v1/chat/completions")
+            .header(header::CONTENT_TYPE, "application/json")
+            .header(header::AUTHORIZATION, "Bearer round-trip-key")
+            .body(Body::from(
+                serde_json::to_vec(&json!({
+                    "model": "k3",
+                    "messages": [
+                        {"role": "user", "content": "What's the weather in Tokyo?"},
+                        {
+                            "role": "assistant",
+                            "content": null,
+                            "tool_calls": first_tool_calls.clone()
+                        },
+                        {
+                            "role": "tool",
+                            "tool_call_id": call_id,
+                            "content": "Tokyo is sunny, 23°C."
+                        }
+                    ]
+                }))
+                .expect("encode chat turn 2"),
+            ))
+            .expect("build chat turn 2 request");
+        let second_response = axum::Router::new()
+            .route("/{*path}", axum::routing::any(chat_completions))
+            .with_state(state.clone())
+            .oneshot(second_request)
+            .await
+            .expect("chat turn 2 response");
+        assert_eq!(second_response.status(), StatusCode::OK);
+        let second_body = json_body_async(second_response).await;
+        assert_eq!(
+            second_body["choices"][0]["message"]["content"],
+            "Tokyo is sunny, 23°C."
+        );
+        assert_eq!(second_body["choices"][0]["finish_reason"], "stop");
+
+        // Verify the second-turn request that reached the upstream carries
+        // the assistant tool_calls block plus the tool message so the
+        // upstream could see the full conversation context.
+        let captured = recorded.lock().expect("recorded lock").clone();
+        assert_eq!(captured.len(), 2, "upstream must see both logical turns");
+        let messages = captured[1].body["messages"]
+            .as_array()
+            .expect("second-turn messages array");
+        let roles: Vec<&str> = messages
+            .iter()
+            .map(|m| m["role"].as_str().expect("message role"))
+            .collect();
+        assert_eq!(roles, vec!["user", "assistant", "tool"]);
+        assert_eq!(
+            messages[2]["tool_call_id"].as_str(),
+            Some("call_TOKYO_1"),
+            "second turn must reference the first-turn tool call id"
+        );
+        assert_eq!(messages[2]["content"], "Tokyo is sunny, 23°C.");
+        assert!(
+            !messages[1]["tool_calls"].is_null(),
+            "second turn must include the assistant tool_calls block"
+        );
+    }
+
+    #[tokio::test]
+    async fn responses_multi_turn_tool_use_preserves_context() {
+        let _environment_lock = ENV_LOCK.lock().await;
+        let _key = EnvRestore::set("GATEWAY_API_KEY", "round-trip-key");
+        let first_turn = json_response(
+            StatusCode::OK,
+            json!({
+                "id": "resp_tool_1",
+                "object": "response",
+                "status": "completed",
+                "model": "k3",
+                "output": [{
+                    "type": "function_call",
+                    "id": "fc_TOKYO_1",
+                    "call_id": "fc_TOKYO_1",
+                    "name": "lookup_weather",
+                    "arguments": "{\"city\":\"Tokyo\"}"
+                }],
+                "usage": {
+                    "input_tokens": 12,
+                    "output_tokens": 5,
+                    "total_tokens": 17
+                }
+            }),
+        );
+        let subsequent_turn = json_response(
+            StatusCode::OK,
+            json!({
+                "id": "resp_final_2",
+                "object": "response",
+                "status": "completed",
+                "model": "k3",
+                "output": [{
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "Tokyo is sunny, 23°C."}]
+                }],
+                "usage": {
+                    "input_tokens": 30,
+                    "output_tokens": 7,
+                    "total_tokens": 37
+                }
+            }),
+        );
+        let (base_url, recorded) = spawn_round_trip_upstream(first_turn, subsequent_turn).await;
+        let state = round_trip_state(base_url);
+
+        let first_request = Request::builder()
+            .method("POST")
+            .uri("/v1/responses")
+            .header(header::CONTENT_TYPE, "application/json")
+            .header(header::AUTHORIZATION, "Bearer round-trip-key")
+            .body(Body::from(
+                serde_json::to_vec(&json!({
+                    "model": "k3",
+                    "input": "What's the weather in Tokyo?",
+                    "tools": [{
+                        "type": "function",
+                        "name": "lookup_weather",
+                        "description": "Return the current weather for a city.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"city": {"type": "string"}},
+                            "required": ["city"]
+                        }
+                    }]
+                }))
+                .expect("encode responses turn 1"),
+            ))
+            .expect("build responses turn 1 request");
+        let first_response = axum::Router::new()
+            .route("/{*path}", axum::routing::any(responses))
+            .with_state(state.clone())
+            .oneshot(first_request)
+            .await
+            .expect("responses turn 1 response");
+        assert_eq!(first_response.status(), StatusCode::OK);
+        let first_body = json_body_async(first_response).await;
+        let first_output = first_body["output"].as_array().expect("output array");
+        assert_eq!(first_output[0]["type"], "function_call");
+        assert_eq!(first_output[0]["call_id"], "fc_TOKYO_1");
+
+        let second_request = Request::builder()
+            .method("POST")
+            .uri("/v1/responses")
+            .header(header::CONTENT_TYPE, "application/json")
+            .header(header::AUTHORIZATION, "Bearer round-trip-key")
+            .body(Body::from(
+                serde_json::to_vec(&json!({
+                    "model": "k3",
+                    "input": [
+                        {"role": "user", "content": "What's the weather in Tokyo?"},
+                        {
+                            "type": "function_call",
+                            "call_id": "fc_TOKYO_1",
+                            "name": "lookup_weather",
+                            "arguments": "{\"city\":\"Tokyo\"}"
+                        },
+                        {
+                            "type": "function_call_output",
+                            "call_id": "fc_TOKYO_1",
+                            "output": "Tokyo is sunny, 23°C."
+                        }
+                    ]
+                }))
+                .expect("encode responses turn 2"),
+            ))
+            .expect("build responses turn 2 request");
+        let second_response = axum::Router::new()
+            .route("/{*path}", axum::routing::any(responses))
+            .with_state(state.clone())
+            .oneshot(second_request)
+            .await
+            .expect("responses turn 2 response");
+        assert_eq!(second_response.status(), StatusCode::OK);
+        let second_body = json_body_async(second_response).await;
+        assert_eq!(
+            second_body["output"][0]["content"][0]["text"],
+            "Tokyo is sunny, 23°C."
+        );
+
+        let captured = recorded.lock().expect("recorded lock").clone();
+        assert_eq!(captured.len(), 2);
+        let input = captured[1].body["input"]
+            .as_array()
+            .expect("second-turn input array");
+        let types: Vec<&str> = input
+            .iter()
+            .map(|item| {
+                item["type"]
+                    .as_str()
+                    .unwrap_or(item["role"].as_str().unwrap_or("?"))
+            })
+            .collect();
+        assert_eq!(types, vec!["user", "function_call", "function_call_output"]);
+        assert_eq!(input[2]["call_id"], "fc_TOKYO_1");
+        assert_eq!(input[2]["output"], "Tokyo is sunny, 23°C.");
+    }
+
+    #[tokio::test]
+    async fn anthropic_messages_multi_turn_tool_use_preserves_context() {
+        let _environment_lock = ENV_LOCK.lock().await;
+        let _key = EnvRestore::set("GATEWAY_API_KEY", "round-trip-key");
+        let first_turn = json_response(
+            StatusCode::OK,
+            json!({
+                "id": "msg_tool_1",
+                "type": "message",
+                "role": "assistant",
+                "model": "k3",
+                "stop_reason": "tool_use",
+                "content": [{
+                    "type": "tool_use",
+                    "id": "toolu_TOKYO_1",
+                    "name": "lookup_weather",
+                    "input": {"city": "Tokyo"}
+                }],
+                "usage": {"input_tokens": 12, "output_tokens": 5}
+            }),
+        );
+        let subsequent_turn = json_response(
+            StatusCode::OK,
+            json!({
+                "id": "msg_final_2",
+                "type": "message",
+                "role": "assistant",
+                "model": "k3",
+                "stop_reason": "end_turn",
+                "content": [{"type": "text", "text": "Tokyo is sunny, 23°C."}],
+                "usage": {"input_tokens": 32, "output_tokens": 6}
+            }),
+        );
+        let (base_url, recorded) = spawn_round_trip_upstream(first_turn, subsequent_turn).await;
+        let state = round_trip_state(base_url);
+
+        let first_request = Request::builder()
+            .method("POST")
+            .uri("/v1/messages")
+            .header(header::CONTENT_TYPE, "application/json")
+            .header("x-api-key", "round-trip-key")
+            .body(Body::from(
+                serde_json::to_vec(&json!({
+                    "model": "k3",
+                    "max_tokens": 256,
+                    "messages": [
+                        {"role": "user", "content": "What's the weather in Tokyo?"}
+                    ],
+                    "tools": [{
+                        "name": "lookup_weather",
+                        "description": "Return the current weather for a city.",
+                        "input_schema": {
+                            "type": "object",
+                            "properties": {"city": {"type": "string"}},
+                            "required": ["city"]
+                        }
+                    }]
+                }))
+                .expect("encode anthropic turn 1"),
+            ))
+            .expect("build anthropic turn 1 request");
+        let first_response = axum::Router::new()
+            .route("/{*path}", axum::routing::any(messages))
+            .with_state(state.clone())
+            .oneshot(first_request)
+            .await
+            .expect("anthropic turn 1 response");
+        assert_eq!(first_response.status(), StatusCode::OK);
+        let first_body = json_body_async(first_response).await;
+        let first_content = first_body["content"].as_array().expect("content array");
+        assert_eq!(first_content[0]["type"], "tool_use");
+        assert_eq!(first_content[0]["id"], "toolu_TOKYO_1");
+        let first_tool_input = first_content[0]["input"].clone();
+        let first_tool_name = first_content[0]["name"].as_str().expect("tool name");
+
+        let second_request = Request::builder()
+            .method("POST")
+            .uri("/v1/messages")
+            .header(header::CONTENT_TYPE, "application/json")
+            .header("x-api-key", "round-trip-key")
+            .body(Body::from(
+                serde_json::to_vec(&json!({
+                    "model": "k3",
+                    "max_tokens": 256,
+                    "messages": [
+                        {"role": "user", "content": "What's the weather in Tokyo?"},
+                        {
+                            "role": "assistant",
+                            "content": [{
+                                "type": "tool_use",
+                                "id": "toolu_TOKYO_1",
+                                "name": first_tool_name,
+                                "input": first_tool_input
+                            }]
+                        },
+                        {
+                            "role": "user",
+                            "content": [{
+                                "type": "tool_result",
+                                "tool_use_id": "toolu_TOKYO_1",
+                                "content": "Tokyo is sunny, 23°C."
+                            }]
+                        }
+                    ]
+                }))
+                .expect("encode anthropic turn 2"),
+            ))
+            .expect("build anthropic turn 2 request");
+        let second_response = axum::Router::new()
+            .route("/{*path}", axum::routing::any(messages))
+            .with_state(state.clone())
+            .oneshot(second_request)
+            .await
+            .expect("anthropic turn 2 response");
+        assert_eq!(second_response.status(), StatusCode::OK);
+        let second_body = json_body_async(second_response).await;
+        assert_eq!(second_body["content"][0]["text"], "Tokyo is sunny, 23°C.");
+        assert_eq!(second_body["stop_reason"], "end_turn");
+
+        let captured = recorded.lock().expect("recorded lock").clone();
+        assert_eq!(captured.len(), 2);
+        let messages = captured[1].body["messages"]
+            .as_array()
+            .expect("second-turn messages array");
+        let roles: Vec<&str> = messages
+            .iter()
+            .map(|m| m["role"].as_str().expect("message role"))
+            .collect();
+        assert_eq!(roles, vec!["user", "assistant", "user"]);
+        let tool_result = &messages[2]["content"][0];
+        assert_eq!(tool_result["type"], "tool_result");
+        assert_eq!(tool_result["tool_use_id"], "toolu_TOKYO_1");
+        assert_eq!(tool_result["content"], "Tokyo is sunny, 23°C.");
+    }
+}
