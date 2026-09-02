@@ -469,6 +469,16 @@ impl Database {
         ))
         .execute(&mut *tx)
         .await?;
+        sqlx::raw_sql(include_str!(
+            "../../migrations/0017_restore_builtin_provider_presets.sql"
+        ))
+        .execute(&mut *tx)
+        .await?;
+        sqlx::raw_sql(include_str!(
+            "../../migrations/0018_document_token_count_semantics.sql"
+        ))
+        .execute(&mut *tx)
+        .await?;
         tx.commit().await
     }
 

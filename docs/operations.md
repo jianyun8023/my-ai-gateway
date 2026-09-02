@@ -167,3 +167,19 @@ cargo run -- ops control-plane-import --input control-plane.json --replace
 - 物理 dump 必须加密存储、限制权限并设置独立保留期；
 - 恢复演练不能把测试数据库当作运行时 `DATABASE_URL`；
 - 当前凭据信封/统一 Secret Resolver 仍由 Issue #47 负责，JSON 导出只保留 Secret 引用，不能替代 Secret 管理系统。
+
+## Usage 事件 Token 计数语义
+
+`usage_events` 的 token 列遵循以下约定，避免下游计费面板把缓存命中静默低估（Issue #100）：
+
+| 列 | 含义 |
+| --- | --- |
+| `input_tokens` | 上游报告的新增（未缓存）输入 token。Anthropic `cache_read_input_tokens` 与 `cache_creation_input_tokens` 不计入此列。 |
+| `output_tokens` | 上游报告的生成 token。独立计费的 reasoning / thinking token 不计入此列（参见 `reasoning_tokens`）。 |
+| `reasoning_tokens` | 思考/推理 token，仅当上游在 usage 中独立报告（OpenAI `output_tokens_details.reasoning_tokens` / Anthropic 风格 `thinking_tokens`）时非零。 |
+| `cached_tokens` | 提示缓存命中 token：Anthropic `cache_read_input_tokens` + `cache_creation_input_tokens` 之和。 |
+| `total_tokens` | `input_tokens + output_tokens`，**不包含** `cached_tokens` 也不包含 `reasoning_tokens`。 |
+
+**计费口径**：跨厂商聚合需要 `input_tokens + output_tokens + cached_tokens`，把 `reasoning_tokens` 按厂商账单规则单算。下游报表若只读 `total_tokens`，对有缓存命中的长会话会大幅低估。CSV 导出（`/admin/usage/export`）与 JSON（`/admin/usage/events`、`/admin/usage/summary`）的 `total_tokens` 字段都按本约定。
+
+`usage_source` 标记 token 数来源：`upstream` 表示上游 usage 字段直接解析；`parsed` 表示从 SSE 流中最后一个含 usage 的事件解析；`estimated` 表示上游未报告，由 tiktoken 对请求体/响应体估算；`missing` 表示请求失败且无可用 usage。`estimated` 与 `missing` 行的 `total_tokens` 含义同上，但数值仅为粗估，**不可作为计费值**（Issue #98）。
