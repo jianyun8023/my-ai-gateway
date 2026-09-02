@@ -62,6 +62,24 @@ const DEFAULT_VISIBLE_COLUMNS: EventColumn[] = [
   'usageSource',
 ];
 
+const FALLBACK_REASON_KEYS: Record<string, string> = {
+  account_disabled: 'usage.fallback_reason.account_disabled',
+  account_cooling_down: 'usage.fallback_reason.account_cooling_down',
+  account_unhealthy: 'usage.fallback_reason.account_unhealthy',
+  account_unavailable: 'usage.fallback_reason.account_unavailable',
+  upstream_transport_error: 'usage.fallback_reason.upstream_transport_error',
+};
+
+// Map a persisted fallback_reason code (migration 0019) to localized text.
+// `upstream_http_<status>` is templated; unknown codes fall back to the raw
+// code so the UI never hides information it cannot translate.
+export const formatFallbackReason = (t: TFunction, reason: string): string => {
+  const http = /^upstream_http_(\d+)$/.exec(reason);
+  if (http) return t('usage.fallback_reason.upstream_http', { code: http[1] });
+  const key = FALLBACK_REASON_KEYS[reason];
+  return key ? t(key) : t('usage.fallback_reason.other', { reason });
+};
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 const defaultFilters = (): GatewayUsageFilters => {
@@ -398,7 +416,13 @@ const renderEventCell = (event: UsageEventViewModel, column: EventColumn, t: TFu
     case 'clientSource': return event.clientSource;
     case 'protocol': return <span>{event.protocolIn}<small>→ {event.protocolUpstream}</small></span>;
     case 'status': return <span className={styles.statusBadge} data-success={event.success}>{event.statusCode || '—'} · {event.success ? t('usage.event.success') : t('usage.event.failure')}</span>;
-    case 'retries': return event.fallback ? t('usage.event.retries_fallback', { count: event.retryCount }) : String(event.retryCount);
+    case 'retries': {
+      if (!event.fallback) return String(event.retryCount);
+      const label = t('usage.event.retries_fallback', { count: event.retryCount });
+      return event.fallbackReason
+        ? <span title={formatFallbackReason(t, event.fallbackReason)}>{label}</span>
+        : label;
+    }
     case 'latency': return `${formatNumber(event.latencyMs)} ms`;
     case 'tokens': return formatNumber(event.tokens.total);
     case 'usageSource': return <UsageBadge source={event.usageSource} />;
@@ -478,10 +502,16 @@ function EventDetails({ event, onClose, client }: { event: UsageEventViewModel; 
           <div><span>{t('usage.field.usage_source')}</span><strong><UsageBadge source={event.usageSource} /></strong></div>
           <div><span>{t('usage.field.latency')}</span><strong>{formatNumber(event.latencyMs)} ms</strong></div>
           <div><span>{t('usage.field.retries')}</span><strong>{event.fallback ? t('usage.event.retries_fallback', { count: event.retryCount }) : String(event.retryCount)}</strong></div>
+          {event.fallbackReason && (
+            <div><span>{t('usage.field.fallback_reason')}</span><strong title={event.fallbackReason}>{formatFallbackReason(t, event.fallbackReason)}</strong></div>
+          )}
         </section>
         <Card title={t('usage.detail.token_title')} subtitle={t('usage.detail.token_subtitle')}>
           <div className={styles.tokenDetails}><span>{t('usage.legend.input')} <strong>{event.tokens.input}</strong></span><span>{t('usage.legend.output')} <strong>{event.tokens.output}</strong></span><span>{t('usage.legend.reasoning')} <strong>{event.tokens.reasoning}</strong></span><span>{t('usage.legend.cached')} <strong>{event.tokens.cached}</strong></span><span>{t('usage.legend.total')} <strong>{event.tokens.total}</strong></span></div>
         </Card>
+        {event.fallback && event.fallbackReason && event.retryCount === 0 && (
+          <p className={styles.fallbackNotice}>{t('usage.detail.primary_skipped')}</p>
+        )}
         <Card title={t('usage.detail.attempts_title')} subtitle={t('usage.detail.attempts_subtitle')}>
           {loadingAttempts ? <div style={{ padding: '1rem', opacity: 0.6 }}>{t('usage.detail.attempts_loading')}</div> : displayAttempts.length === 0 ? <EmptyState title={t('usage.detail.attempts_empty_title')} description={t('usage.detail.attempts_empty_desc')} /> : (
             <ol className={styles.attemptList}>{displayAttempts.map((attempt) => <li key={attempt.attemptNo}><span>#{attempt.attemptNo + 1}</span><strong>{attempt.account}</strong><span>{attempt.sourceId} · {attempt.provider} · {attempt.upstreamModel}</span><span className={attempt.success ? styles.statusSuccess : styles.statusFailure}>{attempt.statusCode} · {attempt.latencyMs} ms</span></li>)}</ol>

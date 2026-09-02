@@ -98,6 +98,7 @@ export interface UsageEventViewModel {
   success: boolean;
   retryCount: number;
   fallback: boolean;
+  fallbackReason?: string;
   latencyMs: number;
   tokens: TokenTotals;
   usageSource: UsageSource;
