@@ -232,6 +232,7 @@
 .attemptList li { display: grid; grid-template-columns: 36px 1fr 1.5fr auto; gap: 9px; padding: 10px 0; border-bottom: 1px solid var(--border-color); font-family: var(--font-mono); font-size: var(--fs-small); }
 .errorSummary { margin: 0; color: var(--error-color); font-size: 11px; line-height: 1.6; }
 .noBodyNotice { margin: 0; color: var(--text-secondary); font-size: var(--fs-small); line-height: 1.6; }
+.fallbackNotice { margin: 12px 0 0; padding: 8px 10px; color: var(--text-secondary); border: 1px dashed var(--border-color); border-radius: 7px; font-size: var(--fs-small); line-height: 1.6; }
 .statusSuccess { color: var(--success); }
 .statusFailure { color: var(--error-color); }
 

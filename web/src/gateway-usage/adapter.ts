@@ -171,6 +171,7 @@ export const adaptUsageEvent = (payload: RawGatewayUsagePayload): UsageEventView
   const retryCount = readNumber(item, ['retry_count', 'retries'], Math.max(0, attempts.length - 1));
   const statusCode = readNumber(item, ['status_code']);
   const success = asBoolean(item.success, statusCode > 0 && statusCode < 400);
+  const fallbackReason = readString(item, ['fallback_reason']) || undefined;
   return {
     id: readString(item, ['id'], requestId),
     requestId,
@@ -187,7 +188,8 @@ export const adaptUsageEvent = (payload: RawGatewayUsagePayload): UsageEventView
     statusCode,
     success,
     retryCount,
-    fallback: asBoolean(item.fallback, retryCount > 0 || attempts.length > 1),
+    fallback: asBoolean(item.fallback, retryCount > 0 || attempts.length > 1 || Boolean(fallbackReason)),
+    fallbackReason,
     latencyMs: readNumber(item, ['latency_ms']),
     tokens: adaptTokenTotals(item),
     usageSource: readString(item, ['usage_source'], 'missing'),

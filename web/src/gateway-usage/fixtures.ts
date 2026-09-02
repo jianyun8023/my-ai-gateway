@@ -66,6 +66,7 @@ export const gatewayUsageEventsFixture = {
       status_code: 200,
       success: true,
       retry_count: 1,
+      fallback_reason: 'upstream_http_429',
       latency_ms: 1280,
       usage_source: 'estimated',
       tokens: { input: 680, output: 220, reasoning: 80, cached: 120, total: 980 },

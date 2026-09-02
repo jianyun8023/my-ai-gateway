@@ -20,6 +20,7 @@ export const usage = {
     latency: 'Latency',
     tokens: 'Tokens',
     usage_source: 'Usage source',
+    fallback_reason: 'Fallback reason',
   },
 
   // —— 用量来源枚举展示(值保持枚举原形)——
@@ -28,6 +29,17 @@ export const usage = {
     parsed: 'Parsed',
     estimated: 'Estimated',
     missing: 'Missing',
+  },
+
+  // —— 回退原因枚举展示(值保持原因码原形)——
+  fallback_reason: {
+    account_disabled: 'Primary account disabled',
+    account_cooling_down: 'Primary account cooling down (usage cap / failure backoff)',
+    account_unhealthy: 'Primary account unhealthy (cooldown expired, not recovered)',
+    account_unavailable: 'Primary account unavailable',
+    upstream_transport_error: 'Primary upstream connection error',
+    upstream_http: 'Primary upstream returned {{code}}',
+    other: 'Fallback: {{reason}}',
   },
 
   // —— 筛选栏 ——
@@ -142,6 +154,7 @@ export const usage = {
     attempts_loading: 'Loading attempt details…',
     attempts_empty_title: 'No standalone attempt details',
     attempts_empty_desc: 'The event retains the final account and retry count.',
+    primary_skipped: 'The primary account was unavailable, so no request was sent to it; the fallback account served this event.',
     error_summary: 'Sanitized error summary',
     no_body_notice: 'Privacy boundary: this view never reads or displays prompt, response body, or request log bodies.',
   },

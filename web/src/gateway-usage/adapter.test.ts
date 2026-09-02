@@ -29,6 +29,7 @@ describe('gateway usage adapter', () => {
       usageSource: 'estimated',
       retryCount: 1,
       fallback: true,
+      fallbackReason: 'upstream_http_429',
       provider: 'provider-fallback',
       sourceId: 'source-tokyo',
       clientSource: 'codex-desktop',
@@ -38,6 +39,41 @@ describe('gateway usage adapter', () => {
     expect(page.events[0].attempts.map((attempt) => attempt.provider)).toEqual(['provider-primary', 'provider-fallback']);
     expect(page.events[0].attempts.map((attempt) => attempt.statusCode)).toEqual([429, 200]);
     expect(page.events[1]).toMatchObject({ usageSource: 'missing', success: false, tokens: { total: 0 } });
+  });
+
+  it('marks primary-unavailable fallback via fallback_reason even with a single attempt', () => {
+    const page = adaptUsageEventPage({
+      data: [{
+        request_id: 'r3',
+        created_at: '2026-08-30T10:04:00Z',
+        logical_model: 'reasoning-large',
+        provider_id: 'provider-fallback',
+        source_id: 'source-tokyo',
+        account_id: 'fallback-account',
+        upstream_model_id: 'model-v2',
+        status_code: 200,
+        success: true,
+        retry_count: 0,
+        fallback_reason: 'account_cooling_down',
+        attempts: [{
+          attempt_no: 0,
+          provider_id: 'provider-fallback',
+          source_id: 'source-tokyo',
+          account_id: 'fallback-account',
+          upstream_model_id: 'model-v2',
+          status_code: 200,
+          success: true,
+          latency_ms: 12,
+        }],
+      }],
+    });
+    expect(page.events[0]).toMatchObject({
+      fallback: true,
+      fallbackReason: 'account_cooling_down',
+      retryCount: 0,
+      sourceId: 'source-tokyo',
+      account: 'fallback-account',
+    });
   });
 
   it('keeps runtime Source and client-reported Source separate in the v1 event contract', () => {

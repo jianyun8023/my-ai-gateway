@@ -20,6 +20,7 @@ export const usage = {
     latency: '延迟',
     tokens: 'Token',
     usage_source: '用量来源',
+    fallback_reason: '回退原因',
   },
 
   // —— 用量来源枚举展示(值保持枚举原形)——
@@ -28,6 +29,17 @@ export const usage = {
     parsed: '解析',
     estimated: '估算',
     missing: '缺失',
+  },
+
+  // —— 回退原因枚举展示(值保持原因码原形)——
+  fallback_reason: {
+    account_disabled: '主账号已禁用',
+    account_cooling_down: '主账号冷却中（用量熔断 / 失败退避）',
+    account_unhealthy: '主账号不健康（冷却过期未恢复）',
+    account_unavailable: '主账号不可用',
+    upstream_transport_error: '主账号上游连接失败',
+    upstream_http: '主账号上游返回 {{code}}',
+    other: '回退：{{reason}}',
   },
 
   // —— 筛选栏 ——
@@ -142,6 +154,7 @@ export const usage = {
     attempts_loading: '正在加载尝试明细…',
     attempts_empty_title: '没有独立尝试明细',
     attempts_empty_desc: '事件仍保留最终账号与重试次数。',
+    primary_skipped: '主账号不可用，未向其发送请求；本次请求由回退账号完成。',
     error_summary: '脱敏错误摘要',
     no_body_notice: '安全边界:此详情不读取或显示 prompt、response body 或请求日志正文。',
   },
