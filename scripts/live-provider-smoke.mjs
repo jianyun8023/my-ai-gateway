@@ -625,11 +625,17 @@ function responseSearchMetadata(payload) {
 async function nativeWebSearch(context, testCase, provider) {
   const model = provider === 'deepseek' ? 'deepseek-v4-flash' : 'MiniMax-M3'
   const source = clientSource(context, testCase, 'request')
+  // `web_search_call.action.sources` is opt-in in OpenAI Responses: the
+  // gateway forwards the request body verbatim, so the client must declare
+  // the include list to surface source URLs (issue #85).  `url_citation`
+  // annotations on `message.output_text` should appear by default.
+  const include = ['web_search_call.action.sources']
   const body = {
     model,
     input: 'Use web search to find the current stable Rust release from an official Rust source. Return a concise answer with a source.',
     tools: [{ type: 'web_search' }],
     tool_choice: { type: 'web_search' },
+    include,
     max_output_tokens: 512,
     stream: false,
   }
@@ -644,7 +650,24 @@ async function nativeWebSearch(context, testCase, provider) {
     provider,
     duration_ms: response.duration_ms,
     ...metadata,
+    include_sent: include,
     usage_event: await usageEvent(context, source),
+    known_issue_checks: [
+      {
+        id: 'web_search_sources_visible',
+        issue: 85,
+        passed: metadata.source_count > 0,
+        note:
+          'Native Providers (MiniMax / DeepSeek) currently return empty `web_search_call.action.sources` even with `include`. The capability matrix marks this as Unsupported (#85).',
+      },
+      {
+        id: 'web_search_citations_visible',
+        issue: 85,
+        passed: metadata.citation_count > 0,
+        note:
+          'Native Providers currently return no `url_citation` annotations on `message.output_text`. The capability matrix marks this as Unsupported (#85).',
+      },
+    ],
   }
 }
 
