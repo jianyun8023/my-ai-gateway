@@ -1,3 +1,7 @@
+/// Map an unusable primary account to the persisted `fallback_reason` code.
+/// Only called when `health.available == false` (cooldown / unhealthy / stale
+/// with residual failures / unknown with no row); the `disabled` status covers
+/// account or source being turned off in the control plane.
 fn primary_unavailable_reason(health: &health::AccountHealth) -> String {
     if health.status == "disabled" {
         "account_disabled".into()
@@ -265,10 +269,3 @@ pub(crate) fn finalize_stream_usage(
     event.total_tokens = report.total_tokens;
     event.usage_source = report.source;
 }
-
-#[allow(clippy::too_many_arguments)]
-#[tracing::instrument(name = "gateway.forward", skip_all, fields(
-    source_id = %route.source_id,
-    account_id = %account.id,
-    upstream_model = %route.upstream_model_id,
-))]
