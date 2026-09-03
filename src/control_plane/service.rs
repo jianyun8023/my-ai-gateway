@@ -724,6 +724,49 @@ async fn validate_binding_reference(
         if !errors.is_empty() {
             return Err(ControlPlaneError::Validation(errors));
         }
+        validate_binding_family_constraint(tx, input).await?;
+    }
+    Ok(())
+}
+
+/// Reject cross-family bindings: when a LogicalModel already has confirmed
+/// enabled bindings from one provider family (identified by
+/// `sources.provider_preset_id`), a new binding from a different family is
+/// forbidden.  This prevents silent cross-provider fallback that would
+/// pollute usage attribution and cache statistics.
+async fn validate_binding_family_constraint(
+    tx: &mut Transaction<'_, Postgres>,
+    input: &ModelBindingWrite,
+) -> Result<(), ControlPlaneError> {
+    let existing_family: Option<String> = sqlx::query_scalar(
+        "SELECT DISTINCT s.provider_preset_id \
+         FROM model_bindings b \
+         JOIN sources s ON s.id = b.source_id \
+         WHERE b.logical_model_id = $1 \
+           AND b.status = 'confirmed' \
+           AND b.enabled \
+           AND b.source_id <> $2 \
+         LIMIT 1",
+    )
+    .bind(&input.logical_model_id)
+    .bind(&input.source_id)
+    .fetch_optional(&mut **tx)
+    .await?;
+    if let Some(existing) = existing_family {
+        let new_family: Option<String> =
+            sqlx::query_scalar("SELECT provider_preset_id FROM sources WHERE id = $1")
+                .bind(&input.source_id)
+                .fetch_optional(&mut **tx)
+                .await?;
+        if let Some(new) = new_family {
+            if new != existing {
+                return Err(ControlPlaneError::Validation(vec![format!(
+                    "cross-family binding rejected: logical model '{}' already has enabled \
+                     bindings from provider family '{}'; cannot add binding from family '{}'",
+                    input.logical_model_id, existing, new
+                )]));
+            }
+        }
     }
     Ok(())
 }

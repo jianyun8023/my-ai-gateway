@@ -299,6 +299,14 @@ pub(crate) async fn proxy(
                     .map(|value| value.reasoning_tokens)
                     .unwrap_or(0),
                 cached_tokens: usage.as_ref().map(|value| value.cached_tokens).unwrap_or(0),
+                cache_read_tokens: usage
+                    .as_ref()
+                    .map(|value| value.cache_read_tokens)
+                    .unwrap_or(0),
+                cache_creation_tokens: usage
+                    .as_ref()
+                    .map(|value| value.cache_creation_tokens)
+                    .unwrap_or(0),
                 total_tokens: usage.as_ref().map(|value| value.total_tokens).unwrap_or(0),
                 usage_source: usage
                     .as_ref()
@@ -531,6 +539,8 @@ pub(crate) async fn proxy(
             output_tokens: usage.as_ref().map(|u| u.output_tokens).unwrap_or(0),
             reasoning_tokens: usage.as_ref().map(|u| u.reasoning_tokens).unwrap_or(0),
             cached_tokens: usage.as_ref().map(|u| u.cached_tokens).unwrap_or(0),
+            cache_read_tokens: usage.as_ref().map(|u| u.cache_read_tokens).unwrap_or(0),
+            cache_creation_tokens: usage.as_ref().map(|u| u.cache_creation_tokens).unwrap_or(0),
             total_tokens: usage.as_ref().map(|u| u.total_tokens).unwrap_or(0),
             usage_source: usage
                 .as_ref()
@@ -608,15 +618,21 @@ fn client_source_from_headers(headers: &HeaderMap) -> String {
     {
         return value.to_owned();
     }
-    if let Some(value) = headers
+    let user_agent = headers
         .get(axum::http::header::USER_AGENT)
         .and_then(|value| value.to_str().ok())
         .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
+        .filter(|value| !value.is_empty());
+    if let Some(value) = user_agent {
         if let Some(product) = known_client_user_agent(value) {
             return product.to_owned();
         }
+    }
+    if user_agent.is_some_and(|ua| !ua.is_empty()) {
+        tracing::debug!(
+            user_agent = user_agent.unwrap_or(""),
+            "unrecognised User-Agent mapped to client_source=unknown"
+        );
     }
     "unknown".to_owned()
 }
@@ -657,6 +673,10 @@ const KNOWN_CLIENT_USER_AGENTS: &[(&str, &str)] = &[
     // (the web UI is the same product with a `(web)` suffix in the UA
     // parenthesised comment, which we strip before matching).
     ("kimi-code-cli", "kimi-code-cli"),
+    // Kimi Code VS Code extension — ships `kimi-code/<ver>` without the
+    // `-cli` suffix, or may appear as `kimi_code/<ver>`.
+    ("kimi-code", "kimi-code"),
+    ("kimi_code", "kimi-code"),
     // OpenAI Codex CLI — both product tokens seen in the daemon UA.
     ("codex_app_server_daemon", "codex-cli"),
     ("codex_cli_rs", "codex-cli"),
@@ -822,6 +842,8 @@ pub(crate) fn finalize_stream_usage(
     event.output_tokens = report.output_tokens;
     event.reasoning_tokens = report.reasoning_tokens;
     event.cached_tokens = report.cached_tokens;
+    event.cache_read_tokens = report.cache_read_tokens;
+    event.cache_creation_tokens = report.cache_creation_tokens;
     event.total_tokens = report.total_tokens;
     event.usage_source = report.source;
 }
@@ -1502,6 +1524,27 @@ mod tests {
         );
         assert_eq!(known_client_user_agent(""), None);
         assert_eq!(known_client_user_agent("(no product)"), None);
+    }
+
+    #[test]
+    fn user_agent_identifies_kimi_code_vscode() {
+        let mut headers = HeaderMap::new();
+        header(&mut headers, "user-agent", "kimi-code/0.39.0");
+        assert_eq!(client_source_from_headers(&headers), "kimi-code");
+    }
+
+    #[test]
+    fn user_agent_identifies_kimi_code_underscore() {
+        let mut headers = HeaderMap::new();
+        header(&mut headers, "user-agent", "kimi_code/0.39.0");
+        assert_eq!(client_source_from_headers(&headers), "kimi-code");
+    }
+
+    #[test]
+    fn kimi_code_cli_takes_precedence_over_kimi_code() {
+        let mut headers = HeaderMap::new();
+        header(&mut headers, "user-agent", "kimi-code-cli/1.2.3 (web)");
+        assert_eq!(client_source_from_headers(&headers), "kimi-code-cli");
     }
 
     #[test]

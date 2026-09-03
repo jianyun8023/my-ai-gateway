@@ -17,6 +17,8 @@ pub struct UsageReport {
     pub output_tokens: i64,
     pub reasoning_tokens: i64,
     pub cached_tokens: i64,
+    pub cache_read_tokens: i64,
+    pub cache_creation_tokens: i64,
     pub total_tokens: i64,
     pub source: String,
 }
@@ -272,6 +274,8 @@ impl UsageReport {
             || self.output_tokens > 0
             || self.reasoning_tokens > 0
             || self.cached_tokens > 0
+            || self.cache_read_tokens > 0
+            || self.cache_creation_tokens > 0
             || self.total_tokens > 0
     }
 }
@@ -309,19 +313,17 @@ pub fn extract_json(value: &Value) -> Option<UsageReport> {
                 .map(|v| i64_at(v, "reasoning_tokens"))
         })
         .unwrap_or_else(|| i64_at(usage, "reasoning_tokens"));
-    let cached = usage
+    let (cache_read, cache_creation) = if let Some(details) = usage
         .get("input_tokens_details")
-        .map(|v| i64_at(v, "cached_tokens"))
-        .or_else(|| {
-            usage
-                .get("prompt_tokens_details")
-                .map(|v| i64_at(v, "cached_tokens"))
-        })
-        .unwrap_or_else(|| {
-            i64_at(usage, "cached_tokens")
-                + i64_at(usage, "cache_read_input_tokens")
-                + i64_at(usage, "cache_creation_input_tokens")
-        });
+        .or_else(|| usage.get("prompt_tokens_details"))
+    {
+        (i64_at(details, "cached_tokens"), 0i64)
+    } else {
+        let read = i64_at(usage, "cache_read_input_tokens") + i64_at(usage, "cached_tokens");
+        let creation = i64_at(usage, "cache_creation_input_tokens");
+        (read, creation)
+    };
+    let cached = cache_read + cache_creation;
     let total = usage
         .get("total_tokens")
         .and_then(Value::as_i64)
@@ -331,6 +333,8 @@ pub fn extract_json(value: &Value) -> Option<UsageReport> {
         output_tokens: output,
         reasoning_tokens: reasoning,
         cached_tokens: cached,
+        cache_read_tokens: cache_read,
+        cache_creation_tokens: cache_creation,
         total_tokens: total,
         source: "upstream".into(),
     };
@@ -381,6 +385,12 @@ pub fn extract_sse(text: &str) -> Option<UsageReport> {
                     }
                     if report.cached_tokens > 0 {
                         current.cached_tokens = report.cached_tokens;
+                    }
+                    if report.cache_read_tokens > 0 {
+                        current.cache_read_tokens = report.cache_read_tokens;
+                    }
+                    if report.cache_creation_tokens > 0 {
+                        current.cache_creation_tokens = report.cache_creation_tokens;
                     }
                     if report.total_tokens > 0 {
                         current.total_tokens = report.total_tokens;
@@ -551,7 +561,21 @@ mod tests {
         assert_eq!(report.input_tokens, 10);
         assert_eq!(report.output_tokens, 5);
         assert_eq!(report.cached_tokens, 6);
+        assert_eq!(report.cache_read_tokens, 4);
+        assert_eq!(report.cache_creation_tokens, 2);
         assert_eq!(report.total_tokens, 15);
+    }
+
+    #[test]
+    fn extracts_openai_cached_tokens_as_cache_read() {
+        let report = extract_json(&json!({
+            "usage": {"prompt_tokens": 12, "completion_tokens": 8, "total_tokens": 20,
+                "prompt_tokens_details": {"cached_tokens": 5}}
+        }))
+        .unwrap();
+        assert_eq!(report.cache_read_tokens, 5);
+        assert_eq!(report.cache_creation_tokens, 0);
+        assert_eq!(report.cached_tokens, 5);
     }
 
     #[test]
@@ -582,6 +606,156 @@ mod tests {
         let report = extract_sse("event: message_start\ndata: {\"message\":{\"usage\":{\"input_tokens\":9}}}\n\nevent: message_delta\ndata: {\"delta\":{\"usage\":{\"output_tokens\":4}}}\n").unwrap();
         assert_eq!(report.input_tokens, 9);
         assert_eq!(report.output_tokens, 4);
+    }
+
+    #[test]
+    fn extracts_anthropic_stream_cache_tokens_split() {
+        let sse = concat!(
+            "event: message_start\n",
+            "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_01\",\"type\":\"message\",",
+            "\"role\":\"assistant\",\"content\":[],\"model\":\"MiniMax-M3\",",
+            "\"usage\":{\"input_tokens\":444,\"cache_creation_input_tokens\":0,",
+            "\"cache_read_input_tokens\":295552}}}\n\n",
+            "event: content_block_start\n",
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+            "event: content_block_delta\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Hello\"}}\n\n",
+            "event: content_block_stop\n",
+            "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
+            "event: message_delta\n",
+            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},",
+            "\"usage\":{\"output_tokens\":593}}\n\n",
+            "event: message_stop\n",
+            "data: {\"type\":\"message_stop\"}\n\n",
+        );
+        let report = extract_sse(sse).unwrap();
+        assert_eq!(report.source, "parsed");
+        assert_eq!(report.input_tokens, 444);
+        assert_eq!(report.output_tokens, 593);
+        assert_eq!(report.cache_read_tokens, 295552);
+        assert_eq!(report.cache_creation_tokens, 0);
+        assert_eq!(report.cached_tokens, 295552);
+    }
+
+    #[test]
+    fn extracts_anthropic_stream_cache_creation() {
+        let sse = concat!(
+            "event: message_start\n",
+            "data: {\"type\":\"message_start\",\"message\":{\"usage\":{",
+            "\"input_tokens\":1200,\"cache_creation_input_tokens\":8000,",
+            "\"cache_read_input_tokens\":0}}}\n\n",
+            "event: message_delta\n",
+            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},",
+            "\"usage\":{\"output_tokens\":50}}\n\n",
+        );
+        let report = extract_sse(sse).unwrap();
+        assert_eq!(report.input_tokens, 1200);
+        assert_eq!(report.output_tokens, 50);
+        assert_eq!(report.cache_read_tokens, 0);
+        assert_eq!(report.cache_creation_tokens, 8000);
+        assert_eq!(report.cached_tokens, 8000);
+    }
+
+    #[test]
+    fn extracts_minimax_anthropic_stream_with_both_cache_fields() {
+        let sse = concat!(
+            "event: message_start\n",
+            "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_m3\",\"type\":\"message\",",
+            "\"role\":\"assistant\",\"content\":[],\"model\":\"MiniMax-M3\",",
+            "\"usage\":{\"input_tokens\":500,\"cache_creation_input_tokens\":2000,",
+            "\"cache_read_input_tokens\":150000}}}\n\n",
+            "event: content_block_delta\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"test\"}}\n\n",
+            "event: message_delta\n",
+            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},",
+            "\"usage\":{\"output_tokens\":200}}\n\n",
+            "event: message_stop\n",
+            "data: {\"type\":\"message_stop\"}\n\n",
+        );
+        let report = extract_sse(sse).unwrap();
+        assert_eq!(report.input_tokens, 500);
+        assert_eq!(report.output_tokens, 200);
+        assert_eq!(report.cache_read_tokens, 150000);
+        assert_eq!(report.cache_creation_tokens, 2000);
+        assert_eq!(report.cached_tokens, 152000);
+    }
+
+    #[test]
+    fn extracts_minimax_real_sse_format_with_zero_message_start() {
+        let sse = concat!(
+            "event: message_start\n",
+            "data: {\"type\":\"message_start\",\"message\":{\"id\":\"06e7eb84618f\",\"type\":\"message\",",
+            "\"role\":\"assistant\",\"content\":[],\"model\":\"MiniMax-M3\",",
+            "\"stop_reason\":null,\"stop_sequence\":null,",
+            "\"usage\":{\"input_tokens\":0,\"output_tokens\":0,\"service_tier\":\"standard\"},",
+            "\"service_tier\":\"standard\"}}\n\n",
+            "event: ping\n",
+            "data: {\"type\":\"ping\"}\n\n",
+            "event: content_block_start\n",
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+            "event: content_block_delta\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Hello!\"}}\n\n",
+            "event: content_block_stop\n",
+            "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
+            "event: message_delta\n",
+            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},",
+            "\"usage\":{\"input_tokens\":842,\"output_tokens\":3,",
+            "\"cache_read_input_tokens\":128,\"service_tier\":\"standard\"}}\n\n",
+            "event: message_stop\n",
+            "data: {\"type\":\"message_stop\"}\n\n",
+        );
+        let report = extract_sse(sse).unwrap();
+        assert_eq!(report.source, "parsed");
+        assert_eq!(report.input_tokens, 842);
+        assert_eq!(report.output_tokens, 3);
+        assert_eq!(report.cache_read_tokens, 128);
+        assert_eq!(report.cache_creation_tokens, 0);
+        assert_eq!(report.cached_tokens, 128);
+    }
+
+    #[test]
+    fn extracts_minimax_real_sse_without_cache() {
+        let sse = concat!(
+            "event: message_start\n",
+            "data: {\"type\":\"message_start\",\"message\":{\"id\":\"06e7eb84618f\",\"type\":\"message\",",
+            "\"role\":\"assistant\",\"content\":[],\"model\":\"MiniMax-M3\",",
+            "\"stop_reason\":null,\"stop_sequence\":null,",
+            "\"usage\":{\"input_tokens\":0,\"output_tokens\":0,\"service_tier\":\"standard\"},",
+            "\"service_tier\":\"standard\"}}\n\n",
+            "event: ping\n",
+            "data: {\"type\":\"ping\"}\n\n",
+            "event: content_block_delta\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Hi\"}}\n\n",
+            "event: message_delta\n",
+            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},",
+            "\"usage\":{\"input_tokens\":180,\"output_tokens\":3,\"service_tier\":\"standard\"}}\n\n",
+            "event: message_stop\n",
+            "data: {\"type\":\"message_stop\"}\n\n",
+        );
+        let report = extract_sse(sse).unwrap();
+        assert_eq!(report.source, "parsed");
+        assert_eq!(report.input_tokens, 180);
+        assert_eq!(report.output_tokens, 3);
+        assert_eq!(report.cache_read_tokens, 0);
+        assert_eq!(report.cached_tokens, 0);
+    }
+
+    #[test]
+    fn sse_usage_for_response_preserves_cache_split() {
+        let sse_bytes = concat!(
+            "event: message_start\n",
+            "data: {\"type\":\"message_start\",\"message\":{\"usage\":{",
+            "\"input_tokens\":100,\"cache_read_input_tokens\":5000,",
+            "\"cache_creation_input_tokens\":0}}}\n\n",
+            "event: message_delta\n",
+            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},",
+            "\"usage\":{\"output_tokens\":20}}\n\n",
+        );
+        let report = usage_for_sse_response("test-cache-split", true, b"{}", sse_bytes.as_bytes());
+        assert_eq!(report.source, "parsed");
+        assert_eq!(report.cache_read_tokens, 5000);
+        assert_eq!(report.cache_creation_tokens, 0);
+        assert_eq!(report.cached_tokens, 5000);
     }
 
     #[test]

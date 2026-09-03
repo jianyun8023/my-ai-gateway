@@ -453,6 +453,8 @@ fn usage_event() -> db::UsageEvent {
         output_tokens: 0,
         reasoning_tokens: 0,
         cached_tokens: 0,
+        cache_read_tokens: 0,
+        cache_creation_tokens: 0,
         total_tokens: 0,
         usage_source: "missing".into(),
         degraded: false,

@@ -23,6 +23,8 @@ export interface TokenTotals {
   output: number;
   reasoning: number;
   cached: number;
+  cacheRead: number;
+  cacheCreation: number;
   total: number;
 }
 

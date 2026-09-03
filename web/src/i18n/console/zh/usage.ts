@@ -89,6 +89,8 @@ export const usage = {
     output: '输出',
     reasoning: '推理',
     cached: '缓存',
+    cache_read: '缓存读取',
+    cache_creation: '缓存创建',
     total: '总计',
   },
   trend: {

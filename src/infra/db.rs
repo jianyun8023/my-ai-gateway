@@ -55,6 +55,8 @@ pub struct UsageEvent {
     pub output_tokens: i64,
     pub reasoning_tokens: i64,
     pub cached_tokens: i64,
+    pub cache_read_tokens: i64,
+    pub cache_creation_tokens: i64,
     pub total_tokens: i64,
     pub usage_source: String,
     pub degraded: bool,
@@ -192,6 +194,8 @@ pub struct UsageEventRecord {
     pub output_tokens: i64,
     pub reasoning_tokens: i64,
     pub cached_tokens: i64,
+    pub cache_read_tokens: i64,
+    pub cache_creation_tokens: i64,
     pub total_tokens: i64,
     pub usage_source: String,
     pub degraded: bool,
@@ -259,6 +263,8 @@ pub struct UsageAggregate {
     pub output_tokens: i64,
     pub reasoning_tokens: i64,
     pub cached_tokens: i64,
+    pub cache_read_tokens: i64,
+    pub cache_creation_tokens: i64,
     pub total_tokens: i64,
 }
 
@@ -277,6 +283,8 @@ pub struct UsageTimeBucket {
     pub output_tokens: i64,
     pub reasoning_tokens: i64,
     pub cached_tokens: i64,
+    pub cache_read_tokens: i64,
+    pub cache_creation_tokens: i64,
     pub total_tokens: i64,
 }
 
@@ -297,6 +305,8 @@ pub struct UsageBreakdown {
     pub output_tokens: i64,
     pub reasoning_tokens: i64,
     pub cached_tokens: i64,
+    pub cache_read_tokens: i64,
+    pub cache_creation_tokens: i64,
     pub total_tokens: i64,
 }
 
@@ -697,13 +707,14 @@ impl Database {
     ) -> Result<(), sqlx::Error> {
         let now: DateTime<Utc> = Utc::now();
         let mut tx = self.pool.begin().await?;
-        sqlx::query("INSERT INTO usage_events (request_id, virtual_key_id, provider_id, account_id, model, logical_model, upstream_model_id, source_id, client_source, protocol_in, protocol_upstream, mode, status_code, success, retry_count, latency_ms, ttft_ms, input_tokens, output_tokens, reasoning_tokens, cached_tokens, total_tokens, usage_source, degraded, route_id, streamed, error_summary, fallback_reason, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29) ON CONFLICT (request_id) DO NOTHING")
+        sqlx::query("INSERT INTO usage_events (request_id, virtual_key_id, provider_id, account_id, model, logical_model, upstream_model_id, source_id, client_source, protocol_in, protocol_upstream, mode, status_code, success, retry_count, latency_ms, ttft_ms, input_tokens, output_tokens, reasoning_tokens, cached_tokens, cache_read_tokens, cache_creation_tokens, total_tokens, usage_source, degraded, route_id, streamed, error_summary, fallback_reason, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31) ON CONFLICT (request_id) DO NOTHING")
             .bind(&event.request_id).bind(event.virtual_key_id).bind(&event.provider_id).bind(&event.account_id).bind(&event.model)
             .bind(&event.logical_model).bind(&event.upstream_model_id).bind(&event.source_id).bind(&event.client_source)
             .bind(&event.protocol_in).bind(&event.protocol_upstream).bind(&event.mode).bind(event.status_code)
             .bind(event.success).bind(event.retry_count).bind(event.latency_ms).bind(event.ttft_ms)
             .bind(event.input_tokens).bind(event.output_tokens).bind(event.reasoning_tokens)
-            .bind(event.cached_tokens).bind(event.total_tokens).bind(&event.usage_source).bind(event.degraded)
+            .bind(event.cached_tokens).bind(event.cache_read_tokens).bind(event.cache_creation_tokens)
+            .bind(event.total_tokens).bind(&event.usage_source).bind(event.degraded)
             .bind(&event.route_id).bind(event.streamed).bind(&event.error_summary).bind(&event.fallback_reason).bind(now)
             .execute(&mut *tx).await?;
         for attempt in attempts {
@@ -1540,7 +1551,7 @@ impl Database {
     ) -> Result<UsageAggregate, sqlx::Error> {
         let (where_sql, binds) = filter_sql(filter);
         let query = format!(
-            "WITH filtered AS (SELECT * FROM usage_events {where_sql}), logical AS (SELECT COUNT(*)::BIGINT AS logical_requests, COALESCE(SUM(retry_count),0)::BIGINT AS retries, COUNT(*) FILTER (WHERE success)::BIGINT AS successes, COUNT(*) FILTER (WHERE NOT success)::BIGINT AS failures, CASE WHEN COUNT(*)=0 THEN 0 ELSE COUNT(*) FILTER (WHERE success)::DOUBLE PRECISION / COUNT(*)::DOUBLE PRECISION END AS success_rate, COALESCE(AVG(latency_ms),0)::DOUBLE PRECISION AS average_latency_ms, COALESCE(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY latency_ms),0)::DOUBLE PRECISION AS p95_latency_ms, COALESCE(SUM(input_tokens),0)::BIGINT AS input_tokens, COALESCE(SUM(output_tokens),0)::BIGINT AS output_tokens, COALESCE(SUM(reasoning_tokens),0)::BIGINT AS reasoning_tokens, COALESCE(SUM(cached_tokens),0)::BIGINT AS cached_tokens, COALESCE(SUM(total_tokens),0)::BIGINT AS total_tokens FROM filtered), attempts AS (SELECT COUNT(*)::BIGINT AS upstream_attempts FROM usage_event_attempts a JOIN filtered f ON f.request_id=a.request_id) SELECT logical.logical_requests, attempts.upstream_attempts, logical.retries, logical.successes, logical.failures, logical.success_rate, logical.average_latency_ms, logical.p95_latency_ms, logical.input_tokens, logical.output_tokens, logical.reasoning_tokens, logical.cached_tokens, logical.total_tokens FROM logical CROSS JOIN attempts"
+            "WITH filtered AS (SELECT * FROM usage_events {where_sql}), logical AS (SELECT COUNT(*)::BIGINT AS logical_requests, COALESCE(SUM(retry_count),0)::BIGINT AS retries, COUNT(*) FILTER (WHERE success)::BIGINT AS successes, COUNT(*) FILTER (WHERE NOT success)::BIGINT AS failures, CASE WHEN COUNT(*)=0 THEN 0 ELSE COUNT(*) FILTER (WHERE success)::DOUBLE PRECISION / COUNT(*)::DOUBLE PRECISION END AS success_rate, COALESCE(AVG(latency_ms),0)::DOUBLE PRECISION AS average_latency_ms, COALESCE(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY latency_ms),0)::DOUBLE PRECISION AS p95_latency_ms, COALESCE(SUM(input_tokens),0)::BIGINT AS input_tokens, COALESCE(SUM(output_tokens),0)::BIGINT AS output_tokens, COALESCE(SUM(reasoning_tokens),0)::BIGINT AS reasoning_tokens, COALESCE(SUM(cached_tokens),0)::BIGINT AS cached_tokens, COALESCE(SUM(cache_read_tokens),0)::BIGINT AS cache_read_tokens, COALESCE(SUM(cache_creation_tokens),0)::BIGINT AS cache_creation_tokens, COALESCE(SUM(total_tokens),0)::BIGINT AS total_tokens FROM filtered), attempts AS (SELECT COUNT(*)::BIGINT AS upstream_attempts FROM usage_event_attempts a JOIN filtered f ON f.request_id=a.request_id) SELECT logical.logical_requests, attempts.upstream_attempts, logical.retries, logical.successes, logical.failures, logical.success_rate, logical.average_latency_ms, logical.p95_latency_ms, logical.input_tokens, logical.output_tokens, logical.reasoning_tokens, logical.cached_tokens, logical.cache_read_tokens, logical.cache_creation_tokens, logical.total_tokens FROM logical CROSS JOIN attempts"
         );
         let mut q = sqlx::query_as::<_, UsageAggregate>(&query);
         q = bind_filter(q, binds);
@@ -1563,7 +1574,7 @@ impl Database {
             "date_trunc('{trunc}', filtered.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'"
         );
         let query = format!(
-            "WITH filtered AS (SELECT * FROM usage_events {where_sql}), logical AS (SELECT {bucket} AS bucket, COUNT(*)::BIGINT AS logical_requests, COALESCE(SUM(retry_count),0)::BIGINT AS retries, COUNT(*) FILTER (WHERE success)::BIGINT AS successes, COUNT(*) FILTER (WHERE NOT success)::BIGINT AS failures, COUNT(*) FILTER (WHERE success)::DOUBLE PRECISION / COUNT(*)::DOUBLE PRECISION AS success_rate, COALESCE(AVG(latency_ms),0)::DOUBLE PRECISION AS average_latency_ms, COALESCE(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY latency_ms),0)::DOUBLE PRECISION AS p95_latency_ms, COALESCE(SUM(input_tokens),0)::BIGINT AS input_tokens, COALESCE(SUM(output_tokens),0)::BIGINT AS output_tokens, COALESCE(SUM(reasoning_tokens),0)::BIGINT AS reasoning_tokens, COALESCE(SUM(cached_tokens),0)::BIGINT AS cached_tokens, COALESCE(SUM(total_tokens),0)::BIGINT AS total_tokens FROM filtered GROUP BY 1), attempts AS (SELECT {qualified_bucket} AS bucket, COUNT(*)::BIGINT AS upstream_attempts FROM filtered JOIN usage_event_attempts USING (request_id) GROUP BY 1) SELECT logical.bucket, logical.logical_requests, COALESCE(attempts.upstream_attempts,0)::BIGINT AS upstream_attempts, logical.retries, logical.successes, logical.failures, logical.success_rate, logical.average_latency_ms, logical.p95_latency_ms, logical.input_tokens, logical.output_tokens, logical.reasoning_tokens, logical.cached_tokens, logical.total_tokens FROM logical LEFT JOIN attempts USING (bucket) ORDER BY logical.bucket"
+            "WITH filtered AS (SELECT * FROM usage_events {where_sql}), logical AS (SELECT {bucket} AS bucket, COUNT(*)::BIGINT AS logical_requests, COALESCE(SUM(retry_count),0)::BIGINT AS retries, COUNT(*) FILTER (WHERE success)::BIGINT AS successes, COUNT(*) FILTER (WHERE NOT success)::BIGINT AS failures, COUNT(*) FILTER (WHERE success)::DOUBLE PRECISION / COUNT(*)::DOUBLE PRECISION AS success_rate, COALESCE(AVG(latency_ms),0)::DOUBLE PRECISION AS average_latency_ms, COALESCE(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY latency_ms),0)::DOUBLE PRECISION AS p95_latency_ms, COALESCE(SUM(input_tokens),0)::BIGINT AS input_tokens, COALESCE(SUM(output_tokens),0)::BIGINT AS output_tokens, COALESCE(SUM(reasoning_tokens),0)::BIGINT AS reasoning_tokens, COALESCE(SUM(cached_tokens),0)::BIGINT AS cached_tokens, COALESCE(SUM(cache_read_tokens),0)::BIGINT AS cache_read_tokens, COALESCE(SUM(cache_creation_tokens),0)::BIGINT AS cache_creation_tokens, COALESCE(SUM(total_tokens),0)::BIGINT AS total_tokens FROM filtered GROUP BY 1), attempts AS (SELECT {qualified_bucket} AS bucket, COUNT(*)::BIGINT AS upstream_attempts FROM filtered JOIN usage_event_attempts USING (request_id) GROUP BY 1) SELECT logical.bucket, logical.logical_requests, COALESCE(attempts.upstream_attempts,0)::BIGINT AS upstream_attempts, logical.retries, logical.successes, logical.failures, logical.success_rate, logical.average_latency_ms, logical.p95_latency_ms, logical.input_tokens, logical.output_tokens, logical.reasoning_tokens, logical.cached_tokens, logical.cache_read_tokens, logical.cache_creation_tokens, logical.total_tokens FROM logical LEFT JOIN attempts USING (bucket) ORDER BY logical.bucket"
         );
         let mut q = sqlx::query_as::<_, UsageTimeBucket>(&query);
         q = bind_filter(q, binds);
@@ -1594,7 +1605,7 @@ impl Database {
         };
         let (where_sql, binds) = filter_sql(filter);
         let query = format!(
-            "WITH filtered AS (SELECT * FROM usage_events {where_sql}), logical AS (SELECT {column} AS key, COUNT(*)::BIGINT AS logical_requests, COALESCE(SUM(retry_count),0)::BIGINT AS retries, COUNT(*) FILTER (WHERE success)::BIGINT AS successes, COUNT(*) FILTER (WHERE NOT success)::BIGINT AS failures, COUNT(*) FILTER (WHERE success)::DOUBLE PRECISION / COUNT(*)::DOUBLE PRECISION AS success_rate, COALESCE(AVG(latency_ms),0)::DOUBLE PRECISION AS average_latency_ms, COALESCE(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY latency_ms),0)::DOUBLE PRECISION AS p95_latency_ms, COALESCE(SUM(input_tokens),0)::BIGINT AS input_tokens, COALESCE(SUM(output_tokens),0)::BIGINT AS output_tokens, COALESCE(SUM(reasoning_tokens),0)::BIGINT AS reasoning_tokens, COALESCE(SUM(cached_tokens),0)::BIGINT AS cached_tokens, COALESCE(SUM(total_tokens),0)::BIGINT AS total_tokens FROM filtered GROUP BY {column}), attempts AS (SELECT {qualified_column} AS key, COUNT(*)::BIGINT AS upstream_attempts FROM filtered f JOIN usage_event_attempts a ON f.request_id=a.request_id GROUP BY {qualified_column}) SELECT logical.key, logical.logical_requests, COALESCE(attempts.upstream_attempts,0)::BIGINT AS upstream_attempts, logical.retries, logical.successes, logical.failures, logical.success_rate, logical.logical_requests::DOUBLE PRECISION / SUM(logical.logical_requests) OVER ()::DOUBLE PRECISION AS logical_request_share, CASE WHEN SUM(logical.total_tokens) OVER ()=0 THEN 0 ELSE logical.total_tokens::DOUBLE PRECISION / SUM(logical.total_tokens) OVER ()::DOUBLE PRECISION END AS total_token_share, logical.average_latency_ms, logical.p95_latency_ms, logical.input_tokens, logical.output_tokens, logical.reasoning_tokens, logical.cached_tokens, logical.total_tokens FROM logical LEFT JOIN attempts ON logical.key IS NOT DISTINCT FROM attempts.key ORDER BY logical.logical_requests DESC, logical.key ASC NULLS LAST"
+            "WITH filtered AS (SELECT * FROM usage_events {where_sql}), logical AS (SELECT {column} AS key, COUNT(*)::BIGINT AS logical_requests, COALESCE(SUM(retry_count),0)::BIGINT AS retries, COUNT(*) FILTER (WHERE success)::BIGINT AS successes, COUNT(*) FILTER (WHERE NOT success)::BIGINT AS failures, COUNT(*) FILTER (WHERE success)::DOUBLE PRECISION / COUNT(*)::DOUBLE PRECISION AS success_rate, COALESCE(AVG(latency_ms),0)::DOUBLE PRECISION AS average_latency_ms, COALESCE(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY latency_ms),0)::DOUBLE PRECISION AS p95_latency_ms, COALESCE(SUM(input_tokens),0)::BIGINT AS input_tokens, COALESCE(SUM(output_tokens),0)::BIGINT AS output_tokens, COALESCE(SUM(reasoning_tokens),0)::BIGINT AS reasoning_tokens, COALESCE(SUM(cached_tokens),0)::BIGINT AS cached_tokens, COALESCE(SUM(cache_read_tokens),0)::BIGINT AS cache_read_tokens, COALESCE(SUM(cache_creation_tokens),0)::BIGINT AS cache_creation_tokens, COALESCE(SUM(total_tokens),0)::BIGINT AS total_tokens FROM filtered GROUP BY {column}), attempts AS (SELECT {qualified_column} AS key, COUNT(*)::BIGINT AS upstream_attempts FROM filtered f JOIN usage_event_attempts a ON f.request_id=a.request_id GROUP BY {qualified_column}) SELECT logical.key, logical.logical_requests, COALESCE(attempts.upstream_attempts,0)::BIGINT AS upstream_attempts, logical.retries, logical.successes, logical.failures, logical.success_rate, logical.logical_requests::DOUBLE PRECISION / SUM(logical.logical_requests) OVER ()::DOUBLE PRECISION AS logical_request_share, CASE WHEN SUM(logical.total_tokens) OVER ()=0 THEN 0 ELSE logical.total_tokens::DOUBLE PRECISION / SUM(logical.total_tokens) OVER ()::DOUBLE PRECISION END AS total_token_share, logical.average_latency_ms, logical.p95_latency_ms, logical.input_tokens, logical.output_tokens, logical.reasoning_tokens, logical.cached_tokens, logical.cache_read_tokens, logical.cache_creation_tokens, logical.total_tokens FROM logical LEFT JOIN attempts ON logical.key IS NOT DISTINCT FROM attempts.key ORDER BY logical.logical_requests DESC, logical.key ASC NULLS LAST"
         );
         let mut q = sqlx::query_as::<_, UsageBreakdown>(&query);
         q = bind_filter(q, binds);
@@ -1603,7 +1614,7 @@ impl Database {
 }
 
 fn usage_event_select() -> &'static str {
-    "SELECT request_id,virtual_key_id,provider_id,account_id,logical_model,upstream_model_id,source_id,client_source,protocol_in,protocol_upstream,mode,status_code,success,retry_count,latency_ms,ttft_ms,input_tokens,output_tokens,reasoning_tokens,cached_tokens,total_tokens,usage_source,degraded,route_id,streamed,error_summary,fallback_reason,created_at FROM usage_events"
+    "SELECT request_id,virtual_key_id,provider_id,account_id,logical_model,upstream_model_id,source_id,client_source,protocol_in,protocol_upstream,mode,status_code,success,retry_count,latency_ms,ttft_ms,input_tokens,output_tokens,reasoning_tokens,cached_tokens,cache_read_tokens,cache_creation_tokens,total_tokens,usage_source,degraded,route_id,streamed,error_summary,fallback_reason,created_at FROM usage_events"
 }
 
 fn filter_sql(filter: &UsageFilter) -> (String, Vec<FilterBind>) {
@@ -2208,6 +2219,8 @@ mod tests {
             output_tokens: 3,
             reasoning_tokens: 0,
             cached_tokens: 0,
+            cache_read_tokens: 0,
+            cache_creation_tokens: 0,
             total_tokens: 5,
             usage_source: "parsed".into(),
             degraded: false,
@@ -2292,6 +2305,8 @@ mod tests {
             output_tokens: 1,
             reasoning_tokens: 0,
             cached_tokens: 0,
+            cache_read_tokens: 0,
+            cache_creation_tokens: 0,
             total_tokens: 2,
             usage_source: "upstream".into(),
             degraded: false,
