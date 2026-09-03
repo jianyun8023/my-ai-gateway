@@ -76,6 +76,18 @@
     opacity: 0.6;
     cursor: not-allowed;
   }
+
+  > span:not(.loading-spinner) {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    line-height: 1;
+  }
+
+  svg {
+    display: block;
+    flex: 0 0 auto;
+  }
 }
 
 // 页面内新增、保存、编辑与危险操作复用原 usagePillAction 的低优先级胶囊约束。
@@ -862,6 +874,17 @@ textarea {
 
   .modal-footer .btn {
     width: 100%;
+  }
+}
+
+@media (min-width: 601px) {
+  .modal-footer {
+    flex-direction: row;
+    align-items: center;
+  }
+
+  .modal-footer .btn {
+    width: auto;
   }
 }
 
