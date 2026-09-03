@@ -1,4 +1,3 @@
-// CI cache probe: source-only changes should reuse the cargo-chef dependency layer.
 mod api;
 mod control_plane;
 mod domain;
