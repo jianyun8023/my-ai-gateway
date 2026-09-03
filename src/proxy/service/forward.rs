@@ -1,3 +1,9 @@
+#[allow(clippy::too_many_arguments)]
+#[tracing::instrument(name = "gateway.forward", skip_all, fields(
+    source_id = %route.source_id,
+    account_id = %account.id,
+    upstream_model = %route.upstream_model_id,
+))]
 async fn forward_account(
     _config: &GatewayConfig,
     secrets: &secrets::SecretResolver,
