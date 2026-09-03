@@ -76,6 +76,18 @@
     opacity: 0.6;
     cursor: not-allowed;
   }
+
+  > span:not(.loading-spinner) {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    line-height: 1;
+  }
+
+  svg {
+    display: block;
+    flex: 0 0 auto;
+  }
 }
 
 // 页面内新增、保存、编辑与危险操作复用原 usagePillAction 的低优先级胶囊约束。
@@ -224,11 +236,27 @@
   }
 }
 
+input[type='text'],
+input[type='number'],
+input[type='search'],
+input[type='email'],
+input[type='url'],
+input[type='password'],
+input[type='tel'],
+input[type='date'],
+input[type='datetime-local'],
+input:not([type]),
+select,
+textarea,
+.input {
+  border-radius: var(--radius, #{$radius-md});
+}
+
 .input,
 textarea {
   width: 100%;
   border: 1px solid var(--border-color);
-  border-radius: $radius-md;
+  border-radius: var(--radius, #{$radius-md});
   padding: 10px 12px;
   background-color: var(--bg-secondary);
   color: var(--text-primary);
@@ -862,6 +890,17 @@ textarea {
 
   .modal-footer .btn {
     width: 100%;
+  }
+}
+
+@media (min-width: 601px) {
+  .modal-footer {
+    flex-direction: row;
+    align-items: center;
+  }
+
+  .modal-footer .btn {
+    width: auto;
   }
 }
 

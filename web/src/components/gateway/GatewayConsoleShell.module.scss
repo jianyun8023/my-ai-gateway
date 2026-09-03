@@ -164,7 +164,7 @@
   > input {
     padding: 6px 10px;
     border: 1px solid var(--border-color);
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius);
     background: var(--bg);
     font-size: 13px;
     color: var(--text-primary);
@@ -317,7 +317,7 @@
     width: 140px;
     height: 30px;
     border: 1px solid var(--border-color);
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius);
     padding: 0 9px;
     color: var(--text-primary);
     background: var(--bg);

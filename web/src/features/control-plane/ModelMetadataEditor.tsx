@@ -77,9 +77,11 @@ function FieldLabel({ field, source }: { field: ModelMetadataField; source?: Met
   return (
     <span className={styles.metadataFieldLabel}>
       <span>{t(METADATA_LABEL_KEYS[field])}</span>
-      <StatusPill tone={source === 'user' ? 'accent' : source === 'preset' ? 'success' : source === 'upstream' ? 'warning' : 'muted'}>
-        {source ?? 'unknown'}
-      </StatusPill>
+      {source && (
+        <StatusPill tone={source === 'user' ? 'accent' : source === 'preset' ? 'success' : source === 'upstream' ? 'warning' : 'muted'}>
+          {t(`models.metadata_source.${source}`, { defaultValue: source })}
+        </StatusPill>
+      )}
     </span>
   );
 }

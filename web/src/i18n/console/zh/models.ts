@@ -31,6 +31,12 @@ export const models = {
     lossy_hint: '实际损失由有效能力矩阵列出。',
   },
 
+  metadata_source: {
+    user: '用户设置',
+    preset: '预设',
+    upstream: '上游发现',
+  },
+
   // 字段标签
   field: {
     lm_id: '逻辑模型 ID',

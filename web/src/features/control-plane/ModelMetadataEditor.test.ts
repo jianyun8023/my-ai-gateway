@@ -80,8 +80,22 @@ describe('model metadata field labels', () => {
     expect(options.map((option) => option.value)).toEqual(expect.arrayContaining(['unknown', 'supported', 'unsupported']));
   });
 
-  it('keeps field source pills as raw enum values', () => {
+  it('hides source pills when field sources are undefined', () => {
     renderFields();
-    expect(container.textContent).toContain('unknown');
+    expect(container.textContent).not.toMatch(/\bunknown\b/i);
+    expect(container.querySelectorAll('[class*="pill"]').length).toBe(0);
+  });
+
+  it('shows localized source pills when field sources are provided', async () => {
+    await setTestLanguage('zh');
+    act(() => {
+      root.render(createElement(ModelMetadataFields, {
+        draft: createMetadataDraft(),
+        fieldSources: { display_name: 'preset', tools: 'user' },
+        onChange: () => {},
+      }));
+    });
+    expect(container.textContent).toContain('预设');
+    expect(container.textContent).toContain('用户设置');
   });
 });

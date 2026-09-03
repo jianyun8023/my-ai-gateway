@@ -31,6 +31,12 @@ export const models = {
     lossy_hint: 'Actual loss is listed in the effective capability matrix.',
   },
 
+  metadata_source: {
+    user: 'User',
+    preset: 'Preset',
+    upstream: 'Upstream',
+  },
+
   // 字段标签
   field: {
     lm_id: 'LogicalModel ID',
