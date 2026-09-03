@@ -377,7 +377,7 @@ async fn apply_manual_health_transition(
 ) -> Result<(), ControlPlaneError> {
     let status = if enabled { "unknown" } else { "disabled" };
     sqlx::query(
-        "UPDATE accounts SET health_status=$2,cooldown_until=NULL,consecutive_failures=0,last_error=NULL,last_success_at=NULL,health_source='manual',health_updated_at=$3,last_probe_error=NULL WHERE id=$1",
+        "UPDATE accounts SET health_status=$2,cooldown_until=NULL,consecutive_failures=0,failure_window_started_at=NULL,last_error=NULL,last_success_at=NULL,health_source='manual',health_updated_at=$3,last_probe_error=NULL WHERE id=$1",
     )
     .bind(account_id)
     .bind(status)
@@ -403,7 +403,7 @@ async fn apply_manual_health_transition_for_source(
 ) -> Result<(), ControlPlaneError> {
     let status = if enabled { "unknown" } else { "disabled" };
     sqlx::query(
-        "UPDATE accounts SET health_status=$2,cooldown_until=NULL,consecutive_failures=0,last_error=NULL,last_success_at=NULL,health_source='manual',health_updated_at=$3,last_probe_error=NULL WHERE source_id=$1",
+        "UPDATE accounts SET health_status=$2,cooldown_until=NULL,consecutive_failures=0,failure_window_started_at=NULL,last_error=NULL,last_success_at=NULL,health_source='manual',health_updated_at=$3,last_probe_error=NULL WHERE source_id=$1",
     )
     .bind(source_id)
     .bind(status)
@@ -3094,7 +3094,9 @@ mod tests {
             .unwrap()
             .iter()
             .any(|model| model["id"] == "logical-b"));
-        health.mark_failure("account-b").await;
+        for _ in 0..health.config().failure_threshold {
+            health.mark_failure("account-b").await;
+        }
         let model_payload = invoke_models_for_test(&state).await;
         assert!(!model_payload["data"]
             .as_array()
