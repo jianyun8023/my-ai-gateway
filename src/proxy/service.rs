@@ -687,10 +687,6 @@ pub(crate) async fn proxy(
     finish_proxy(protocol, model, started, is_streamed, response)
 }
 
-/// Map an unusable primary account to the persisted `fallback_reason` code.
-/// Only called when `health.available == false` (cooldown / unhealthy / stale
-/// with residual failures / unknown with no row); the `disabled` status covers
-/// account or source being turned off in the control plane.
 include!("service/response.rs");
 include!("service/forward.rs");
 include!("service/fallback.rs");
