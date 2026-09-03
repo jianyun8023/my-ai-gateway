@@ -48,11 +48,15 @@ export const usage = {
     preset_24h: '24 小时',
     preset_7d: '7 天',
     preset_30d: '30 天',
+    preset_custom: '自定义',
     from: '从',
     to: '到',
     status_success: '成功',
     status_failure: '失败',
     apply: '应用筛选',
+    advanced: '高级筛选',
+    reset: '重置',
+    preset_active: '当前',
   },
 
   // —— 时间粒度 ——
@@ -100,6 +104,7 @@ export const usage = {
   composition: {
     title: 'Token 构成',
     subtitle: '原始 Token 口径,不依赖价格配置',
+    cache_rate: '缓存命中率: {{rate}}%',
   },
   distribution: {
     title: '模型 Token 分布',

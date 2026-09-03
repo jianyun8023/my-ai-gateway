@@ -48,11 +48,15 @@ export const usage = {
     preset_24h: 'Last 24 hours',
     preset_7d: 'Last 7 days',
     preset_30d: 'Last 30 days',
+    preset_custom: 'Custom',
     from: 'From',
     to: 'To',
     status_success: 'Succeeded',
     status_failure: 'Failed',
     apply: 'Apply filters',
+    advanced: 'Advanced Filters',
+    reset: 'Reset',
+    preset_active: 'Active',
   },
 
   // —— 时间粒度 ——
@@ -100,6 +104,7 @@ export const usage = {
   composition: {
     title: 'Token Composition',
     subtitle: 'Raw token counts, independent of pricing configuration',
+    cache_rate: 'Cache hit rate: {{rate}}%',
   },
   distribution: {
     title: 'Model Token Distribution',

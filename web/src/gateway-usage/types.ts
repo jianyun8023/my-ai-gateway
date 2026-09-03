@@ -2,9 +2,14 @@ export type UsageSource = 'upstream' | 'parsed' | 'estimated' | 'missing' | stri
 
 export type UsageStatus = 'success' | 'failure';
 
+export type UsageRelativePreset = '24h' | '7d' | '30d';
+export type UsageTimeMode = 'relative' | 'absolute';
+
 export interface GatewayUsageFilters {
   from: string;
   to: string;
+  timeMode?: UsageTimeMode;
+  relativePreset?: UsageRelativePreset;
   logicalModel?: string;
   upstreamModel?: string;
   provider?: string;
