@@ -186,7 +186,7 @@ UI 流程为：
 
 字段优先级为：用户覆盖 > 模型预设 > 上游发现 > unknown。刷新模型时不得覆盖用户已经确认的字段；新发现的模型先进入待确认列表，不自动改变现有路由。
 
-当前实现内置版本化 ProviderPreset：`deepseek@1`、`minimax@1`、`kimi_code@1` 保留为历史不可变快照，`@2` 是最新内置版本。`@2` 只记录已验证的能力事实：DeepSeek/MiniMax Responses 的 `web_search`，以及 Kimi Responses Adapter 的 `tool_streaming`；启动注册新版本不会改写已经创建的 Source 快照。ProviderPreset 完整声明默认 Base URL、三协议 endpoint/模式、认证和 Header 模板、最小连接测试请求、默认能力及发现规则；Kimi Code 因官方未提供已认证模型列表 endpoint，明确声明 `discovery.support=unsupported`，不会猜测接口。首批 ModelPreset 包括 DeepSeek V4、MiniMax M3/M2.7、Kimi K3/K2.7 Code Model。
+当前实现内置版本化 ProviderPreset：`deepseek@1`、`minimax@1`、`kimi_code@1` 保留为历史不可变快照，`@3` 是最新内置版本。`@2` 记录已验证的 Responses `web_search` 与 Kimi Responses Adapter 的 `tool_streaming`；`@3` 进一步显式记录 Responses 的 `web_search_citations` 与 `web_search_sources`：DeepSeek/MiniMax 当前声明为 `unsupported`，Kimi Responses Adapter 声明为 `supported`。启动注册新版本不会改写已经创建的 Source 快照。ProviderPreset 完整声明默认 Base URL、三协议 endpoint/模式、认证和 Header 模板、最小连接测试请求、默认能力及发现规则；Kimi Code 因官方未提供已认证模型列表 endpoint，明确声明 `discovery.support=unsupported`，不会猜测接口。首批 ModelPreset 包括 DeepSeek V4、MiniMax M3/M2.7、Kimi K3/K2.7 Code Model。
 
 管理 API 流程为：
 

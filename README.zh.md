@@ -24,7 +24,7 @@ MiniMax、DeepSeek 等原生支持三协议的 Provider 不进入转换器。Kim
 - Usage 记录实际 `upstream_model_id`、`source_id`、独立的 `client_source`、`usage_source` 和流式 TTFT。
 - PostgreSQL-backed Virtual Key 支持创建、列表、撤销和模型白名单。
 - 管理端已有 Overview、Analysis、Request Events 三个网关原生用量页面。
-- ProviderPreset（当前内置最新版本为 `@2`）、连接测试、模型发现、差异预览、编辑和批量确认 API 已实现；预设升级不会改写既有 Source 快照，已验证的 Responses `web_search` 与 Kimi Adapter `tool_streaming` 能力按版本声明。
+- ProviderPreset（当前内置最新版本为 `@3`）、连接测试、模型发现、差异预览、编辑和批量确认 API 已实现；预设升级不会改写既有 Source 快照，已验证的 Responses `web_search` 与 Kimi Adapter `tool_streaming` 能力按版本声明。
 - `/admin/capabilities` 从当前 DB runtime snapshot 输出三协议有效能力矩阵和完整转换链。
 - 账号健康状态以 PostgreSQL 为事实来源，支持被动失败冷却、主动连接探测、stale/过期放行、指数退避、重启恢复和人工启停。
 - AES-256-GCM 凭据信封加密（`gwenc:v1` 格式），支持多版本 keyring 和渐进式轮换；Admin 加密/轮换端点已集成。
