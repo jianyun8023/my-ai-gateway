@@ -459,7 +459,6 @@ impl Database {
     pub(crate) fn pool(&self) -> &PgPool {
         &self.pool
     }
-
 }
 
 #[cfg(test)]
@@ -472,8 +471,8 @@ pub use virtual_keys::validate_virtual_key_scopes;
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::usage::filter_sql;
+    use super::*;
     use crate::{
         control_plane::model_catalog::{install_builtin_presets, ModelCatalogRepository},
         domain::{
