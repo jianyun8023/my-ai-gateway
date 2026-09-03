@@ -18,19 +18,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 pub(crate) use app::{application, should_audit_admin_request};
 
 #[cfg(test)]
-use std::sync::Arc;
+use api::{
+    health_admin::admin_health,
+    proxy::{models, responses},
+    usage::{csv_field, parse_usage_query, usage_events_csv},
+};
 #[cfg(test)]
 use axum::{
     body::{Body, Bytes},
     extract::State,
-    http::{
-        header::CONTENT_TYPE,
-        HeaderMap, HeaderValue, Method, Request, Response, StatusCode,
-    },
+    http::{header::CONTENT_TYPE, HeaderMap, HeaderValue, Method, Request, Response, StatusCode},
     Router,
 };
 #[cfg(test)]
-use serde_json::{json, Value};
+use domain::{config, protocol::Protocol};
 #[cfg(test)]
 use infra::{audit, db, health, observability, ops, secrets};
 #[cfg(test)]
@@ -38,15 +39,11 @@ use proxy::service::proxy as proxy_fn;
 #[cfg(test)]
 use proxy::{transport, usage};
 #[cfg(test)]
+use serde_json::{json, Value};
+#[cfg(test)]
 use state::{AdminAuth, AppState, EnvRestore, LiveConfig, ENV_LOCK, TEST_ADMIN_KEY};
 #[cfg(test)]
-use api::{
-    health_admin::admin_health,
-    proxy::{models, responses},
-    usage::{csv_field, parse_usage_query, usage_events_csv},
-};
-#[cfg(test)]
-use domain::{config, protocol::Protocol};
+use std::sync::Arc;
 #[cfg(test)]
 use tower::ServiceExt;
 #[cfg(test)]

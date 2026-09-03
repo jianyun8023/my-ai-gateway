@@ -289,5 +289,4 @@ impl Database {
             .await?
             .ok_or(sqlx::Error::RowNotFound)
     }
-
 }

@@ -340,7 +340,6 @@ pub struct UsageEventPage {
     pub has_more: bool,
 }
 
-
 impl Database {
     pub async fn connect_from_env() -> Result<Option<Self>, sqlx::Error> {
         let Ok(url) = std::env::var("DATABASE_URL") else {
@@ -463,11 +462,11 @@ impl Database {
 
 }
 
+#[cfg(test)]
+mod config;
 mod health;
 mod usage;
 mod virtual_keys;
-#[cfg(test)]
-mod config;
 
 pub use virtual_keys::validate_virtual_key_scopes;
 
