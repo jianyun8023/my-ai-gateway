@@ -1,6 +1,5 @@
 use super::*;
 use sha2::{Digest, Sha256};
-use uuid::Uuid;
 
 impl Database {
     /// Compatibility helper that creates a hash-only, unrecoverable key. The
