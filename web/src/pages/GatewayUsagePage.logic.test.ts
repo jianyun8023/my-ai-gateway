@@ -3,9 +3,28 @@ import { adaptUsageEventPage } from '@/gateway-usage';
 import { gatewayUsageEventsFixture } from '@/gateway-usage/fixtures';
 import '@/i18n/console';
 import i18n from '@/i18n';
-import { appendStableEventPage, formatFallbackReason, normalizeVisibleEventColumns } from './GatewayUsagePage';
+import {
+  DEFAULT_VISIBLE_COLUMNS,
+  appendStableEventPage,
+  formatFallbackReason,
+  normalizeVisibleEventColumns,
+} from './GatewayUsagePage';
 
 describe('GatewayUsagePage logic', () => {
+  it('defaults to eight high-frequency event columns', () => {
+    expect(DEFAULT_VISIBLE_COLUMNS).toEqual([
+      'time',
+      'logicalModel',
+      'upstreamModel',
+      'provider',
+      'status',
+      'retries',
+      'latency',
+      'tokens',
+    ]);
+    expect(normalizeVisibleEventColumns([])).toEqual(DEFAULT_VISIBLE_COLUMNS);
+  });
+
   it('persists only supported columns and never allows an empty table', () => {
     expect(normalizeVisibleEventColumns(['time', 'clientSource', 'usageSource', 'cost'])).toEqual(['time', 'clientSource', 'usageSource']);
     expect(normalizeVisibleEventColumns([]).length).toBeGreaterThan(0);

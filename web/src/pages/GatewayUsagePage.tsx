@@ -3,17 +3,26 @@ import { useTranslation } from 'react-i18next';
 import { currentIntlLocale } from '@/i18n/intl';
 import type { TFunction } from 'i18next';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { Bar, Doughnut, Line } from 'react-chartjs-2';
+import { Bar, Line } from 'react-chartjs-2';
+import type { TooltipItem } from 'chart.js';
 import '@/lib/chartjs';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { EmptyState } from '@/components/ui/EmptyState';
+import {
+  FILTER_STORAGE_KEY,
+  countActiveAdvancedFilters,
+  defaultFilters,
+  resolveFilterWindow,
+  safeParseFilters,
+  serializeFiltersForStorage,
+  type RelativePreset,
+} from '@/gateway-usage/filterState';
 import { GatewayUsageClient, type GatewayUsageFilters, type UsageBreakdownDimension, type UsageBreakdownItem, type UsageEventViewModel, type UsageOverviewViewModel, type UsageSummaryViewModel } from '@/gateway-usage';
 import type { GatewayUsageTab } from '@/lib/consoleNavigation';
 import { useLocalizedApiError } from '@/hooks/useLocalizedApiError';
+import { formatCompact, formatCompactWithTitle, formatExactInteger } from '@/utils/formatCompact';
 import styles from './GatewayUsagePage.module.scss';
-
-const FILTER_STORAGE_KEY = 'my-ai-gateway-usage-filters-v2';
 const COLUMNS_STORAGE_KEY = 'my-ai-gateway-usage-event-columns-v2';
 
 const EVENT_COLUMNS = [
@@ -48,19 +57,15 @@ const EVENT_COLUMN_LABELS: Record<EventColumn, string> = {
   usageSource: 'usage.field.usage_source',
 };
 
-const DEFAULT_VISIBLE_COLUMNS: EventColumn[] = [
+export const DEFAULT_VISIBLE_COLUMNS: EventColumn[] = [
   'time',
   'logicalModel',
   'upstreamModel',
   'provider',
-  'sourceAccount',
-  'clientSource',
-  'protocol',
   'status',
   'retries',
   'latency',
   'tokens',
-  'usageSource',
 ];
 
 const FALLBACK_REASON_KEYS: Record<string, string> = {
@@ -81,32 +86,11 @@ export const formatFallbackReason = (t: TFunction, reason: string): string => {
   return key ? t(key) : t('usage.fallback_reason.other', { reason });
 };
 
-const DAY_MS = 24 * 60 * 60 * 1000;
-
-const defaultFilters = (): GatewayUsageFilters => {
-  const to = new Date();
-  const from = new Date(to.getTime() - DAY_MS);
-  return { from: from.toISOString(), to: to.toISOString() };
-};
-
 const safeLocalRead = (key: string): string => {
   try {
     return localStorage.getItem(key) ?? '';
   } catch {
     return '';
-  }
-};
-
-const safeParseFilters = (): GatewayUsageFilters => {
-  const fallback = defaultFilters();
-  try {
-    const value = JSON.parse(safeLocalRead(FILTER_STORAGE_KEY)) as Partial<GatewayUsageFilters>;
-    if (!value.from || !value.to || Number.isNaN(Date.parse(value.from)) || Number.isNaN(Date.parse(value.to))) {
-      return fallback;
-    }
-    return { ...fallback, ...value };
-  } catch {
-    return fallback;
   }
 };
 
@@ -145,10 +129,46 @@ const toLocalInputValue = (iso: string): string => {
 
 const fromLocalInputValue = (value: string): string => new Date(value).toISOString();
 
-const formatNumber = (value: number): string => new Intl.NumberFormat(currentIntlLocale(), {
-  notation: value >= 100_000 ? 'compact' : 'standard',
-  maximumFractionDigits: 1,
-}).format(value);
+const compactTick = (value: string | number): string => formatCompact(Number(value));
+
+const compactTooltipLabel = (context: TooltipItem<'line' | 'bar'>): string => {
+  const raw = Number(context.parsed.y ?? context.parsed.x ?? 0);
+  const { display, exact } = formatCompactWithTitle(raw);
+  const label = context.dataset.label ? `${context.dataset.label}: ` : '';
+  return `${label}${display} (${exact})`;
+};
+
+const horizontalTokenBarOptions = {
+  indexAxis: 'y' as const,
+  responsive: true,
+  maintainAspectRatio: false,
+  plugins: {
+    legend: { display: false },
+    tooltip: { callbacks: { label: compactTooltipLabel } },
+  },
+  scales: {
+    x: { ticks: { callback: compactTick } },
+  },
+};
+
+const lineChartOptions = {
+  responsive: true,
+  maintainAspectRatio: false,
+  interaction: { mode: 'index' as const, intersect: false },
+  plugins: {
+    tooltip: { callbacks: { label: compactTooltipLabel } },
+  },
+  scales: {
+    y: {
+      ticks: { callback: compactTick },
+    },
+    secondary: {
+      position: 'right' as const,
+      grid: { display: false },
+      ticks: { callback: compactTick },
+    },
+  },
+};
 
 const formatTime = (value: string): string => {
   if (!value) return '—';
@@ -167,9 +187,15 @@ const formatBucket = (value: string): string => new Intl.DateTimeFormat(currentI
 
 const formatDuration = (value: number): string => {
   if (value <= 0) return '—';
-  if (value < 1000) return `${formatNumber(value)} ms`;
+  if (value < 1000) return `${formatExactInteger(value)} ms`;
   return `${(value / 1000).toFixed(value < 10_000 ? 1 : 0)} s`;
 };
+
+const TIME_PRESETS: Array<{ key: RelativePreset; labelKey: string }> = [
+  { key: '24h', labelKey: 'usage.filter.preset_24h' },
+  { key: '7d', labelKey: 'usage.filter.preset_7d' },
+  { key: '30d', labelKey: 'usage.filter.preset_30d' },
+];
 
 const makeChartColors = () => [
   'oklch(58% 0.16 145)',
@@ -185,41 +211,78 @@ interface FilterBarProps {
   draft: GatewayUsageFilters;
   onChange: (value: GatewayUsageFilters) => void;
   onApply: () => void;
+  onPresetSelect: (preset: RelativePreset) => void;
+  onReset: () => void;
   loading: boolean;
 }
 
-function FilterBar({ draft, onChange, onApply, loading }: FilterBarProps) {
+function FilterBar({ draft, onChange, onApply, onPresetSelect, onReset, loading }: FilterBarProps) {
   const { t } = useTranslation('console');
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const advancedCount = countActiveAdvancedFilters(draft);
   const update = (field: keyof GatewayUsageFilters, value: string) => onChange({
     ...draft,
     [field]: value || undefined,
   });
-  const setPreset = (durationMs: number) => {
-    const to = new Date();
-    onChange({ ...draft, from: new Date(to.getTime() - durationMs).toISOString(), to: to.toISOString() });
-  };
+  const updateAbsoluteTime = (field: 'from' | 'to', value: string) => onChange({
+    ...draft,
+    timeMode: 'absolute',
+    [field]: fromLocalInputValue(value),
+  });
+  const selectCustom = () => onChange({
+    ...draft,
+    timeMode: 'absolute',
+  });
 
   return (
     <section className={styles.filters} aria-label={t('usage.filter.aria')}>
-      <div className={styles.filterPresets}>
-        <Button size="sm" variant="ghost" onClick={() => setPreset(DAY_MS)}>{t('usage.filter.preset_24h')}</Button>
-        <Button size="sm" variant="ghost" onClick={() => setPreset(7 * DAY_MS)}>{t('usage.filter.preset_7d')}</Button>
-        <Button size="sm" variant="ghost" onClick={() => setPreset(30 * DAY_MS)}>{t('usage.filter.preset_30d')}</Button>
+      <div className={styles.commonFilters}>
+        <div className={styles.filterPresets}>
+          {TIME_PRESETS.map((preset) => (
+            <button
+              key={preset.key}
+              type="button"
+              data-active={draft.relativePreset === preset.key && draft.timeMode === 'relative'}
+              onClick={() => onPresetSelect(preset.key)}
+            >
+              {t(preset.labelKey)}
+            </button>
+          ))}
+          <button
+            type="button"
+            data-active={draft.timeMode === 'absolute'}
+            onClick={selectCustom}
+          >
+            {t('usage.filter.preset_custom')}
+          </button>
+        </div>
+        {draft.timeMode === 'absolute' && (
+          <div className={styles.timeRange}>
+            <label>{t('usage.filter.from')}<input type="datetime-local" value={toLocalInputValue(draft.from)} onChange={(event) => updateAbsoluteTime('from', event.target.value)} /></label>
+            <label>{t('usage.filter.to')}<input type="datetime-local" value={toLocalInputValue(draft.to)} onChange={(event) => updateAbsoluteTime('to', event.target.value)} /></label>
+          </div>
+        )}
+        <label>{t('usage.field.logical_model')}<input value={draft.logicalModel ?? ''} onChange={(event) => update('logicalModel', event.target.value)} placeholder={t('common.all')} /></label>
+        <label>{t('usage.field.provider')}<input value={draft.provider ?? ''} onChange={(event) => update('provider', event.target.value)} placeholder={t('common.all')} /></label>
+        <label>{t('usage.field.status')}<select value={draft.status ?? ''} onChange={(event) => update('status', event.target.value)}><option value="">{t('common.all')}</option><option value="success">{t('usage.filter.status_success')}</option><option value="failure">{t('usage.filter.status_failure')}</option></select></label>
+        <Button variant="ghost" onClick={() => setShowAdvanced(!showAdvanced)}>
+          {t('usage.filter.advanced')}{advancedCount > 0 ? ` (${advancedCount})` : ''}
+        </Button>
+        <Button variant="ghost" onClick={onReset}>{t('usage.filter.reset')}</Button>
+        <Button variant="secondary" onClick={onApply} loading={loading}>{t('usage.filter.apply')}</Button>
       </div>
-      <label>{t('usage.filter.from')}<input type="datetime-local" value={toLocalInputValue(draft.from)} onChange={(event) => update('from', fromLocalInputValue(event.target.value))} /></label>
-      <label>{t('usage.filter.to')}<input type="datetime-local" value={toLocalInputValue(draft.to)} onChange={(event) => update('to', fromLocalInputValue(event.target.value))} /></label>
-      <label>{t('usage.field.logical_model')}<input value={draft.logicalModel ?? ''} onChange={(event) => update('logicalModel', event.target.value)} placeholder={t('common.all')} /></label>
-      <label>{t('usage.field.upstream_model')}<input value={draft.upstreamModel ?? ''} onChange={(event) => update('upstreamModel', event.target.value)} placeholder={t('common.all')} /></label>
-      <label>{t('usage.field.provider')}<input value={draft.provider ?? ''} onChange={(event) => update('provider', event.target.value)} placeholder={t('common.all')} /></label>
-      <label>{t('usage.field.source_id')}<input value={draft.sourceId ?? ''} onChange={(event) => update('sourceId', event.target.value)} placeholder={t('common.all')} /></label>
-      <label>{t('usage.field.client_source')}<input value={draft.clientSource ?? ''} onChange={(event) => update('clientSource', event.target.value)} placeholder={t('common.all')} /></label>
-      <label>{t('usage.field.account')}<input value={draft.account ?? ''} onChange={(event) => update('account', event.target.value)} placeholder={t('common.all')} /></label>
-      <label>{t('usage.field.protocol_in')}<input value={draft.protocolIn ?? ''} onChange={(event) => update('protocolIn', event.target.value)} placeholder={t('common.all')} /></label>
-      <label>{t('usage.field.protocol_upstream')}<input value={draft.protocolUpstream ?? ''} onChange={(event) => update('protocolUpstream', event.target.value)} placeholder={t('common.all')} /></label>
-      <label>{t('usage.field.virtual_key_id')}<input inputMode="numeric" value={draft.virtualKey ?? ''} onChange={(event) => update('virtualKey', event.target.value)} placeholder={t('common.all')} /></label>
-      <label>{t('usage.field.status')}<select value={draft.status ?? ''} onChange={(event) => update('status', event.target.value)}><option value="">{t('common.all')}</option><option value="success">{t('usage.filter.status_success')}</option><option value="failure">{t('usage.filter.status_failure')}</option></select></label>
-      <label>{t('usage.field.usage_source')}<select value={draft.usageSource ?? ''} onChange={(event) => update('usageSource', event.target.value)}><option value="">{t('common.all')}</option><option value="upstream">{t('usage.usage_source.upstream')}</option><option value="parsed">{t('usage.usage_source.parsed')}</option><option value="estimated">{t('usage.usage_source.estimated')}</option><option value="missing">{t('usage.usage_source.missing')}</option></select></label>
-      <Button className={styles.applyFilters} variant="secondary" onClick={onApply} loading={loading}>{t('usage.filter.apply')}</Button>
+      {showAdvanced && (
+        <div className={styles.advancedFilters}>
+          <label>{t('usage.field.upstream_model')}<input value={draft.upstreamModel ?? ''} onChange={(event) => update('upstreamModel', event.target.value)} placeholder={t('common.all')} /></label>
+          <label>{t('usage.field.source_id')}<input value={draft.sourceId ?? ''} onChange={(event) => update('sourceId', event.target.value)} placeholder={t('common.all')} /></label>
+          <label>{t('usage.field.account')}<input value={draft.account ?? ''} onChange={(event) => update('account', event.target.value)} placeholder={t('common.all')} /></label>
+          <label>{t('usage.field.client_source')}<input value={draft.clientSource ?? ''} onChange={(event) => update('clientSource', event.target.value)} placeholder={t('common.all')} /></label>
+          <label>{t('usage.field.protocol_in')}<input value={draft.protocolIn ?? ''} onChange={(event) => update('protocolIn', event.target.value)} placeholder={t('common.all')} /></label>
+          <label>{t('usage.field.protocol_upstream')}<input value={draft.protocolUpstream ?? ''} onChange={(event) => update('protocolUpstream', event.target.value)} placeholder={t('common.all')} /></label>
+          <label>{t('usage.field.virtual_key_id')}<input inputMode="numeric" value={draft.virtualKey ?? ''} onChange={(event) => update('virtualKey', event.target.value)} placeholder={t('common.all')} /></label>
+          <label>{t('usage.field.usage_source')}<select value={draft.usageSource ?? ''} onChange={(event) => update('usageSource', event.target.value)}><option value="">{t('common.all')}</option><option value="upstream">{t('usage.usage_source.upstream')}</option><option value="parsed">{t('usage.usage_source.parsed')}</option><option value="estimated">{t('usage.usage_source.estimated')}</option><option value="missing">{t('usage.usage_source.missing')}</option></select></label>
+        </div>
+      )}
     </section>
   );
 }
@@ -258,23 +321,43 @@ function extractMetricData(data: UsageOverviewViewModel, metric: TrendMetric): n
 
 function TokenComposition({ summary }: { summary: UsageSummaryViewModel }) {
   const { t } = useTranslation('console');
-  const colors = makeChartColors();
+  const total = summary.tokens.total;
   const rows = [
-    { labelKey: 'usage.legend.input', value: summary.tokens.input, color: colors[0] },
-    { labelKey: 'usage.legend.output', value: summary.tokens.output, color: colors[1] },
-    { labelKey: 'usage.legend.reasoning', value: summary.tokens.reasoning, color: colors[2] },
-    { labelKey: 'usage.legend.cached', value: summary.tokens.cached, color: colors[3] },
-  ] as const;
-  const compositionData = {
-    labels: rows.map((row) => t(row.labelKey)),
-    datasets: [{ data: rows.map((row) => row.value), backgroundColor: rows.map((row) => row.color), borderWidth: 0 }],
-  };
+    { key: 'input', label: t('usage.legend.input'), value: summary.tokens.input },
+    { key: 'output', label: t('usage.legend.output'), value: summary.tokens.output },
+    { key: 'reasoning', label: t('usage.legend.reasoning'), value: summary.tokens.reasoning },
+    { key: 'cache_read', label: t('usage.legend.cache_read'), value: summary.tokens.cacheRead },
+    { key: 'cache_creation', label: t('usage.legend.cache_creation'), value: summary.tokens.cacheCreation },
+  ];
+  const totalFormatted = formatCompactWithTitle(total);
 
   return (
     <Card title={t('usage.composition.title')} subtitle={t('usage.composition.subtitle')}>
       <div className={styles.tokenComposition}>
-        <div className={styles.chartSmall}><Doughnut data={compositionData} options={{ responsive: true, maintainAspectRatio: false, cutout: '70%', plugins: { legend: { display: false } } }} /></div>
-        <dl>{rows.map((row) => <div key={row.labelKey}><dt><i style={{ background: row.color }} />{t(row.labelKey)}</dt><dd>{formatNumber(row.value)}</dd></div>)}</dl>
+        <div className={styles.tokenTotal}>
+          <span>{t('usage.legend.total')}</span>
+          <strong title={totalFormatted.exact}>{totalFormatted.display}</strong>
+        </div>
+        <div className={styles.tokenBreakdown}>
+          {rows.filter((row) => row.value > 0).map((row) => {
+            const formatted = formatCompactWithTitle(row.value);
+            return (
+              <div key={row.key} className={styles.tokenRow}>
+                <span>{row.label}</span>
+                <div className={styles.tokenBar}>
+                  <div style={{ width: `${Math.max(2, (row.value / Math.max(total, 1)) * 100)}%` }} />
+                </div>
+                <strong title={formatted.exact}>{formatted.display}</strong>
+                <small>{((row.value / Math.max(total, 1)) * 100).toFixed(1)}%</small>
+              </div>
+            );
+          })}
+        </div>
+        {summary.tokens.cacheRead > 0 && (
+          <small className={styles.cacheNote}>
+            {t('usage.composition.cache_rate', { rate: ((summary.tokens.cacheRead / Math.max(summary.tokens.input, 1)) * 100).toFixed(1) })}
+          </small>
+        )}
       </div>
     </Card>
   );
@@ -290,7 +373,7 @@ function ModelDistribution({ rows }: { rows: UsageBreakdownItem[] }) {
       {visibleRows.length === 0 ? <EmptyState title={t('usage.distribution.empty')} /> : (
         <div className={styles.distributionList}>{visibleRows.map((row) => (
           <div key={row.key}>
-            <div><strong>{row.label}</strong><span>{t('usage.value.requests_tokens', { count: formatNumber(row.logicalRequests), tokens: formatNumber(row.tokens.total) })}</span></div>
+            <div><strong>{row.label}</strong><span>{t('usage.value.requests_tokens', { count: formatCompact(row.logicalRequests), tokens: formatCompact(row.tokens.total) })}</span></div>
             <span className={styles.distributionTrack}><i style={{ width: `${Math.max(4, (row.tokens.total / maxTokens) * 100)}%` }} /></span>
           </div>
         ))}</div>
@@ -321,9 +404,9 @@ function Overview({ data, metric, onMetricChange }: { data: UsageOverviewViewMod
   return (
     <div className={styles.stack}>
       <div className={styles.statsGrid} data-od-id="kpi-row">
-        <Stat label={t('usage.stat.logical_requests')} value={formatNumber(summary.logicalRequests)} hint={t('usage.stat.upstream_attempts', { count: formatNumber(summary.upstreamAttempts), retries: formatNumber(summary.retries) })} />
-        <Stat label={t('usage.stat.success_rate')} value={`${(summary.successRate * 100).toFixed(1)}%`} hint={t('usage.stat.failures', { count: formatNumber(summary.failedRequests) })} tone={summary.failedRequests > 0 ? 'warning' : 'success'} />
-        <Stat label={t('usage.stat.total_tokens')} value={formatNumber(summary.tokens.total)} hint={t('usage.stat.final_accounting')} />
+        <Stat label={t('usage.stat.logical_requests')} value={formatCompact(summary.logicalRequests)} hint={t('usage.stat.upstream_attempts', { count: formatCompact(summary.upstreamAttempts), retries: formatCompact(summary.retries) })} />
+        <Stat label={t('usage.stat.success_rate')} value={`${(summary.successRate * 100).toFixed(1)}%`} hint={t('usage.stat.failures', { count: formatCompact(summary.failedRequests) })} tone={summary.failedRequests > 0 ? 'warning' : 'success'} />
+        <Stat label={t('usage.stat.total_tokens')} value={formatCompact(summary.tokens.total)} hint={t('usage.stat.final_accounting')} />
         <Stat label={t('usage.stat.avg_latency')} value={formatDuration(summary.averageLatencyMs)} hint={t('usage.stat.p95', { value: formatDuration(summary.p95LatencyMs) })} />
       </div>
       <div className={styles.chartGrid}>
@@ -332,7 +415,7 @@ function Overview({ data, metric, onMetricChange }: { data: UsageOverviewViewMod
             {TREND_METRICS.map((m) => <option key={m.value} value={m.value}>{t(m.labelKey)}</option>)}
           </select>
         }>
-          <div className={styles.chartLarge}><Line data={trendData} options={{ responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, scales: { secondary: { position: 'right', grid: { display: false } } } }} /></div>
+          <div className={styles.chartLarge}><Line data={trendData} options={lineChartOptions} /></div>
         </Card>
         <TokenComposition summary={summary} />
       </div>
@@ -345,7 +428,7 @@ function Overview({ data, metric, onMetricChange }: { data: UsageOverviewViewMod
                 <time>{formatTime(event.createdAt)}</time>
                 <strong>{event.logicalModel}</strong>
                 <span>{event.provider} · {event.sourceId} / {event.account}</span>
-                <em>{t('usage.value.tokens', { count: formatNumber(event.tokens.total) })}</em>
+                <em>{t('usage.value.tokens', { count: formatCompact(event.tokens.total) })}</em>
               </div>
             ))}</div>
           )}
@@ -374,7 +457,7 @@ function BreakdownChart({ title, rows }: { title: string; rows: UsageBreakdownIt
     <Card title={title} subtitle={t('usage.breakdown.subtitle')}>
       {visibleRows.length === 0 ? <EmptyState title={t('usage.breakdown.empty')} /> : (
         <div className={styles.breakdownChart}>
-          <Bar data={{ labels: visibleRows.map((item) => item.label), datasets: [{ label: t('usage.legend.total'), data: visibleRows.map((item) => item.tokens.total), backgroundColor: makeChartColors()[0], borderRadius: 6 }] }} options={{ indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }} />
+          <Bar data={{ labels: visibleRows.map((item) => item.label), datasets: [{ label: t('usage.legend.total'), data: visibleRows.map((item) => item.tokens.total), backgroundColor: makeChartColors()[0], borderRadius: 6 }] }} options={horizontalTokenBarOptions} />
         </div>
       )}
     </Card>
@@ -394,7 +477,7 @@ function Analysis({ breakdowns, summary }: { breakdowns: Partial<Record<UsageBre
         <Card title={t('usage.latency.title')} subtitle={t('usage.latency.subtitle')}>
           {latencyRows.length === 0 ? <EmptyState title={t('usage.latency.empty')} /> : (
             <div className={styles.breakdownChart}>
-              <Bar data={{ labels: latencyRows.map((item) => item.label), datasets: [{ label: t('usage.latency.dataset'), data: latencyRows.map((item) => item.averageLatencyMs ?? 0), backgroundColor: makeChartColors()[2], borderRadius: 6 }] }} options={{ responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }} />
+              <Bar data={{ labels: latencyRows.map((item) => item.label), datasets: [{ label: t('usage.latency.dataset'), data: latencyRows.map((item) => item.averageLatencyMs ?? 0), backgroundColor: makeChartColors()[2], borderRadius: 6 }] }} options={{ responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: (context) => `${context.dataset.label}: ${formatExactInteger(Number(context.parsed.y ?? 0))} ms` } } }, scales: { y: { ticks: { callback: (value) => `${formatExactInteger(Number(value))} ms` } } } }} />
             </div>
           )}
         </Card>
@@ -427,8 +510,8 @@ const renderEventCell = (event: UsageEventViewModel, column: EventColumn, t: TFu
         ? <span title={formatFallbackReason(t, event.fallbackReason)}>{label}</span>
         : label;
     }
-    case 'latency': return `${formatNumber(event.latencyMs)} ms`;
-    case 'tokens': return formatNumber(event.tokens.total);
+    case 'latency': return `${formatExactInteger(event.latencyMs)} ms`;
+    case 'tokens': return formatCompact(event.tokens.total);
     case 'usageSource': return <UsageBadge source={event.usageSource} />;
   }
 };
@@ -504,7 +587,7 @@ function EventDetails({ event, onClose, client }: { event: UsageEventViewModel; 
           <div><span>{t('usage.field.account')}</span><strong>{event.account}</strong></div>
           <div><span>{t('usage.field.protocol')}</span><strong>{event.protocolIn} → {event.protocolUpstream}</strong></div>
           <div><span>{t('usage.field.usage_source')}</span><strong><UsageBadge source={event.usageSource} /></strong></div>
-          <div><span>{t('usage.field.latency')}</span><strong>{formatNumber(event.latencyMs)} ms</strong></div>
+          <div><span>{t('usage.field.latency')}</span><strong>{formatExactInteger(event.latencyMs)} ms</strong></div>
           <div><span>{t('usage.field.retries')}</span><strong>{event.fallback ? (event.retryCount > 0 ? t('usage.event.retries_fallback', { count: event.retryCount }) : t('usage.event.fallback_only')) : String(event.retryCount)}</strong></div>
           {event.fallbackReason && (
             <div><span>{t('usage.field.fallback_reason')}</span><strong title={event.fallbackReason}>{formatFallbackReason(t, event.fallbackReason)}</strong></div>
@@ -605,8 +688,8 @@ export function GatewayUsagePage({
   const getAdminKeyRef = useRef(getAdminKey);
   getAdminKeyRef.current = getAdminKey;
   const [client] = useState(() => new GatewayUsageClient({ getAdminKey: () => getAdminKeyRef.current() }));
-  const [draftFilters, setDraftFilters] = useState<GatewayUsageFilters>(safeParseFilters);
-  const [filters, setFilters] = useState<GatewayUsageFilters>(draftFilters);
+  const [draftFilters, setDraftFilters] = useState<GatewayUsageFilters>(() => safeParseFilters());
+  const [filters, setFilters] = useState<GatewayUsageFilters>(() => safeParseFilters());
   const [overview, setOverview] = useState<UsageOverviewViewModel>();
   const [analysisSummary, setAnalysisSummary] = useState<UsageSummaryViewModel>();
   const [breakdowns, setBreakdowns] = useState<Partial<Record<UsageBreakdownDimension, UsageBreakdownItem[]>>>({});
@@ -621,25 +704,26 @@ export function GatewayUsagePage({
   const [granularity, setGranularity] = useState<'auto' | 'hour' | 'day'>('auto');
 
   const loadActiveTab = useCallback(async (signal?: AbortSignal) => {
+    const effectiveFilters = resolveFilterWindow(filters);
     setLoading(true);
     onLoadingChange?.(true);
     setError('');
     try {
       if (activeTab === 'overview') {
         const granularityParam = granularity === 'auto' ? undefined : granularity;
-        setOverview(await client.overview(filters, granularityParam, signal));
+        setOverview(await client.overview(effectiveFilters, granularityParam, signal));
       } else if (activeTab === 'analysis') {
         const [summary, results] = await Promise.all([
-          client.summary(filters, signal),
+          client.summary(effectiveFilters, signal),
           Promise.all(ANALYSIS_DIMENSIONS.map(async ({ dimension }) => [
             dimension,
-            await client.breakdown(filters, dimension, signal),
+            await client.breakdown(effectiveFilters, dimension, signal),
           ] as const)),
         ]);
         setAnalysisSummary(summary);
         setBreakdowns(Object.fromEntries(results));
       } else {
-        const page = await client.events({ filters, limit: 100 }, signal);
+        const page = await client.events({ filters: effectiveFilters, limit: 100 }, signal);
         setEvents(page.events);
         setNextCursor(page.nextCursor);
         setHasMore(page.hasMore);
@@ -663,20 +747,40 @@ export function GatewayUsagePage({
 
   useEffect(() => () => onLoadingChange?.(false), [onLoadingChange]);
 
-  const applyFilters = () => {
-    if (new Date(draftFilters.from) >= new Date(draftFilters.to)) {
+  const applyFilterState = useCallback((next: GatewayUsageFilters) => {
+    const resolved = resolveFilterWindow(next);
+    if (new Date(resolved.from) >= new Date(resolved.to)) {
       setError(t('usage.error.invalid_range'));
       return;
     }
-    localStorage.setItem(FILTER_STORAGE_KEY, JSON.stringify(draftFilters));
-    setFilters({ ...draftFilters });
+    setError('');
+    localStorage.setItem(FILTER_STORAGE_KEY, JSON.stringify(serializeFiltersForStorage(resolved)));
+    setDraftFilters(resolved);
+    setFilters(resolved);
+  }, [t]);
+
+  const applyFilters = () => {
+    applyFilterState(draftFilters);
+  };
+
+  const handlePresetSelect = (preset: RelativePreset) => {
+    applyFilterState({
+      ...draftFilters,
+      timeMode: 'relative',
+      relativePreset: preset,
+    });
+  };
+
+  const resetFilters = () => {
+    applyFilterState(defaultFilters());
   };
 
   const loadMore = useCallback(async () => {
     if (!nextCursor || !hasMore || loadingMore) return;
+    const effectiveFilters = resolveFilterWindow(filters);
     setLoadingMore(true);
     try {
-      const page = await client.events({ filters, cursor: nextCursor, limit: 100 });
+      const page = await client.events({ filters: effectiveFilters, cursor: nextCursor, limit: 100 });
       setEvents((current) => appendStableEventPage(current, page.events));
       setNextCursor(page.nextCursor);
       setHasMore(page.hasMore);
@@ -694,8 +798,9 @@ export function GatewayUsagePage({
   };
 
   const exportEvents = async (format: 'csv' | 'json') => {
+    const effectiveFilters = resolveFilterWindow(filters);
     try {
-      const blob = await client.exportEvents(filters, format);
+      const blob = await client.exportEvents(effectiveFilters, format);
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement('a');
       anchor.href = url;
@@ -709,7 +814,14 @@ export function GatewayUsagePage({
 
   return (
     <section className={styles.content} data-od-id={`page-${activeTab}`}>
-      <FilterBar draft={draftFilters} onChange={setDraftFilters} onApply={applyFilters} loading={loading} />
+      <FilterBar
+        draft={draftFilters}
+        onChange={setDraftFilters}
+        onApply={applyFilters}
+        onPresetSelect={handlePresetSelect}
+        onReset={resetFilters}
+        loading={loading}
+      />
       {activeTab === 'overview' && (
         <div className={styles.granularityBar}>
           <span>{t('usage.granularity.label')}</span>
