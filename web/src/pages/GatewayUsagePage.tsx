@@ -511,7 +511,7 @@ function EventDetails({ event, onClose, client }: { event: UsageEventViewModel; 
           )}
         </section>
         <Card title={t('usage.detail.token_title')} subtitle={t('usage.detail.token_subtitle')}>
-          <div className={styles.tokenDetails}><span>{t('usage.legend.input')} <strong>{event.tokens.input}</strong></span><span>{t('usage.legend.output')} <strong>{event.tokens.output}</strong></span><span>{t('usage.legend.reasoning')} <strong>{event.tokens.reasoning}</strong></span><span>{t('usage.legend.cached')} <strong>{event.tokens.cached}</strong></span><span>{t('usage.legend.total')} <strong>{event.tokens.total}</strong></span></div>
+          <div className={styles.tokenDetails}><span>{t('usage.legend.input')} <strong>{event.tokens.input}</strong></span><span>{t('usage.legend.output')} <strong>{event.tokens.output}</strong></span><span>{t('usage.legend.reasoning')} <strong>{event.tokens.reasoning}</strong></span><span>{t('usage.legend.cache_read')} <strong>{event.tokens.cacheRead}</strong></span><span>{t('usage.legend.cache_creation')} <strong>{event.tokens.cacheCreation}</strong></span><span>{t('usage.legend.total')} <strong>{event.tokens.total}</strong></span></div>
         </Card>
         {event.fallback && event.fallbackReason && event.retryCount === 0 && (
           <p className={styles.fallbackNotice}>{t('usage.detail.primary_skipped')}</p>

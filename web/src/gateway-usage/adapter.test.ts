@@ -10,7 +10,7 @@ describe('gateway usage adapter', () => {
     expect(summary.retries).toBe(2);
     expect(summary.averageLatencyMs).toBe(940);
     expect(summary.p95LatencyMs).toBe(1280);
-    expect(summary.tokens).toEqual({ input: 1200, output: 420, reasoning: 160, cached: 300, total: 1780 });
+    expect(summary.tokens).toEqual({ input: 1200, output: 420, reasoning: 160, cached: 300, cacheRead: 250, cacheCreation: 50, total: 1780 });
     expect(summary.usageSources).toEqual({ upstream: 1, estimated: 1, missing: 1 });
   });
 

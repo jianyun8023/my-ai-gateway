@@ -11,7 +11,7 @@ import type {
 
 type UnknownRecord = Record<string, unknown>;
 
-const EMPTY_TOKENS: TokenTotals = { input: 0, output: 0, reasoning: 0, cached: 0, total: 0 };
+const EMPTY_TOKENS: TokenTotals = { input: 0, output: 0, reasoning: 0, cached: 0, cacheRead: 0, cacheCreation: 0, total: 0 };
 
 const asRecord = (value: unknown): UnknownRecord => (
   value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -55,13 +55,17 @@ export const adaptTokenTotals = (payload: RawGatewayUsagePayload): TokenTotals =
   const input = readNumber(tokens, ['input', 'input_tokens']);
   const output = readNumber(tokens, ['output', 'output_tokens']);
   const reasoning = readNumber(tokens, ['reasoning', 'reasoning_tokens']);
-  const cached = readNumber(tokens, ['cached', 'cached_tokens', 'cache_read_tokens']);
+  const cacheRead = readNumber(tokens, ['cacheRead', 'cache_read_tokens', 'cache_read']);
+  const cacheCreation = readNumber(tokens, ['cacheCreation', 'cache_creation_tokens', 'cache_creation']);
+  const cached = readNumber(tokens, ['cached', 'cached_tokens']) || (cacheRead + cacheCreation);
   const explicitTotal = firstDefined(tokens, ['total', 'total_tokens']);
   return {
     input,
     output,
     reasoning,
     cached,
+    cacheRead,
+    cacheCreation,
     total: explicitTotal === undefined ? input + output : asNumber(explicitTotal),
   };
 };

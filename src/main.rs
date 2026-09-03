@@ -1708,6 +1708,8 @@ mod usage_api_tests {
             output_tokens: 5,
             reasoning_tokens: 2,
             cached_tokens: 1,
+            cache_read_tokens: 1,
+            cache_creation_tokens: 0,
             total_tokens: 17,
             usage_source: "upstream".into(),
             degraded: false,

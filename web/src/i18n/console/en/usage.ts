@@ -89,6 +89,8 @@ export const usage = {
     output: 'Output',
     reasoning: 'Reasoning',
     cached: 'Cached',
+    cache_read: 'Cache Read',
+    cache_creation: 'Cache Creation',
     total: 'Total',
   },
   trend: {

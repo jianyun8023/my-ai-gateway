@@ -5,7 +5,7 @@ export const gatewayUsageSummaryFixture = {
   upstream_attempts: { total: 5, retries: 2 },
   average_latency_ms: 940,
   p95_latency_ms: 1280,
-  tokens: { input: 1200, output: 420, reasoning: 160, cached: 300, total: 1780 },
+  tokens: { input: 1200, output: 420, reasoning: 160, cached: 300, cache_read_tokens: 250, cache_creation_tokens: 50, total: 1780 },
   usage_sources: [
     { usage_source: 'upstream', requests: 1 },
     { usage_source: 'estimated', requests: 1 },
@@ -20,14 +20,14 @@ export const gatewayUsageTimeseriesFixture = {
       logical_requests: 2,
       upstream_attempts: 3,
       successful_requests: 2,
-      tokens: { input: 1000, output: 400, reasoning: 160, cached: 300, total: 1560 },
+      tokens: { input: 1000, output: 400, reasoning: 160, cached: 300, cache_read_tokens: 200, cache_creation_tokens: 100, total: 1560 },
     },
     {
       bucket: '2026-08-30T11:00:00Z',
       logical_requests: 1,
       upstream_attempts: 2,
       successful_requests: 0,
-      tokens: { input: 200, output: 20, reasoning: 0, cached: 0, total: 220 },
+      tokens: { input: 200, output: 20, reasoning: 0, cached: 0, cache_read_tokens: 0, cache_creation_tokens: 0, total: 220 },
     },
   ],
 };
@@ -43,7 +43,7 @@ export const gatewayUsageBreakdownFixture = {
       upstream_attempts: 5,
       successful_requests: 2,
       average_latency_ms: 940,
-      tokens: { input: 1200, output: 420, reasoning: 160, cached: 300, total: 1780 },
+      tokens: { input: 1200, output: 420, reasoning: 160, cached: 300, cache_read_tokens: 250, cache_creation_tokens: 50, total: 1780 },
     },
   ],
 };
@@ -69,7 +69,7 @@ export const gatewayUsageEventsFixture = {
       fallback_reason: 'upstream_http_429',
       latency_ms: 1280,
       usage_source: 'estimated',
-      tokens: { input: 680, output: 220, reasoning: 80, cached: 120, total: 980 },
+      tokens: { input: 680, output: 220, reasoning: 80, cached: 120, cache_read_tokens: 100, cache_creation_tokens: 20, total: 980 },
       attempts: [
         {
           attempt_index: 0,
@@ -112,7 +112,7 @@ export const gatewayUsageEventsFixture = {
       retry_count: 0,
       latency_ms: 510,
       usage_source: 'missing',
-      tokens: { input: 0, output: 0, reasoning: 0, cached: 0, total: 0 },
+      tokens: { input: 0, output: 0, reasoning: 0, cached: 0, cache_read_tokens: 0, cache_creation_tokens: 0, total: 0 },
       error_summary: 'Upstream returned a gateway error',
     },
   ],
