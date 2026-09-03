@@ -236,11 +236,27 @@
   }
 }
 
+input[type='text'],
+input[type='number'],
+input[type='search'],
+input[type='email'],
+input[type='url'],
+input[type='password'],
+input[type='tel'],
+input[type='date'],
+input[type='datetime-local'],
+input:not([type]),
+select,
+textarea,
+.input {
+  border-radius: var(--radius, #{$radius-md});
+}
+
 .input,
 textarea {
   width: 100%;
   border: 1px solid var(--border-color);
-  border-radius: $radius-md;
+  border-radius: var(--radius, #{$radius-md});
   padding: 10px 12px;
   background-color: var(--bg-secondary);
   color: var(--text-primary);
