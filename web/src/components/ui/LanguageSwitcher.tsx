@@ -3,8 +3,7 @@ import { useTranslation } from 'react-i18next';
 import i18n, { isSupportedLanguage, persistLanguage, type SupportedLanguage } from '@/i18n';
 import styles from './LanguageSwitcher.module.scss';
 
-// 目前仅支持 en / zh 简体。aria/title 文案经 console 命名空间提供,
-// 供控制台与遗留页(LoginPage/UsagePage 等)共用。
+// 目前仅支持 en / zh 简体；aria/title 文案由 console 命名空间提供。
 const LANGUAGE_OPTIONS: ReadonlyArray<{ value: SupportedLanguage; label: string }> = [
   { value: 'en', label: 'EN' },
   { value: 'zh', label: '中文' },

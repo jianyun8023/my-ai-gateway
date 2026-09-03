@@ -1,7 +1,4 @@
-/**
- * 主题状态管理
- * 从原项目 src/modules/theme.js 迁移
- */
+/** Gateway console theme state. */
 
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';

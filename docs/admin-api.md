@@ -14,10 +14,12 @@
 
 ## 内置预设
 
-每个内置 ProviderPreset 以不可变 `(id, version)` 保存。`deepseek@2` 与
-`minimax@2` 在 Responses 协议声明已验证的 `web_search`，`kimi_code@2` 在
-Responses Adapter 声明 `tool_streaming`；`@1` 记录继续可读取，已有 Source 快照不会被启动时
-注册新版本改写。创建 Source 时省略版本会选择该 Provider 的最新版本。
+每个内置 ProviderPreset 以不可变 `(id, version)` 保存。`deepseek@3` 与
+`minimax@3` 在 Responses 协议声明已验证的 `web_search`，并显式声明
+`web_search_citations` 与 `web_search_sources` 不支持；`kimi_code@3` 在 Responses Adapter
+声明 `tool_streaming`、`web_search_citations` 与 `web_search_sources` 支持。`@1` 和 `@2`
+记录继续可读取，已有 Source 快照不会被启动时注册新版本改写。创建 Source 时省略版本会选择
+该 Provider 的最新版本。
 
 `GET /admin/provider-presets` 返回数据库中的不可变版本列表。启动时注册以下首批版本：
 
