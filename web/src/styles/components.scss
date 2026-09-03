@@ -264,8 +264,8 @@ textarea {
 
   &:focus {
     outline: none;
-    border-color: var(--primary-color);
-    box-shadow: 0 0 0 3px rgba($primary-color, 0.18);
+    border-color: var(--accent, var(--primary-color));
+    box-shadow: 0 0 0 3px var(--accent-soft, rgba($primary-color, 0.18));
   }
 }
 
@@ -632,10 +632,10 @@ textarea {
 }
 
 .modal {
-  background: var(--bg-primary);
+  background: var(--floating-surface, var(--bg-primary));
   border-radius: var(--keeper-card-radius);
-  border: 1px solid var(--border-color);
-  box-shadow: $shadow-lg;
+  border: 1px solid var(--floating-border, var(--border-color));
+  box-shadow: var(--floating-shadow, #{$shadow-lg});
   max-width: 100%;
   max-height: 90vh;
   overflow: hidden;
@@ -750,8 +750,8 @@ textarea {
   width: 32px;
   height: 32px;
   padding: 0;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
+  background: var(--bg-tertiary, var(--bg-secondary));
+  border: 1px solid var(--floating-border, var(--border-color));
   color: var(--text-secondary);
   cursor: pointer;
   border-radius: $radius-full;
@@ -793,7 +793,7 @@ textarea {
   align-items: center;
   min-height: calc(var(--keeper-card-title-track-height) + #{$spacing-md * 2});
   padding: $spacing-md $spacing-lg;
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--floating-border, var(--border-color));
 
   .modal-title {
     font-weight: var(--keeper-card-title-weight);
@@ -812,11 +812,11 @@ textarea {
 
 .modal-footer {
   padding: $spacing-md $spacing-lg;
-  border-top: 1px solid var(--border-color);
+  border-top: 1px solid var(--floating-border, var(--border-color));
   display: flex;
   justify-content: flex-end;
   gap: $spacing-sm;
-  background: var(--bg-primary);
+  background: var(--floating-surface, var(--bg-primary));
 }
 
 @media (max-width: $breakpoint-mobile) {

@@ -454,13 +454,14 @@ const modelEfficiencyTooltipPointerPlugin: Plugin<'scatter'> = {
   id: 'analysis-model-efficiency-tooltip-pointer',
   beforeEvent: (chart, args) => {
     const { event } = args;
+    const key = chart as unknown as Chart;
     if (event.type === 'mouseout') {
-      modelEfficiencyTooltipPointers.delete(chart);
+      modelEfficiencyTooltipPointers.delete(key);
       return;
     }
     const pointer = getChartTooltipPointer(event);
     if (!pointer) return;
-    modelEfficiencyTooltipPointers.set(chart, pointer);
+    modelEfficiencyTooltipPointers.set(key, pointer);
   },
 };
 

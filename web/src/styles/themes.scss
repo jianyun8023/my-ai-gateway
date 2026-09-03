@@ -78,6 +78,11 @@
   --radius-md: 8px;
   --accent-tertiary: var(--bg-tertiary);
 
+  // Accent fallback: gateway console overrides --accent to green in .app-frame/.shell;
+  // Portal-rendered modals live at body and need a valid :root fallback.
+  --accent: var(--primary-color);
+  --accent-soft: color-mix(in srgb, var(--primary-color) 14%, transparent);
+
   // Glass effect (blurred surfaces)
   --glass-blur: 12px;
   --glass-backdrop-filter: blur(var(--glass-blur));
@@ -142,6 +147,9 @@
 
   --radius-md: 8px;
   --accent-tertiary: var(--bg-tertiary);
+
+  --accent: var(--primary-color);
+  --accent-soft: color-mix(in srgb, var(--primary-color) 14%, transparent);
 }
 
 // 深色主题（#191919）
@@ -200,6 +208,9 @@
 
   --radius-md: 8px;
   --accent-tertiary: var(--bg-tertiary);
+
+  --accent: var(--primary-color);
+  --accent-soft: color-mix(in srgb, var(--primary-color) 14%, transparent);
 
   --glass-border: color-mix(in srgb, var(--border-color) 55%, transparent);
 }
