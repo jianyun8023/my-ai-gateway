@@ -26,6 +26,7 @@ use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use std::{
     collections::HashMap,
     str::FromStr,
+    sync::atomic::{AtomicUsize, Ordering},
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -290,12 +291,13 @@ async fn primary_account_model_map_is_applied_for_all_three_protocols() {
 async fn retryable_primary_response_uses_mapped_fallback_after_primary() {
     let (base_url, recorded) = spawn_upstream(|request| {
         let status = if request.authorization.as_deref() == Some("Bearer primary-secret") {
-            StatusCode::SERVICE_UNAVAILABLE
+            StatusCode::TOO_MANY_REQUESTS
         } else {
             StatusCode::OK
         };
         Response::builder()
             .status(status)
+            .header(header::RETRY_AFTER, "0")
             .header(header::CONTENT_TYPE, "application/json")
             .body(Body::from(format!(r#"{{"status":{}}}"#, status.as_u16())))
             .unwrap()
@@ -334,6 +336,90 @@ async fn retryable_primary_response_uses_mapped_fallback_after_primary() {
         recorded[1].authorization.as_deref(),
         Some("Bearer fallback-secret")
     );
+}
+
+#[tokio::test]
+async fn short_retry_after_retries_same_account_once_when_no_fallback_exists() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let (base_url, recorded) = spawn_upstream({
+        let calls = calls.clone();
+        move |_| {
+            let call = calls.fetch_add(1, Ordering::SeqCst);
+            if call == 0 {
+                return Response::builder()
+                    .status(StatusCode::TOO_MANY_REQUESTS)
+                    .header(header::RETRY_AFTER, "0")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"error":"rate limited"}"#))
+                    .unwrap();
+            }
+            Response::builder()
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"id":"recovered"}"#))
+                .unwrap()
+        }
+    })
+    .await;
+    let config = GatewayConfig {
+        listen_addr: "127.0.0.1:0".into(),
+        providers: vec![provider(base_url)],
+        accounts: vec![account("primary", "primary-secret", "primary-upstream")],
+        routes: vec![route(Protocol::OpenAiChatCompletions, false)],
+    };
+
+    let response = proxy_fn(
+        state(config, None),
+        static_auth_headers(),
+        Bytes::from_static(
+            br#"{"model":"logical-model","messages":[{"role":"user","content":"hello"}]}"#,
+        ),
+        Protocol::OpenAiChatCompletions,
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    drain(response).await;
+    let recorded = recorded.lock().unwrap();
+    assert_eq!(recorded.len(), 2);
+    assert!(recorded
+        .iter()
+        .all(|request| request.authorization.as_deref() == Some("Bearer primary-secret")));
+    assert!(recorded
+        .iter()
+        .all(|request| request.body["model"] == "primary-upstream"));
+}
+
+#[tokio::test]
+async fn long_retry_after_is_not_retried_on_the_same_account() {
+    let (base_url, recorded) = spawn_upstream(|_| {
+        Response::builder()
+            .status(StatusCode::TOO_MANY_REQUESTS)
+            .header(header::RETRY_AFTER, "3")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(r#"{"error":"rate limited"}"#))
+            .unwrap()
+    })
+    .await;
+    let config = GatewayConfig {
+        listen_addr: "127.0.0.1:0".into(),
+        providers: vec![provider(base_url)],
+        accounts: vec![account("primary", "primary-secret", "primary-upstream")],
+        routes: vec![route(Protocol::OpenAiChatCompletions, false)],
+    };
+
+    let response = proxy_fn(
+        state(config, None),
+        static_auth_headers(),
+        Bytes::from_static(
+            br#"{"model":"logical-model","messages":[{"role":"user","content":"hello"}]}"#,
+        ),
+        Protocol::OpenAiChatCompletions,
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+    drain(response).await;
+    assert_eq!(recorded.lock().unwrap().len(), 1);
 }
 
 #[tokio::test]
@@ -654,7 +740,11 @@ async fn postgres_db_first_source_attribution_covers_primary_fallback_stream_and
     let config = GatewayConfig {
         listen_addr: "127.0.0.1:0".into(),
         providers: vec![
-            named_provider("source-primary", primary_url, &["logical-model"]),
+            named_provider(
+                "source-primary",
+                primary_url,
+                &["logical-model", "solo-model"],
+            ),
             named_provider(
                 "source-fallback",
                 fallback_url,
@@ -680,7 +770,10 @@ async fn postgres_db_first_source_attribution_covers_primary_fallback_stream_and
             named_account(
                 "primary-account",
                 "source-primary",
-                &[("logical-model", "primary-upstream")],
+                &[
+                    ("logical-model", "primary-upstream"),
+                    ("solo-model", "solo-upstream"),
+                ],
             ),
             named_account(
                 "fallback-account",
@@ -728,6 +821,18 @@ async fn postgres_db_first_source_attribution_covers_primary_fallback_stream_and
                 "failed-primary-account",
                 "failed-fallback-account",
             ),
+            config::RouteConfig {
+                id: "solo-route".into(),
+                model: "solo-model".into(),
+                provider_id: "source-primary".into(),
+                protocols: vec![Protocol::OpenAiResponses],
+                primary_account_id: "primary-account".into(),
+                fallback_accounts: Vec::new(),
+                strategy: "primary_then_weighted_fallback".into(),
+                mode: "native".into(),
+                adapter: None,
+                allow_lossy_conversion: false,
+            },
         ],
     };
     let control_plane = control_plane::ControlPlane::with_url_policy(
@@ -768,7 +873,11 @@ async fn postgres_db_first_source_attribution_covers_primary_fallback_stream_and
         http: http::test_client().expect("runtime HTTP client"),
         db: Some(database.clone()),
         control_plane: None,
-        health: health::HealthRegistry::new(Duration::from_secs(30)),
+        health: health::HealthRegistry::with_config(health::HealthConfig {
+            cooldown: Duration::from_secs(30),
+            failure_threshold: 1,
+            ..health::HealthConfig::default()
+        }),
         admin_auth: AdminAuth::test(),
         secrets: secrets::SecretResolver::empty(),
         prometheus_handle: observability::prometheus_handle(),
@@ -831,6 +940,16 @@ async fn postgres_db_first_source_attribution_covers_primary_fallback_stream_and
     assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
     drain(response).await;
 
+    let response = runtime_request(
+        &state,
+        &virtual_key,
+        "client-cooldown-no-fallback",
+        json!({"model":"solo-model","input":"hello"}),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    drain(response).await;
+
     let filter = db::UsageFilter {
         virtual_key_id: Some(virtual_key_id),
         ..Default::default()
@@ -843,12 +962,12 @@ async fn postgres_db_first_source_attribution_covers_primary_fallback_stream_and
                 .await
                 .expect("query runtime usage events")
                 .data;
-            if found.len() == 5 {
+            if found.len() == 6 {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        assert_eq!(found.len(), 5, "all runtime usage events were persisted");
+        assert_eq!(found.len(), 6, "all runtime usage events were persisted");
         found
     };
     let events = events
@@ -918,6 +1037,21 @@ async fn postgres_db_first_source_attribution_covers_primary_fallback_stream_and
         Some("source-fallback")
     );
 
+    let blocked = &events["client-cooldown-no-fallback"];
+    assert_eq!(blocked.status_code, 503);
+    assert!(!blocked.success);
+    assert_eq!(blocked.account_id, "primary-account");
+    assert_eq!(blocked.retry_count, 0);
+    assert_eq!(
+        blocked.fallback_reason.as_deref(),
+        Some("account_cooling_down")
+    );
+    assert!(database
+        .list_attempts_for_event(&blocked.request_id)
+        .await
+        .expect("query blocked request attempts")
+        .is_empty());
+
     let transport = &events["client-transport-fallback"];
     assert_eq!(transport.provider_id, "deepseek");
     assert_eq!(transport.source_id.as_deref(), Some("source-fallback"));
@@ -979,7 +1113,7 @@ async fn postgres_db_first_source_attribution_covers_primary_fallback_stream_and
         .into_iter()
         .map(|row| (row.key.expect("Provider key"), row.logical_requests))
         .collect::<HashMap<_, _>>();
-    assert_eq!(provider_breakdown.get("deepseek"), Some(&4));
+    assert_eq!(provider_breakdown.get("deepseek"), Some(&5));
     assert_eq!(provider_breakdown.get("minimax"), Some(&1));
     let source_breakdown = database
         .usage_breakdown(&filter, "source_id")
@@ -988,7 +1122,7 @@ async fn postgres_db_first_source_attribution_covers_primary_fallback_stream_and
         .into_iter()
         .map(|row| (row.key.expect("Source key"), row.logical_requests))
         .collect::<HashMap<_, _>>();
-    assert_eq!(source_breakdown.get("source-primary"), Some(&1));
+    assert_eq!(source_breakdown.get("source-primary"), Some(&2));
     assert_eq!(source_breakdown.get("source-fallback"), Some(&3));
     assert_eq!(source_breakdown.get("source-failed-fallback"), Some(&1));
     let combined = db::UsageFilter {

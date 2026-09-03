@@ -553,12 +553,12 @@ CPA Usage Keeper 只复用 React 页面和交互，不复用其 Go 后端、SQLi
 
 - `unknown`：没有观测或人工重新启用；
 - `healthy`：路由请求或 ProviderPreset 连接探测成功；
-- `cooling_down`：408、429、5xx 或传输错误触发指数退避；
-- `unhealthy`：cooldown 到期但尚未成功恢复；
+- `cooling_down`：失败窗口达到阈值后触发指数退避；
+- `unhealthy`：窗口内尚未达到阈值，或 cooldown 到期但尚未成功恢复；
 - `stale`：`health_updated_at` 达到阈值，旧 cooldown 只作提示而不会永久屏蔽账号；
 - `disabled`：Account 或 Source 被人工停用。
 
-所有转换以 UTC 观测时间写入，行级锁保证并发失败计数不丢失；成功会清零连续失败和 cooldown，新的 `HealthRegistry` 直接读取数据库恢复重启前状态。固定首选保持优先，只有失败、不可用或人工停用才进入 fallback。`POST /admin/accounts/:account_id/probe`、`POST /admin/health/probe` 和批量接口复用 ProviderPreset 最小连接测试，不调用 discovery；探测沿用 Source URL allowlist、DNS、重定向和凭据策略。周期任务默认每 60 秒运行，可由环境变量关闭或调整。
+所有转换以 UTC 观测时间写入，行级锁保证并发失败计数不丢失。默认在 60 秒内累计 3 次可重试失败才开启冷却，第三次采用 base cooldown；活跃 cooldown 内完成的并发请求不会继续放大退避。成功会清零失败窗口、连续失败和 cooldown，新的 `HealthRegistry` 直接读取数据库恢复重启前状态。固定首选保持优先，只有冷却、不可用或人工停用才进入 fallback；无 fallback 时只对带短 `Retry-After` 的 429 做一次同账号重试。`POST /admin/accounts/:account_id/probe`、`POST /admin/health/probe` 和批量接口复用 ProviderPreset 最小连接测试，不调用 discovery；探测沿用 Source URL allowlist、DNS、重定向和凭据策略，并在 cooldown 内按正常周期作为半开恢复探测。周期任务默认每 60 秒运行，可由环境变量关闭或调整。
 
 生产化剩余范围均有独立 Issue：
 

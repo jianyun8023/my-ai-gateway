@@ -22,6 +22,8 @@ use super::stream;
 use super::transport;
 use super::usage;
 
+const MAX_SAME_ACCOUNT_RETRY_AFTER: Duration = Duration::from_secs(2);
+
 #[tracing::instrument(name = "gateway.proxy", skip_all, fields(
     otel.kind = "server",
     request_id,
@@ -171,23 +173,55 @@ pub(crate) async fn proxy(
         let Some(candidate) =
             select_fallback_candidate(&config, &state.health, &route, model, protocol).await
         else {
-            return finish_proxy(
+            let response = data_plane_error_response(
                 protocol,
-                model,
-                started,
-                is_streamed,
-                data_plane_error_response(
-                    protocol,
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    if account.enabled {
-                        "account_cooling_down"
-                    } else {
-                        "account_disabled"
-                    },
-                    "primary account is unavailable and no fallback succeeded",
-                    &request_id,
-                ),
+                StatusCode::SERVICE_UNAVAILABLE,
+                if account.enabled {
+                    "account_cooling_down"
+                } else {
+                    "account_disabled"
+                },
+                "primary account is unavailable and no fallback succeeded",
+                &request_id,
             );
+            if let Some(database) = &state.db {
+                let event = db::UsageEvent {
+                    request_id: request_id.clone(),
+                    virtual_key_id,
+                    provider_id: route.provider_id.clone(),
+                    account_id: account.id.clone(),
+                    model: model.to_string(),
+                    logical_model: model.to_string(),
+                    upstream_model_id: Some(route.upstream_model_id.clone()),
+                    source_id: route.source_id.clone(),
+                    client_source: client_source_from_headers(&headers),
+                    protocol_in: protocol.to_string(),
+                    protocol_upstream: route.protocol_upstream.to_string(),
+                    mode: route.mode.clone(),
+                    status_code: StatusCode::SERVICE_UNAVAILABLE.as_u16() as i32,
+                    success: false,
+                    retry_count: 0,
+                    latency_ms: started.elapsed().as_millis() as i64,
+                    ttft_ms: None,
+                    input_tokens: 0,
+                    output_tokens: 0,
+                    reasoning_tokens: 0,
+                    cached_tokens: 0,
+                    cache_read_tokens: 0,
+                    cache_creation_tokens: 0,
+                    total_tokens: 0,
+                    usage_source: "missing".into(),
+                    degraded: route.is_degraded(),
+                    route_id: Some(route.route_id.clone()),
+                    streamed: is_streamed,
+                    error_summary: Some("HTTP 503".into()),
+                    fallback_reason: fallback_reason.clone(),
+                };
+                if let Err(error) = database.insert_usage_with_attempts(&event, &[]).await {
+                    tracing::warn!(%error, "failed to persist usage event");
+                }
+            }
+            return finish_proxy(protocol, model, started, is_streamed, response);
         };
         if !route.is_degraded() && !candidate.degraded_features.is_empty() {
             warn_degraded_features(&request_id, &route.route_id, &candidate.degraded_features);
@@ -375,6 +409,9 @@ pub(crate) async fn proxy(
     let mut attempts = Vec::new();
     let response = match result {
         Ok(response) if is_retryable(response.status()) => {
+            let retry_after = (response.status() == StatusCode::TOO_MANY_REQUESTS)
+                .then(|| retry_after_delay(response.headers()))
+                .flatten();
             attempts.push(db::UsageAttempt {
                 attempt_no: 0,
                 provider_id: route.provider_id.clone(),
@@ -393,23 +430,97 @@ pub(crate) async fn proxy(
                 response.status(),
             )
             .await;
-            let (response, mut fallback_attempts) = try_fallback(
-                &config,
-                &state.secrets,
-                &state.health,
-                &state.http,
-                &route,
-                model,
-                protocol,
-                &headers,
-                body,
-                response,
-                &stream_config,
-                started,
-            )
-            .await;
-            attempts.append(&mut fallback_attempts);
-            response
+            let fallback_available =
+                select_fallback_candidate(&config, &state.health, &route, model, protocol)
+                    .await
+                    .is_some();
+            if let Some(delay) = retry_after.filter(|_| !fallback_available) {
+                tokio::time::sleep(delay).await;
+                let retry_started = Instant::now();
+                let retry_request =
+                    transport::prepare_model_request(&body, model, &primary_upstream_model);
+                match forward_account(
+                    &config,
+                    &state.secrets,
+                    &state.http,
+                    &route,
+                    provider,
+                    account,
+                    &headers,
+                    retry_request.body,
+                    &stream_config,
+                    started,
+                )
+                .await
+                {
+                    Ok(retry_response) => {
+                        attempts.push(db::UsageAttempt {
+                            attempt_no: 1,
+                            provider_id: route.provider_id.clone(),
+                            source_id: route.source_id.clone(),
+                            account_id: account.id.clone(),
+                            upstream_model_id: Some(retry_request.upstream_model_id),
+                            status_code: retry_response.status().as_u16() as i32,
+                            success: retry_response.status().is_success(),
+                            latency_ms: retry_started.elapsed().as_millis() as i64,
+                        });
+                        record_response_health(
+                            &state.health,
+                            &route.source_id,
+                            &account.id,
+                            retry_response.status(),
+                        )
+                        .await;
+                        retry_response
+                    }
+                    Err(error) => {
+                        attempts.push(db::UsageAttempt {
+                            attempt_no: 1,
+                            provider_id: route.provider_id.clone(),
+                            source_id: route.source_id.clone(),
+                            account_id: account.id.clone(),
+                            upstream_model_id: Some(retry_request.upstream_model_id),
+                            status_code: error.status_code(),
+                            success: false,
+                            latency_ms: retry_started.elapsed().as_millis() as i64,
+                        });
+                        state
+                            .health
+                            .mark_failure_with_details(
+                                &account.id,
+                                "passive",
+                                Some("upstream_transport_error"),
+                                Some("upstream request failed"),
+                            )
+                            .await;
+                        data_plane_error_response(
+                            protocol,
+                            transport_error_status(&error),
+                            "upstream_request_failed",
+                            error.message(),
+                            &request_id,
+                        )
+                    }
+                }
+            } else {
+                let (response, mut fallback_attempts) = try_fallback(
+                    &config,
+                    &state.secrets,
+                    &state.health,
+                    &state.http,
+                    &route,
+                    model,
+                    protocol,
+                    &headers,
+                    body,
+                    response,
+                    &stream_config,
+                    started,
+                )
+                .await;
+                attempts.append(&mut fallback_attempts);
+                response
+            }
         }
         Ok(response) => {
             attempts.push(db::UsageAttempt {
@@ -1386,6 +1497,22 @@ fn is_retryable(status: StatusCode) -> bool {
         || status.is_server_error()
 }
 
+fn retry_after_delay(headers: &HeaderMap) -> Option<Duration> {
+    let value = headers.get("retry-after")?.to_str().ok()?.trim();
+    let delay = if let Ok(seconds) = value.parse::<u64>() {
+        Duration::from_secs(seconds)
+    } else {
+        let retry_at = chrono::DateTime::parse_from_rfc2822(value)
+            .ok()?
+            .with_timezone(&chrono::Utc);
+        retry_at
+            .signed_duration_since(chrono::Utc::now())
+            .to_std()
+            .ok()?
+    };
+    (delay <= MAX_SAME_ACCOUNT_RETRY_AFTER).then_some(delay)
+}
+
 fn transport_error_status(error: &transport::TransportError) -> StatusCode {
     if matches!(error, transport::TransportError::Timeout(_)) {
         StatusCode::GATEWAY_TIMEOUT
@@ -1401,9 +1528,8 @@ async fn record_response_health(
     status: StatusCode,
 ) {
     if is_retryable(status) {
-        observability::record_cooldown(source_id, account_id);
         let code = format!("upstream_http_{}", status.as_u16());
-        health
+        let cooldown_started = health
             .mark_failure_with_details(
                 account_id,
                 "passive",
@@ -1411,6 +1537,9 @@ async fn record_response_health(
                 Some("retryable upstream response"),
             )
             .await;
+        if cooldown_started {
+            observability::record_cooldown(source_id, account_id);
+        }
     } else if status.is_success() {
         health.mark_success(account_id).await;
     }
@@ -1418,11 +1547,28 @@ async fn record_response_health(
 
 #[cfg(test)]
 mod tests {
-    use super::{client_source_from_headers, known_client_user_agent};
+    use std::time::Duration;
+
+    use super::{
+        client_source_from_headers, known_client_user_agent, retry_after_delay,
+        MAX_SAME_ACCOUNT_RETRY_AFTER,
+    };
     use axum::http::{HeaderMap, HeaderValue};
 
     fn header(headers: &mut HeaderMap, name: &'static str, value: &str) {
         headers.insert(name, HeaderValue::from_str(value).unwrap());
+    }
+
+    #[test]
+    fn retry_after_accepts_only_short_valid_delays() {
+        let mut headers = HeaderMap::new();
+        header(&mut headers, "retry-after", "2");
+        assert_eq!(retry_after_delay(&headers), Some(Duration::from_secs(2)));
+        header(&mut headers, "retry-after", "3");
+        assert_eq!(retry_after_delay(&headers), None);
+        header(&mut headers, "retry-after", "invalid");
+        assert_eq!(retry_after_delay(&headers), None);
+        assert_eq!(MAX_SAME_ACCOUNT_RETRY_AFTER, Duration::from_secs(2));
     }
 
     #[test]

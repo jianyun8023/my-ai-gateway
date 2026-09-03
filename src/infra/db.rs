@@ -23,6 +23,7 @@ pub struct AccountHealthRow {
     pub health_source: String,
     pub cooldown_until: Option<DateTime<Utc>>,
     pub consecutive_failures: i32,
+    pub failure_window_started_at: Option<DateTime<Utc>>,
     pub last_error: Option<String>,
     pub last_success_at: Option<DateTime<Utc>>,
     pub health_updated_at: Option<DateTime<Utc>>,
@@ -341,9 +342,9 @@ pub struct UsageEventPage {
     pub has_more: bool,
 }
 
-const HEALTH_SELECT_ONE: &str = "SELECT a.id AS account_id,a.enabled,s.enabled AS source_enabled,a.health_status,a.health_source,a.cooldown_until,a.consecutive_failures,a.last_error,a.last_success_at,a.health_updated_at,a.last_probe_at,a.last_probe_status,a.last_probe_error,a.updated_at AS account_updated_at FROM accounts a JOIN sources s ON s.id=a.source_id WHERE a.id=$1";
-const HEALTH_SELECT_ONE_FOR_UPDATE: &str = "SELECT a.id AS account_id,a.enabled,s.enabled AS source_enabled,a.health_status,a.health_source,a.cooldown_until,a.consecutive_failures,a.last_error,a.last_success_at,a.health_updated_at,a.last_probe_at,a.last_probe_status,a.last_probe_error,a.updated_at AS account_updated_at FROM accounts a JOIN sources s ON s.id=a.source_id WHERE a.id=$1 FOR UPDATE OF a";
-const HEALTH_SELECT_ALL: &str = "SELECT a.id AS account_id,a.enabled,s.enabled AS source_enabled,a.health_status,a.health_source,a.cooldown_until,a.consecutive_failures,a.last_error,a.last_success_at,a.health_updated_at,a.last_probe_at,a.last_probe_status,a.last_probe_error,a.updated_at AS account_updated_at FROM accounts a JOIN sources s ON s.id=a.source_id ORDER BY a.id";
+const HEALTH_SELECT_ONE: &str = "SELECT a.id AS account_id,a.enabled,s.enabled AS source_enabled,a.health_status,a.health_source,a.cooldown_until,a.consecutive_failures,a.failure_window_started_at,a.last_error,a.last_success_at,a.health_updated_at,a.last_probe_at,a.last_probe_status,a.last_probe_error,a.updated_at AS account_updated_at FROM accounts a JOIN sources s ON s.id=a.source_id WHERE a.id=$1";
+const HEALTH_SELECT_ONE_FOR_UPDATE: &str = "SELECT a.id AS account_id,a.enabled,s.enabled AS source_enabled,a.health_status,a.health_source,a.cooldown_until,a.consecutive_failures,a.failure_window_started_at,a.last_error,a.last_success_at,a.health_updated_at,a.last_probe_at,a.last_probe_status,a.last_probe_error,a.updated_at AS account_updated_at FROM accounts a JOIN sources s ON s.id=a.source_id WHERE a.id=$1 FOR UPDATE OF a";
+const HEALTH_SELECT_ALL: &str = "SELECT a.id AS account_id,a.enabled,s.enabled AS source_enabled,a.health_status,a.health_source,a.cooldown_until,a.consecutive_failures,a.failure_window_started_at,a.last_error,a.last_success_at,a.health_updated_at,a.last_probe_at,a.last_probe_status,a.last_probe_error,a.updated_at AS account_updated_at FROM accounts a JOIN sources s ON s.id=a.source_id ORDER BY a.id";
 
 fn normalize_health_source(source: &str) -> &str {
     match source {
@@ -504,6 +505,11 @@ impl Database {
         ))
         .execute(&mut *tx)
         .await?;
+        sqlx::raw_sql(include_str!(
+            "../../migrations/0022_health_failure_window.sql"
+        ))
+        .execute(&mut *tx)
+        .await?;
         tx.commit().await
     }
 
@@ -594,12 +600,14 @@ impl Database {
         observed_at: DateTime<Utc>,
         base_cooldown: Duration,
         max_cooldown: Duration,
+        failure_threshold: u32,
+        failure_window: Duration,
         source: &str,
         error_code: Option<&str>,
         error_message: Option<&str>,
         latency_ms: Option<i64>,
         connection_test_id: Option<i64>,
-    ) -> Result<AccountHealthRow, sqlx::Error> {
+    ) -> Result<(AccountHealthRow, bool), sqlx::Error> {
         let source = normalize_health_source(source);
         let mut tx = self.pool.begin().await?;
         let current = sqlx::query_as::<_, AccountHealthRow>(HEALTH_SELECT_ONE_FOR_UPDATE)
@@ -609,19 +617,54 @@ impl Database {
             .ok_or(sqlx::Error::RowNotFound)?;
         if !current.enabled || !current.source_enabled {
             tx.commit().await?;
-            return Ok(current);
+            return Ok((current, false));
         }
-        let failures = current.consecutive_failures.max(0) as u32 + 1;
-        let delay = exponential_backoff(base_cooldown, max_cooldown, failures);
-        let cooldown_until = observed_at
-            + chrono::Duration::from_std(delay).unwrap_or_else(|_| chrono::Duration::zero());
-        let status = if current.enabled {
-            "cooling_down"
+        let active_cooldown = current
+            .cooldown_until
+            .is_some_and(|until| until > observed_at);
+        let window_expired = current.failure_window_started_at.is_none_or(|started_at| {
+            observed_at
+                .signed_duration_since(started_at)
+                .to_std()
+                .map(|elapsed| elapsed > failure_window)
+                .unwrap_or(true)
+        });
+        let (failures, failure_window_started_at, cooldown_until, status) = if active_cooldown {
+            (
+                current.consecutive_failures.max(0) as u32,
+                current.failure_window_started_at,
+                current.cooldown_until,
+                "cooling_down",
+            )
         } else {
-            "disabled"
+            let failures = if window_expired {
+                1
+            } else {
+                current.consecutive_failures.max(0) as u32 + 1
+            };
+            let failure_window_started_at = if window_expired {
+                Some(observed_at)
+            } else {
+                current.failure_window_started_at
+            };
+            if failures >= failure_threshold {
+                let breaker_failures = failures - failure_threshold + 1;
+                let delay = exponential_backoff(base_cooldown, max_cooldown, breaker_failures);
+                let until = observed_at
+                    + chrono::Duration::from_std(delay)
+                        .unwrap_or_else(|_| chrono::Duration::zero());
+                (
+                    failures,
+                    failure_window_started_at,
+                    Some(until),
+                    "cooling_down",
+                )
+            } else {
+                (failures, failure_window_started_at, None, "unhealthy")
+            }
         };
         sqlx::query(
-            "UPDATE accounts SET health_status=$2,cooldown_until=$3,last_error=$4,last_success_at=NULL,health_source=$5,health_updated_at=$6,consecutive_failures=$7,last_probe_at=CASE WHEN $5='probe' THEN $6 ELSE last_probe_at END,last_probe_status=CASE WHEN $5='probe' THEN 'failed' ELSE last_probe_status END,last_probe_error=CASE WHEN $5='probe' THEN $4 ELSE last_probe_error END WHERE id=$1",
+            "UPDATE accounts SET health_status=$2,cooldown_until=$3,last_error=$4,last_success_at=NULL,health_source=$5,health_updated_at=$6,consecutive_failures=$7,failure_window_started_at=$8,last_probe_at=CASE WHEN $5='probe' THEN $6 ELSE last_probe_at END,last_probe_status=CASE WHEN $5='probe' THEN 'failed' ELSE last_probe_status END,last_probe_error=CASE WHEN $5='probe' THEN $4 ELSE last_probe_error END WHERE id=$1",
         )
         .bind(account_id)
         .bind(status)
@@ -630,6 +673,7 @@ impl Database {
         .bind(source)
         .bind(observed_at)
         .bind(i32::try_from(failures).unwrap_or(i32::MAX))
+        .bind(failure_window_started_at)
         .execute(&mut *tx)
         .await?;
         sqlx::query(
@@ -647,10 +691,13 @@ impl Database {
         .bind(latency_ms)
         .execute(&mut *tx)
         .await?;
+        let cooldown_started = !active_cooldown && cooldown_until.is_some();
         tx.commit().await?;
-        self.account_health(account_id)
+        let health = self
+            .account_health(account_id)
             .await?
-            .ok_or(sqlx::Error::RowNotFound)
+            .ok_or(sqlx::Error::RowNotFound)?;
+        Ok((health, cooldown_started))
     }
 
     pub async fn record_account_health_success(
@@ -678,7 +725,7 @@ impl Database {
             "disabled"
         };
         sqlx::query(
-            "UPDATE accounts SET health_status=$2,cooldown_until=NULL,last_error=NULL,last_success_at=$3,health_source=$4,health_updated_at=$3,consecutive_failures=0,last_probe_at=CASE WHEN $4='probe' THEN $3 ELSE last_probe_at END,last_probe_status=CASE WHEN $4='probe' THEN 'succeeded' ELSE last_probe_status END,last_probe_error=CASE WHEN $4='probe' THEN NULL ELSE last_probe_error END WHERE id=$1",
+            "UPDATE accounts SET health_status=$2,cooldown_until=NULL,last_error=NULL,last_success_at=$3,health_source=$4,health_updated_at=$3,consecutive_failures=0,failure_window_started_at=NULL,last_probe_at=CASE WHEN $4='probe' THEN $3 ELSE last_probe_at END,last_probe_status=CASE WHEN $4='probe' THEN 'succeeded' ELSE last_probe_status END,last_probe_error=CASE WHEN $4='probe' THEN NULL ELSE last_probe_error END WHERE id=$1",
         )
         .bind(account_id)
         .bind(status)

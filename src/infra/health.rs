@@ -20,6 +20,8 @@ pub const DEFAULT_COOLDOWN: Duration = Duration::from_secs(30);
 pub const DEFAULT_MAX_COOLDOWN: Duration = Duration::from_secs(30 * 60);
 pub const DEFAULT_STALE_AFTER: Duration = Duration::from_secs(10 * 60);
 pub const DEFAULT_PROBE_INTERVAL: Duration = Duration::from_secs(60);
+pub const DEFAULT_FAILURE_THRESHOLD: u32 = 3;
+pub const DEFAULT_FAILURE_WINDOW: Duration = Duration::from_secs(60);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct HealthConfig {
@@ -27,6 +29,8 @@ pub struct HealthConfig {
     pub max_cooldown: Duration,
     pub stale_after: Duration,
     pub probe_interval: Duration,
+    pub failure_threshold: u32,
+    pub failure_window: Duration,
 }
 
 impl Default for HealthConfig {
@@ -36,6 +40,8 @@ impl Default for HealthConfig {
             max_cooldown: DEFAULT_MAX_COOLDOWN,
             stale_after: DEFAULT_STALE_AFTER,
             probe_interval: DEFAULT_PROBE_INTERVAL,
+            failure_threshold: DEFAULT_FAILURE_THRESHOLD,
+            failure_window: DEFAULT_FAILURE_WINDOW,
         }
     }
 }
@@ -51,6 +57,14 @@ impl HealthConfig {
                 "GATEWAY_HEALTH_PROBE_INTERVAL_SECS",
                 defaults.probe_interval,
             ),
+            failure_threshold: env_u32(
+                "GATEWAY_HEALTH_FAILURE_THRESHOLD",
+                defaults.failure_threshold,
+            ),
+            failure_window: env_duration_secs(
+                "GATEWAY_HEALTH_FAILURE_WINDOW_SECS",
+                defaults.failure_window,
+            ),
         }
     }
 
@@ -61,8 +75,17 @@ impl HealthConfig {
             max_cooldown: self.max_cooldown.max(cooldown),
             stale_after: self.stale_after.max(Duration::from_millis(1)),
             probe_interval: self.probe_interval.max(Duration::from_millis(1)),
+            failure_threshold: self.failure_threshold.max(1),
+            failure_window: self.failure_window.max(Duration::from_millis(1)),
         }
     }
+}
+
+fn env_u32(name: &str, default: u32) -> u32 {
+    std::env::var(name)
+        .ok()
+        .and_then(|value| value.parse::<u32>().ok())
+        .unwrap_or(default)
 }
 
 fn env_duration_ms(name: &str, default: Duration) -> Duration {
@@ -149,6 +172,7 @@ struct MemoryAccountState {
     source: String,
     cooldown_until: Option<DateTime<Utc>>,
     consecutive_failures: u32,
+    failure_window_started_at: Option<DateTime<Utc>>,
     updated_at: Option<DateTime<Utc>>,
     last_error: Option<String>,
     last_success_at: Option<DateTime<Utc>>,
@@ -339,14 +363,16 @@ impl HealthRegistry {
         source: &str,
         error_code: Option<&str>,
         error_message: Option<&str>,
-    ) {
+    ) -> bool {
         if let Some(database) = &self.database {
-            if let Err(error) = database
+            return match database
                 .record_account_health_failure(
                     account_id,
                     self.now(),
                     self.config.cooldown,
                     self.config.max_cooldown,
+                    self.config.failure_threshold,
+                    self.config.failure_window,
                     source,
                     error_code,
                     error_message,
@@ -355,12 +381,15 @@ impl HealthRegistry {
                 )
                 .await
             {
-                tracing::warn!(account_id, %error, "failed to persist account health failure");
-            }
-            return;
+                Ok((_, cooldown_started)) => cooldown_started,
+                Err(error) => {
+                    tracing::warn!(account_id, %error, "failed to persist account health failure");
+                    false
+                }
+            };
         }
         self.mark_memory_failure(account_id, source, error_message)
-            .await;
+            .await
     }
 
     async fn mark_probe_failure(
@@ -378,6 +407,8 @@ impl HealthRegistry {
                     self.now(),
                     self.config.cooldown,
                     self.config.max_cooldown,
+                    self.config.failure_threshold,
+                    self.config.failure_window,
                     "probe",
                     error_code,
                     error_message,
@@ -399,7 +430,7 @@ impl HealthRegistry {
         account_id: &str,
         source: &str,
         error_message: Option<&str>,
-    ) {
+    ) -> bool {
         let now = self.now();
         let mut state = self.state.lock().await;
         let entry = state
@@ -409,6 +440,7 @@ impl HealthRegistry {
                 source: "unknown".into(),
                 cooldown_until: None,
                 consecutive_failures: 0,
+                failure_window_started_at: None,
                 updated_at: None,
                 last_error: None,
                 last_success_at: None,
@@ -417,15 +449,40 @@ impl HealthRegistry {
                 last_probe_error: None,
                 enabled: true,
             });
-        entry.consecutive_failures = entry.consecutive_failures.saturating_add(1);
-        let delay = exponential_backoff(
-            self.config.cooldown,
-            self.config.max_cooldown,
-            entry.consecutive_failures,
-        );
-        entry.cooldown_until = Some(now + ChronoDuration::from_std(delay).unwrap_or_default());
-        entry.status = if entry.enabled {
+        let active_cooldown = entry.cooldown_until.is_some_and(|until| until > now);
+        let mut cooldown_started = false;
+        if !active_cooldown {
+            let window_expired = entry.failure_window_started_at.is_none_or(|started_at| {
+                now.signed_duration_since(started_at)
+                    .to_std()
+                    .map(|elapsed| elapsed > self.config.failure_window)
+                    .unwrap_or(true)
+            });
+            if window_expired {
+                entry.consecutive_failures = 1;
+                entry.failure_window_started_at = Some(now);
+            } else {
+                entry.consecutive_failures = entry.consecutive_failures.saturating_add(1);
+            }
+            if entry.consecutive_failures >= self.config.failure_threshold {
+                let breaker_failures =
+                    entry.consecutive_failures - self.config.failure_threshold + 1;
+                let delay = exponential_backoff(
+                    self.config.cooldown,
+                    self.config.max_cooldown,
+                    breaker_failures,
+                );
+                entry.cooldown_until =
+                    Some(now + ChronoDuration::from_std(delay).unwrap_or_default());
+                cooldown_started = true;
+            } else {
+                entry.cooldown_until = None;
+            }
+        }
+        entry.status = if entry.enabled && entry.cooldown_until.is_some_and(|until| until > now) {
             "cooling_down"
+        } else if entry.enabled {
+            "unhealthy"
         } else {
             "disabled"
         }
@@ -439,6 +496,7 @@ impl HealthRegistry {
             entry.last_probe_status = Some("failed".into());
             entry.last_probe_error = sanitize_error(error_message);
         }
+        cooldown_started
     }
 
     pub async fn mark_success(&self, account_id: &str) {
@@ -477,6 +535,7 @@ impl HealthRegistry {
                 source: "unknown".into(),
                 cooldown_until: None,
                 consecutive_failures: 0,
+                failure_window_started_at: None,
                 updated_at: None,
                 last_error: None,
                 last_success_at: None,
@@ -489,6 +548,7 @@ impl HealthRegistry {
         entry.source = normalize_source(source).into();
         entry.cooldown_until = None;
         entry.consecutive_failures = 0;
+        entry.failure_window_started_at = None;
         entry.updated_at = Some(now);
         entry.last_error = None;
         entry.last_success_at = Some(now);
@@ -793,7 +853,14 @@ mod tests {
     #[tokio::test]
     async fn passive_failures_use_exponential_backoff_and_recover() {
         let clock = clock();
-        let registry = HealthRegistry::with_clock(Duration::from_secs(10), clock.clone());
+        let registry = HealthRegistry::with_config_and_clock(
+            HealthConfig {
+                cooldown: Duration::from_secs(10),
+                failure_threshold: 1,
+                ..HealthConfig::default()
+            },
+            Arc::new(clock.clone()),
+        );
         assert!(registry.is_available("a").await);
         registry.mark_failure("a").await;
         let first = registry.get_health("a").await;
@@ -811,12 +878,75 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn transient_failures_require_threshold_and_reset_outside_window() {
+        let clock = clock();
+        let registry = HealthRegistry::with_config_and_clock(
+            HealthConfig {
+                cooldown: Duration::from_secs(10),
+                max_cooldown: Duration::from_secs(40),
+                failure_threshold: 3,
+                failure_window: Duration::from_secs(60),
+                ..HealthConfig::default()
+            },
+            Arc::new(clock.clone()),
+        );
+
+        assert!(
+            !registry
+                .mark_failure_with_details("a", "passive", Some("upstream_http_429"), None)
+                .await
+        );
+        assert!(
+            !registry
+                .mark_failure_with_details("a", "passive", Some("upstream_http_429"), None)
+                .await
+        );
+        let suspect = registry.get_health("a").await;
+        assert!(suspect.available);
+        assert_eq!(suspect.status, "unhealthy");
+        assert_eq!(suspect.consecutive_failures, 2);
+        assert_eq!(suspect.cooldown_remaining_ms, 0);
+
+        clock.advance(Duration::from_secs(61));
+        assert!(
+            !registry
+                .mark_failure_with_details("a", "passive", Some("upstream_http_429"), None)
+                .await
+        );
+        let reset = registry.get_health("a").await;
+        assert!(reset.available);
+        assert_eq!(reset.consecutive_failures, 1);
+        assert_eq!(reset.cooldown_remaining_ms, 0);
+
+        assert!(
+            !registry
+                .mark_failure_with_details("a", "passive", Some("upstream_http_429"), None)
+                .await
+        );
+        assert!(
+            registry
+                .mark_failure_with_details("a", "passive", Some("upstream_http_429"), None)
+                .await
+        );
+        let cooling = registry.get_health("a").await;
+        assert!(!cooling.available);
+        assert_eq!(cooling.consecutive_failures, 3);
+        assert_eq!(cooling.cooldown_remaining_ms, 10_000);
+
+        registry.mark_success("a").await;
+        let recovered = registry.get_health("a").await;
+        assert!(recovered.available);
+        assert_eq!(recovered.consecutive_failures, 0);
+    }
+
+    #[tokio::test]
     async fn stale_is_orthogonal_and_does_not_permanently_block_after_expiry() {
         let clock = clock();
         let config = HealthConfig {
             cooldown: Duration::from_secs(5),
             max_cooldown: Duration::from_secs(20),
             stale_after: Duration::from_secs(3),
+            failure_threshold: 1,
             ..HealthConfig::default()
         };
         let registry = HealthRegistry::with_config_and_clock(config, Arc::new(clock.clone()));
@@ -827,7 +957,7 @@ mod tests {
         assert!(health.stale);
         assert_eq!(health.status, "stale");
         assert!(health.available);
-        assert!(health.cooldown_remaining_ms > 0);
+        assert_eq!(health.cooldown_remaining_ms, 0);
     }
 
     #[test]
@@ -878,13 +1008,25 @@ mod tests {
         .fetch_one(&pool)
         .await
         .expect("read schema metadata");
-        assert!(versions.0 >= 12 && versions.1 >= 12);
+        assert_eq!(
+            versions,
+            (
+                crate::infra::ops::CURRENT_SCHEMA_VERSION,
+                crate::infra::ops::CURRENT_MIGRATION_VERSION,
+            )
+        );
         let migration_name: String =
             sqlx::query_scalar("SELECT name FROM gateway_schema_migrations WHERE version=12")
                 .fetch_one(&pool)
                 .await
                 .expect("read health migration metadata");
         assert_eq!(migration_name, "health_persistence");
+        let failure_window_migration: String =
+            sqlx::query_scalar("SELECT name FROM gateway_schema_migrations WHERE version=22")
+                .fetch_one(&pool)
+                .await
+                .expect("read failure-window migration metadata");
+        assert_eq!(failure_window_migration, "health_failure_window");
         sqlx::query("INSERT INTO sources (id,display_name,provider_preset_id,provider_preset_version,provider_preset_snapshot,base_url,endpoints,auth_config,protocol_capabilities) VALUES ('health-source','Health Source','custom',1,'{}'::jsonb,'https://health.example','{\"openai_chat_completions\":\"/chat/completions\"}'::jsonb,'{}'::jsonb,'{}'::jsonb)")
             .execute(&pool)
             .await
@@ -894,12 +1036,64 @@ mod tests {
             .await
             .expect("seed health account");
 
+        // Simulate an upgrade from v21: legacy counters are reset exactly once,
+        // while ordinary startup replays must preserve current runtime state.
+        sqlx::query("DELETE FROM gateway_schema_migrations WHERE version=22")
+            .execute(&pool)
+            .await
+            .expect("rewind failure-window migration marker");
+        sqlx::query("UPDATE gateway_schema_metadata SET schema_version=21,migration_version=21 WHERE singleton=TRUE")
+            .execute(&pool)
+            .await
+            .expect("rewind schema metadata");
+        sqlx::query("UPDATE accounts SET health_status='cooling_down',consecutive_failures=9,cooldown_until=NOW()+INTERVAL '30 minutes' WHERE id='health-account'")
+            .execute(&pool)
+            .await
+            .expect("seed legacy cooldown state");
+        sqlx::raw_sql(include_str!(
+            "../../migrations/0022_health_failure_window.sql"
+        ))
+        .execute(&pool)
+        .await
+        .expect("apply failure-window migration upgrade");
+        let upgraded: (i32, Option<DateTime<Utc>>, Option<DateTime<Utc>>) = sqlx::query_as(
+            "SELECT consecutive_failures,cooldown_until,failure_window_started_at FROM accounts WHERE id='health-account'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("read upgraded health state");
+        assert_eq!(upgraded, (0, None, None));
+
+        sqlx::query("UPDATE accounts SET health_status='cooling_down',consecutive_failures=7,cooldown_until=NOW()+INTERVAL '30 minutes' WHERE id='health-account'")
+            .execute(&pool)
+            .await
+            .expect("seed post-migration cooldown state");
+        sqlx::raw_sql(include_str!(
+            "../../migrations/0022_health_failure_window.sql"
+        ))
+        .execute(&pool)
+        .await
+        .expect("replay failure-window migration");
+        let replayed: (i32, bool) = sqlx::query_as(
+            "SELECT consecutive_failures,cooldown_until IS NOT NULL FROM accounts WHERE id='health-account'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("read replayed health state");
+        assert_eq!(replayed, (7, true));
+        sqlx::query("UPDATE accounts SET health_status='unknown',consecutive_failures=0,cooldown_until=NULL WHERE id='health-account'")
+            .execute(&pool)
+            .await
+            .expect("reset health state for transition assertions");
+
         let clock = clock();
         let config = HealthConfig {
             cooldown: Duration::from_secs(1),
             max_cooldown: Duration::from_secs(8),
             stale_after: Duration::from_secs(3),
             probe_interval: Duration::from_secs(60),
+            failure_threshold: 3,
+            failure_window: Duration::from_secs(60),
         };
         let registry = HealthRegistry::with_database_config_and_clock(
             database.clone(),
@@ -907,7 +1101,7 @@ mod tests {
             Arc::new(clock.clone()),
         );
         let mut tasks = Vec::new();
-        for _ in 0..3 {
+        for _ in 0..5 {
             let registry = registry.clone();
             tasks.push(tokio::spawn(async move {
                 registry
@@ -933,7 +1127,7 @@ mod tests {
         assert_eq!(persisted.1, "passive");
         assert_eq!(
             persisted.2,
-            clock.now() + ChronoDuration::from_std(Duration::from_secs(4)).unwrap()
+            clock.now() + ChronoDuration::from_std(Duration::from_secs(1)).unwrap()
         );
 
         // A new registry instance reads the same row, proving restart recovery.
@@ -951,7 +1145,7 @@ mod tests {
         let stale = restarted.get_health("health-account").await;
         assert!(stale.available);
         assert!(stale.stale);
-        assert!(stale.cooldown_remaining_ms > 0);
+        assert_eq!(stale.cooldown_remaining_ms, 0);
         clock.advance(Duration::from_secs(2));
         let expired = restarted.get_health("health-account").await;
         assert!(expired.available);

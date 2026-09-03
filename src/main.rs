@@ -383,7 +383,10 @@ async fn run_health_probes_once(state: &AppState) {
                 .map(|elapsed| elapsed >= state.health.config().probe_interval)
                 .unwrap_or(true)
         });
-        if !due || (current.cooldown_remaining_ms > 0 && !current.stale) {
+        // Keep probing at the configured cadence while the account is cooling
+        // down. A successful half-open probe can restore a transiently limited
+        // account before a long exponential cooldown expires.
+        if !due {
             continue;
         }
         match state

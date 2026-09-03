@@ -101,13 +101,15 @@ Kimi Responses 返回 `protocol=openai_responses`、`upstream_protocol=anthropic
 | --- | --- | --- |
 | `unknown` | 没有成功或失败观测，或人工重新启用 | 可用（还没有失败冷却） |
 | `healthy` | 路由请求或连接探测成功（2xx） | 可用 |
-| `cooling_down` | 408、429、5xx 或传输错误 | 在 `cooldown_until` 前不可用 |
-| `unhealthy` | 冷却已到期但还没有成功恢复 | 可用，可再次作为候选 |
+| `cooling_down` | 失败窗口达到阈值后进入指数退避 | 在 `cooldown_until` 前不可用 |
+| `unhealthy` | 窗口内尚未达到阈值，或冷却已到期但还没有成功恢复 | 可用，可再次作为候选 |
 | `stale` | `health_updated_at` 达到 `stale_after` | 可用；旧 cooldown 不会永久屏蔽账号 |
 | `disabled` | Account 或 Source 被人工停用 | 不可用 |
 
-被动失败的退避为 `base * 2^(consecutive_failures-1)`，并受最大退避上限约束；一次成功
-会清零连续失败计数和 cooldown。状态行还保存 `health_source`（`passive`、`probe`、
+408、429、5xx 和传输错误默认需在 60 秒窗口内累计 3 次才进入冷却；窗口外重新计数，
+首次冷却采用 base，后续冷却指数增长并受最大退避上限约束。阈值和窗口分别由
+`GATEWAY_HEALTH_FAILURE_THRESHOLD`、`GATEWAY_HEALTH_FAILURE_WINDOW_SECS` 配置；一次成功
+会清零失败窗口、连续失败计数和 cooldown。状态行还保存 `health_source`（`passive`、`probe`、
 `manual`、`startup` 或 `unknown`）、`health_updated_at`、最近探测结果和脱敏错误摘要。
 所有时间均为 UTC。进程重启后直接读取这些绝对时间戳，不依赖进程内的 `Instant`。
 
@@ -136,8 +138,9 @@ endpoint，经过同一 URL allowlist、DNS、重定向和凭据策略，客户�
 
 后台探测默认启用，每个账号按 `GATEWAY_HEALTH_PROBE_INTERVAL_SECS` 周期执行；可用
 `GATEWAY_HEALTH_PROBE_ENABLED=false` 关闭，或用 `GATEWAY_HEALTH_PROBE_ON_STARTUP=true`
-在启动时立即执行一次。探测失败使用与被动失败相同的指数退避，不会绕过固定首选：只有
-首选账号失败、冷却或人工停用时才选择 fallback。
+在启动时立即执行一次。冷却期间仍按该周期执行半开探测，成功可提前关闭 cooldown；失败不会
+在同一 cooldown 内继续放大退避。无可用 fallback 且 429 携带不超过 2 秒的 `Retry-After`
+时，同一账号最多重试一次；更长或非法的值不会让请求阻塞等待。固定首选仍保持优先。
 
 ## 模型发现与差异
 
@@ -337,7 +340,7 @@ dry-run 只统计候选，不删除数据。正式清理按 attempt → logical 
 
 `POST /admin/control-plane/import` 接受导出 JSON，或 `{ "data": <export>, "replace": true, "requested_by": "..." }` 包装。非空目标必须显式 `replace=true`。导入按 FK 顺序恢复并重置 serial sequence；提交后重新构建 snapshot，只有 fingerprint 与导出一致才返回 `verified=true` 和新的 `snapshot_revision`。目标环境必须自行注入导出中列出的 Secret。
 
-`GET /admin/ops/schema`（`/admin/schema` 为同义入口）返回当前 `schema_version`、`migration_version`、应用版本和 UTC 更新时间。网关启动时会自动应用 `migrations/0011_retention_backup.sql` 与 `migrations/0012_health_persistence.sql`，并在 `gateway_schema_migrations` 中记录 1..12。
+`GET /admin/ops/schema`（`/admin/schema` 为同义入口）返回当前 `schema_version`、`migration_version`、应用版本和 UTC 更新时间。网关启动时会顺序应用仓库中的迁移；当前版本为 22，`migrations/0022_health_failure_window.sql` 增加失败窗口状态并一次性清理旧的无界失败计数。
 
 完整的 PostgreSQL `pg_dump`、新库恢复、Docker Compose 和本地 CLI 步骤见 [`docs/operations.md`](./operations.md)。物理 dump 可能包含数据库内的加密凭据和全部历史，必须按高敏感备份保护；脱敏迁移请使用控制面 JSON 导出。
 

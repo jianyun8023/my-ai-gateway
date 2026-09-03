@@ -178,11 +178,12 @@ POST /admin/health/probes
 数据库中保存的 Source endpoint，并遵守 URL allowlist、DNS、重定向和凭据策略；不会读取或
 记录完整请求/响应正文。模型 discovery 失败只写入 discovery 审计，不会被当作路由失败。
 
-被动失败和探测失败使用指数退避；一次成功会清零连续失败和 cooldown。冷却到期或观测 stale
-后账号重新具备候选资格，陈旧状态不会永久屏蔽账号。固定首选只有在失败、不可用或人工停用
-时才进入 fallback。后台探测默认每 60 秒运行，可用 `GATEWAY_HEALTH_PROBE_INTERVAL_SECS`
-调整；`GATEWAY_HEALTH_PROBE_ENABLED=false` 关闭周期任务，`GATEWAY_HEALTH_PROBE_ON_STARTUP=true`
-在启动时立即执行一次。
+默认在 60 秒窗口内累计 3 次可重试失败后才进入指数退避冷却；窗口外的失败重新计数，任意成功
+会立即清零。短暂的 429 因此不会直接摘除账号；无 fallback 且上游给出不超过 2 秒的
+`Retry-After` 时，同一账号最多重试一次。冷却期间仍按正常周期执行半开探测，成功即可提前恢复。
+可通过 `GATEWAY_HEALTH_FAILURE_THRESHOLD`、`GATEWAY_HEALTH_FAILURE_WINDOW_SECS` 和
+`GATEWAY_HEALTH_PROBE_INTERVAL_SECS` 调整；`GATEWAY_HEALTH_PROBE_ENABLED=false` 关闭周期任务，
+`GATEWAY_HEALTH_PROBE_ON_STARTUP=true` 在启动时立即执行一次。
 
 创建 Virtual Key 需要配置 `GATEWAY_CREDENTIAL_MASTER_KEY`。鉴权使用不可逆哈希；原始值以 AES-GCM 密文保存，并可由 Admin 显式查看和复制：
 
