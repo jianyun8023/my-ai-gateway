@@ -633,23 +633,23 @@ impl ModelDiscoveryService {
 fn parse_preset(source: &SourceRecord) -> Result<ProviderPresetDefinition, DiscoveryServiceError> {
     let definition: ProviderPresetDefinition =
         serde_json::from_value(source.provider_preset_snapshot.clone())
-            .map_err(|_| DiscoveryServiceError::InvalidPreset)?;
+            .map_err(|error| invalid_source_snapshot(source, "provider_preset_snapshot", error))?;
     definition
         .validate()
-        .map_err(|_| DiscoveryServiceError::InvalidPreset)?;
+        .map_err(|error| invalid_source_snapshot(source, "provider_preset_snapshot", error))?;
     Ok(definition)
 }
 
 fn source_auth(source: &SourceRecord) -> Result<SourceAuthConfig, DiscoveryServiceError> {
     serde_json::from_value(source.auth_config.clone())
-        .map_err(|_| DiscoveryServiceError::InvalidPreset)
+        .map_err(|error| invalid_source_snapshot(source, "auth_config", error))
 }
 
 fn source_protocol_capabilities(
     source: &SourceRecord,
 ) -> Result<BTreeMap<Protocol, SourceProtocolCapability>, DiscoveryServiceError> {
     serde_json::from_value(source.protocol_capabilities.clone())
-        .map_err(|_| DiscoveryServiceError::InvalidPreset)
+        .map_err(|error| invalid_source_snapshot(source, "protocol_capabilities", error))
 }
 
 fn source_endpoint(
@@ -658,12 +658,28 @@ fn source_endpoint(
     fallback: &str,
 ) -> Result<String, DiscoveryServiceError> {
     let endpoints = serde_json::from_value::<BTreeMap<Protocol, String>>(source.endpoints.clone())
-        .map_err(|_| DiscoveryServiceError::InvalidPreset)?;
+        .map_err(|error| invalid_source_snapshot(source, "endpoints", error))?;
     Ok(endpoints
         .get(&protocol)
         .filter(|endpoint| !endpoint.trim().is_empty())
         .cloned()
         .unwrap_or_else(|| fallback.into()))
+}
+
+fn invalid_source_snapshot(
+    source: &SourceRecord,
+    field: &'static str,
+    error: impl std::fmt::Display,
+) -> DiscoveryServiceError {
+    tracing::warn!(
+        source_id = %source.id,
+        provider_preset_id = %source.provider_preset_id,
+        provider_preset_version = source.provider_preset_version,
+        field,
+        %error,
+        "source runtime snapshot is invalid"
+    );
+    DiscoveryServiceError::InvalidPreset
 }
 
 fn source_url(base_url: &str, endpoint: &str) -> Result<Url, DiscoveryServiceError> {

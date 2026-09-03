@@ -496,8 +496,11 @@ impl Database {
         ))
         .execute(&mut *tx)
         .await?;
+        sqlx::raw_sql(include_str!("../../migrations/0020_split_cache_tokens.sql"))
+            .execute(&mut *tx)
+            .await?;
         sqlx::raw_sql(include_str!(
-            "../../migrations/0020_split_cache_tokens.sql"
+            "../../migrations/0021_repair_builtin_source_auth_snapshots.sql"
         ))
         .execute(&mut *tx)
         .await?;
@@ -1753,7 +1756,7 @@ pub fn validate_virtual_key_scopes(scopes: &[String]) -> Result<(), String> {
 mod tests {
     use super::*;
     use crate::{
-        control_plane::model_catalog::ModelCatalogRepository,
+        control_plane::model_catalog::{install_builtin_presets, ModelCatalogRepository},
         domain::{
             catalog::{
                 CapabilitySupport, CatalogMetadata, CatalogStatus, LogicalModelInput,
@@ -1762,6 +1765,7 @@ mod tests {
                 SourceModelRefresh, SourceProtocolMode,
             },
             protocol::Protocol,
+            provider_preset::SourceAuthConfig,
         },
     };
     use serde_json::json;
@@ -2031,6 +2035,79 @@ mod tests {
         let database = Database { pool };
         database.migrate().await.expect("apply test migrations");
         Some(database)
+    }
+
+    #[tokio::test]
+    async fn postgres_repairs_only_empty_builtin_source_auth_snapshots() {
+        let Some(database) = postgres_test_database().await else {
+            eprintln!(
+                "skipping PostgreSQL Source auth migration test: TEST_DATABASE_URL is not set"
+            );
+            return;
+        };
+        let repository = ModelCatalogRepository::new(database.pool.clone());
+        install_builtin_presets(&repository)
+            .await
+            .expect("install built-in ProviderPresets");
+        let suffix = uuid::Uuid::new_v4().simple().to_string();
+        let empty_source = format!("migration-empty-auth-{suffix}");
+        let override_source = format!("migration-override-auth-{suffix}");
+        let endpoints = json!({"openai_chat_completions":"/custom/chat/completions"});
+        let capabilities = json!({
+            "openai_chat_completions": {"mode":"native"}
+        });
+        let explicit_auth = json!({
+            "credential_header": {"header":"x-api-key","prefix":""},
+            "default_headers": {"x-source-override":"true"}
+        });
+        for (source_id, auth_config) in [
+            (empty_source.as_str(), json!({})),
+            (override_source.as_str(), explicit_auth.clone()),
+        ] {
+            sqlx::query("INSERT INTO sources (id,display_name,provider_preset_id,provider_preset_version,provider_preset_snapshot,base_url,endpoints,auth_config,protocol_capabilities) SELECT $1,$1,'minimax',3,definition,'https://example.invalid',$2,$3,$4 FROM provider_presets WHERE id='minimax' AND version=3")
+                .bind(source_id)
+                .bind(&endpoints)
+                .bind(&auth_config)
+                .bind(&capabilities)
+                .execute(&database.pool)
+                .await
+                .expect("seed Source auth migration fixture");
+        }
+
+        sqlx::raw_sql(include_str!(
+            "../../migrations/0021_repair_builtin_source_auth_snapshots.sql"
+        ))
+        .execute(&database.pool)
+        .await
+        .expect("replay Source auth snapshot repair");
+
+        let repaired: (serde_json::Value, serde_json::Value, serde_json::Value) = sqlx::query_as(
+            "SELECT auth_config,endpoints,protocol_capabilities FROM sources WHERE id=$1",
+        )
+        .bind(&empty_source)
+        .fetch_one(&database.pool)
+        .await
+        .expect("read repaired Source");
+        let repaired_auth: SourceAuthConfig =
+            serde_json::from_value(repaired.0).expect("repaired auth snapshot deserializes");
+        assert_eq!(repaired_auth.credential_header.header, "authorization");
+        assert_eq!(repaired_auth.credential_header.prefix, "Bearer ");
+        assert_eq!(repaired.1, endpoints);
+        assert_eq!(repaired.2, capabilities);
+
+        let preserved_auth: serde_json::Value =
+            sqlx::query_scalar("SELECT auth_config FROM sources WHERE id=$1")
+                .bind(&override_source)
+                .fetch_one(&database.pool)
+                .await
+                .expect("read Source auth override");
+        assert_eq!(preserved_auth, explicit_auth);
+
+        sqlx::query("DELETE FROM sources WHERE id = ANY($1)")
+            .bind(vec![empty_source, override_source])
+            .execute(&database.pool)
+            .await
+            .expect("clean Source auth migration fixtures");
     }
 
     #[tokio::test]
