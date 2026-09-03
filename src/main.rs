@@ -31,11 +31,7 @@ use axum::{
     http::{header::CONTENT_TYPE, HeaderMap, HeaderValue, Method, Request, Response, StatusCode},
 };
 #[cfg(test)]
-use domain::{
-    config,
-    config::GatewayConfig,
-    protocol::Protocol,
-};
+use domain::{config, config::GatewayConfig, protocol::Protocol};
 #[cfg(test)]
 use infra::{db, health, observability, secrets};
 #[cfg(test)]
