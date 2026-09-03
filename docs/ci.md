@@ -45,6 +45,10 @@ PostgreSQL 用户、密码和数据库只存在于当前 GitHub Actions runner�
 ghcr.io/jianyun8023/my-ai-gateway:<tag>
 ```
 
+`main` 分支上的镜像 workflow 只在镜像输入发生变化时运行：Dockerfile、`.dockerignore`、Cargo manifest/lock、Rust workspace、migration、配置示例或 `web/` 发生变化时触发。仅修改文档、测试、脚本或其他 CI workflow 不会触发镜像构建；`v*.*.*` Release tag 仍按现有逻辑触发构建。
+
+Rust 构建使用固定版本的 `cargo-chef` 依赖预编译层。依赖 manifest 未变化时，后续提交会复用已导出的 BuildKit 依赖缓存，只重新编译工作区代码。
+
 ### main
 
 每次推送到 `main` 都会更新：
@@ -111,5 +115,6 @@ mise run test-postgres
 - 镜像构建和 manifest 合并 job 额外授予 `packages: write`，用于写入 GHCR。
 - CI 不读取 Provider Key、Gateway Key 或 Admin Key，也不上传数据库内容。
 - Cargo 和 npm 缓存由锁文件与 `mise.toml` 计算 key。
+- Dockerfile 使用 `cargo-chef` 将 Rust 依赖编译拆为独立的 BuildKit 缓存层。
 - 多架构构建按平台使用独立的 GitHub Actions cache scope。
 - 同一 PR 的旧运行会在新提交到达时取消；镜像发布运行不会被自动取消。

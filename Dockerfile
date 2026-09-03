@@ -1,5 +1,7 @@
 ARG NODE_VERSION=24.11.1-bookworm
 ARG RUST_VERSION=1.97.1-bookworm
+ARG CARGO_CHEF_VERSION=0.1.78
+
 FROM node:${NODE_VERSION} AS web-builder
 WORKDIR /app/web
 COPY web/package.json web/package-lock.json ./
@@ -7,8 +9,17 @@ RUN npm ci
 COPY web ./
 RUN npm run build
 
-FROM rust:${RUST_VERSION} AS builder
+FROM lukemathwalker/cargo-chef:${CARGO_CHEF_VERSION}-rust-${RUST_VERSION} AS chef
 WORKDIR /app
+
+FROM chef AS planner
+COPY . .
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM chef AS builder
+COPY --from=planner /app/recipe.json recipe.json
+# Keep dependency compilation in a layer that is independent from application source.
+RUN cargo chef cook --release --recipe-path recipe.json
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
 COPY crates ./crates
