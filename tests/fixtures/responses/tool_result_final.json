@@ -1,0 +1,27 @@
+{
+  "id": "resp_test_tool_result_final_001",
+  "object": "response",
+  "created_at": 1700000000,
+  "status": "completed",
+  "model": "test-model",
+  "output": [
+    {
+      "type": "message",
+      "id": "msg_test_tool_result_final_001",
+      "status": "completed",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "The weather in San Francisco is 72°F and sunny.",
+          "annotations": []
+        }
+      ]
+    }
+  ],
+  "usage": {
+    "input_tokens": 80,
+    "output_tokens": 15,
+    "total_tokens": 95
+  }
+}

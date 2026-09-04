@@ -160,6 +160,50 @@ pub mod catalog {
         )
     }
 
+    pub fn chat_stream_usage() -> CaseFixture {
+        CaseFixture::sse(
+            "chat.stream.usage",
+            StatusCode::OK,
+            &load_fixture("chat/text_stream_usage.sse"),
+            SseChunkPlan::per_event(),
+        )
+    }
+
+    pub fn chat_stream_no_done() -> CaseFixture {
+        CaseFixture::sse(
+            "chat.stream.done",
+            StatusCode::OK,
+            &load_fixture("chat/text_stream_no_done.sse"),
+            SseChunkPlan::per_event(),
+        )
+    }
+
+    pub fn chat_tool_stream_args() -> CaseFixture {
+        CaseFixture::sse(
+            "chat.tool.stream_arguments",
+            StatusCode::OK,
+            &load_fixture("chat/tool_stream_args.sse"),
+            SseChunkPlan::per_event(),
+        )
+    }
+
+    pub fn chat_tool_result_final() -> CaseFixture {
+        CaseFixture::json(
+            "chat.tool.result_final",
+            StatusCode::OK,
+            &load_fixture("chat/tool_result_final.json"),
+        )
+    }
+
+    pub fn chat_reasoning_stream() -> CaseFixture {
+        CaseFixture::sse(
+            "chat.reasoning.stream",
+            StatusCode::OK,
+            &load_fixture("chat/reasoning_stream.sse"),
+            SseChunkPlan::per_event(),
+        )
+    }
+
     // -----------------------------------------------------------------------
     // OpenAI Responses
     // -----------------------------------------------------------------------
@@ -205,6 +249,50 @@ pub mod catalog {
         )
     }
 
+    pub fn responses_tool_stream() -> CaseFixture {
+        CaseFixture::sse(
+            "responses.tool.stream_arguments",
+            StatusCode::OK,
+            &load_fixture("responses/tool_stream.sse"),
+            SseChunkPlan::per_event(),
+        )
+    }
+
+    pub fn responses_reasoning_stream() -> CaseFixture {
+        CaseFixture::sse(
+            "responses.reasoning.stream",
+            StatusCode::OK,
+            &load_fixture("responses/reasoning_stream.sse"),
+            SseChunkPlan::per_event(),
+        )
+    }
+
+    pub fn responses_tool_result_final() -> CaseFixture {
+        CaseFixture::json(
+            "responses.tool.result_final",
+            StatusCode::OK,
+            &load_fixture("responses/tool_result_final.json"),
+        )
+    }
+
+    pub fn responses_incomplete_stream() -> CaseFixture {
+        CaseFixture::sse(
+            "responses.stream.incomplete",
+            StatusCode::OK,
+            &load_fixture("responses/incomplete_stream.sse"),
+            SseChunkPlan::per_event(),
+        )
+    }
+
+    pub fn responses_stream_split_lines() -> CaseFixture {
+        CaseFixture::sse(
+            "responses.stream.split_lines",
+            StatusCode::OK,
+            &load_fixture("responses/text_basic_stream.sse"),
+            SseChunkPlan::split_data_lines(3),
+        )
+    }
+
     // -----------------------------------------------------------------------
     // Anthropic Messages
     // -----------------------------------------------------------------------
@@ -247,6 +335,50 @@ pub mod catalog {
             "messages.thinking.basic",
             StatusCode::OK,
             &load_fixture("messages/thinking.json"),
+        )
+    }
+
+    pub fn messages_tool_stream() -> CaseFixture {
+        CaseFixture::sse(
+            "messages.tool.stream_arguments",
+            StatusCode::OK,
+            &load_fixture("messages/tool_stream.sse"),
+            SseChunkPlan::per_event(),
+        )
+    }
+
+    pub fn messages_thinking_stream() -> CaseFixture {
+        CaseFixture::sse(
+            "messages.thinking.stream",
+            StatusCode::OK,
+            &load_fixture("messages/thinking_stream.sse"),
+            SseChunkPlan::per_event(),
+        )
+    }
+
+    pub fn messages_tool_result_final() -> CaseFixture {
+        CaseFixture::json(
+            "messages.tool.result_final",
+            StatusCode::OK,
+            &load_fixture("messages/tool_result_final.json"),
+        )
+    }
+
+    pub fn messages_incomplete_stream() -> CaseFixture {
+        CaseFixture::sse(
+            "messages.stream.incomplete",
+            StatusCode::OK,
+            &load_fixture("messages/incomplete_stream.sse"),
+            SseChunkPlan::per_event(),
+        )
+    }
+
+    pub fn messages_stream_split_lines() -> CaseFixture {
+        CaseFixture::sse(
+            "messages.stream.split_lines",
+            StatusCode::OK,
+            &load_fixture("messages/text_basic_stream.sse"),
+            SseChunkPlan::split_data_lines(3),
         )
     }
 
@@ -383,6 +515,7 @@ pub mod catalog {
     /// All first-batch fixtures keyed by case ID, ready for `MockProvider::spawn()`.
     pub fn all_first_batch() -> HashMap<String, CaseFixture> {
         let fixtures = vec![
+            // Chat Completions
             chat_text_basic(),
             chat_text_basic_stream(),
             chat_usage(),
@@ -391,16 +524,34 @@ pub mod catalog {
             chat_reasoning(),
             chat_stream_split_lines(),
             chat_stream_merged(),
+            chat_stream_usage(),
+            chat_stream_no_done(),
+            chat_tool_stream_args(),
+            chat_tool_result_final(),
+            chat_reasoning_stream(),
+            // Responses
             responses_text_basic(),
             responses_text_basic_stream(),
             responses_tool_single(),
             responses_tool_parallel(),
             responses_reasoning(),
+            responses_tool_stream(),
+            responses_reasoning_stream(),
+            responses_tool_result_final(),
+            responses_incomplete_stream(),
+            responses_stream_split_lines(),
+            // Messages
             messages_text_basic(),
             messages_text_basic_stream(),
             messages_tool_single(),
             messages_tool_parallel(),
             messages_thinking(),
+            messages_tool_stream(),
+            messages_thinking_stream(),
+            messages_tool_result_final(),
+            messages_incomplete_stream(),
+            messages_stream_split_lines(),
+            // Errors
             error_400(),
             error_401(),
             error_403(),

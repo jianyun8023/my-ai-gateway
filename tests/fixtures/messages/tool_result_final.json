@@ -1,0 +1,18 @@
+{
+  "id": "msg_test_tool_result_final_001",
+  "type": "message",
+  "role": "assistant",
+  "model": "test-model",
+  "content": [
+    {
+      "type": "text",
+      "text": "The weather in San Francisco is 72°F and sunny."
+    }
+  ],
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 80,
+    "output_tokens": 15
+  }
+}

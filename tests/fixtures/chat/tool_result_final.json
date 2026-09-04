@@ -1,0 +1,21 @@
+{
+  "id": "chatcmpl-test-tool-result-final-001",
+  "object": "chat.completion",
+  "created": 1700000000,
+  "model": "test-model",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "The weather in San Francisco is 72°F and sunny."
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 80,
+    "completion_tokens": 15,
+    "total_tokens": 95
+  }
+}

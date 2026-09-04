@@ -144,9 +144,16 @@ SDK 解析失败"的情况。
 `mise run test-contract` 依次运行两个 cargo test target：
 
 1. `cargo test --test mock_provider_tests`：MockProvider 基础设施自测（#115）。
-2. `cargo test --test contract_tests --features test-support`：三协议非流式基础
-   Contract 测试（#116），包含 Chat Completions 11 个 case、Responses 9 个 case、
-   Anthropic Messages 8 个 case、以及跨协议 error envelope 和 #84 回归共 4 个 case。
+2. `cargo test --test contract_tests --features test-support`：三协议 Contract 测试
+   （#116 + #117），包含：
+   - #116 非流式基础：Chat Completions 11 case、Responses 9 case、Messages 8 case、
+     跨协议 error envelope 和 #84 回归 4 case；
+   - #117 高风险协议语义：Streaming Chat 6 case（含 #83 [DONE] 回归）、
+     Streaming Responses 7 case（event 顺序断言）、Streaming Messages 6 case
+     （content block 状态机）、Tool Calling 17 case（single/parallel/required/named/
+     none/result_roundtrip/stream_arguments × 三协议）、Reasoning/Thinking 8 case
+     （separate_from_text/stream/multi_turn #88 回归）；
+   - 合计 81 个 case，全部离线、确定性、无 Provider Secret。
 
 所有 case 完全离线（无 Provider Secret、无公网访问），使用进程内 MockProvider
 作为确定性上游，通过 `test-support` cargo feature 暴露的 `test_gateway_router()`
