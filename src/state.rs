@@ -271,9 +271,10 @@ pub(crate) fn data_plane_error_response(
 /// `type`.  See https://docs.anthropic.com/en/api/errors for the full enum.
 fn anthropic_standard_error_type(gateway_code: &str) -> &'static str {
     match gateway_code {
-        "invalid_json" | "unsupported_protocol" | "lossy_conversion_not_allowed" => {
-            "invalid_request_error"
-        }
+        "invalid_json"
+        | "missing_required_parameter"
+        | "unsupported_protocol"
+        | "lossy_conversion_not_allowed" => "invalid_request_error",
         "unauthorized" => "authentication_error",
         "route_not_found" => "not_found_error",
         "account_cooling_down" => "overloaded_error",

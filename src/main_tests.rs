@@ -517,6 +517,9 @@ mod audit_closeout_tests {
 
     #[tokio::test]
     async fn proxy_preserves_structured_unsupported_and_lossy_route_errors() {
+        // Holds ENV_LOCK because proxy_request and the data-plane auth layer
+        // both read GATEWAY_API_KEY from the process environment.
+        let _environment_lock = ENV_LOCK.lock().await;
         let unsupported = GatewayConfig {
             listen_addr: "127.0.0.1:0".into(),
             providers: vec![provider("audit-provider", "https://unused.invalid".into())],
@@ -648,6 +651,62 @@ mod audit_closeout_tests {
                 assert_eq!(body["type"], "error");
                 assert_eq!(body["error"]["type"], "authentication_error");
                 assert!(body["error"]["message"].is_string());
+            },
+        )
+        .await;
+    }
+
+    fn proxy_request_without_model(uri: &str) -> Request<Body> {
+        let mut builder = Request::builder()
+            .method("POST")
+            .uri(uri)
+            .header(CONTENT_TYPE, "application/json");
+        if let Ok(key) = std::env::var("GATEWAY_API_KEY") {
+            builder = builder.header("authorization", format!("Bearer {key}"));
+        }
+        builder
+            .body(Body::from(r#"{}"#))
+            .expect("proxy request without model")
+    }
+
+    #[tokio::test]
+    async fn data_plane_openai_chat_missing_model_returns_400_not_404() {
+        let _environment_lock = ENV_LOCK.lock().await;
+        let _key = EnvRestore::set("GATEWAY_API_KEY", "audit-missing-model");
+        // Surface-discovery tools (e.g. llmprobe) probe endpoints with an
+        // empty body and read 404 as "endpoint not implemented".  A missing
+        // `model` is a client validation error and must stay 400.
+        let response = application(state(empty_routes_config()))
+            .oneshot(proxy_request_without_model("/v1/chat/completions"))
+            .await
+            .expect("openai chat missing-model response");
+        assert_data_plane_error_envelope(
+            response,
+            StatusCode::BAD_REQUEST,
+            "missing_required_parameter",
+            |body| {
+                assert_eq!(body["error"]["type"], "missing_required_parameter");
+                assert!(body["error"]["message"].is_string());
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn data_plane_anthropic_messages_missing_model_returns_400() {
+        let _environment_lock = ENV_LOCK.lock().await;
+        let _key = EnvRestore::set("GATEWAY_API_KEY", "audit-missing-model");
+        let response = application(state(empty_routes_config()))
+            .oneshot(proxy_request_without_model("/v1/messages"))
+            .await
+            .expect("anthropic missing-model response");
+        assert_data_plane_error_envelope(
+            response,
+            StatusCode::BAD_REQUEST,
+            "missing_required_parameter",
+            |body| {
+                assert_eq!(body["type"], "error");
+                assert_eq!(body["error"]["type"], "invalid_request_error");
             },
         )
         .await;

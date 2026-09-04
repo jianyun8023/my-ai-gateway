@@ -12,3 +12,4 @@
 backups/
 control-plane*.json
 .private/
+scripts/conformance/sdk-smoke/node_modules/

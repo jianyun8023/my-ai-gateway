@@ -8,7 +8,7 @@ run = "npm --prefix web ci"
 
 [tasks.config-check]
 description = "校验仓库 JSON 配置和测试元数据"
-run = "node -e \"const fs=require('node:fs'); for (const file of ['config.example.json','tests/live/provider-smoke.cases.json','tests/codex/cases.json','tests/tooling/versions.json','tests/coverage/capability-matrix.json','tests/coverage/test-result.schema.json']) JSON.parse(fs.readFileSync(file, 'utf8'))\""
+run = "node -e \"const fs=require('node:fs'); for (const file of ['config.example.json','tests/live/provider-smoke.cases.json','tests/codex/cases.json','tests/tooling/versions.json','tests/coverage/capability-matrix.json','tests/coverage/test-result.schema.json','tests/conformance/config.json']) JSON.parse(fs.readFileSync(file, 'utf8'))\""
 
 [tasks.dev]
 description = "启动 Rust 网关与前端开发环境"
@@ -42,7 +42,7 @@ run = "npm --prefix web run build && cargo build"
 
 [tasks.test]
 description = "运行 Rust 与前端单元测试"
-run = "cargo test --workspace --features test-support -- --test-threads=1 && npm --prefix web test && node --test scripts/live-provider-smoke.test.mjs scripts/codex-e2e-smoke.test.mjs"
+run = "cargo test --workspace --features test-support -- --test-threads=1 && npm --prefix web test && node --test scripts/live-provider-smoke.test.mjs scripts/codex-e2e-smoke.test.mjs scripts/conformance/conformance.test.mjs"
 
 [tasks.test-live]
 description = "显式运行真实 Provider 工具、搜索与 fallback smoke 测试"
@@ -104,18 +104,80 @@ echo "=== test-contract: 全部通过 ==="
 [tasks.test-conformance]
 description = "运行 llmprobe + CompatCanary 外部合规扫描（#118）"
 run = '''
-echo "ERROR: test-conformance 尚未实现。" >&2
-echo "该命令将由 #118 接入 llmprobe 和 CompatCanary。" >&2
-echo "工具版本见 tests/tooling/versions.json。" >&2
-exit 1
+echo "=== test-conformance: llmprobe + CompatCanary ==="
+echo ""
+echo "工具版本（来自 tests/tooling/versions.json）："
+node -e "const v=JSON.parse(require('fs').readFileSync('tests/tooling/versions.json','utf8')); console.log('  llmprobe: '+v.llmprobe); console.log('  compatcanary: '+v.compatcanary)"
+echo ""
+
+failed=0
+
+echo "--- [1/2] llmprobe conformance scan ---"
+if node scripts/conformance/run-llmprobe.mjs; then
+  echo "  ✓ llmprobe passed"
+else
+  echo "  ✗ llmprobe failed (exit $?)"
+  failed=$((failed + 1))
+fi
+
+echo ""
+echo "--- [2/2] CompatCanary probe scan ---"
+if node scripts/conformance/run-compatcanary.mjs; then
+  echo "  ✓ compatcanary passed"
+else
+  echo "  ✗ compatcanary failed (exit $?)"
+  failed=$((failed + 1))
+fi
+
+echo ""
+if [ "$failed" -gt 0 ]; then
+  echo "=== test-conformance: $failed/2 子任务失败 ==="
+  echo "  报告目录: target/test-reports/conformance/"
+  exit 1
+else
+  echo "=== test-conformance: 全部通过 ==="
+fi
 '''
 
 [tasks.test-sdk-smoke]
 description = "运行 OpenAI/Anthropic 官方 SDK Smoke 测试（#118）"
 run = '''
-echo "ERROR: test-sdk-smoke 尚未实现。" >&2
-echo "该命令将由 #118 接入官方 SDK 解析兼容验证。" >&2
-exit 1
+echo "=== test-sdk-smoke: Official SDK smoke tests ==="
+echo ""
+
+# Install SDK dependencies if needed
+if [ ! -d scripts/conformance/sdk-smoke/node_modules ]; then
+  echo "  Installing SDK dependencies…"
+  npm --prefix scripts/conformance/sdk-smoke install --ignore-scripts 2>&1 | tail -1
+fi
+
+failed=0
+
+echo "--- [1/2] OpenAI SDK smoke ---"
+if node scripts/conformance/sdk-smoke/openai.mjs; then
+  echo "  ✓ OpenAI SDK smoke passed"
+else
+  echo "  ✗ OpenAI SDK smoke failed (exit $?)"
+  failed=$((failed + 1))
+fi
+
+echo ""
+echo "--- [2/2] Anthropic SDK smoke ---"
+if node scripts/conformance/sdk-smoke/anthropic.mjs; then
+  echo "  ✓ Anthropic SDK smoke passed"
+else
+  echo "  ✗ Anthropic SDK smoke failed (exit $?)"
+  failed=$((failed + 1))
+fi
+
+echo ""
+if [ "$failed" -gt 0 ]; then
+  echo "=== test-sdk-smoke: $failed/2 子任务失败 ==="
+  echo "  报告目录: target/test-reports/conformance/sdk-smoke/"
+  exit 1
+else
+  echo "=== test-sdk-smoke: 全部通过 ==="
+fi
 '''
 
 [tasks.test-differential]

@@ -1,0 +1,57 @@
+{
+  "_comment": "Conformance scan configuration. Default target: local Gateway + Mock Provider via conformance-target example. No real API keys committed.",
+  "targets": {
+    "local": {
+      "description": "Local Gateway backed by deterministic MockProvider (conformance-target example)",
+      "base_url_env": "CONFORMANCE_GATEWAY_URL",
+      "api_key_env": "CONFORMANCE_API_KEY",
+      "api_key_default": "sk-conformance-test",
+      "model": "conformance-test-model",
+      "protocols": ["openai_chat_completions", "openai_responses", "anthropic_messages"],
+      "managed": true
+    },
+    "external": {
+      "description": "External Gateway (opt-in, requires real credentials)",
+      "base_url_env": "CONFORMANCE_GATEWAY_URL",
+      "api_key_env": "CONFORMANCE_API_KEY",
+      "model_env": "CONFORMANCE_MODEL",
+      "protocols": ["openai_chat_completions", "openai_responses", "anthropic_messages"],
+      "managed": false
+    }
+  },
+  "default_target": "local",
+  "report_dir": "target/test-reports/conformance",
+  "tools": {
+    "llmprobe": {
+      "specs": ["chat-completions", "responses", "anthropic-messages"],
+      "notes": "llmprobe 单次运行探测全部 surface；--spec 只是规范化后的结果过滤。--quick 深度下 capability/agentic/fidelity/performance/reasoning 相位为 not-run，记录在规范化报告的 phases 元数据中，不生成用例。",
+      "known_gaps": [
+        {
+          "case_pattern": "completions.*",
+          "reason": "legacy completions endpoint is outside the gateway product surface",
+          "expected_result": "UNSUPPORTED"
+        },
+        {
+          "case_pattern": "count_tokens.*",
+          "reason": "messages/count_tokens is outside the gateway product surface",
+          "expected_result": "UNSUPPORTED"
+        },
+        {
+          "case_pattern": "embeddings|images|audio",
+          "reason": "non-chat surfaces are out of scope; recorded in out_of_scope_surfaces metadata, not as cases",
+          "expected_result": "SKIPPED"
+        },
+        {
+          "case_pattern": "responses\\.streaming\\.streaming",
+          "failure_id_pattern": "responses-sse-missing-done",
+          "reason": "llmprobe 0.6.1 MUST-asserts a terminal `data: [DONE]` for Responses streams; the real OpenAI Responses API terminates with `response.completed` and sends no [DONE] sentinel",
+          "expected_result": "SKIPPED"
+        }
+      ]
+    },
+    "compatcanary": {
+      "profiles": ["chat", "modern"],
+      "known_gaps": []
+    }
+  }
+}

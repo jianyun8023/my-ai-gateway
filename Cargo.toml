@@ -56,3 +56,8 @@ path = "tests/mock_provider_tests.rs"
 name = "contract_tests"
 path = "tests/contract_tests.rs"
 required-features = ["test-support"]
+
+[[example]]
+name = "conformance-target"
+path = "examples/conformance_target.rs"
+required-features = ["test-support"]
