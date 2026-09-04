@@ -8,7 +8,7 @@ run = "npm --prefix web ci"
 
 [tasks.config-check]
 description = "校验仓库 JSON 配置和测试元数据"
-run = "node -e \"const fs=require('node:fs'); for (const file of ['config.example.json','tests/live/provider-smoke.cases.json','tests/codex/cases.json','tests/tooling/versions.json']) JSON.parse(fs.readFileSync(file, 'utf8'))\""
+run = "node -e \"const fs=require('node:fs'); for (const file of ['config.example.json','tests/live/provider-smoke.cases.json','tests/codex/cases.json','tests/tooling/versions.json','tests/coverage/capability-matrix.json','tests/coverage/test-result.schema.json']) JSON.parse(fs.readFileSync(file, 'utf8'))\""
 
 [tasks.dev]
 description = "启动 Rust 网关与前端开发环境"

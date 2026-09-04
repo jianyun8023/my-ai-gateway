@@ -174,7 +174,10 @@ SDK 解析失败"的情况。
 
 ## 8. 测试结果模型
 
-详见 `tests/coverage/README.md`（#114）。
+详见 [`tests/coverage/README.md`](../tests/coverage/README.md)（#114）。
+
+- 能力矩阵：[`tests/coverage/capability-matrix.json`](../tests/coverage/capability-matrix.json)
+- 结果 Schema：[`tests/coverage/test-result.schema.json`](../tests/coverage/test-result.schema.json)
 
 ### 8.1 Result 状态
 
