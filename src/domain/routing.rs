@@ -112,7 +112,7 @@ impl fmt::Display for RouteResolutionError {
 impl std::error::Error for RouteResolutionError {}
 
 impl RouteResolver {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn new(config: Arc<GatewayConfig>) -> Self {
         Self {
             config,

@@ -139,6 +139,23 @@ SDK 解析失败"的情况。
 - 包含 contract + faults + 本地可运行的 conformance/sdk smoke；
 - 可作为未来 CI 的完整协议门禁。
 
+### `test-contract` 运行方式
+
+`mise run test-contract` 依次运行两个 cargo test target：
+
+1. `cargo test --test mock_provider_tests`：MockProvider 基础设施自测（#115）。
+2. `cargo test --test contract_tests --features test-support`：三协议非流式基础
+   Contract 测试（#116），包含 Chat Completions 11 个 case、Responses 9 个 case、
+   Anthropic Messages 8 个 case、以及跨协议 error envelope 和 #84 回归共 4 个 case。
+
+所有 case 完全离线（无 Provider Secret、无公网访问），使用进程内 MockProvider
+作为确定性上游，通过 `test-support` cargo feature 暴露的 `test_gateway_router()`
+构造无数据库 Gateway Router。
+
+`cargo test --workspace` 也会自动包含 `contract_tests`（当 `test-support` feature
+启用时），因此 `mise run test` 已隐式覆盖这些测试。若只跑 Rust 部分，可直接执行
+`cargo test --workspace --features test-support -- --test-threads=1`。
+
 ### `verify` 策略
 
 第一版保持现有 `verify` 快速稳定，不立即把第三方扫描和 load 塞进去。

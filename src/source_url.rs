@@ -262,7 +262,7 @@ pub fn reqwest_error_is_policy_violation(error: &reqwest::Error) -> bool {
     false
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub(crate) fn test_policy() -> Arc<SourceUrlPolicy> {
     Arc::new(
         SourceUrlPolicy::from_allowlist("localhost,127.0.0.1,::1")

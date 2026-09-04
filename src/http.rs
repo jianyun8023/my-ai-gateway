@@ -56,7 +56,7 @@ pub fn client(policy: Arc<SourceUrlPolicy>) -> Result<SourceHttpClient, reqwest:
     Ok(SourceHttpClient { inner, policy })
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub fn test_client() -> Result<SourceHttpClient, reqwest::Error> {
     client(crate::source_url::test_policy())
 }

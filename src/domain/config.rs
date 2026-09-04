@@ -652,7 +652,7 @@ impl GatewayConfig {
         Capabilities::default()
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn models(&self) -> Vec<String> {
         let mut models = Vec::new();
         for model in self
