@@ -1,0 +1,6 @@
+this is not a valid SSE stream
+no event: or data: prefixes
+just random bytes that should cause parsing failures
+: comment line
+dat: almost a data line but misspelled
+

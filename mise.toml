@@ -88,12 +88,14 @@ description = "运行 Rust 与前端静态检查"
 run = "cargo fmt --all -- --check && cargo check --workspace && cargo clippy --all-targets -- -D warnings && npm --prefix web run lint && npm --prefix web run typecheck"
 
 [tasks.test-contract]
-description = "运行 Rust 基础和高风险协议 Contract 测试（#116, #117）"
+description = "运行 Mock Provider 基础设施和协议 Contract 测试（#115, #116, #117）"
 run = '''
-echo "ERROR: test-contract 尚未实现。" >&2
-echo "该命令将由 #116（基础 Contract）和 #117（Streaming/Tools/Reasoning）实现。" >&2
-echo "当前只有 'mise run test' 中的 cargo test 可用。" >&2
-exit 1
+echo "=== test-contract: Mock Provider 基础设施 + 协议 Contract ==="
+echo ""
+echo "运行 MockProvider 自测（#115）和后续 Contract 测试（#116/#117 追加）…"
+cargo test --test mock_provider_tests -- --test-threads=1
+echo ""
+echo "=== test-contract: 全部通过 ==="
 '''
 
 [tasks.test-conformance]

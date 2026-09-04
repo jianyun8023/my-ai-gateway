@@ -1,0 +1,21 @@
+{
+  "id": "chatcmpl-test-text-basic-001",
+  "object": "chat.completion",
+  "created": 1700000000,
+  "model": "test-model",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "Hello! This is a deterministic test response from the mock provider."
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 10,
+    "completion_tokens": 15,
+    "total_tokens": 25
+  }
+}

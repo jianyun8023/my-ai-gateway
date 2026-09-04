@@ -1,0 +1,18 @@
+{
+  "id": "msg_test_text_basic_001",
+  "type": "message",
+  "role": "assistant",
+  "model": "test-model",
+  "content": [
+    {
+      "type": "text",
+      "text": "Hello! This is a deterministic test response from the mock provider."
+    }
+  ],
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 10,
+    "output_tokens": 15
+  }
+}
