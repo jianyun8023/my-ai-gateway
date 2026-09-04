@@ -1,0 +1,9 @@
+event: response.created
+data: {"type":"response.created","response":{"id":"resp_test_incomplete_001","object":"response","created_at":1700000000,"status":"in_progress","model":"test-model","output":[],"usage":null}}
+
+event: response.output_item.added
+data: {"type":"response.output_item.added","output_index":0,"item":{"type":"message","id":"msg_test_incomplete_001","status":"in_progress","role":"assistant","content":[]}}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","item_id":"msg_test_incomplete_001","output_index":0,"content_index":0,"delta":"Partial response"}
+

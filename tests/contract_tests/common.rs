@@ -266,6 +266,113 @@ pub fn assert_json_content_type(response: &Response<Body>) {
     );
 }
 
+// ── SSE parsing helpers ─────────────────────────────────────────────────────
+
+/// A parsed SSE event from a streaming response.
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct SseEvent {
+    pub event_type: Option<String>,
+    pub data: String,
+}
+
+#[allow(dead_code)]
+impl SseEvent {
+    /// Parse the `data` field as JSON.
+    pub fn json(&self) -> Value {
+        serde_json::from_str(&self.data).unwrap_or_else(|e| {
+            panic!(
+                "failed to parse SSE data as JSON: {e}\ndata: {}",
+                &self.data
+            )
+        })
+    }
+
+    /// Check if this event is the `[DONE]` sentinel.
+    pub fn is_done(&self) -> bool {
+        self.data.trim() == "[DONE]"
+    }
+}
+
+/// Parse an SSE body into structured events, filtering out comments
+/// (e.g. `: gateway-heartbeat`) and empty lines.
+#[allow(dead_code)]
+pub fn parse_sse_events(text: &str) -> Vec<SseEvent> {
+    let mut events = Vec::new();
+    let mut current_event_type: Option<String> = None;
+    let mut current_data: Vec<String> = Vec::new();
+
+    for line in text.lines() {
+        if line.starts_with(':') {
+            continue;
+        }
+        if line.is_empty() {
+            if !current_data.is_empty() {
+                let data = current_data.join("\n");
+                events.push(SseEvent {
+                    event_type: current_event_type.take(),
+                    data,
+                });
+                current_data.clear();
+            }
+            current_event_type = None;
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("event: ") {
+            current_event_type = Some(rest.to_string());
+        } else if line.starts_with("event:") {
+            current_event_type = Some(line[6..].trim().to_string());
+        } else if let Some(rest) = line.strip_prefix("data: ") {
+            current_data.push(rest.to_string());
+        } else if line.starts_with("data:") {
+            current_data.push(line[5..].trim().to_string());
+        }
+    }
+    if !current_data.is_empty() {
+        events.push(SseEvent {
+            event_type: current_event_type,
+            data: current_data.join("\n"),
+        });
+    }
+
+    events
+}
+
+/// Collect the response body as raw text (for SSE bodies).
+pub async fn text_body(response: Response<Body>) -> String {
+    let bytes = response
+        .into_body()
+        .collect()
+        .await
+        .expect("collect response body")
+        .to_bytes();
+    String::from_utf8_lossy(&bytes).into_owned()
+}
+
+/// Assert `content-type` header starts with `text/event-stream`.
+#[allow(dead_code)]
+pub fn assert_sse_content_type(response: &Response<Body>) {
+    let ct = response
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    assert!(
+        ct.starts_with("text/event-stream"),
+        "expected text/event-stream content-type, got: {ct}"
+    );
+}
+
+/// Extract event type sequence from parsed SSE events (excluding [DONE]).
+#[allow(dead_code)]
+pub fn event_type_sequence(events: &[SseEvent]) -> Vec<String> {
+    events
+        .iter()
+        .filter(|e| !e.is_done())
+        .map(|e| e.event_type.clone().unwrap_or_else(|| "data".to_string()))
+        .collect()
+}
+
 // ── Case ID macro for stable, searchable case IDs ───────────────────────────
 
 /// Annotate a test with its case ID for traceability to the #114 matrix.
