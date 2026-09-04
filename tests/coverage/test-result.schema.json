@@ -1,0 +1,155 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jianyun8023/my-ai-gateway/tests/coverage/test-result.schema.json",
+  "title": "AI Gateway Test Result",
+  "description": "统一测试结果报告结构。每个 test result 记录一次测试用例执行的完整上下文和结论。",
+  "type": "object",
+  "required": [
+    "case_id",
+    "protocol_in",
+    "result",
+    "feature",
+    "stream",
+    "duration_ms",
+    "tool_name",
+    "tool_version",
+    "timestamp"
+  ],
+  "properties": {
+    "case_id": {
+      "type": "string",
+      "description": "稳定 case ID，格式 {surface}.{feature}.{scenario}，如 chat.text.basic。一旦进入报告不因函数名或文件移动修改。",
+      "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$"
+    },
+    "protocol_in": {
+      "type": "string",
+      "enum": ["openai_chat_completions", "openai_responses", "anthropic_messages"],
+      "description": "北向入口协议"
+    },
+    "protocol_upstream": {
+      "type": ["string", "null"],
+      "enum": ["openai_chat_completions", "openai_responses", "anthropic_messages", null],
+      "description": "实际上游协议。native 路径与 protocol_in 相同；null 表示未到达上游。"
+    },
+    "mode": {
+      "type": ["string", "null"],
+      "enum": ["native", "convert", "degraded", "unsupported", null],
+      "description": "协议路径模式"
+    },
+    "feature": {
+      "type": "string",
+      "enum": [
+        "text",
+        "multi_turn",
+        "streaming",
+        "usage",
+        "tools",
+        "tool_choice",
+        "parallel_tools",
+        "tool_result",
+        "structured_output",
+        "reasoning",
+        "thinking",
+        "error_envelope",
+        "cancel",
+        "timeout",
+        "web_search",
+        "citations"
+      ],
+      "description": "被测能力/特性"
+    },
+    "provider": {
+      "type": ["string", "null"],
+      "description": "Provider 标识（如 deepseek, minimax, kimi_code）。Mock 测试可为 mock。"
+    },
+    "source": {
+      "type": ["string", "null"],
+      "description": "Source 标识"
+    },
+    "requested_model": {
+      "type": ["string", "null"],
+      "description": "客户端请求的逻辑模型名"
+    },
+    "resolved_model": {
+      "type": ["string", "null"],
+      "description": "实际路由到的上游模型 ID"
+    },
+    "result": {
+      "type": "string",
+      "enum": ["PASS", "FAIL", "UNSUPPORTED", "DEGRADED", "SKIPPED"],
+      "description": "测试结论。PASS 要求全部断言通过，HTTP 200 不能单独判定 PASS。"
+    },
+    "failure_class": {
+      "type": ["string", "null"],
+      "enum": ["GATEWAY_BUG", "UPSTREAM_LIMITATION", "MODEL_BEHAVIOR", "FLAKY", "TOOL_LIMITATION", null],
+      "description": "失败分类。仅 FAIL 时必填。"
+    },
+    "http_status": {
+      "type": ["integer", "null"],
+      "description": "HTTP 响应状态码"
+    },
+    "stream": {
+      "type": "boolean",
+      "description": "是否为流式请求"
+    },
+    "request_id": {
+      "type": ["string", "null"],
+      "description": "Gateway 分配的 request_id"
+    },
+    "retry_count": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "description": "重试次数"
+    },
+    "fallback_count": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "description": "fallback 次数"
+    },
+    "duration_ms": {
+      "type": "number",
+      "minimum": 0,
+      "description": "测试用例执行耗时（毫秒）"
+    },
+    "evidence": {
+      "type": ["object", "null"],
+      "description": "断言摘要和元数据。禁止保存完整 prompt/response/thinking/Authorization/API Key。",
+      "properties": {
+        "assertions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "passed"],
+            "properties": {
+              "name": { "type": "string" },
+              "passed": { "type": "boolean" },
+              "message": { "type": ["string", "null"] }
+            }
+          }
+        },
+        "notes": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "tool_name": {
+      "type": "string",
+      "description": "执行该测试的工具名称（如 cargo_test, llmprobe, compatcanary, sdk_smoke）"
+    },
+    "tool_version": {
+      "type": "string",
+      "description": "执行该测试的工具版本"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "测试执行时间（ISO 8601 UTC）"
+    }
+  },
+  "if": {
+    "properties": { "result": { "const": "FAIL" } }
+  },
+  "then": {
+    "required": ["failure_class"]
+  }
+}
