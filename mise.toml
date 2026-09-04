@@ -7,8 +7,8 @@ description = "安装前端锁定依赖"
 run = "npm --prefix web ci"
 
 [tasks.config-check]
-description = "校验仓库 JSON 配置示例"
-run = "node -e \"const fs=require('node:fs'); for (const file of ['config.example.json','tests/live/provider-smoke.cases.json','tests/codex/cases.json']) JSON.parse(fs.readFileSync(file, 'utf8'))\""
+description = "校验仓库 JSON 配置和测试元数据"
+run = "node -e \"const fs=require('node:fs'); for (const file of ['config.example.json','tests/live/provider-smoke.cases.json','tests/codex/cases.json','tests/tooling/versions.json']) JSON.parse(fs.readFileSync(file, 'utf8'))\""
 
 [tasks.dev]
 description = "启动 Rust 网关与前端开发环境"
@@ -86,6 +86,125 @@ run = "cargo run -- ops control-plane-export --output control-plane.json"
 [tasks.lint]
 description = "运行 Rust 与前端静态检查"
 run = "cargo fmt --all -- --check && cargo check --workspace && cargo clippy --all-targets -- -D warnings && npm --prefix web run lint && npm --prefix web run typecheck"
+
+[tasks.test-contract]
+description = "运行 Rust 基础和高风险协议 Contract 测试（#116, #117）"
+run = '''
+echo "ERROR: test-contract 尚未实现。" >&2
+echo "该命令将由 #116（基础 Contract）和 #117（Streaming/Tools/Reasoning）实现。" >&2
+echo "当前只有 'mise run test' 中的 cargo test 可用。" >&2
+exit 1
+'''
+
+[tasks.test-conformance]
+description = "运行 llmprobe + CompatCanary 外部合规扫描（#118）"
+run = '''
+echo "ERROR: test-conformance 尚未实现。" >&2
+echo "该命令将由 #118 接入 llmprobe 和 CompatCanary。" >&2
+echo "工具版本见 tests/tooling/versions.json。" >&2
+exit 1
+'''
+
+[tasks.test-sdk-smoke]
+description = "运行 OpenAI/Anthropic 官方 SDK Smoke 测试（#118）"
+run = '''
+echo "ERROR: test-sdk-smoke 尚未实现。" >&2
+echo "该命令将由 #118 接入官方 SDK 解析兼容验证。" >&2
+exit 1
+'''
+
+[tasks.test-differential]
+description = "运行 Direct vs Gateway 差分测试（#119）"
+run = '''
+echo "ERROR: test-differential 尚未实现。" >&2
+echo "该命令将由 #119 建立 Direct vs Gateway 差分验证框架。" >&2
+exit 1
+'''
+
+[tasks.test-faults]
+description = "运行故障注入与异常行为测试（#120）"
+run = '''
+echo "ERROR: test-faults 尚未实现。" >&2
+echo "该命令将由 #120 建立 Rust 故障注入测试。" >&2
+exit 1
+'''
+
+[tasks.test-load]
+description = "运行 k6/xk6-sse 性能基线测试（#120）"
+run = '''
+echo "ERROR: test-load 尚未实现。" >&2
+echo "该命令将由 #120 接入 k6 和 xk6-sse 性能测试。" >&2
+echo "工具版本见 tests/tooling/versions.json。" >&2
+exit 1
+'''
+
+[tasks.test-all-offline]
+description = "聚合离线门禁：无 Secret、无公网的完整协议验证"
+run = '''
+echo "=== test-all-offline: 聚合离线协议门禁 ==="
+echo ""
+echo "约束：不读取真实 Provider Secret，不访问公网模型 API。"
+echo "包含：contract + faults + 本地可运行的 conformance/sdk smoke。"
+echo ""
+
+failed=0
+
+echo "--- [1/6] test-contract ---"
+if mise run test-contract; then
+  echo "  ✓ test-contract passed"
+else
+  echo "  ✗ test-contract failed (exit $?)"
+  failed=$((failed + 1))
+fi
+
+echo "--- [2/6] test-conformance ---"
+if mise run test-conformance; then
+  echo "  ✓ test-conformance passed"
+else
+  echo "  ✗ test-conformance failed (exit $?)"
+  failed=$((failed + 1))
+fi
+
+echo "--- [3/6] test-sdk-smoke ---"
+if mise run test-sdk-smoke; then
+  echo "  ✓ test-sdk-smoke passed"
+else
+  echo "  ✗ test-sdk-smoke failed (exit $?)"
+  failed=$((failed + 1))
+fi
+
+echo "--- [4/6] test-differential ---"
+if mise run test-differential; then
+  echo "  ✓ test-differential passed"
+else
+  echo "  ✗ test-differential failed (exit $?)"
+  failed=$((failed + 1))
+fi
+
+echo "--- [5/6] test-faults ---"
+if mise run test-faults; then
+  echo "  ✓ test-faults passed"
+else
+  echo "  ✗ test-faults failed (exit $?)"
+  failed=$((failed + 1))
+fi
+
+echo "--- [6/6] test-load ---"
+if mise run test-load; then
+  echo "  ✓ test-load passed"
+else
+  echo "  ✗ test-load failed (exit $?)"
+  failed=$((failed + 1))
+fi
+
+echo ""
+if [ "$failed" -gt 0 ]; then
+  echo "=== test-all-offline: $failed/6 子任务失败 ==="
+  exit 1
+else
+  echo "=== test-all-offline: 全部通过 ==="
+fi
+'''
 
 [tasks.verify]
 description = "部署前完整门禁：静态检查、构建、单元测试"
