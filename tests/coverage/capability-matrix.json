@@ -1,0 +1,323 @@
+{
+  "$schema_comment": "AI Gateway 协议能力基线矩阵 — 第一版为计划/声明状态，允许 unknown，禁止伪造测试结果。",
+  "version": 1,
+  "generated_at": null,
+  "description": "Protocol × Provider × Feature × Mode 的支持状态矩阵。后续 #116/#117/#118/#62 跑完后逐项回填 evidence。",
+  "protocols": [
+    "openai_chat_completions",
+    "openai_responses",
+    "anthropic_messages"
+  ],
+  "features": [
+    "text",
+    "multi_turn",
+    "streaming",
+    "usage",
+    "tools",
+    "tool_choice",
+    "parallel_tools",
+    "tool_result",
+    "structured_output",
+    "reasoning",
+    "thinking",
+    "error_envelope",
+    "cancel",
+    "timeout",
+    "web_search",
+    "citations"
+  ],
+  "providers": {
+    "deepseek": {
+      "display_name": "DeepSeek",
+      "protocols": {
+        "openai_chat_completions": {
+          "mode": "native",
+          "features": {
+            "text":              { "status": "unknown", "evidence": null },
+            "multi_turn":        { "status": "unknown", "evidence": null },
+            "streaming":         { "status": "unknown", "evidence": null },
+            "usage":             { "status": "unknown", "evidence": null },
+            "tools":             { "status": "unknown", "evidence": null },
+            "tool_choice":       { "status": "unknown", "evidence": null },
+            "parallel_tools":    { "status": "unknown", "evidence": null },
+            "tool_result":       { "status": "unknown", "evidence": null },
+            "structured_output": { "status": "unknown", "evidence": null },
+            "reasoning":         { "status": "unknown", "evidence": null },
+            "thinking":          { "status": "unknown", "evidence": null },
+            "error_envelope":    { "status": "unknown", "evidence": null },
+            "cancel":            { "status": "unknown", "evidence": null },
+            "timeout":           { "status": "unknown", "evidence": null },
+            "web_search":        { "status": "unknown", "evidence": null },
+            "citations":         { "status": "unknown", "evidence": null }
+          }
+        },
+        "openai_responses": {
+          "mode": "native",
+          "features": {
+            "text":              { "status": "unknown", "evidence": null },
+            "multi_turn":        { "status": "unknown", "evidence": null },
+            "streaming":         { "status": "unknown", "evidence": null },
+            "usage":             { "status": "unknown", "evidence": null },
+            "tools":             { "status": "unknown", "evidence": null },
+            "tool_choice":       { "status": "unknown", "evidence": null },
+            "parallel_tools":    { "status": "unknown", "evidence": null },
+            "tool_result":       { "status": "unknown", "evidence": null },
+            "structured_output": { "status": "unknown", "evidence": null },
+            "reasoning":         { "status": "unknown", "evidence": null },
+            "thinking":          { "status": "unknown", "evidence": null },
+            "error_envelope":    { "status": "unknown", "evidence": null },
+            "cancel":            { "status": "unknown", "evidence": null },
+            "timeout":           { "status": "unknown", "evidence": null },
+            "web_search":        { "status": "unknown", "evidence": null },
+            "citations":         { "status": "unknown", "evidence": null }
+          }
+        },
+        "anthropic_messages": {
+          "mode": "native",
+          "features": {
+            "text":              { "status": "unknown", "evidence": null },
+            "multi_turn":        { "status": "unknown", "evidence": null },
+            "streaming":         { "status": "unknown", "evidence": null },
+            "usage":             { "status": "unknown", "evidence": null },
+            "tools":             { "status": "unknown", "evidence": null },
+            "tool_choice":       { "status": "unknown", "evidence": null },
+            "parallel_tools":    { "status": "unknown", "evidence": null },
+            "tool_result":       { "status": "unknown", "evidence": null },
+            "structured_output": { "status": "unknown", "evidence": null },
+            "reasoning":         { "status": "unknown", "evidence": null },
+            "thinking":          { "status": "unknown", "evidence": null },
+            "error_envelope":    { "status": "unknown", "evidence": null },
+            "cancel":            { "status": "unknown", "evidence": null },
+            "timeout":           { "status": "unknown", "evidence": null },
+            "web_search":        { "status": "unknown", "evidence": null },
+            "citations":         { "status": "unknown", "evidence": null }
+          }
+        }
+      }
+    },
+    "minimax": {
+      "display_name": "MiniMax",
+      "protocols": {
+        "openai_chat_completions": {
+          "mode": "native",
+          "features": {
+            "text":              { "status": "unknown", "evidence": null },
+            "multi_turn":        { "status": "unknown", "evidence": null },
+            "streaming":         { "status": "unknown", "evidence": null },
+            "usage":             { "status": "unknown", "evidence": null },
+            "tools":             { "status": "unknown", "evidence": null },
+            "tool_choice":       { "status": "unknown", "evidence": null },
+            "parallel_tools":    { "status": "unknown", "evidence": null },
+            "tool_result":       { "status": "unknown", "evidence": null },
+            "structured_output": { "status": "unknown", "evidence": null },
+            "reasoning":         { "status": "unknown", "evidence": null },
+            "thinking":          { "status": "unknown", "evidence": null },
+            "error_envelope":    { "status": "unknown", "evidence": null },
+            "cancel":            { "status": "unknown", "evidence": null },
+            "timeout":           { "status": "unknown", "evidence": null },
+            "web_search":        { "status": "unknown", "evidence": null },
+            "citations":         { "status": "unknown", "evidence": null }
+          }
+        },
+        "openai_responses": {
+          "mode": "native",
+          "features": {
+            "text":              { "status": "unknown", "evidence": null },
+            "multi_turn":        { "status": "unknown", "evidence": null },
+            "streaming":         { "status": "unknown", "evidence": null },
+            "usage":             { "status": "unknown", "evidence": null },
+            "tools":             { "status": "unknown", "evidence": null },
+            "tool_choice":       { "status": "unknown", "evidence": null },
+            "parallel_tools":    { "status": "unknown", "evidence": null },
+            "tool_result":       { "status": "unknown", "evidence": null },
+            "structured_output": { "status": "unknown", "evidence": null },
+            "reasoning":         { "status": "unknown", "evidence": null },
+            "thinking":          { "status": "unknown", "evidence": null },
+            "error_envelope":    { "status": "unknown", "evidence": null },
+            "cancel":            { "status": "unknown", "evidence": null },
+            "timeout":           { "status": "unknown", "evidence": null },
+            "web_search":        { "status": "unknown", "evidence": null },
+            "citations":         { "status": "unknown", "evidence": null }
+          }
+        },
+        "anthropic_messages": {
+          "mode": "native",
+          "features": {
+            "text":              { "status": "unknown", "evidence": null },
+            "multi_turn":        { "status": "unknown", "evidence": null },
+            "streaming":         { "status": "unknown", "evidence": null },
+            "usage":             { "status": "unknown", "evidence": null },
+            "tools":             { "status": "unknown", "evidence": null },
+            "tool_choice":       { "status": "unknown", "evidence": null },
+            "parallel_tools":    { "status": "unknown", "evidence": null },
+            "tool_result":       { "status": "unknown", "evidence": null },
+            "structured_output": { "status": "unknown", "evidence": null },
+            "reasoning":         { "status": "unknown", "evidence": null },
+            "thinking":          { "status": "unknown", "evidence": null },
+            "error_envelope":    { "status": "unknown", "evidence": null },
+            "cancel":            { "status": "unknown", "evidence": null },
+            "timeout":           { "status": "unknown", "evidence": null },
+            "web_search":        { "status": "unknown", "evidence": null },
+            "citations":         { "status": "unknown", "evidence": null }
+          }
+        }
+      }
+    },
+    "kimi_code": {
+      "display_name": "Kimi Code",
+      "protocols": {
+        "openai_chat_completions": {
+          "mode": "native",
+          "features": {
+            "text":              { "status": "unknown", "evidence": null },
+            "multi_turn":        { "status": "unknown", "evidence": null },
+            "streaming":         { "status": "unknown", "evidence": null },
+            "usage":             { "status": "unknown", "evidence": null },
+            "tools":             { "status": "unknown", "evidence": null },
+            "tool_choice":       { "status": "unknown", "evidence": null },
+            "parallel_tools":    { "status": "unknown", "evidence": null },
+            "tool_result":       { "status": "unknown", "evidence": null },
+            "structured_output": { "status": "unknown", "evidence": null },
+            "reasoning":         { "status": "unknown", "evidence": null },
+            "thinking":          { "status": "unknown", "evidence": null },
+            "error_envelope":    { "status": "unknown", "evidence": null },
+            "cancel":            { "status": "unknown", "evidence": null },
+            "timeout":           { "status": "unknown", "evidence": null },
+            "web_search":        { "status": "unknown", "evidence": null },
+            "citations":         { "status": "unknown", "evidence": null }
+          }
+        },
+        "openai_responses": {
+          "mode": "convert",
+          "adapter": "kimi_responses_adapter",
+          "source_protocol": "anthropic_messages",
+          "features": {
+            "text":              { "status": "unknown", "evidence": null },
+            "multi_turn":        { "status": "unknown", "evidence": null },
+            "streaming":         { "status": "unknown", "evidence": null },
+            "usage":             { "status": "unknown", "evidence": null },
+            "tools":             { "status": "unknown", "evidence": null },
+            "tool_choice":       { "status": "unknown", "evidence": null },
+            "parallel_tools":    { "status": "unknown", "evidence": null },
+            "tool_result":       { "status": "unknown", "evidence": null },
+            "structured_output": { "status": "unsupported", "evidence": null },
+            "reasoning":         { "status": "unknown", "evidence": null },
+            "thinking":          { "status": "unknown", "evidence": null },
+            "error_envelope":    { "status": "unknown", "evidence": null },
+            "cancel":            { "status": "unknown", "evidence": null },
+            "timeout":           { "status": "unknown", "evidence": null },
+            "web_search":        { "status": "unknown", "evidence": null },
+            "citations":         { "status": "unknown", "evidence": null }
+          }
+        },
+        "anthropic_messages": {
+          "mode": "native",
+          "features": {
+            "text":              { "status": "unknown", "evidence": null },
+            "multi_turn":        { "status": "unknown", "evidence": null },
+            "streaming":         { "status": "unknown", "evidence": null },
+            "usage":             { "status": "unknown", "evidence": null },
+            "tools":             { "status": "unknown", "evidence": null },
+            "tool_choice":       { "status": "unknown", "evidence": null },
+            "parallel_tools":    { "status": "unknown", "evidence": null },
+            "tool_result":       { "status": "unknown", "evidence": null },
+            "structured_output": { "status": "unknown", "evidence": null },
+            "reasoning":         { "status": "unknown", "evidence": null },
+            "thinking":          { "status": "unknown", "evidence": null },
+            "error_envelope":    { "status": "unknown", "evidence": null },
+            "cancel":            { "status": "unknown", "evidence": null },
+            "timeout":           { "status": "unknown", "evidence": null },
+            "web_search":        { "status": "unknown", "evidence": null },
+            "citations":         { "status": "unknown", "evidence": null }
+          }
+        }
+      }
+    },
+    "gateway_common": {
+      "display_name": "Gateway 通用行为",
+      "description": "跨 Provider 的网关自身行为，如错误处理、取消、超时。",
+      "protocols": {
+        "openai_chat_completions": {
+          "mode": "native",
+          "features": {
+            "text":              { "status": "unknown", "evidence": null },
+            "multi_turn":        { "status": "unknown", "evidence": null },
+            "streaming":         { "status": "unknown", "evidence": null },
+            "usage":             { "status": "unknown", "evidence": null },
+            "tools":             { "status": "unknown", "evidence": null },
+            "tool_choice":       { "status": "unknown", "evidence": null },
+            "parallel_tools":    { "status": "unknown", "evidence": null },
+            "tool_result":       { "status": "unknown", "evidence": null },
+            "structured_output": { "status": "unknown", "evidence": null },
+            "reasoning":         { "status": "unknown", "evidence": null },
+            "thinking":          { "status": "unknown", "evidence": null },
+            "error_envelope":    { "status": "unknown", "evidence": null },
+            "cancel":            { "status": "unknown", "evidence": null },
+            "timeout":           { "status": "unknown", "evidence": null },
+            "web_search":        { "status": "unknown", "evidence": null },
+            "citations":         { "status": "unknown", "evidence": null }
+          }
+        },
+        "openai_responses": {
+          "mode": "native",
+          "features": {
+            "text":              { "status": "unknown", "evidence": null },
+            "multi_turn":        { "status": "unknown", "evidence": null },
+            "streaming":         { "status": "unknown", "evidence": null },
+            "usage":             { "status": "unknown", "evidence": null },
+            "tools":             { "status": "unknown", "evidence": null },
+            "tool_choice":       { "status": "unknown", "evidence": null },
+            "parallel_tools":    { "status": "unknown", "evidence": null },
+            "tool_result":       { "status": "unknown", "evidence": null },
+            "structured_output": { "status": "unknown", "evidence": null },
+            "reasoning":         { "status": "unknown", "evidence": null },
+            "thinking":          { "status": "unknown", "evidence": null },
+            "error_envelope":    { "status": "unknown", "evidence": null },
+            "cancel":            { "status": "unknown", "evidence": null },
+            "timeout":           { "status": "unknown", "evidence": null },
+            "web_search":        { "status": "unknown", "evidence": null },
+            "citations":         { "status": "unknown", "evidence": null }
+          }
+        },
+        "anthropic_messages": {
+          "mode": "native",
+          "features": {
+            "text":              { "status": "unknown", "evidence": null },
+            "multi_turn":        { "status": "unknown", "evidence": null },
+            "streaming":         { "status": "unknown", "evidence": null },
+            "usage":             { "status": "unknown", "evidence": null },
+            "tools":             { "status": "unknown", "evidence": null },
+            "tool_choice":       { "status": "unknown", "evidence": null },
+            "parallel_tools":    { "status": "unknown", "evidence": null },
+            "tool_result":       { "status": "unknown", "evidence": null },
+            "structured_output": { "status": "unknown", "evidence": null },
+            "reasoning":         { "status": "unknown", "evidence": null },
+            "thinking":          { "status": "unknown", "evidence": null },
+            "error_envelope":    { "status": "unknown", "evidence": null },
+            "cancel":            { "status": "unknown", "evidence": null },
+            "timeout":           { "status": "unknown", "evidence": null },
+            "web_search":        { "status": "unknown", "evidence": null },
+            "citations":         { "status": "unknown", "evidence": null }
+          }
+        }
+      }
+    }
+  },
+  "status_values": {
+    "unknown":     "未测试或未确认",
+    "supported":   "已验证支持（native 或 convert）",
+    "unsupported": "明确不支持",
+    "degraded":    "可运行但有已声明语义损失",
+    "planned":     "计划支持但尚未实现"
+  },
+  "evidence_schema": {
+    "description": "evidence 对象记录测试来源和简要结论",
+    "properties": {
+      "test_issue": "关联的 GitHub Issue 编号",
+      "case_ids": "通过的 case ID 列表",
+      "tool": "执行测试的工具",
+      "date": "最近验证日期 (ISO 8601)",
+      "notes": "补充说明"
+    }
+  }
+}
