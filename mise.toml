@@ -42,7 +42,7 @@ run = "npm --prefix web run build && cargo build"
 
 [tasks.test]
 description = "运行 Rust 与前端单元测试"
-run = "cargo test --workspace -- --test-threads=1 && npm --prefix web test && node --test scripts/live-provider-smoke.test.mjs scripts/codex-e2e-smoke.test.mjs"
+run = "cargo test --workspace --features test-support -- --test-threads=1 && npm --prefix web test && node --test scripts/live-provider-smoke.test.mjs scripts/codex-e2e-smoke.test.mjs"
 
 [tasks.test-live]
 description = "显式运行真实 Provider 工具、搜索与 fallback smoke 测试"
@@ -92,8 +92,11 @@ description = "运行 Mock Provider 基础设施和协议 Contract 测试（#115
 run = '''
 echo "=== test-contract: Mock Provider 基础设施 + 协议 Contract ==="
 echo ""
-echo "运行 MockProvider 自测（#115）和后续 Contract 测试（#116/#117 追加）…"
+echo "--- [1/2] MockProvider 自测（#115）---"
 cargo test --test mock_provider_tests -- --test-threads=1
+echo ""
+echo "--- [2/2] 协议 Contract 测试（#116）---"
+cargo test --test contract_tests --features test-support -- --test-threads=1
 echo ""
 echo "=== test-contract: 全部通过 ==="
 '''

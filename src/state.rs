@@ -32,7 +32,7 @@ pub(crate) struct LiveConfig {
 }
 
 impl LiveConfig {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub(crate) fn legacy(config: Arc<GatewayConfig>) -> Self {
         let account_ids = config
             .accounts

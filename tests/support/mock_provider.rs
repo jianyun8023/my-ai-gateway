@@ -132,6 +132,7 @@ impl MockProvider {
     }
 
     /// Snapshot of all recorded requests so far.
+    #[allow(dead_code)]
     pub fn requests(&self) -> Vec<RecordedRequest> {
         self.requests.lock().expect("request recorder lock").clone()
     }

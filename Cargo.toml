@@ -40,10 +40,19 @@ opentelemetry_sdk = { version = "0.32", features = ["rt-tokio"] }
 opentelemetry-otlp = { version = "0.32", default-features = false, features = ["grpc-tonic", "trace"] }
 tracing-opentelemetry = "0.33"
 
+[features]
+test-support = []
+
 [dev-dependencies]
 http-body-util = "0.1"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 
 [[test]]
 name = "mock_provider_tests"
 path = "tests/mock_provider_tests.rs"
+
+[[test]]
+name = "contract_tests"
+path = "tests/contract_tests.rs"
+required-features = ["test-support"]
