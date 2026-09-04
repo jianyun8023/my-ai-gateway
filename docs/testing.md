@@ -213,6 +213,54 @@ SDK 解析失败"的情况。
 SDK 版本固定在 `scripts/conformance/sdk-smoke/package.json`（devDependency 精确版本）。
 首次运行自动 `npm install`。测试同样使用 conformance-target 本地 Gateway。
 
+### `test-differential` 运行方式
+
+`mise run test-differential` 运行 Direct vs Gateway 差分测试（#119）。
+
+**两种运行模式：**
+
+1. **离线自测**（默认，`DIFFERENTIAL_TESTS` 未设置）：运行
+   `scripts/differential/differential.test.mjs` 中的 49 个 node:test 用例，
+   覆盖归一化器、比较器、分类器、参数解析和用例加载。不消耗真实 Token、不访问网络。
+
+2. **真实 Provider**（`DIFFERENTIAL_TESTS=1`）：对同一 Provider 分别发起直连请求和
+   经 Gateway 代理请求，比较归一化后的协议语义。需要 `.env.live` 凭据和运行中的
+   Gateway 实例。
+
+**第一阶段 Provider**：DeepSeek（openai_chat_completions 原生协议，当前最稳定）。
+
+**用例定义**（`tests/differential/cases.json`，6 类）：
+- `text.basic`：非流式文本完成
+- `stream.basic`：流式文本完成
+- `tool.single`：单次工具调用
+- `tool.roundtrip`：工具调用往返
+- `usage.basic`：Token 使用量字段
+- `error.rate_limit_429`：限流错误信封
+
+**归一化器**（`scripts/differential/normalize.mjs`）显式列出每个被忽略的动态字段及理由：
+`strip_dynamic_ids`、`strip_timestamps`、`normalize_finish_reason`、
+`normalize_usage_shape`、`normalize_tool_call`、`normalize_stream_events`。
+
+**结果分类**遵循 #119 矩阵：
+- 双侧失败同类 → `UPSTREAM_LIMITATION`
+- Direct PASS + Gateway FAIL → `GATEWAY_BUG`
+- 双 PASS 但 Gateway 丢字段 → `GATEWAY_BUG`
+- 模型随机性 → `MODEL_BEHAVIOR`
+- 网络偶发 → `FLAKY`
+
+**结果产物**：`target/test-reports/differential/differential-report.json`，
+符合 `tests/coverage/test-result.schema.json`。报告仅保存 metadata/assertion。
+
+**可选参数**：
+- `--provider <id>`：只运行指定 Provider 的用例
+- `--model <id>`：覆盖模型
+- `--case <id>`：只运行指定用例
+- `--list`：列出匹配用例
+
+**失败语义**：零有效用例 exit 2（绝不允许假通过）；至少一个 FAIL exit 1。
+
+**安全**：不提交密钥，复用 `.env.live`，报告不存完整 prompt/response/thinking。
+
 ### AI Ping — 可选手工排障入口
 
 [AI Ping](https://github.com/thinkall/ai-ping) 支持 OpenAI / Anthropic 协议的

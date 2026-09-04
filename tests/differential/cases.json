@@ -1,0 +1,262 @@
+[
+  {
+    "case_id": "text.basic",
+    "description": "Non-streaming text completion — compare envelope, finish reason, and usage presence.",
+    "provider": "deepseek",
+    "model_env": "DEEPSEEK_MODEL",
+    "model_default": "deepseek-chat",
+    "protocol": "openai_chat_completions",
+    "feature": "text",
+    "stream": false,
+    "cost": "low",
+    "required_env": ["DEEPSEEK_API_KEY", "DEEPSEEK_BASE_URL"],
+    "direct_base_url_env": "DEEPSEEK_BASE_URL",
+    "gateway_base_url_env": "DIFFERENTIAL_GATEWAY_URL",
+    "request": {
+      "messages": [
+        { "role": "user", "content": "Reply with exactly: hello" }
+      ],
+      "max_tokens": 16,
+      "temperature": 0
+    },
+    "normalizers": [
+      "strip_dynamic_ids",
+      "strip_timestamps",
+      "normalize_finish_reason",
+      "normalize_usage_shape"
+    ],
+    "assertions": [
+      { "name": "http_status_match", "description": "HTTP status codes must match" },
+      { "name": "envelope_parseable", "description": "Response JSON must be parseable as ChatCompletion" },
+      { "name": "finish_reason_present", "description": "finish_reason must be present and non-null" },
+      { "name": "usage_fields_present", "description": "usage.prompt_tokens and usage.completion_tokens must exist" },
+      { "name": "choices_non_empty", "description": "choices array must be non-empty" },
+      { "name": "content_non_empty", "description": "choices[0].message.content must be non-empty string" }
+    ]
+  },
+  {
+    "case_id": "stream.basic",
+    "description": "Streaming text completion — compare event structure, finish reason, and stream termination.",
+    "provider": "deepseek",
+    "model_env": "DEEPSEEK_MODEL",
+    "model_default": "deepseek-chat",
+    "protocol": "openai_chat_completions",
+    "feature": "streaming",
+    "stream": true,
+    "cost": "low",
+    "required_env": ["DEEPSEEK_API_KEY", "DEEPSEEK_BASE_URL"],
+    "direct_base_url_env": "DEEPSEEK_BASE_URL",
+    "gateway_base_url_env": "DIFFERENTIAL_GATEWAY_URL",
+    "request": {
+      "messages": [
+        { "role": "user", "content": "Reply with exactly: hello" }
+      ],
+      "max_tokens": 16,
+      "temperature": 0,
+      "stream": true
+    },
+    "normalizers": [
+      "strip_dynamic_ids",
+      "strip_timestamps",
+      "normalize_finish_reason",
+      "normalize_usage_shape",
+      "normalize_stream_events"
+    ],
+    "assertions": [
+      { "name": "http_status_match", "description": "HTTP status codes must match" },
+      { "name": "stream_has_chunks", "description": "At least one SSE data chunk received" },
+      { "name": "stream_has_done", "description": "Stream terminates with data: [DONE]" },
+      { "name": "finish_reason_present", "description": "Last chunk must contain finish_reason" },
+      { "name": "content_chunks_present", "description": "At least one chunk must contain delta.content" }
+    ]
+  },
+  {
+    "case_id": "tool.single",
+    "description": "Single tool call — compare tool name, arguments schema, and call ID presence.",
+    "provider": "deepseek",
+    "model_env": "DEEPSEEK_MODEL",
+    "model_default": "deepseek-chat",
+    "protocol": "openai_chat_completions",
+    "feature": "tools",
+    "stream": false,
+    "cost": "low",
+    "required_env": ["DEEPSEEK_API_KEY", "DEEPSEEK_BASE_URL"],
+    "direct_base_url_env": "DEEPSEEK_BASE_URL",
+    "gateway_base_url_env": "DIFFERENTIAL_GATEWAY_URL",
+    "request": {
+      "messages": [
+        { "role": "user", "content": "What is the weather in Tokyo?" }
+      ],
+      "max_tokens": 128,
+      "temperature": 0,
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "get_weather",
+            "description": "Get the current weather for a location",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "location": { "type": "string", "description": "City name" }
+              },
+              "required": ["location"]
+            }
+          }
+        }
+      ],
+      "tool_choice": "auto"
+    },
+    "normalizers": [
+      "strip_dynamic_ids",
+      "strip_timestamps",
+      "normalize_finish_reason",
+      "normalize_usage_shape",
+      "normalize_tool_call"
+    ],
+    "assertions": [
+      { "name": "http_status_match", "description": "HTTP status codes must match" },
+      { "name": "tool_call_present", "description": "At least one tool_call must be present" },
+      { "name": "tool_name_match", "description": "Tool function name must be 'get_weather'" },
+      { "name": "tool_args_valid_json", "description": "Tool arguments must be valid JSON" },
+      { "name": "tool_call_id_present", "description": "tool_call.id must be present (non-empty string)" },
+      { "name": "finish_reason_tool_calls", "description": "finish_reason should be 'tool_calls'" }
+    ]
+  },
+  {
+    "case_id": "tool.roundtrip",
+    "description": "Tool call round-trip — send tool result back, compare final response structure.",
+    "provider": "deepseek",
+    "model_env": "DEEPSEEK_MODEL",
+    "model_default": "deepseek-chat",
+    "protocol": "openai_chat_completions",
+    "feature": "tool_result",
+    "stream": false,
+    "cost": "low",
+    "required_env": ["DEEPSEEK_API_KEY", "DEEPSEEK_BASE_URL"],
+    "direct_base_url_env": "DEEPSEEK_BASE_URL",
+    "gateway_base_url_env": "DIFFERENTIAL_GATEWAY_URL",
+    "request": {
+      "messages": [
+        { "role": "user", "content": "What is the weather in Tokyo?" },
+        {
+          "role": "assistant",
+          "content": null,
+          "tool_calls": [
+            {
+              "id": "call_placeholder",
+              "type": "function",
+              "function": {
+                "name": "get_weather",
+                "arguments": "{\"location\":\"Tokyo\"}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "call_placeholder",
+          "content": "{\"temperature\": 22, \"condition\": \"sunny\"}"
+        }
+      ],
+      "max_tokens": 128,
+      "temperature": 0,
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "get_weather",
+            "description": "Get the current weather for a location",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "location": { "type": "string", "description": "City name" }
+              },
+              "required": ["location"]
+            }
+          }
+        }
+      ]
+    },
+    "normalizers": [
+      "strip_dynamic_ids",
+      "strip_timestamps",
+      "normalize_finish_reason",
+      "normalize_usage_shape"
+    ],
+    "assertions": [
+      { "name": "http_status_match", "description": "HTTP status codes must match" },
+      { "name": "envelope_parseable", "description": "Response JSON must be parseable as ChatCompletion" },
+      { "name": "finish_reason_present", "description": "finish_reason must be present" },
+      { "name": "content_non_empty", "description": "Assistant response content must be non-empty" },
+      { "name": "no_tool_call", "description": "Should not produce another tool call (conversation resolved)" }
+    ]
+  },
+  {
+    "case_id": "usage.basic",
+    "description": "Usage field structure — compare token count presence and type consistency.",
+    "provider": "deepseek",
+    "model_env": "DEEPSEEK_MODEL",
+    "model_default": "deepseek-chat",
+    "protocol": "openai_chat_completions",
+    "feature": "usage",
+    "stream": false,
+    "cost": "low",
+    "required_env": ["DEEPSEEK_API_KEY", "DEEPSEEK_BASE_URL"],
+    "direct_base_url_env": "DEEPSEEK_BASE_URL",
+    "gateway_base_url_env": "DIFFERENTIAL_GATEWAY_URL",
+    "request": {
+      "messages": [
+        { "role": "user", "content": "Say OK" }
+      ],
+      "max_tokens": 8,
+      "temperature": 0
+    },
+    "normalizers": [
+      "strip_dynamic_ids",
+      "strip_timestamps",
+      "normalize_finish_reason",
+      "normalize_usage_shape"
+    ],
+    "assertions": [
+      { "name": "http_status_match", "description": "HTTP status codes must match" },
+      { "name": "usage_present", "description": "usage object must be present" },
+      { "name": "usage_prompt_tokens_type", "description": "usage.prompt_tokens must be a non-negative integer" },
+      { "name": "usage_completion_tokens_type", "description": "usage.completion_tokens must be a non-negative integer" },
+      { "name": "usage_total_tokens_type", "description": "usage.total_tokens must be a non-negative integer" },
+      { "name": "usage_shape_match", "description": "Gateway usage field keys must be superset of direct usage field keys" }
+    ]
+  },
+  {
+    "case_id": "error.rate_limit_429",
+    "description": "Rate limit error — compare error envelope structure and HTTP status.",
+    "provider": "deepseek",
+    "model_env": "DEEPSEEK_MODEL",
+    "model_default": "deepseek-chat",
+    "protocol": "openai_chat_completions",
+    "feature": "error_envelope",
+    "stream": false,
+    "cost": "low",
+    "required_env": ["DEEPSEEK_API_KEY", "DEEPSEEK_BASE_URL"],
+    "direct_base_url_env": "DEEPSEEK_BASE_URL",
+    "gateway_base_url_env": "DIFFERENTIAL_GATEWAY_URL",
+    "request": {
+      "_comment": "This case is validated only when both sides return 429. The runner sends a normal request and classifies the comparison based on actual HTTP status.",
+      "messages": [
+        { "role": "user", "content": "Say OK" }
+      ],
+      "max_tokens": 8,
+      "temperature": 0
+    },
+    "normalizers": [
+      "strip_dynamic_ids",
+      "strip_timestamps"
+    ],
+    "assertions": [
+      { "name": "http_status_match", "description": "HTTP status codes must match" },
+      { "name": "error_envelope_present", "description": "Error response must contain error object with message" },
+      { "name": "error_type_present", "description": "error.type must be present when error occurs" }
+    ],
+    "error_expected": true
+  }
+]
