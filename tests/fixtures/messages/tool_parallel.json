@@ -1,0 +1,30 @@
+{
+  "id": "msg_test_tool_parallel_001",
+  "type": "message",
+  "role": "assistant",
+  "model": "test-model",
+  "content": [
+    {
+      "type": "tool_use",
+      "id": "toolu_test_fixed_par_001",
+      "name": "get_weather",
+      "input": {
+        "location": "San Francisco"
+      }
+    },
+    {
+      "type": "tool_use",
+      "id": "toolu_test_fixed_par_002",
+      "name": "get_weather",
+      "input": {
+        "location": "Tokyo"
+      }
+    }
+  ],
+  "stop_reason": "tool_use",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 35,
+    "output_tokens": 30
+  }
+}

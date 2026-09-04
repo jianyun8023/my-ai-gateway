@@ -1,0 +1,22 @@
+{
+  "id": "resp_test_tool_single_001",
+  "object": "response",
+  "created_at": 1700000000,
+  "status": "completed",
+  "model": "test-model",
+  "output": [
+    {
+      "type": "function_call",
+      "id": "fc_test_fixed_001",
+      "call_id": "call_test_fixed_001",
+      "name": "get_weather",
+      "arguments": "{\"location\":\"San Francisco\",\"unit\":\"celsius\"}",
+      "status": "completed"
+    }
+  ],
+  "usage": {
+    "input_tokens": 30,
+    "output_tokens": 20,
+    "total_tokens": 50
+  }
+}

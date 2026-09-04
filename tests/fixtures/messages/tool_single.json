@@ -1,0 +1,23 @@
+{
+  "id": "msg_test_tool_single_001",
+  "type": "message",
+  "role": "assistant",
+  "model": "test-model",
+  "content": [
+    {
+      "type": "tool_use",
+      "id": "toolu_test_fixed_001",
+      "name": "get_weather",
+      "input": {
+        "location": "San Francisco",
+        "unit": "celsius"
+      }
+    }
+  ],
+  "stop_reason": "tool_use",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 30,
+    "output_tokens": 20
+  }
+}

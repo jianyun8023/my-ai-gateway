@@ -1,0 +1,37 @@
+{
+  "id": "resp_test_reasoning_001",
+  "object": "response",
+  "created_at": 1700000000,
+  "status": "completed",
+  "model": "test-model",
+  "output": [
+    {
+      "type": "reasoning",
+      "id": "rs_test_001",
+      "summary": [
+        {
+          "type": "summary_text",
+          "text": "Let me think about this step by step..."
+        }
+      ]
+    },
+    {
+      "type": "message",
+      "id": "msg_test_reasoning_001",
+      "status": "completed",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "The answer is 42.",
+          "annotations": []
+        }
+      ]
+    }
+  ],
+  "usage": {
+    "input_tokens": 20,
+    "output_tokens": 50,
+    "total_tokens": 70
+  }
+}
