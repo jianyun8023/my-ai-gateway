@@ -163,10 +163,82 @@ SDK 解析失败"的情况。
 启用时），因此 `mise run test` 已隐式覆盖这些测试。若只跑 Rust 部分，可直接执行
 `cargo test --workspace --features test-support -- --test-threads=1`。
 
+### `test-conformance` 运行方式
+
+`mise run test-conformance` 依次运行 llmprobe 和 CompatCanary（#118）。
+
+两者都默认对本地 conformance-target 运行：
+
+1. 自动编译并启动 `cargo run --example conformance-target --features test-support`，
+   进程内同时启动 MockProvider 和 Gateway（无 PostgreSQL），绑定随机端口。
+2. Node runner 解析 stdout 获取 `CONFORMANCE_GATEWAY_URL`，等待就绪后执行扫描。
+3. 扫描完成后自动清理 conformance-target 进程。
+
+**工具版本**来自 `tests/tooling/versions.json`（唯一事实来源）。
+
+**结果产物**：
+- 原始报告：`target/test-reports/conformance/llmprobe/` 和
+  `target/test-reports/conformance/compatcanary/`
+- 归一化摘要：`*-normalized.json`，符合 `tests/coverage/test-result.schema.json`
+
+**可选参数**：
+- `--target external`：对外部 Gateway 运行（需设 `CONFORMANCE_GATEWAY_URL` 等 env）
+- `--spec`：llmprobe 仅扫描指定协议（chat-completions / responses / anthropic-messages）
+- `--profile`：CompatCanary 仅扫描指定 profile（chat / modern）
+- `--filter`：llmprobe 测试过滤
+
+### `test-sdk-smoke` 运行方式
+
+`mise run test-sdk-smoke` 运行 OpenAI 和 Anthropic 官方 SDK smoke 测试（#118）。
+
+- **OpenAI SDK**（6 case）：Chat basic、Chat stream、Responses basic、Responses
+  stream、Tool basic、Usage。
+- **Anthropic SDK**（4 case）：Messages basic、Messages stream、Tool basic、Usage。
+
+SDK 版本固定在 `scripts/conformance/sdk-smoke/package.json`（devDependency 精确版本）。
+首次运行自动 `npm install`。测试同样使用 conformance-target 本地 Gateway。
+
+### AI Ping — 可选手工排障入口
+
+[AI Ping](https://github.com/thinkall/ai-ping) 支持 OpenAI / Anthropic 协议的
+快速连通性检查，适合手工排障或提供第二意见。
+
+**不进入任何自动门禁**，原因：与 llmprobe/CompatCanary 功能重叠，维护两套门禁
+增加复杂度但不增加覆盖面。
+
+手工使用：
+
+```bash
+# 安装（一次性）
+npx ai-ping --help
+
+# 对本地 Gateway 快速检查
+npx ai-ping --provider openai \
+  --base-url http://127.0.0.1:8787/v1 \
+  --api-key sk-test \
+  --model conformance-test-model
+
+# 对真实 Provider 检查
+npx ai-ping --provider anthropic \
+  --base-url https://api.anthropic.com \
+  --api-key $ANTHROPIC_API_KEY \
+  --model claude-sonnet-4-20250514
+```
+
 ### `verify` 策略
 
 第一版保持现有 `verify` 快速稳定，不立即把第三方扫描和 load 塞进去。
-后续 #118 决定哪些 conformance job 适合进入默认 CI。
+
+### CI 策略（#118 决策）
+
+- **Rust Contract**（`test-contract`）：默认 CI 必跑。
+- **CompatCanary against local Gateway**（`test-conformance` 中 CompatCanary 部分）：
+  可进入默认 CI——运行时间短、确定性强、无外部依赖。
+- **llmprobe**：因运行时间较长且依赖 npx 下载，建议作为独立 CI job 或
+  release/manual gate；待稳定后可合入默认 CI。
+- **SDK Smoke**（`test-sdk-smoke`）：可进入默认或独立 CI job。
+- **AI Ping**：不进 CI。
+- **真实 Provider**：仍由 #62 opt-in。
 
 ## 6. Issue 到命令/工具的映射
 

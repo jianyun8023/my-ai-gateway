@@ -1,0 +1,46 @@
+{
+  "_comment": "Conformance scan configuration. Default target: local Gateway + Mock Provider via conformance-target example. No real API keys committed.",
+  "targets": {
+    "local": {
+      "description": "Local Gateway backed by deterministic MockProvider (conformance-target example)",
+      "base_url_env": "CONFORMANCE_GATEWAY_URL",
+      "api_key_env": "CONFORMANCE_API_KEY",
+      "api_key_default": "sk-conformance-test",
+      "model": "conformance-test-model",
+      "protocols": ["openai_chat_completions", "openai_responses", "anthropic_messages"],
+      "managed": true
+    },
+    "external": {
+      "description": "External Gateway (opt-in, requires real credentials)",
+      "base_url_env": "CONFORMANCE_GATEWAY_URL",
+      "api_key_env": "CONFORMANCE_API_KEY",
+      "model_env": "CONFORMANCE_MODEL",
+      "protocols": ["openai_chat_completions", "openai_responses", "anthropic_messages"],
+      "managed": false
+    }
+  },
+  "default_target": "local",
+  "report_dir": "target/test-reports/conformance",
+  "tools": {
+    "llmprobe": {
+      "specs": ["chat-completions", "responses", "anthropic-messages"],
+      "known_gaps": [
+        {
+          "case_pattern": "capability.*",
+          "reason": "capability/agentic/model-quality scores excluded from Gateway conformance",
+          "expected_result": "SKIPPED"
+        }
+      ]
+    },
+    "compatcanary": {
+      "profiles": ["chat", "modern"],
+      "known_gaps": [
+        {
+          "probe": "structured_output",
+          "reason": "Mock Provider returns fixed JSON, may not match dynamic schema",
+          "expected_result": "SKIPPED"
+        }
+      ]
+    }
+  }
+}

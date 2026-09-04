@@ -12,3 +12,5 @@
 backups/
 control-plane*.json
 .private/
+scripts/conformance/sdk-smoke/node_modules/
+scripts/conformance/sdk-smoke/package-lock.json

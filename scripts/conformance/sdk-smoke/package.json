@@ -1,0 +1,10 @@
+{
+  "name": "conformance-sdk-smoke",
+  "private": true,
+  "type": "module",
+  "description": "SDK smoke tests for AI Gateway conformance (#118). Versions pinned explicitly.",
+  "devDependencies": {
+    "openai": "4.100.0",
+    "@anthropic-ai/sdk": "0.37.0"
+  }
+}
