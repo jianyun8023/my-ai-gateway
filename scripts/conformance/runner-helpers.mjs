@@ -219,8 +219,9 @@ export function printSummary(report) {
   const total = report.results.length
   const pass = report.results.filter((r) => r.result === 'PASS').length
   const fail = report.results.filter((r) => r.result === 'FAIL').length
+  const unsupported = report.results.filter((r) => r.result === 'UNSUPPORTED').length
   const skip = report.results.filter((r) => r.result === 'SKIPPED').length
-  console.error(`\n${report.tool} v${report.tool_version} — ${total} cases: ${pass} PASS, ${fail} FAIL, ${skip} SKIPPED`)
+  console.error(`\n${report.tool} v${report.tool_version} — ${total} cases: ${pass} PASS, ${fail} FAIL, ${unsupported} UNSUPPORTED, ${skip} SKIPPED`)
   if (fail > 0) {
     for (const r of report.results.filter((r) => r.result === 'FAIL')) {
       console.error(`  ✗ ${r.case_id}: ${r.evidence?.notes || ''}`)

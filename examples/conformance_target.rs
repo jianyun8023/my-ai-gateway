@@ -165,8 +165,7 @@ fn generate_from_schema(schema: &Value) -> Value {
         Some("boolean") => Value::Bool(true),
         Some("array") => {
             if let Some(items) = schema.get("items") {
-                let min = schema.get("minItems").and_then(|v| v.as_u64()).unwrap_or(0);
-                let count = min.max(0);
+                let count = schema.get("minItems").and_then(|v| v.as_u64()).unwrap_or(0);
                 Value::Array((0..count).map(|_| generate_from_schema(items)).collect())
             } else {
                 Value::Array(vec![])
@@ -250,7 +249,7 @@ async fn mock_handler(request: Request) -> Response<Body> {
         .map(|c| c.to_bytes())
         .unwrap_or_default();
 
-    let body_json: Value = serde_json::from_slice(&body_bytes).unwrap_or_else(|_| Value::Null);
+    let body_json: Value = serde_json::from_slice(&body_bytes).unwrap_or(Value::Null);
 
     let model = body_json
         .get("model")
@@ -265,34 +264,62 @@ async fn mock_handler(request: Request) -> Response<Body> {
 
     let _ = parts;
 
+    // llmprobe's error-shape probes send deliberately malformed envelopes
+    // (`messages: "not-an-array"`, `input: 42`).  A real provider rejects
+    // these with 400; the mock must do the same so the gateway's pass-through
+    // of upstream 4xx is exercised honestly.
     match path.as_str() {
         p if p.ends_with("/chat/completions") => {
+            if let Some(messages) = body_json.get("messages") {
+                if !messages.is_array() {
+                    return openai_error_response(
+                        StatusCode::BAD_REQUEST,
+                        "messages must be an array",
+                    );
+                }
+            }
             if has_tools {
                 chat_tool_response(model, &body_json)
             } else if has_response_format {
                 chat_structured_response(model, &body_json)
             } else if is_stream {
-                chat_stream_response(model)
+                chat_stream_response(model, &body_json)
             } else {
-                chat_basic_response(model)
+                chat_basic_response(model, &body_json)
             }
         }
         p if p.ends_with("/responses") => {
+            if let Some(input) = body_json.get("input") {
+                if !(input.is_string() || input.is_array()) {
+                    return openai_error_response(
+                        StatusCode::BAD_REQUEST,
+                        "input must be a string or an array",
+                    );
+                }
+            }
             if has_tools {
                 responses_tool_response(model, &body_json)
             } else if is_stream {
-                responses_stream_response(model)
+                responses_stream_response(model, &body_json)
             } else {
-                responses_basic_response(model)
+                responses_basic_response(model, &body_json)
             }
         }
         p if p.ends_with("/messages") => {
+            if let Some(messages) = body_json.get("messages") {
+                if !messages.is_array() {
+                    return anthropic_error_response(
+                        StatusCode::BAD_REQUEST,
+                        "messages must be an array",
+                    );
+                }
+            }
             if has_tools {
                 messages_tool_response(model, &body_json)
             } else if is_stream {
-                messages_stream_response(model)
+                messages_stream_response(model, &body_json)
             } else {
-                messages_basic_response(model)
+                messages_basic_response(model, &body_json)
             }
         }
         _ => Response::builder()
@@ -305,9 +332,53 @@ async fn mock_handler(request: Request) -> Response<Body> {
     }
 }
 
+/// Effective output-token cap per protocol, and whether the deterministic
+/// reply (8 nominal tokens) would be truncated by it.
+fn truncation(body_json: &Value, param: &str) -> bool {
+    body_json
+        .get(param)
+        .and_then(|v| v.as_u64())
+        .is_some_and(|cap| cap < 8)
+}
+
+fn openai_error_response(status: StatusCode, message: &str) -> Response<Body> {
+    json_response(
+        status,
+        &serde_json::json!({
+            "error": {
+                "message": message,
+                "type": "invalid_request_error",
+                "code": "invalid_request_error"
+            }
+        }),
+    )
+}
+
+fn anthropic_error_response(status: StatusCode, message: &str) -> Response<Body> {
+    json_response(
+        status,
+        &serde_json::json!({
+            "type": "error",
+            "error": {
+                "type": "invalid_request_error",
+                "message": message
+            }
+        }),
+    )
+}
+
 // ── Chat Completions responses ──────────────────────────────────────────────
 
-fn chat_basic_response(model: &str) -> Response<Body> {
+fn chat_finish_reason(body_json: &Value) -> &'static str {
+    if truncation(body_json, "max_completion_tokens") || truncation(body_json, "max_tokens") {
+        "length"
+    } else {
+        "stop"
+    }
+}
+
+fn chat_basic_response(model: &str, body_json: &Value) -> Response<Body> {
+    let finish_reason = chat_finish_reason(body_json);
     let body = serde_json::json!({
         "id": "chatcmpl-conformance-001",
         "object": "chat.completion",
@@ -319,7 +390,7 @@ fn chat_basic_response(model: &str) -> Response<Body> {
                 "role": "assistant",
                 "content": "This is a deterministic conformance test response."
             },
-            "finish_reason": "stop"
+            "finish_reason": finish_reason
         }],
         "usage": {
             "prompt_tokens": 10,
@@ -330,13 +401,14 @@ fn chat_basic_response(model: &str) -> Response<Body> {
     json_response(StatusCode::OK, &body)
 }
 
-fn chat_stream_response(model: &str) -> Response<Body> {
+fn chat_stream_response(model: &str, body_json: &Value) -> Response<Body> {
+    let finish_reason = chat_finish_reason(body_json);
     let events = vec![
         serde_json::json!({"id":"chatcmpl-conformance-s01","object":"chat.completion.chunk","created":1700000000_u64,"model":model,"choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}),
         serde_json::json!({"id":"chatcmpl-conformance-s01","object":"chat.completion.chunk","created":1700000000_u64,"model":model,"choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}),
         serde_json::json!({"id":"chatcmpl-conformance-s01","object":"chat.completion.chunk","created":1700000000_u64,"model":model,"choices":[{"index":0,"delta":{"content":" from"},"finish_reason":null}]}),
         serde_json::json!({"id":"chatcmpl-conformance-s01","object":"chat.completion.chunk","created":1700000000_u64,"model":model,"choices":[{"index":0,"delta":{"content":" conformance"},"finish_reason":null}]}),
-        serde_json::json!({"id":"chatcmpl-conformance-s01","object":"chat.completion.chunk","created":1700000000_u64,"model":model,"choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":3,"total_tokens":13}}),
+        serde_json::json!({"id":"chatcmpl-conformance-s01","object":"chat.completion.chunk","created":1700000000_u64,"model":model,"choices":[{"index":0,"delta":{},"finish_reason":finish_reason}],"usage":{"prompt_tokens":10,"completion_tokens":3,"total_tokens":13}}),
     ];
     sse_response(events, true)
 }
@@ -400,75 +472,153 @@ fn chat_structured_response(model: &str, body_json: &Value) -> Response<Body> {
 
 // ── Responses responses ─────────────────────────────────────────────────────
 
-fn responses_basic_response(model: &str) -> Response<Body> {
-    let body = serde_json::json!({
+/// Full Responses API resource object.  Conformance tools validate against
+/// the published spec schema, which requires every field below with a
+/// concrete type (`null` where unset).
+fn responses_resource(
+    model: &str,
+    status: &str,
+    output: Value,
+    usage: Value,
+    incomplete_reason: Option<&str>,
+) -> Value {
+    let completed = status == "completed";
+    serde_json::json!({
         "id": "resp_conformance_001",
         "object": "response",
         "created_at": 1700000000_u64,
-        "status": "completed",
+        "completed_at": if completed { serde_json::json!(1700000001_u64) } else { Value::Null },
+        "status": status,
+        "incomplete_details": incomplete_reason.map(|r| serde_json::json!({"reason": r})).unwrap_or(Value::Null),
         "model": model,
-        "output": [{
-            "type": "message",
-            "id": "msg_conformance_001",
-            "status": "completed",
-            "role": "assistant",
-            "content": [{
-                "type": "output_text",
-                "text": "This is a deterministic conformance test response.",
-                "annotations": []
-            }]
-        }],
-        "usage": {
-            "input_tokens": 10,
-            "output_tokens": 8,
-            "total_tokens": 18
-        }
-    });
+        "previous_response_id": null,
+        "instructions": null,
+        "output": output,
+        "error": null,
+        "tools": [],
+        "tool_choice": "auto",
+        "truncation": "disabled",
+        "parallel_tool_calls": true,
+        "text": {"format": {"type": "text"}},
+        "top_p": 1.0,
+        "presence_penalty": 0.0,
+        "frequency_penalty": 0.0,
+        "top_logprobs": 0,
+        "temperature": 1.0,
+        "reasoning": null,
+        "usage": usage,
+        "max_output_tokens": null,
+        "max_tool_calls": null,
+        "store": false,
+        "background": false,
+        "service_tier": "default",
+        "metadata": {},
+        "safety_identifier": null,
+        "prompt_cache_key": null
+    })
+}
+
+fn responses_usage(input_tokens: u64, output_tokens: u64) -> Value {
+    serde_json::json!({
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": input_tokens + output_tokens,
+        "input_tokens_details": {"cached_tokens": 0},
+        "output_tokens_details": {"reasoning_tokens": 0}
+    })
+}
+
+fn responses_message_item(text: &str) -> Value {
+    serde_json::json!({
+        "type": "message",
+        "id": "msg_conformance_001",
+        "status": "completed",
+        "role": "assistant",
+        "content": [{
+            "type": "output_text",
+            "text": text,
+            "annotations": []
+        }]
+    })
+}
+
+fn responses_basic_response(model: &str, body_json: &Value) -> Response<Body> {
+    let truncated = truncation(body_json, "max_output_tokens");
+    let body = responses_resource(
+        model,
+        if truncated { "incomplete" } else { "completed" },
+        serde_json::json!([responses_message_item(
+            "This is a deterministic conformance test response."
+        )]),
+        responses_usage(10, 8),
+        truncated.then_some("max_output_tokens"),
+    );
     json_response(StatusCode::OK, &body)
 }
 
-fn responses_stream_response(model: &str) -> Response<Body> {
+fn responses_stream_response(model: &str, body_json: &Value) -> Response<Body> {
+    let truncated = truncation(body_json, "max_output_tokens");
+    let status = if truncated { "incomplete" } else { "completed" };
+    let created = responses_resource(
+        model,
+        "in_progress",
+        serde_json::json!([]),
+        Value::Null,
+        None,
+    );
+    let mut completed = responses_resource(
+        model,
+        status,
+        serde_json::json!([responses_message_item("Hello from conformance")]),
+        responses_usage(10, 3),
+        truncated.then_some("max_output_tokens"),
+    );
+    completed["id"] = Value::String("resp_conformance_s01".into());
+    let created_id = {
+        let mut c = created.clone();
+        c["id"] = Value::String("resp_conformance_s01".into());
+        c
+    };
     let events = vec![
-        serde_json::json!({"type":"response.created","response":{"id":"resp_conformance_s01","object":"response","created_at":1700000000_u64,"status":"in_progress","model":model,"output":[],"usage":null},"sequence_number":0}),
+        serde_json::json!({"type":"response.created","response":created_id,"sequence_number":0}),
         serde_json::json!({"type":"response.output_item.added","output_index":0,"item":{"type":"message","id":"msg_conformance_s01","status":"in_progress","role":"assistant","content":[]},"sequence_number":1}),
         serde_json::json!({"type":"response.content_part.added","item_id":"msg_conformance_s01","output_index":0,"content_index":0,"part":{"type":"output_text","text":"","annotations":[]},"sequence_number":2}),
         serde_json::json!({"type":"response.output_text.delta","item_id":"msg_conformance_s01","output_index":0,"content_index":0,"delta":"Hello from conformance","sequence_number":3}),
         serde_json::json!({"type":"response.output_text.done","item_id":"msg_conformance_s01","output_index":0,"content_index":0,"text":"Hello from conformance","sequence_number":4}),
         serde_json::json!({"type":"response.content_part.done","item_id":"msg_conformance_s01","output_index":0,"content_index":0,"part":{"type":"output_text","text":"Hello from conformance","annotations":[]},"sequence_number":5}),
         serde_json::json!({"type":"response.output_item.done","output_index":0,"item":{"type":"message","id":"msg_conformance_s01","status":"completed","role":"assistant","content":[{"type":"output_text","text":"Hello from conformance","annotations":[]}]},"sequence_number":6}),
-        serde_json::json!({"type":"response.completed","response":{"id":"resp_conformance_s01","object":"response","created_at":1700000000_u64,"status":"completed","model":model,"output":[{"type":"message","id":"msg_conformance_s01","status":"completed","role":"assistant","content":[{"type":"output_text","text":"Hello from conformance","annotations":[]}]}],"usage":{"input_tokens":10,"output_tokens":3,"total_tokens":13}},"sequence_number":7}),
+        serde_json::json!({"type": if truncated { "response.incomplete" } else { "response.completed" },"response":completed,"sequence_number":7}),
     ];
     sse_typed_response(events)
 }
 
 fn responses_tool_response(model: &str, body_json: &Value) -> Response<Body> {
     let (tool_name, arguments) = extract_tool_info(body_json);
-    let body = serde_json::json!({
-        "id": "resp_conformance_tool_001",
-        "object": "response",
-        "created_at": 1700000000_u64,
-        "status": "completed",
-        "model": model,
-        "output": [{
+    let body = responses_resource(
+        model,
+        "completed",
+        serde_json::json!([{
             "type": "function_call",
             "id": "fc_conformance_001",
             "call_id": "call_conformance_001",
             "name": tool_name,
             "arguments": arguments,
             "status": "completed"
-        }],
-        "usage": {
-            "input_tokens": 30,
-            "output_tokens": 20,
-            "total_tokens": 50
-        }
-    });
+        }]),
+        responses_usage(30, 20),
+        None,
+    );
     json_response(StatusCode::OK, &body)
 }
 
 // ── Anthropic Messages responses ────────────────────────────────────────────
 
-fn messages_basic_response(model: &str) -> Response<Body> {
+fn messages_basic_response(model: &str, body_json: &Value) -> Response<Body> {
+    let stop_reason = if truncation(body_json, "max_tokens") {
+        "max_tokens"
+    } else {
+        "end_turn"
+    };
     let body = serde_json::json!({
         "id": "msg_conformance_001",
         "type": "message",
@@ -478,7 +628,7 @@ fn messages_basic_response(model: &str) -> Response<Body> {
             "type": "text",
             "text": "This is a deterministic conformance test response."
         }],
-        "stop_reason": "end_turn",
+        "stop_reason": stop_reason,
         "stop_sequence": null,
         "usage": {
             "input_tokens": 10,
@@ -488,13 +638,18 @@ fn messages_basic_response(model: &str) -> Response<Body> {
     json_response(StatusCode::OK, &body)
 }
 
-fn messages_stream_response(model: &str) -> Response<Body> {
+fn messages_stream_response(model: &str, body_json: &Value) -> Response<Body> {
+    let stop_reason = if truncation(body_json, "max_tokens") {
+        "max_tokens"
+    } else {
+        "end_turn"
+    };
     let events = vec![
         serde_json::json!({"type":"message_start","message":{"id":"msg_conformance_s01","type":"message","role":"assistant","model":model,"content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":0}}}),
         serde_json::json!({"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}),
         serde_json::json!({"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello from conformance"}}),
         serde_json::json!({"type":"content_block_stop","index":0}),
-        serde_json::json!({"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":3}}),
+        serde_json::json!({"type":"message_delta","delta":{"stop_reason":stop_reason,"stop_sequence":null},"usage":{"output_tokens":3}}),
         serde_json::json!({"type":"message_stop"}),
     ];
     sse_typed_response(events)

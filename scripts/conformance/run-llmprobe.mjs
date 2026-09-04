@@ -6,9 +6,17 @@
  *   node scripts/conformance/run-llmprobe.mjs [--target local|external]
  *       [--spec chat-completions|responses|anthropic-messages] [--filter <pattern>]
  *
- * Default: starts local conformance-target, scans all three specs.
+ * llmprobe probes every surface of an OpenAI-compatible endpoint in one run;
+ * it has no per-spec or per-case CLI selection.  `--spec` / `--filter`
+ * therefore filter the *normalized* results after the scan, they are not
+ * passed to llmprobe.
+ *
+ * Default: starts local conformance-target, scans all surfaces once.
  * Versions read from tests/tooling/versions.json (single source of truth).
  * Results: target/test-reports/conformance/llmprobe-*.json
+ *
+ * Failure policy: a scan that produces zero usable cases is a tool failure
+ * (exit 2), never a silent pass.
  */
 
 import {
@@ -22,29 +30,67 @@ import {
   runCommand,
   printSummary,
   optionalEnv,
-  REPO_ROOT,
 } from './runner-helpers.mjs'
-import { normalizeLlmprobe } from './normalize-report.mjs'
+import {
+  normalizeLlmprobe,
+  LLMPROPE_SPEC_SURFACES,
+} from './normalize-report.mjs'
 
-const ALL_SPECS = ['chat-completions', 'responses', 'anthropic-messages']
+/**
+ * Build the llmprobe CLI invocation.  Exported for unit tests.
+ *
+ * Real CLI (llmprobe 0.6.x): `llmprobe <base-url> -k <key> -m <model>
+ * --quick --no-bench --json --no-save --no-color`.  `--quick` keeps the
+ * scan to surface probe + core conformance; capability/agentic/eval phases
+ * stay not-run (recorded in normalized report metadata).
+ */
+export function buildLlmprobeArgs({ version, baseUrl, apiKey, model }) {
+  return [
+    `llmprobe@${version}`,
+    baseUrl,
+    '--api-key', apiKey,
+    '--model', model,
+    '--quick',
+    '--no-bench',
+    '--json',
+    '--no-save',
+    '--no-color',
+  ]
+}
+
+/** Filter normalized results by spec selection and case_id substring. */
+export function filterNormalizedResults(report, specs, filter) {
+  let results = report.results
+  if (specs.length > 0) {
+    const surfaces = new Set()
+    for (const spec of specs) {
+      for (const surface of LLMPROPE_SPEC_SURFACES[spec] || []) {
+        surfaces.add(surface)
+      }
+    }
+    results = results.filter((r) => surfaces.has(r.llmprobe_surface))
+  }
+  if (filter) {
+    results = results.filter((r) => r.case_id.includes(filter))
+  }
+  return { ...report, results }
+}
 
 async function main() {
   const args = parseArguments(process.argv.slice(2))
   const versions = loadVersions()
   const config = loadConfig()
   const version = versions.llmprobe
-  const specs = args.specs.length > 0 ? args.specs : ALL_SPECS
   const reportDir = ensureReportDir('llmprobe')
 
   console.error(`=== llmprobe v${version} conformance scan ===`)
-  console.error(`  Specs: ${specs.join(', ')}`)
+  console.error(`  Specs filter: ${args.specs.length > 0 ? args.specs.join(', ') : '(all surfaces)'}`)
   console.error(`  Target: ${args.target}`)
 
   // ── Resolve target ──────────────────────────────────────────────────
   let baseUrl, model, cleanup
 
   if (args.target === 'local') {
-    const targetConfig = config.targets.local
     console.error('  Starting conformance-target…')
     const target = await startConformanceTarget()
     baseUrl = target.baseUrl
@@ -66,79 +112,67 @@ async function main() {
     config.targets.local.api_key_default,
   )
 
-  let totalFail = 0
-
   try {
-    for (const spec of specs) {
-      console.error(`\n--- llmprobe --spec ${spec} ---`)
+    const npxArgs = buildLlmprobeArgs({ version, baseUrl, apiKey, model })
 
-      const npxArgs = [
-        `llmprobe@${version}`,
-        '--base-url', baseUrl,
-        '--api-key', apiKey,
-        '--model', model,
-        '--spec', spec,
-        '--format', 'json',
-      ]
-      if (args.filter) {
-        npxArgs.push('--filter', args.filter)
-      }
-
-      if (args.dryRun) {
-        console.error(`  [dry-run] npx ${npxArgs.join(' ')}`)
-        continue
-      }
-
-      const result = await runCommand('npx', npxArgs, {
-        env: { NODE_NO_WARNINGS: '1' },
-        timeout: 180_000,
-      })
-
-      // Preserve raw report regardless of exit code
-      const rawFilename = `llmprobe-${spec}-raw.json`
-      let rawReport = null
-
-      try {
-        rawReport = JSON.parse(result.stdout)
-      } catch {
-        rawReport = {
-          tests: [],
-          _raw_stdout: result.stdout.slice(0, 5000),
-          _parse_error: 'Could not parse llmprobe JSON output',
-        }
-      }
-
-      writeReport(reportDir, rawFilename, rawReport)
-
-      if (result.stderr) {
-        const stderrFile = `llmprobe-${spec}-stderr.txt`
-        writeReport(reportDir, stderrFile, result.stderr)
-      }
-
-      // Normalize to unified schema
-      const normalized = normalizeLlmprobe(rawReport, spec)
-      writeReport(reportDir, `llmprobe-${spec}-normalized.json`, normalized)
-
-      const failCount = printSummary(normalized)
-      totalFail += failCount
-
-      if (result.exitCode !== 0) {
-        console.error(`  llmprobe exited with code ${result.exitCode}`)
-        if (failCount === 0) totalFail += 1
-      }
+    if (args.dryRun) {
+      console.error(`  [dry-run] npx ${npxArgs.join(' ')}`)
+      return
     }
+
+    const result = await runCommand('npx', npxArgs, {
+      env: { NODE_NO_WARNINGS: '1' },
+      timeout: 300_000,
+    })
+
+    if (result.stderr) {
+      writeReport(reportDir, 'llmprobe-stderr.txt', result.stderr)
+    }
+
+    // Preserve raw stdout regardless of exit code, then require valid JSON.
+    let rawReport = null
+    try {
+      rawReport = JSON.parse(result.stdout)
+    } catch {
+      writeReport(reportDir, 'llmprobe-raw-stdout.txt', result.stdout.slice(0, 20000))
+      console.error('FATAL: llmprobe did not produce JSON output on stdout.')
+      console.error(`  exit code: ${result.exitCode}; raw stdout saved for inspection.`)
+      process.exit(2)
+    }
+    writeReport(reportDir, 'llmprobe-raw.json', rawReport)
+
+    const normalized = normalizeLlmprobe(rawReport)
+    const filtered = filterNormalizedResults(normalized, args.specs, args.filter)
+    writeReport(reportDir, 'llmprobe-normalized.json', filtered)
+
+    // A scan with zero usable cases means the tool/runner integration is
+    // broken (wrong CLI, unreachable target, …) — fail loudly.
+    if (filtered.results.length === 0) {
+      console.error('FATAL: llmprobe produced zero usable conformance cases.')
+      console.error('  This is a tool failure, not a passing scan.')
+      process.exit(2)
+    }
+
+    const failCount = printSummary(filtered)
+    if (result.exitCode !== 0) {
+      // llmprobe exits non-zero on any MUST failure, including ones we
+      // normalize away as declared known gaps.  The normalized FAIL count is
+      // the authority; the raw exit code is diagnostic only.
+      console.error(`  (llmprobe raw exit code: ${result.exitCode}; normalized results are authoritative)`)
+    }
+    console.error(`\n=== llmprobe scan complete (${failCount} case failures) ===`)
+    process.exit(failCount > 0 ? 1 : 0)
   } finally {
     if (cleanup) {
       console.error('\n  Stopping conformance-target…')
       await cleanup()
     }
   }
-
-  console.error(`\n=== llmprobe scan complete (${totalFail} failures) ===`)
-  process.exit(totalFail > 0 ? 1 : 0)
 }
 
-main().catch((err) => {
-  console.error(`FATAL: ${err.message}`)
-  process.exit(2)
-})
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((err) => {
+    console.error(`FATAL: ${err.message}`)
+    process.exit(2)
+  })
+}

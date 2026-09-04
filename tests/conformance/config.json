@@ -24,10 +24,27 @@
   "tools": {
     "llmprobe": {
       "specs": ["chat-completions", "responses", "anthropic-messages"],
+      "notes": "llmprobe 单次运行探测全部 surface；--spec 只是规范化后的结果过滤。--quick 深度下 capability/agentic/fidelity/performance/reasoning 相位为 not-run，记录在规范化报告的 phases 元数据中，不生成用例。",
       "known_gaps": [
         {
-          "case_pattern": "capability.*",
-          "reason": "capability/agentic/model-quality scores excluded from Gateway conformance",
+          "case_pattern": "completions.*",
+          "reason": "legacy completions endpoint is outside the gateway product surface",
+          "expected_result": "UNSUPPORTED"
+        },
+        {
+          "case_pattern": "count_tokens.*",
+          "reason": "messages/count_tokens is outside the gateway product surface",
+          "expected_result": "UNSUPPORTED"
+        },
+        {
+          "case_pattern": "embeddings|images|audio",
+          "reason": "non-chat surfaces are out of scope; recorded in out_of_scope_surfaces metadata, not as cases",
+          "expected_result": "SKIPPED"
+        },
+        {
+          "case_pattern": "responses\\.streaming\\.streaming",
+          "failure_id_pattern": "responses-sse-missing-done",
+          "reason": "llmprobe 0.6.1 MUST-asserts a terminal `data: [DONE]` for Responses streams; the real OpenAI Responses API terminates with `response.completed` and sends no [DONE] sentinel",
           "expected_result": "SKIPPED"
         }
       ]

@@ -60,10 +60,7 @@ pub(crate) async fn proxy(
             );
         }
     };
-    let model = payload
-        .get("model")
-        .and_then(Value::as_str)
-        .unwrap_or("default");
+    let model = payload.get("model").and_then(Value::as_str);
     let is_streamed = payload
         .get("stream")
         .and_then(Value::as_bool)
@@ -78,18 +75,18 @@ pub(crate) async fn proxy(
     if transport::sanitize_thinking_params(&mut body, protocol) {
         tracing::warn!(
             request_id = %request_id,
-            model = %model,
+            model = %model.unwrap_or("<missing>"),
             protocol = %protocol,
             "stripped thinking/reasoning parameters: conversation history lacks reasoning fields"
         );
     }
 
-    let virtual_key_id = match authorized_with_db(&state, &headers, Some(model)).await {
+    let virtual_key_id = match authorized_with_db(&state, &headers, model).await {
         Some(virtual_key_id) => virtual_key_id,
         None => {
             return finish_proxy(
                 protocol,
-                model,
+                model.unwrap_or("default"),
                 started,
                 is_streamed,
                 data_plane_error_response(
@@ -101,6 +98,25 @@ pub(crate) async fn proxy(
                 ),
             );
         }
+    };
+    // `model` is required by all three northbound protocols.  A missing or
+    // empty value is a client validation error (400), not a routing miss
+    // (404) — surface-discovery tools such as llmprobe probe endpoints with
+    // an empty body and interpret 404 as "endpoint not implemented".
+    let Some(model) = model.filter(|value| !value.is_empty()) else {
+        return finish_proxy(
+            protocol,
+            "default",
+            started,
+            is_streamed,
+            data_plane_error_response(
+                protocol,
+                StatusCode::BAD_REQUEST,
+                "missing_required_parameter",
+                "missing required field: model",
+                &request_id,
+            ),
+        );
     };
     let route = match resolver.resolve_detailed(protocol, model) {
         Ok(route) => route,

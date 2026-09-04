@@ -107,7 +107,16 @@ SDK 解析失败"的情况。
 
 > 以上版本基于 2026-09-04 各工具的最新稳定版本。
 > - **llmprobe 0.6.1**：npm `llmprobe`，ddalcu/responses-chat-messages-validator。
->   支持 `--spec responses|chat-completions|anthropic-messages` 三协议和 `--filter` 粒度。
+>   单次运行探测端点的全部 surface（chat / responses / messages / models 等），
+>   没有 `--spec`/`--filter`/`--base-url` CLI 参数；实际调用方式为
+>   `npx llmprobe@<version> <base-url> -k <key> -m <model> --quick --no-bench --json --no-save --no-color`。
+>   runner 侧的 `--spec`/`--filter` 是扫描后对归一化结果的过滤，不传给 llmprobe。
+>   `--quick` 深度只跑 surface 探测 + core conformance；capability/agentic/eval 相位
+>   为 not-run，记录在归一化报告的 `phases` 元数据中。
+>   已知过度断言：0.6.1 对 Responses 流 MUST 断言 `data: [DONE]` 终止符，而真实
+>   OpenAI Responses API 以 `response.completed` 结束、不发 `[DONE]`；该断言在
+>   `tests/conformance/config.json` 登记为断言级 known gap（按失败断言 id 匹配，
+>   不会掩盖同 case 的其他 MUST 失败）。
 > - **CompatCanary 0.2.2**：npm `compatcanary`，CognizenOrg/compatcanary。
 >   支持 `--profile chat|modern` 和 `--format json|markdown`。
 > - **k6 2.2.0**：Grafana k6，2026-08-10 发布。
@@ -183,9 +192,15 @@ SDK 解析失败"的情况。
 
 **可选参数**：
 - `--target external`：对外部 Gateway 运行（需设 `CONFORMANCE_GATEWAY_URL` 等 env）
-- `--spec`：llmprobe 仅扫描指定协议（chat-completions / responses / anthropic-messages）
+- `--spec`：仅保留指定协议的归一化结果（chat-completions / responses /
+  anthropic-messages；models 为共享 surface，所有 spec 均保留）。llmprobe 本体
+  不支持按协议选择，runner 在一次完整扫描后过滤结果
 - `--profile`：CompatCanary 仅扫描指定 profile（chat / modern）
-- `--filter`：llmprobe 测试过滤
+- `--filter`：按 case_id 子串过滤归一化结果
+
+**llmprobe 通道的失败语义**：JSON 解析失败或零有效用例视为工具故障（exit 2），
+绝不允许 0 case 假通过；归一化 FAIL 计数是唯一判定依据（llmprobe 原始退出码
+对已登记 known gap 的 MUST 失败也会非零，仅作诊断）。
 
 ### `test-sdk-smoke` 运行方式
 
