@@ -78,6 +78,12 @@ async function main() {
     config.targets.local.api_key_default,
   )
 
+  // CompatCanary follows the OpenAI base-URL convention: it appends paths like
+  // `/chat/completions` directly, so the URL must include the `/v1` prefix.
+  const ccBaseUrl = baseUrl.endsWith('/v1')
+    ? baseUrl
+    : `${baseUrl.replace(/\/+$/, '')}/v1`
+
   let totalFail = 0
 
   try {
@@ -86,7 +92,7 @@ async function main() {
 
       const npxArgs = [
         `compatcanary@${version}`,
-        '--base-url', baseUrl,
+        '--base-url', ccBaseUrl,
         '--api-key', apiKey,
         '--model', model,
         '--profile', profile,
@@ -141,7 +147,7 @@ async function main() {
       for (const profile of args.profiles) {
         const mdArgs = [
           `compatcanary@${version}`,
-          '--base-url', baseUrl,
+          '--base-url', ccBaseUrl,
           '--api-key', apiKey,
           '--model', model,
           '--profile', profile,

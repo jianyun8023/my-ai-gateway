@@ -149,9 +149,12 @@ const CC_PROBE_PROTOCOL = {
 
 const CC_PROBE_FEATURE = {
   models: 'text',
+  list: 'text',
+  basic: 'text',
   chat: 'text',
   streaming: 'streaming',
   tool: 'tools',
+  tool_call: 'tools',
   structured_output: 'structured_output',
   responses: 'text',
   responses_streaming: 'streaming',
@@ -171,10 +174,26 @@ export function normalizeCompatcanary(rawReport) {
   for (const probe of probes) {
     const name = probe.name || probe.probe || probe.id || 'unknown'
     const normalizedName = name.toLowerCase().replace(/[\s-]+/g, '_')
-    const protocol = CC_PROBE_PROTOCOL[normalizedName] || 'openai_chat_completions'
-    const feature = CC_PROBE_FEATURE[normalizedName] || 'text'
+    // Prefer the stable dotted id (e.g. "chat.tool_call") for classification;
+    // display names like "Forced tool call" do not match the mapping tables.
+    const rawId = typeof probe.id === 'string' ? probe.id : ''
+    const idCategory = rawId.split('.')[0] || ''
+    const idLeaf = rawId.split('.').pop() || ''
+    const protocol =
+      idCategory === 'responses'
+        ? 'openai_responses'
+        : CC_PROBE_PROTOCOL[idLeaf] || CC_PROBE_PROTOCOL[idCategory] || CC_PROBE_PROTOCOL[normalizedName] || 'openai_chat_completions'
+    const feature =
+      CC_PROBE_FEATURE[idLeaf] || CC_PROBE_FEATURE[idCategory] || CC_PROBE_FEATURE[normalizedName] || 'text'
     const surface = protocol === 'openai_responses' ? 'responses' : 'chat'
-    const caseId = `${surface}.${feature}.cc_${normalizedName}`
+    const caseSuffix = rawId ? rawId.replace(/[.\s-]+/g, '_') : normalizedName
+    const caseId = `${surface}.${feature}.cc_${caseSuffix}`
+    const errorMessage =
+      typeof probe.error === 'object' && probe.error !== null
+        ? probe.error.message || JSON.stringify(probe.error)
+        : probe.error
+    const httpStatus = probe.http_status || probe.error?.httpStatus || null
+    const durationMs = probe.duration_ms ?? probe.durationMs ?? probe.duration ?? 0
 
     results.push({
       case_id: caseId,
@@ -187,15 +206,15 @@ export function normalizeCompatcanary(rawReport) {
       resolved_model: 'conformance-test-model',
       result: mapResult(probe.status || probe.result),
       failure_class: mapResult(probe.status || probe.result) === 'FAIL' ? 'TOOL_LIMITATION' : null,
-      http_status: probe.http_status || null,
+      http_status: httpStatus,
       stream: normalizedName.includes('stream'),
       request_id: null,
       retry_count: 0,
       fallback_count: 0,
-      duration_ms: probe.duration_ms || probe.duration || 0,
+      duration_ms: durationMs,
       evidence: {
         assertions: [],
-        notes: `CompatCanary probe: ${name}. ${probe.message || probe.error || ''}`.trim(),
+        notes: `CompatCanary probe: ${name}. ${probe.message || errorMessage || probe.summary || ''}`.trim(),
       },
       tool_name: 'compatcanary',
       tool_version: toolVersion,
