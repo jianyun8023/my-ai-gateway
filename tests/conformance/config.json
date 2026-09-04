@@ -34,13 +34,7 @@
     },
     "compatcanary": {
       "profiles": ["chat", "modern"],
-      "known_gaps": [
-        {
-          "probe": "structured_output",
-          "reason": "Mock Provider returns fixed JSON, may not match dynamic schema",
-          "expected_result": "SKIPPED"
-        }
-      ]
+      "known_gaps": []
     }
   }
 }

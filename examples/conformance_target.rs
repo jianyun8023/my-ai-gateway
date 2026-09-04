@@ -144,6 +144,99 @@ fn conformance_config(mock_base_url: &str) -> GatewayConfig {
 }
 
 // ===========================================================================
+// Schema-aware minimal value generation
+// ===========================================================================
+
+/// Generate a minimal JSON value satisfying the given JSON Schema fragment.
+fn generate_from_schema(schema: &Value) -> Value {
+    match schema.get("type").and_then(|t| t.as_str()) {
+        Some("string") => {
+            if let Some(enums) = schema.get("enum").and_then(|e| e.as_array()) {
+                enums
+                    .first()
+                    .cloned()
+                    .unwrap_or(Value::String("placeholder".into()))
+            } else {
+                Value::String("placeholder".into())
+            }
+        }
+        Some("number") => serde_json::json!(0.0),
+        Some("integer") => serde_json::json!(0),
+        Some("boolean") => Value::Bool(true),
+        Some("array") => {
+            if let Some(items) = schema.get("items") {
+                let min = schema.get("minItems").and_then(|v| v.as_u64()).unwrap_or(0);
+                let count = min.max(0);
+                Value::Array((0..count).map(|_| generate_from_schema(items)).collect())
+            } else {
+                Value::Array(vec![])
+            }
+        }
+        Some("object") => {
+            let mut obj = serde_json::Map::new();
+            if let Some(props) = schema.get("properties").and_then(|p| p.as_object()) {
+                let required: Vec<&str> = schema
+                    .get("required")
+                    .and_then(|r| r.as_array())
+                    .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
+                    .unwrap_or_default();
+                let has_additional_props_false =
+                    schema.get("additionalProperties").and_then(|v| v.as_bool()) == Some(false);
+                for (key, prop_schema) in props {
+                    if required.contains(&key.as_str()) || has_additional_props_false {
+                        obj.insert(key.clone(), generate_from_schema(prop_schema));
+                    }
+                }
+            }
+            Value::Object(obj)
+        }
+        _ => Value::Null,
+    }
+}
+
+/// Extract the forced tool name and generate matching arguments from the request body.
+///
+/// Priority: `tool_choice.function.name` → `tools[0].function.name`.
+/// Arguments are synthesized from the tool's `parameters` schema.
+fn extract_tool_info(body: &Value) -> (String, String) {
+    let tool_name = body
+        .pointer("/tool_choice/function/name")
+        .and_then(|v| v.as_str())
+        .or_else(|| {
+            body.pointer("/tools/0/function/name")
+                .and_then(|v| v.as_str())
+        })
+        .unwrap_or("get_weather")
+        .to_owned();
+
+    let arguments = body
+        .pointer("/tools/0/function/parameters")
+        .or_else(|| {
+            body.get("tools")
+                .and_then(|t| t.as_array())
+                .and_then(|tools| {
+                    tools.iter().find(|t| {
+                        t.pointer("/function/name").and_then(|n| n.as_str()) == Some(&tool_name)
+                    })
+                })
+                .and_then(|t| t.pointer("/function/parameters"))
+        })
+        .map(generate_from_schema)
+        .unwrap_or_else(|| serde_json::json!({}))
+        .to_string();
+
+    (tool_name, arguments)
+}
+
+/// Extract the requested JSON schema from `response_format` and generate conforming content.
+fn extract_structured_content(body: &Value) -> String {
+    body.pointer("/response_format/json_schema/schema")
+        .map(generate_from_schema)
+        .unwrap_or_else(|| serde_json::json!({"name":"test","value":42}))
+        .to_string()
+}
+
+// ===========================================================================
 // Deterministic mock upstream handler
 // ===========================================================================
 
@@ -175,9 +268,9 @@ async fn mock_handler(request: Request) -> Response<Body> {
     match path.as_str() {
         p if p.ends_with("/chat/completions") => {
             if has_tools {
-                chat_tool_response(model)
+                chat_tool_response(model, &body_json)
             } else if has_response_format {
-                chat_structured_response(model)
+                chat_structured_response(model, &body_json)
             } else if is_stream {
                 chat_stream_response(model)
             } else {
@@ -186,7 +279,7 @@ async fn mock_handler(request: Request) -> Response<Body> {
         }
         p if p.ends_with("/responses") => {
             if has_tools {
-                responses_tool_response(model)
+                responses_tool_response(model, &body_json)
             } else if is_stream {
                 responses_stream_response(model)
             } else {
@@ -195,7 +288,7 @@ async fn mock_handler(request: Request) -> Response<Body> {
         }
         p if p.ends_with("/messages") => {
             if has_tools {
-                messages_tool_response(model)
+                messages_tool_response(model, &body_json)
             } else if is_stream {
                 messages_stream_response(model)
             } else {
@@ -248,7 +341,8 @@ fn chat_stream_response(model: &str) -> Response<Body> {
     sse_response(events, true)
 }
 
-fn chat_tool_response(model: &str) -> Response<Body> {
+fn chat_tool_response(model: &str, body_json: &Value) -> Response<Body> {
+    let (tool_name, arguments) = extract_tool_info(body_json);
     let body = serde_json::json!({
         "id": "chatcmpl-conformance-tool-001",
         "object": "chat.completion",
@@ -263,8 +357,8 @@ fn chat_tool_response(model: &str) -> Response<Body> {
                     "id": "call_conformance_001",
                     "type": "function",
                     "function": {
-                        "name": "get_weather",
-                        "arguments": "{\"location\":\"San Francisco\",\"unit\":\"celsius\"}"
+                        "name": tool_name,
+                        "arguments": arguments
                     }
                 }]
             },
@@ -279,7 +373,8 @@ fn chat_tool_response(model: &str) -> Response<Body> {
     json_response(StatusCode::OK, &body)
 }
 
-fn chat_structured_response(model: &str) -> Response<Body> {
+fn chat_structured_response(model: &str, body_json: &Value) -> Response<Body> {
+    let content = extract_structured_content(body_json);
     let body = serde_json::json!({
         "id": "chatcmpl-conformance-struct-001",
         "object": "chat.completion",
@@ -289,7 +384,7 @@ fn chat_structured_response(model: &str) -> Response<Body> {
             "index": 0,
             "message": {
                 "role": "assistant",
-                "content": "{\"name\":\"test\",\"value\":42}",
+                "content": content,
                 "refusal": null
             },
             "finish_reason": "stop"
@@ -346,7 +441,8 @@ fn responses_stream_response(model: &str) -> Response<Body> {
     sse_typed_response(events)
 }
 
-fn responses_tool_response(model: &str) -> Response<Body> {
+fn responses_tool_response(model: &str, body_json: &Value) -> Response<Body> {
+    let (tool_name, arguments) = extract_tool_info(body_json);
     let body = serde_json::json!({
         "id": "resp_conformance_tool_001",
         "object": "response",
@@ -357,8 +453,8 @@ fn responses_tool_response(model: &str) -> Response<Body> {
             "type": "function_call",
             "id": "fc_conformance_001",
             "call_id": "call_conformance_001",
-            "name": "get_weather",
-            "arguments": "{\"location\":\"San Francisco\",\"unit\":\"celsius\"}",
+            "name": tool_name,
+            "arguments": arguments,
             "status": "completed"
         }],
         "usage": {
@@ -404,7 +500,23 @@ fn messages_stream_response(model: &str) -> Response<Body> {
     sse_typed_response(events)
 }
 
-fn messages_tool_response(model: &str) -> Response<Body> {
+fn messages_tool_response(model: &str, body_json: &Value) -> Response<Body> {
+    let (tool_name, _arguments_json) = extract_tool_info(body_json);
+    let input: Value = body_json
+        .pointer("/tools/0/input_schema")
+        .or_else(|| {
+            body_json
+                .get("tools")
+                .and_then(|t| t.as_array())
+                .and_then(|tools| {
+                    tools
+                        .iter()
+                        .find(|t| t.get("name").and_then(|n| n.as_str()) == Some(&tool_name))
+                })
+                .and_then(|t| t.get("input_schema"))
+        })
+        .map(generate_from_schema)
+        .unwrap_or_else(|| serde_json::json!({}));
     let body = serde_json::json!({
         "id": "msg_conformance_tool_001",
         "type": "message",
@@ -413,11 +525,8 @@ fn messages_tool_response(model: &str) -> Response<Body> {
         "content": [{
             "type": "tool_use",
             "id": "toolu_conformance_001",
-            "name": "get_weather",
-            "input": {
-                "location": "San Francisco",
-                "unit": "celsius"
-            }
+            "name": tool_name,
+            "input": input
         }],
         "stop_reason": "tool_use",
         "stop_sequence": null,
