@@ -8,7 +8,10 @@
  * Options:
  *   --provider <id>   Only run cases for this provider
  *   --model <id>      Override model for all cases
- *   --case <id>       Only run this case (repeatable)
+ *   --case <id>       Only run this case (repeatable; also re-includes
+ *                     error/high-cost cases excluded by default)
+ *   --include-error   Include error_expected cases (excluded by default)
+ *   --include-high-cost  Include cost=high cases (excluded by default)
  *   --env-file <path> Path to env file (default: .env.live)
  *   --list            List matching cases without running
  *   --timeout <ms>    Per-request timeout (default: 30000)
@@ -16,7 +19,8 @@
  * Environment:
  *   DIFFERENTIAL_TESTS=1         Required to run real provider tests
  *   DIFFERENTIAL_GATEWAY_URL     Gateway base URL (e.g. http://127.0.0.1:8787)
- *   DEEPSEEK_API_KEY             Provider API key
+ *   GATEWAY_API_KEY              Gateway-side credential (Gateway 静态入口 Key)
+ *   DEEPSEEK_API_KEY             Provider API key (direct path only)
  *   DEEPSEEK_BASE_URL            Provider base URL
  *
  * Exit codes:
@@ -27,7 +31,7 @@
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { execSync } from 'node:child_process'
 
 import { compareResponses } from './compare.mjs'
@@ -48,6 +52,8 @@ export function parseArguments(argv) {
     envFile: process.env.DIFFERENTIAL_ENV_FILE || '.env.live',
     list: false,
     timeout: 30_000,
+    includeError: false,
+    includeHighCost: false,
   }
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
@@ -67,6 +73,10 @@ export function parseArguments(argv) {
       args.envFile = argv[++i]
     } else if (arg.startsWith('--env-file=')) {
       args.envFile = arg.split('=', 2)[1]
+    } else if (arg === '--include-error') {
+      args.includeError = true
+    } else if (arg === '--include-high-cost') {
+      args.includeHighCost = true
     } else if (arg === '--list') {
       args.list = true
     } else if ((arg === '--timeout') && argv[i + 1]) {
@@ -102,6 +112,16 @@ export function loadCases() {
 export function filterCases(cases, args) {
   let filtered = cases
 
+  // Default exclusion (Issue #119 安全要求：error/高 token case 默认排除)。
+  // Explicitly naming a case via --case, or passing --include-error /
+  // --include-high-cost, re-includes it.
+  filtered = filtered.filter((c) => {
+    const explicitlyNamed = args.cases.includes(c.case_id)
+    if (c.error_expected && !args.includeError && !explicitlyNamed) return false
+    if (c.cost === 'high' && !args.includeHighCost && !explicitlyNamed) return false
+    return true
+  })
+
   if (args.providers.length > 0) {
     filtered = filtered.filter((c) => args.providers.includes(c.provider))
   }
@@ -129,6 +149,14 @@ function validateEnvironment(cases) {
     }
   } catch {
     console.error(`ERROR: DIFFERENTIAL_GATEWAY_URL is not a valid URL: ${gatewayUrl}`)
+    process.exit(2)
+  }
+
+  // Gateway 侧使用独立凭据（GATEWAY_API_KEY / Virtual Key），
+  // provider API key 只用于直连路径，不能通过 Gateway 鉴权。
+  if (!process.env.GATEWAY_API_KEY) {
+    console.error('ERROR: GATEWAY_API_KEY is not set.')
+    console.error('Gateway requests authenticate with the gateway entry key, not the provider API key.')
     process.exit(2)
   }
 
@@ -355,9 +383,11 @@ async function main() {
     const directBaseUrl = process.env[caseSpec.direct_base_url_env]
     const gatewayBaseUrl = process.env[caseSpec.gateway_base_url_env]
 
-    // Resolve API key — use the first required_env that looks like an API key
+    // Resolve API keys — provider key for the direct path, GATEWAY_API_KEY for
+    // the gateway path (Gateway 鉴权只认入口 Key / Virtual Key)
     const apiKeyEnv = (caseSpec.required_env || []).find((e) => e.endsWith('_API_KEY'))
     const apiKey = apiKeyEnv ? process.env[apiKeyEnv] : ''
+    const gatewayApiKey = process.env.GATEWAY_API_KEY
 
     // Build request with model
     const request = { ...caseSpec.request, model }
@@ -373,7 +403,7 @@ async function main() {
 
     // Send to gateway
     console.error('    → Sending to Gateway...')
-    const gatewayResponse = await sendRequest(gatewayBaseUrl, apiKey, request, args.timeout)
+    const gatewayResponse = await sendRequest(gatewayBaseUrl, gatewayApiKey, request, args.timeout)
 
     const totalDuration = Date.now() - startTime
 
@@ -397,8 +427,12 @@ async function main() {
   process.exit(failCount > 0 ? 1 : 0)
 }
 
-// Only run main when executed directly (not imported for testing)
-if (import.meta.url === `file://${process.argv[1]}`) {
+// Only run main when executed directly (not imported for testing).
+// Use the same pattern as scripts/live-provider-smoke.mjs: resolve argv[1]
+// through pathToFileURL so spaces/non-ASCII in the path don't silently skip
+// main (which would exit 0 with no output — a fake PASS).
+const invokedPath = process.argv[1] ? pathToFileURL(resolve(process.argv[1])).href : ''
+if (import.meta.url === invokedPath) {
   main().catch((err) => {
     console.error(`FATAL: ${err.message}`)
     process.exit(2)

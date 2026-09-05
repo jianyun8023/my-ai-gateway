@@ -45,6 +45,8 @@ function runAssertion(assertionName, direct, gateway, caseSpec) {
         return assertStreamHasChunks(direct, gateway)
       case 'stream_has_done':
         return assertStreamHasDone(direct, gateway)
+      case 'stream_usage_present':
+        return assertStreamUsagePresent(direct, gateway)
       case 'content_chunks_present':
         return assertContentChunksPresent(direct, gateway)
       case 'tool_call_present':
@@ -103,6 +105,22 @@ function assertEnvelopeParseable(_direct, gateway) {
 }
 
 function assertFinishReasonPresent(direct, gateway) {
+  // Streaming responses carry no top-level choices; compare the stream summary
+  // (final_finish_reason extracted by normalize_stream_events) instead.
+  const dSummary = direct?._stream_summary
+  const gSummary = gateway?._stream_summary
+  if (dSummary || gSummary) {
+    const dFR = dSummary?.final_finish_reason ?? null
+    const gFR = gSummary?.final_finish_reason ?? null
+    if (!dFR && !gFR) {
+      return { name: 'finish_reason_present', passed: true, message: 'Neither side stream has a final finish_reason (provider-specific)' }
+    }
+    return {
+      name: 'finish_reason_present',
+      passed: gFR != null,
+      message: gFR == null ? `Direct stream final finish_reason: ${dFR}, Gateway: missing` : null,
+    }
+  }
   const gFR = gateway?.choices?.[0]?.finish_reason
   const dFR = direct?.choices?.[0]?.finish_reason
   if (!dFR && !gFR) {
@@ -166,6 +184,19 @@ function assertStreamHasDone(direct, gateway) {
     name: 'stream_has_done',
     passed: gDone,
     message: gDone ? null : `Direct has [DONE] but Gateway does not`,
+  }
+}
+
+function assertStreamUsagePresent(direct, gateway) {
+  const dHas = direct?._stream_summary?.has_usage ?? false
+  const gHas = gateway?._stream_summary?.has_usage ?? false
+  if (!dHas) {
+    return { name: 'stream_usage_present', passed: true, message: 'Direct stream has no usage chunk (provider did not include usage)' }
+  }
+  return {
+    name: 'stream_usage_present',
+    passed: gHas,
+    message: gHas ? null : 'Direct stream has a usage chunk but Gateway does not',
   }
 }
 

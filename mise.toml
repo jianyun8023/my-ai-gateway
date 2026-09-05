@@ -186,13 +186,7 @@ run = '''
 echo "=== test-differential: Direct vs Gateway Differential ==="
 echo ""
 
-if [ "${DIFFERENTIAL_TESTS:-}" = "1" ]; then
-  echo "DIFFERENTIAL_TESTS=1 — 运行真实 Provider 差分测试"
-  echo ""
-
-  # Forward CLI arguments (--provider, --model, --case)
-  node scripts/differential/run.mjs "$@"
-else
+if [ "${DIFFERENTIAL_TESTS:-}" != "1" ]; then
   echo "DIFFERENTIAL_TESTS 未设置 — 运行离线自测"
   echo ""
 
@@ -205,7 +199,17 @@ else
   else
     echo "=== test-differential: 离线自测通过 ==="
   fi
+  exit 0
 fi
+
+echo "DIFFERENTIAL_TESTS=1 — 运行真实 Provider 差分测试"
+echo ""
+
+# Forward CLI arguments (--provider, --model, --case, --include-error).
+# 注意：mise 会把 `mise run test-differential -- <args>` 的参数原样追加到本脚本
+# 最后一行，因此转发必须收敛在最后一行的 node 调用上（"$@" 对 mise 追加为空，
+# 真正的参数来自 mise 的行尾追加）。
+node scripts/differential/run.mjs "$@"
 '''
 
 [tasks.test-faults]

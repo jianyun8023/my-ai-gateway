@@ -67,6 +67,7 @@
       { "name": "stream_has_chunks", "description": "At least one SSE data chunk received" },
       { "name": "stream_has_done", "description": "Stream terminates with data: [DONE]" },
       { "name": "finish_reason_present", "description": "Last chunk must contain finish_reason" },
+      { "name": "stream_usage_present", "description": "If Direct stream includes a usage chunk, Gateway must too" },
       { "name": "content_chunks_present", "description": "At least one chunk must contain delta.content" }
     ]
   },
@@ -241,13 +242,13 @@
     "direct_base_url_env": "DEEPSEEK_BASE_URL",
     "gateway_base_url_env": "DIFFERENTIAL_GATEWAY_URL",
     "request": {
-      "_comment": "This case is validated only when both sides return 429. The runner sends a normal request and classifies the comparison based on actual HTTP status.",
       "messages": [
         { "role": "user", "content": "Say OK" }
       ],
       "max_tokens": 8,
       "temperature": 0
     },
+    "notes": "This case is validated only when both sides return 429. The runner sends a normal request and classifies the comparison based on actual HTTP status. Excluded by default; run with --include-error or --case error.rate_limit_429.",
     "normalizers": [
       "strip_dynamic_ids",
       "strip_timestamps"

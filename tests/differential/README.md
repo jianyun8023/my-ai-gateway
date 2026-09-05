@@ -52,10 +52,15 @@ DIFFERENTIAL_TESTS=1 \
 |------|------|
 | `--provider <id>` | 只运行指定 Provider 的用例 |
 | `--model <id>` | 覆盖所有用例的模型 |
-| `--case <id>` | 只运行指定用例（可重复） |
+| `--case <id>` | 只运行指定用例（可重复；显式点名会同时解除默认排除） |
+| `--include-error` | 默认排除 `error_expected` 用例，此开关重新纳入 |
+| `--include-high-cost` | 默认排除 `cost=high` 用例，此开关重新纳入 |
 | `--env-file <path>` | 环境文件路径（默认 `.env.live`） |
 | `--list` | 列出匹配的用例，不执行 |
 | `--timeout <ms>` | 单请求超时（默认 30000） |
+
+> 默认排除策略（#119 安全要求）：`error_expected` 和高成本（`cost=high`）用例
+> 不随默认集合运行，需显式 `--case` 点名或对应 `--include-*` 开关。
 
 ### 环境变量
 
@@ -63,7 +68,8 @@ DIFFERENTIAL_TESTS=1 \
 |------|------|
 | `DIFFERENTIAL_TESTS=1` | 必须显式设置才能运行真实测试 |
 | `DIFFERENTIAL_GATEWAY_URL` | Gateway 实例的 base URL |
-| `DEEPSEEK_API_KEY` | DeepSeek API 密钥 |
+| `GATEWAY_API_KEY` | Gateway 侧入口凭据（Gateway 鉴权只认它或 DB Virtual Key；不能用 Provider key） |
+| `DEEPSEEK_API_KEY` | DeepSeek API 密钥（仅用于直连路径） |
 | `DEEPSEEK_BASE_URL` | DeepSeek API base URL |
 | `DEEPSEEK_MODEL` | 可选，覆盖默认模型 |
 

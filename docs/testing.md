@@ -220,12 +220,13 @@ SDK 版本固定在 `scripts/conformance/sdk-smoke/package.json`（devDependency
 **两种运行模式：**
 
 1. **离线自测**（默认，`DIFFERENTIAL_TESTS` 未设置）：运行
-   `scripts/differential/differential.test.mjs` 中的 49 个 node:test 用例，
+   `scripts/differential/differential.test.mjs` 中的 56 个 node:test 用例，
    覆盖归一化器、比较器、分类器、参数解析和用例加载。不消耗真实 Token、不访问网络。
 
 2. **真实 Provider**（`DIFFERENTIAL_TESTS=1`）：对同一 Provider 分别发起直连请求和
    经 Gateway 代理请求，比较归一化后的协议语义。需要 `.env.live` 凭据和运行中的
-   Gateway 实例。
+   Gateway 实例。直连路径用 Provider API key（如 `DEEPSEEK_API_KEY`），Gateway 路径
+   用 `GATEWAY_API_KEY`（Gateway 鉴权只认入口 Key / Virtual Key），两者必须分别配置。
 
 **第一阶段 Provider**：DeepSeek（openai_chat_completions 原生协议，当前最稳定）。
 
@@ -254,8 +255,12 @@ SDK 版本固定在 `scripts/conformance/sdk-smoke/package.json`（devDependency
 **可选参数**：
 - `--provider <id>`：只运行指定 Provider 的用例
 - `--model <id>`：覆盖模型
-- `--case <id>`：只运行指定用例
+- `--case <id>`：只运行指定用例（显式点名会解除默认排除）
+- `--include-error` / `--include-high-cost`：纳入默认排除的 error/高成本用例
 - `--list`：列出匹配用例
+
+**默认排除**：`error_expected` 和 `cost=high` 用例不随默认集合运行（如
+`error.rate_limit_429`），需显式 `--case` 点名或对应 `--include-*` 开关。
 
 **失败语义**：零有效用例 exit 2（绝不允许假通过）；至少一个 FAIL exit 1。
 

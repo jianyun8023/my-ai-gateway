@@ -14,8 +14,8 @@
  *    - Transport error → FLAKY
  *    - Model didn't produce expected output → MODEL_BEHAVIOR
  *  - Argument parsing
- *  - Case loading and filtering
- *  - Stream normalization
+ *  - Case loading and filtering (incl. default exclusion of error/high-cost cases)
+ *  - Stream normalization and stream-summary assertions (finish_reason / usage drop)
  */
 
 import assert from 'node:assert/strict'
@@ -621,6 +621,18 @@ test('parseArguments: --list flag', () => {
   assert.equal(args.list, true)
 })
 
+test('parseArguments: --include-error and --include-high-cost flags', () => {
+  const args = parseArguments(['--include-error', '--include-high-cost'])
+  assert.equal(args.includeError, true)
+  assert.equal(args.includeHighCost, true)
+})
+
+test('parseArguments: include flags default to false', () => {
+  const args = parseArguments([])
+  assert.equal(args.includeError, false)
+  assert.equal(args.includeHighCost, false)
+})
+
 // ════════════════════════════════════════════════════════════════════════════
 // §5 — Case loading and filtering tests
 // ════════════════════════════════════════════════════════════════════════════
@@ -659,10 +671,35 @@ test('loadCases: required 6 case types present', () => {
   assert.ok(ids.includes('error.rate_limit_429'), 'error.rate_limit_429 present')
 })
 
-test('filterCases: no filter returns all', () => {
+test('filterCases: no filter excludes error_expected cases by default', () => {
   const cases = loadCases()
   const filtered = filterCases(cases, { providers: [], cases: [] })
+  assert.equal(filtered.length, cases.length - 1, 'error.rate_limit_429 excluded by default')
+  assert.ok(!filtered.some((c) => c.error_expected), 'no error_expected case in default selection')
+})
+
+test('filterCases: --include-error re-includes error cases', () => {
+  const cases = loadCases()
+  const filtered = filterCases(cases, { providers: [], cases: [], includeError: true })
   assert.equal(filtered.length, cases.length)
+})
+
+test('filterCases: explicit --case re-includes an excluded error case', () => {
+  const cases = loadCases()
+  const filtered = filterCases(cases, { providers: [], cases: ['error.rate_limit_429'] })
+  assert.equal(filtered.length, 1)
+  assert.equal(filtered[0].case_id, 'error.rate_limit_429')
+})
+
+test('filterCases: high-cost cases excluded by default unless --include-high-cost', () => {
+  const cases = [
+    { case_id: 'text.basic', provider: 'p', cost: 'low' },
+    { case_id: 'search.deep', provider: 'p', cost: 'high' },
+  ]
+  const filtered = filterCases(cases, { providers: [], cases: [] })
+  assert.deepEqual(filtered.map((c) => c.case_id), ['text.basic'])
+  const included = filterCases(cases, { providers: [], cases: [], includeHighCost: true })
+  assert.equal(included.length, 2)
 })
 
 test('filterCases: filter by provider', () => {
@@ -818,4 +855,72 @@ test('compareResponses: stream with Gateway missing [DONE] when Direct has it', 
   assert.equal(result.failure_class, 'GATEWAY_BUG')
   const doneAssertion = result.evidence.assertions.find((a) => a.name === 'stream_has_done')
   assert.equal(doneAssertion.passed, false)
+})
+
+test('compareResponses: stream with Gateway dropping final finish_reason → GATEWAY_BUG', () => {
+  const directChunks = [
+    { choices: [{ delta: { content: 'hi' }, finish_reason: null }] },
+    { choices: [{ delta: {}, finish_reason: 'stop' }] },
+    '[DONE]',
+  ]
+  const gatewayChunks = [
+    { choices: [{ delta: { content: 'hi' }, finish_reason: null }] },
+    { choices: [{ delta: {} }] }, // final chunk lost finish_reason
+    '[DONE]',
+  ]
+  const directRaw = { _meta: { http_status: 200 }, _stream_chunks: directChunks }
+  const gatewayRaw = { _meta: { http_status: 200 }, _stream_chunks: gatewayChunks }
+  const caseSpec = {
+    case_id: 'stream.basic',
+    protocol: 'openai_chat_completions',
+    feature: 'streaming',
+    provider: 'test',
+    model_default: 'test-model',
+    stream: true,
+    normalizers: ['strip_dynamic_ids', 'normalize_stream_events'],
+    assertions: [
+      { name: 'finish_reason_present' },
+      { name: 'stream_has_done' },
+    ],
+  }
+  const result = compareResponses(directRaw, gatewayRaw, caseSpec, 10)
+  assert.equal(result.result, 'FAIL')
+  assert.equal(result.failure_class, 'GATEWAY_BUG')
+  const frAssertion = result.evidence.assertions.find((a) => a.name === 'finish_reason_present')
+  assert.equal(frAssertion.passed, false, 'stream finish_reason drop must be detected via _stream_summary')
+})
+
+test('compareResponses: stream with Gateway dropping usage chunk → GATEWAY_BUG', () => {
+  const directChunks = [
+    { choices: [{ delta: { content: 'hi' }, finish_reason: null }] },
+    { choices: [{ delta: {}, finish_reason: 'stop' }] },
+    { choices: [], usage: { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 } },
+    '[DONE]',
+  ]
+  const gatewayChunks = [
+    { choices: [{ delta: { content: 'hi' }, finish_reason: null }] },
+    { choices: [{ delta: {}, finish_reason: 'stop' }] },
+    // usage chunk dropped
+    '[DONE]',
+  ]
+  const directRaw = { _meta: { http_status: 200 }, _stream_chunks: directChunks }
+  const gatewayRaw = { _meta: { http_status: 200 }, _stream_chunks: gatewayChunks }
+  const caseSpec = {
+    case_id: 'stream.basic',
+    protocol: 'openai_chat_completions',
+    feature: 'streaming',
+    provider: 'test',
+    model_default: 'test-model',
+    stream: true,
+    normalizers: ['strip_dynamic_ids', 'normalize_stream_events'],
+    assertions: [
+      { name: 'stream_usage_present' },
+      { name: 'finish_reason_present' },
+    ],
+  }
+  const result = compareResponses(directRaw, gatewayRaw, caseSpec, 10)
+  assert.equal(result.result, 'FAIL')
+  assert.equal(result.failure_class, 'GATEWAY_BUG')
+  const usageAssertion = result.evidence.assertions.find((a) => a.name === 'stream_usage_present')
+  assert.equal(usageAssertion.passed, false)
 })
