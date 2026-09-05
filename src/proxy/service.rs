@@ -16,7 +16,9 @@ use crate::infra::db;
 use crate::infra::health;
 use crate::infra::observability;
 use crate::infra::secrets;
-use crate::state::{authorized_with_db, data_plane_error_response, resolve_credential, AppState};
+use crate::state::{
+    authorized_with_db, data_plane_error_response, resolve_credential, AppState, AuthIdentity,
+};
 
 use super::stream;
 use super::transport;
@@ -81,8 +83,8 @@ pub(crate) async fn proxy(
         );
     }
 
-    let virtual_key_id = match authorized_with_db(&state, &headers, model).await {
-        Some(virtual_key_id) => virtual_key_id,
+    let auth_identity = match authorized_with_db(&state, &headers, model).await {
+        Some(identity) => identity,
         None => {
             return finish_proxy(
                 protocol,
@@ -99,6 +101,7 @@ pub(crate) async fn proxy(
             );
         }
     };
+    let virtual_key_id = auth_identity.virtual_key_id();
     // `model` is required by all three northbound protocols.  A missing or
     // empty value is a client validation error (400), not a routing miss
     // (404) — surface-discovery tools such as llmprobe probe endpoints with
@@ -210,7 +213,7 @@ pub(crate) async fn proxy(
                     logical_model: model.to_string(),
                     upstream_model_id: Some(route.upstream_model_id.clone()),
                     source_id: route.source_id.clone(),
-                    client_source: client_source_from_headers(&headers),
+                    client_source: client_source_from_headers(&headers, Some(&auth_identity)),
                     protocol_in: protocol.to_string(),
                     protocol_upstream: route.protocol_upstream.to_string(),
                     mode: route.mode.clone(),
@@ -323,7 +326,7 @@ pub(crate) async fn proxy(
             None
         };
         if let Some(database) = &state.db {
-            let client_source = client_source_from_headers(&headers);
+            let client_source = client_source_from_headers(&headers, Some(&auth_identity));
             let event = db::UsageEvent {
                 request_id,
                 virtual_key_id,
@@ -631,7 +634,7 @@ pub(crate) async fn proxy(
         None
     };
     if let Some(database) = &state.db {
-        let client_source = client_source_from_headers(&headers);
+        let client_source = client_source_from_headers(&headers, Some(&auth_identity));
         let final_account_id = final_attempt
             .map(|attempt| attempt.account_id.clone())
             .unwrap_or_else(|| account.id.clone());
@@ -736,7 +739,7 @@ fn finish_proxy(
     response
 }
 
-fn client_source_from_headers(headers: &HeaderMap) -> String {
+fn client_source_from_headers(headers: &HeaderMap, auth: Option<&AuthIdentity>) -> String {
     if let Some(value) = headers
         .get("x-client-source")
         .and_then(|value| value.to_str().ok())
@@ -744,6 +747,9 @@ fn client_source_from_headers(headers: &HeaderMap) -> String {
         .filter(|value| !value.is_empty())
     {
         return value.to_owned();
+    }
+    if let Some(identity) = auth {
+        return identity.default_client_source();
     }
     let user_agent = headers
         .get(axum::http::header::USER_AGENT)
@@ -1569,6 +1575,7 @@ mod tests {
         client_source_from_headers, known_client_user_agent, retry_after_delay,
         MAX_SAME_ACCOUNT_RETRY_AFTER,
     };
+    use crate::state::AuthIdentity;
     use axum::http::{HeaderMap, HeaderValue};
 
     fn header(headers: &mut HeaderMap, name: &'static str, value: &str) {
@@ -1592,7 +1599,10 @@ mod tests {
         let mut headers = HeaderMap::new();
         header(&mut headers, "x-client-source", "my-business-app");
         header(&mut headers, "user-agent", "kimi-code-cli/1.2.3");
-        assert_eq!(client_source_from_headers(&headers), "my-business-app");
+        assert_eq!(
+            client_source_from_headers(&headers, None),
+            "my-business-app"
+        );
     }
 
     #[test]
@@ -1600,14 +1610,14 @@ mod tests {
         let mut headers = HeaderMap::new();
         header(&mut headers, "x-client-source", "   ");
         header(&mut headers, "user-agent", "kimi-code-cli/1.2.3");
-        assert_eq!(client_source_from_headers(&headers), "kimi-code-cli");
+        assert_eq!(client_source_from_headers(&headers, None), "kimi-code-cli");
     }
 
     #[test]
     fn user_agent_identifies_kimi_code_cli() {
         let mut headers = HeaderMap::new();
         header(&mut headers, "user-agent", "kimi-code-cli/1.2.3 (web)");
-        assert_eq!(client_source_from_headers(&headers), "kimi-code-cli");
+        assert_eq!(client_source_from_headers(&headers, None), "kimi-code-cli");
     }
 
     #[test]
@@ -1622,7 +1632,7 @@ mod tests {
             let mut headers = HeaderMap::new();
             header(&mut headers, "user-agent", ua);
             assert_eq!(
-                client_source_from_headers(&headers),
+                client_source_from_headers(&headers, None),
                 "anthropic-sdk",
                 "ua={ua}"
             );
@@ -1640,7 +1650,7 @@ mod tests {
             let mut headers = HeaderMap::new();
             header(&mut headers, "user-agent", ua);
             assert_eq!(
-                client_source_from_headers(&headers),
+                client_source_from_headers(&headers, None),
                 "openai-sdk",
                 "ua={ua}"
             );
@@ -1655,23 +1665,23 @@ mod tests {
             "user-agent",
             "codex_app_server_daemon/1.2.3 (Linux 6.8.0; x86_64) codex_cli_rs/1.2.3",
         );
-        assert_eq!(client_source_from_headers(&headers), "codex-cli");
+        assert_eq!(client_source_from_headers(&headers, None), "codex-cli");
         let mut headers = HeaderMap::new();
         header(&mut headers, "user-agent", "codex_cli_rs/1.2.3");
-        assert_eq!(client_source_from_headers(&headers), "codex-cli");
+        assert_eq!(client_source_from_headers(&headers, None), "codex-cli");
     }
 
     #[test]
     fn unknown_user_agent_falls_back_to_unknown() {
         let mut headers = HeaderMap::new();
         header(&mut headers, "user-agent", "curl/8.7.1");
-        assert_eq!(client_source_from_headers(&headers), "unknown");
+        assert_eq!(client_source_from_headers(&headers, None), "unknown");
     }
 
     #[test]
     fn no_client_headers_at_all_returns_unknown() {
         let headers = HeaderMap::new();
-        assert_eq!(client_source_from_headers(&headers), "unknown");
+        assert_eq!(client_source_from_headers(&headers, None), "unknown");
     }
 
     #[test]
@@ -1692,21 +1702,83 @@ mod tests {
     fn user_agent_identifies_kimi_code_vscode() {
         let mut headers = HeaderMap::new();
         header(&mut headers, "user-agent", "kimi-code/0.39.0");
-        assert_eq!(client_source_from_headers(&headers), "kimi-code");
+        assert_eq!(client_source_from_headers(&headers, None), "kimi-code");
     }
 
     #[test]
     fn user_agent_identifies_kimi_code_underscore() {
         let mut headers = HeaderMap::new();
         header(&mut headers, "user-agent", "kimi_code/0.39.0");
-        assert_eq!(client_source_from_headers(&headers), "kimi-code");
+        assert_eq!(client_source_from_headers(&headers, None), "kimi-code");
     }
 
     #[test]
     fn kimi_code_cli_takes_precedence_over_kimi_code() {
         let mut headers = HeaderMap::new();
         header(&mut headers, "user-agent", "kimi-code-cli/1.2.3 (web)");
-        assert_eq!(client_source_from_headers(&headers), "kimi-code-cli");
+        assert_eq!(client_source_from_headers(&headers, None), "kimi-code-cli");
+    }
+
+    #[test]
+    fn static_api_key_provides_default_client_source() {
+        let headers = HeaderMap::new();
+        let auth = AuthIdentity::StaticApiKey;
+        assert_eq!(
+            client_source_from_headers(&headers, Some(&auth)),
+            "static_api_key"
+        );
+    }
+
+    #[test]
+    fn virtual_key_provides_name_as_default_client_source() {
+        let headers = HeaderMap::new();
+        let auth = AuthIdentity::VirtualKey {
+            id: 1,
+            name: "my-app".into(),
+            prefix: "gw_abc123".into(),
+        };
+        assert_eq!(client_source_from_headers(&headers, Some(&auth)), "my-app");
+    }
+
+    #[test]
+    fn virtual_key_falls_back_to_prefix() {
+        let headers = HeaderMap::new();
+        let auth = AuthIdentity::VirtualKey {
+            id: 1,
+            name: String::new(),
+            prefix: "gw_abc123".into(),
+        };
+        assert_eq!(
+            client_source_from_headers(&headers, Some(&auth)),
+            "gw_abc123"
+        );
+    }
+
+    #[test]
+    fn explicit_header_overrides_auth_identity() {
+        let mut headers = HeaderMap::new();
+        header(&mut headers, "x-client-source", "custom-client");
+        let auth = AuthIdentity::VirtualKey {
+            id: 1,
+            name: "my-app".into(),
+            prefix: "gw_abc123".into(),
+        };
+        assert_eq!(
+            client_source_from_headers(&headers, Some(&auth)),
+            "custom-client"
+        );
+    }
+
+    #[test]
+    fn auth_identity_overrides_user_agent() {
+        let mut headers = HeaderMap::new();
+        header(&mut headers, "user-agent", "kimi-code-cli/1.2.3");
+        let auth = AuthIdentity::VirtualKey {
+            id: 1,
+            name: "my-app".into(),
+            prefix: "gw_abc123".into(),
+        };
+        assert_eq!(client_source_from_headers(&headers, Some(&auth)), "my-app");
     }
 
     #[test]

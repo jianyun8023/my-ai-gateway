@@ -12,6 +12,19 @@
 
 每次查看都会写入 `virtual_key.reveal` 元数据审计事件；审计记录、日志和控制面导出均不会包含 Key 明文或加密恢复副本。
 
+## 客户端归因（Client Source）
+
+数据面请求可通过 `X-Client-Source` header 上报客户端来源；这是网关与下游 SDK 之间的协议约定，客户端 SDK 默认应带上该 header，以便用量统计和 Request Events 能准确归因。
+
+当客户端未发送 `X-Client-Source` 时，网关按以下优先级推导 `usage_events.client_source`：
+
+1. 显式 `X-Client-Source` header（非空）；
+2. 鉴权身份默认值；
+3. `User-Agent` 推导（已知 SDK/CLI 产品映射）；
+4. `"unknown"`。
+
+Virtual Key 鉴权时，默认使用 key 的 `name`；若 `name` 为空则回退到 `key_prefix`。静态 `GATEWAY_API_KEY` 鉴权时默认为 `"static_api_key"`。显式 header 始终优先于鉴权身份和 User-Agent 推导。
+
 ## 内置预设
 
 每个内置 ProviderPreset 以不可变 `(id, version)` 保存。`deepseek@3` 与
