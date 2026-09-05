@@ -438,7 +438,7 @@ pub fn usage_for_sse_response(
 }
 
 fn log_sse_extraction_failure(request_id: &str, success: bool, captured: &[u8]) {
-    const PREVIEW: usize = 192;
+    const PREVIEW: usize = 512;
     let head_end = captured.len().min(PREVIEW);
     let tail_start = captured.len().saturating_sub(PREVIEW);
     let head = &captured[..head_end];
@@ -454,6 +454,40 @@ fn log_sse_extraction_failure(request_id: &str, success: bool, captured: &[u8]) 
         head_base64 = %text::encode_base64(head),
         tail_base64 = %text::encode_base64(tail),
         "SSE usage extraction failed: extract_sse returned None; falling back to tiktoken estimate"
+    );
+    // Trace-level extended diagnostics for issue #98
+    let text = String::from_utf8_lossy(captured);
+    let mut json_parse_failures = 0usize;
+    let mut json_without_usage = 0usize;
+    for line in text.lines() {
+        let Some(data) = line.strip_prefix("data:").map(str::trim) else {
+            continue;
+        };
+        if data.is_empty() || data == "[DONE]" {
+            continue;
+        }
+        match serde_json::from_str::<Value>(data) {
+            Ok(value) => {
+                if value.get("usage").is_none()
+                    && value.get("response").and_then(|v| v.get("usage")).is_none()
+                    && value.get("message").and_then(|v| v.get("usage")).is_none()
+                    && value.get("delta").and_then(|v| v.get("usage")).is_none()
+                {
+                    json_without_usage += 1;
+                }
+            }
+            Err(_) => {
+                json_parse_failures += 1;
+            }
+        }
+    }
+    tracing::trace!(
+        request_id = %request_id,
+        captured_sha256 = %text::sha256_hex(captured),
+        json_parse_failures,
+        json_without_usage,
+        data_lines_with_content = count_data.saturating_sub(json_parse_failures + json_without_usage),
+        "SSE extraction failure diagnostics (issue #98)"
     );
 }
 
@@ -482,6 +516,11 @@ mod text {
             .lines()
             .filter(|line| line.trim_start().starts_with("data:"))
             .count()
+    }
+
+    pub fn sha256_hex(bytes: &[u8]) -> String {
+        use sha2::{Digest, Sha256};
+        format!("{:x}", Sha256::digest(bytes))
     }
 
     pub fn encode_base64(bytes: &[u8]) -> String {
@@ -576,6 +615,43 @@ mod tests {
         assert_eq!(report.cache_read_tokens, 5);
         assert_eq!(report.cache_creation_tokens, 0);
         assert_eq!(report.cached_tokens, 5);
+    }
+
+    #[test]
+    fn extract_sse_returns_none_for_empty_captured() {
+        assert!(extract_sse("").is_none());
+    }
+
+    #[test]
+    fn extract_sse_returns_none_for_only_done() {
+        assert!(extract_sse("data: [DONE]\n\n").is_none());
+    }
+
+    #[test]
+    fn extract_sse_returns_none_for_invalid_json() {
+        assert!(extract_sse("data: {invalid json}\n\n").is_none());
+    }
+
+    #[test]
+    fn extract_sse_returns_none_for_valid_json_without_usage() {
+        let text = "data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n";
+        assert!(extract_sse(text).is_none());
+    }
+
+    #[test]
+    fn extract_sse_handles_cross_chunk_data_lines() {
+        // Simulate what would happen if chunks split in the middle of a data line
+        // After concatenation, the full text should still parse correctly
+        let chunk1 = b"data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\nda";
+        let chunk2 = b"ta: {\"id\":\"2\",\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15}}\n\n";
+        let mut captured = Vec::new();
+        captured.extend_from_slice(chunk1);
+        captured.extend_from_slice(chunk2);
+        let text = String::from_utf8_lossy(&captured);
+        let report = extract_sse(&text).expect("should parse cross-chunk SSE");
+        assert_eq!(report.input_tokens, 10);
+        assert_eq!(report.output_tokens, 5);
+        assert_eq!(report.total_tokens, 15);
     }
 
     #[test]
