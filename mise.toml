@@ -8,7 +8,7 @@ run = "npm --prefix web ci"
 
 [tasks.config-check]
 description = "校验仓库 JSON 配置和测试元数据"
-run = "node -e \"const fs=require('node:fs'); for (const file of ['config.example.json','tests/live/provider-smoke.cases.json','tests/codex/cases.json','tests/tooling/versions.json','tests/coverage/capability-matrix.json','tests/coverage/test-result.schema.json','tests/conformance/config.json']) JSON.parse(fs.readFileSync(file, 'utf8'))\""
+run = "node -e \"const fs=require('node:fs'); for (const file of ['config.example.json','tests/live/provider-smoke.cases.json','tests/codex/cases.json','tests/tooling/versions.json','tests/coverage/capability-matrix.json','tests/coverage/test-result.schema.json','tests/conformance/config.json','tests/differential/cases.json']) JSON.parse(fs.readFileSync(file, 'utf8'))\""
 
 [tasks.dev]
 description = "启动 Rust 网关与前端开发环境"
@@ -42,7 +42,7 @@ run = "npm --prefix web run build && cargo build"
 
 [tasks.test]
 description = "运行 Rust 与前端单元测试"
-run = "cargo test --workspace --features test-support -- --test-threads=1 && npm --prefix web test && node --test scripts/live-provider-smoke.test.mjs scripts/codex-e2e-smoke.test.mjs scripts/conformance/conformance.test.mjs"
+run = "cargo test --workspace --features test-support -- --test-threads=1 && npm --prefix web test && node --test scripts/live-provider-smoke.test.mjs scripts/codex-e2e-smoke.test.mjs scripts/conformance/conformance.test.mjs scripts/differential/differential.test.mjs"
 
 [tasks.test-live]
 description = "显式运行真实 Provider 工具、搜索与 fallback smoke 测试"
@@ -183,9 +183,33 @@ fi
 [tasks.test-differential]
 description = "运行 Direct vs Gateway 差分测试（#119）"
 run = '''
-echo "ERROR: test-differential 尚未实现。" >&2
-echo "该命令将由 #119 建立 Direct vs Gateway 差分验证框架。" >&2
-exit 1
+echo "=== test-differential: Direct vs Gateway Differential ==="
+echo ""
+
+if [ "${DIFFERENTIAL_TESTS:-}" != "1" ]; then
+  echo "DIFFERENTIAL_TESTS 未设置 — 运行离线自测"
+  echo ""
+
+  node --test scripts/differential/differential.test.mjs
+  status=$?
+  echo ""
+  if [ "$status" -ne 0 ]; then
+    echo "=== test-differential: 离线自测失败 ==="
+    exit 1
+  else
+    echo "=== test-differential: 离线自测通过 ==="
+  fi
+  exit 0
+fi
+
+echo "DIFFERENTIAL_TESTS=1 — 运行真实 Provider 差分测试"
+echo ""
+
+# Forward CLI arguments (--provider, --model, --case, --include-error).
+# 注意：mise 会把 `mise run test-differential -- <args>` 的参数原样追加到本脚本
+# 最后一行，因此转发必须收敛在最后一行的 node 调用上（"$@" 对 mise 追加为空，
+# 真正的参数来自 mise 的行尾追加）。
+node scripts/differential/run.mjs "$@"
 '''
 
 [tasks.test-faults]
