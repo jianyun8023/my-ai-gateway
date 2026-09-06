@@ -288,6 +288,30 @@ export interface SourceModelConfirmation {
   metadata?: ModelMetadataValues;
 }
 
+export interface SourceModelCapability {
+  source_id: string;
+  upstream_model_id: string;
+  protocol: GatewayProtocol;
+  status: CatalogStatus;
+  mode: SourceProtocolMode;
+  source_protocol?: GatewayProtocol | null;
+  adapter?: string | null;
+  feature_capabilities: Record<string, CapabilitySupport>;
+  field_source: string;
+  observed_at: string;
+  confirmed_at?: string | null;
+  unavailable_at?: string | null;
+  updated_at: string;
+}
+
+export interface SourceModelCapabilityWrite {
+  status: CatalogStatus;
+  mode: SourceProtocolMode;
+  source_protocol?: GatewayProtocol;
+  adapter?: string;
+  feature_capabilities?: Record<string, CapabilitySupport>;
+}
+
 export interface LogicalModel {
   id: string;
   public_name: string;

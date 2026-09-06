@@ -223,7 +223,7 @@ LogicalModel <──────────────────────
 - `model_presets` 以 `(id, version)` 唯一，保存 canonical model ID、别名、元数据和值来源；它只提供默认元数据，不能替代 Source 的实际协议能力。
 - `source_models` 以 `(source_id, upstream_model_id)` 唯一，分别保存确认状态 `pending/confirmed`、可用状态 `unknown/available/unavailable`、原始发现快照、解析后元数据和每个字段的来源。
 - `logical_models` 保存对外公开名及 `pending/confirmed/unavailable` 状态；上游模型 ID 与逻辑模型名不要求相同。
-- `source_model_capabilities` 以 `(source_id, upstream_model_id, protocol)` 唯一，协议模式为 `unknown/native/adapter/unsupported`。`unknown` 和 `unsupported` 都不是可路由能力；Adapter 仍只允许一次直接转换，并要求其来源协议已确认原生可用。
+- `source_model_capabilities` 以 `(source_id, upstream_model_id, protocol)` 唯一，协议模式为 `unknown/native/adapter/unsupported`。`unknown` 和 `unsupported` 都不是可路由能力；Adapter 仍只允许一次直接转换，并要求其来源协议已确认原生可用。能力行可由配置导入创建，也可由管理端逐协议 upsert（`PUT /admin/sources/:source_id/models/:model/capabilities/:protocol`）；feature 能力缺省时从 SourceModel metadata 推导，非法值保持 unknown 而不猜测。
 - `model_bindings` 显式关联 LogicalModel、Source、Account、upstream model 和入口协议。Binding 初始为 `pending`；只有逻辑模型、Source、Account、SourceModel 和对应协议能力都已确认且可用时，数据库才允许转为 `confirmed`。
 
 模型元数据字段第一版包括逻辑名、显示名、上下文窗口、最大输入/输出 Token、输入/输出模态、Tools、Thinking、Web Search、Structured Output、Streaming 和 Usage。每个字段来源只能是 `user/preset/upstream/unknown`，合并优先级固定为：
@@ -234,7 +234,7 @@ user > preset > upstream > unknown
 
 重复刷新同一 `(source_id, upstream_model_id)` 只更新原始发现快照、最近发现时间和可用状态，不创建重复记录。待确认记录会重新应用预设和上游元数据，但保留用户覆盖；已确认记录的元数据和匹配预设均保持不变。发现中消失的模型只标记 `unavailable`，不删除 LogicalModel、Binding 或 Route。
 
-ProviderPreset 与发现确认阶段不改变 Route，也不把发现结果自动写入 `logical_models`、`model_bindings` 或 `routes`。新模型保持 `pending`；用户确认只将 SourceModel 变为 `confirmed`，LogicalModel/Binding/Route 仍由独立控制面流程显式创建。运行时 snapshot 只消费 enabled 且 confirmed/available 的 LogicalModel、SourceModel、SourceModelCapability、ModelBinding、Source、Account 和 Route；`logical_models.enabled` 与 `model_bindings.enabled` 是独立运行期开关，不改变确认/可用状态历史。
+ProviderPreset 与发现确认阶段不改变 Route，也不把发现结果自动写入 `logical_models`、`model_bindings` 或 `routes`。新模型保持 `pending`；用户确认只将 SourceModel 变为 `confirmed`，协议能力需在确认 Binding 之前显式声明并确认，LogicalModel/Binding/Route 仍由独立控制面流程显式创建。运行时 snapshot 只消费 enabled 且 confirmed/available 的 LogicalModel、SourceModel、SourceModelCapability、ModelBinding、Source、Account 和 Route；`logical_models.enabled` 与 `model_bindings.enabled` 是独立运行期开关，不改变确认/可用状态历史。
 
 每次成功刷新在单个 PostgreSQL 事务中按 Source 加锁，保存原始 snapshot、更新模型并生成按模型 ID 排序的 `added/changed/missing` diff。重复相同刷新得到空 diff；confirmed 元数据保持不变，pending 记录重算 upstream/preset 字段但保留 user 字段；missing 仅改为 `unavailable`。连接测试与 discovery run 分别保留审计历史，最近一次 discovery 可由 API 读取。
 

@@ -8,6 +8,7 @@ import type {
   ConnectionTestInput,
   ConnectionTestResult,
   DiscoveryExecution,
+  GatewayProtocol,
   LatestDiscovery,
   LogicalModel,
   LogicalModelWriteInput,
@@ -22,6 +23,8 @@ import type {
   Source,
   SourceCreateInput,
   SourceModel,
+  SourceModelCapability,
+  SourceModelCapabilityWrite,
   SourceModelConfirmation,
   SourceModelEditInput,
   SourceModelFilters,
@@ -200,6 +203,30 @@ export class GatewayAdminResources {
       `/admin/sources/${encodePath(sourceId)}/models/confirm`,
       jsonInit('POST', { models }, signal),
     )).data;
+  }
+
+  async sourceModelCapabilities(
+    sourceId: string,
+    upstreamModelId: string,
+    signal?: AbortSignal,
+  ): Promise<SourceModelCapability[]> {
+    return (await this.transport.json<AdminDataEnvelope<SourceModelCapability[]>>(
+      `/admin/sources/${encodePath(sourceId)}/models/${encodePath(upstreamModelId)}/capabilities`,
+      { signal },
+    )).data;
+  }
+
+  async upsertSourceModelCapability(
+    sourceId: string,
+    upstreamModelId: string,
+    protocol: GatewayProtocol,
+    input: SourceModelCapabilityWrite,
+    signal?: AbortSignal,
+  ): Promise<AdminMutationEnvelope<SourceModelCapability>> {
+    return this.transport.json(
+      `/admin/sources/${encodePath(sourceId)}/models/${encodePath(upstreamModelId)}/capabilities/${encodePath(protocol)}`,
+      jsonInit('PUT', input, signal),
+    );
   }
 
   async logicalModels(signal?: AbortSignal): Promise<LogicalModel[]> {

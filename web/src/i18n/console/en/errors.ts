@@ -9,5 +9,6 @@ export const errors = {
   usage_api_failed: 'Usage API request failed',
   export_failed: 'Usage export failed',
   http: 'Request failed (HTTP {{status}}).',
+  validation_failed: 'The request was rejected: {{message}}',
   unknown: 'An unexpected error occurred.',
 } as const;

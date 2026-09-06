@@ -48,6 +48,11 @@ mod admin_auth_tests {
         ("PUT", "/admin/sources/source-id"),
         ("DELETE", "/admin/sources/source-id"),
         ("PUT", "/admin/sources/source-id/enabled"),
+        ("GET", "/admin/sources/source-id/models/model-id/capabilities"),
+        (
+            "PUT",
+            "/admin/sources/source-id/models/model-id/capabilities/openai_chat_completions",
+        ),
         ("GET", "/admin/accounts"),
         ("POST", "/admin/accounts"),
         ("GET", "/admin/accounts/account-id"),

@@ -5,11 +5,21 @@ use axum::{
     response::IntoResponse,
     Json,
 };
+use chrono::Utc;
+use serde::Deserialize;
 use serde_json::json;
+use std::{collections::BTreeMap, str::FromStr};
 
 use crate::{
     control_plane,
-    domain::{capabilities, protocol::Protocol},
+    domain::{
+        capabilities,
+        catalog::{
+            CapabilitySupport, CatalogStatus, MetadataSource, SourceModelCapabilityInput,
+            SourceProtocolMode,
+        },
+        protocol::Protocol,
+    },
 };
 
 use super::helpers::{
@@ -351,6 +361,77 @@ pub(crate) async fn create_model_binding(
         &state,
         StatusCode::CREATED,
         control_plane.create_model_binding(&input).await,
+    )
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct SourceModelCapabilityWrite {
+    pub status: CatalogStatus,
+    pub mode: SourceProtocolMode,
+    #[serde(default)]
+    pub source_protocol: Option<Protocol>,
+    #[serde(default)]
+    pub adapter: Option<String>,
+    #[serde(default)]
+    pub feature_capabilities: BTreeMap<String, CapabilitySupport>,
+}
+
+pub(crate) async fn list_source_model_capabilities(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((source_id, upstream_model_id)): Path<(String, String)>,
+) -> Response<Body> {
+    let control_plane = match admin_control_plane(&state, &headers) {
+        Ok(control_plane) => control_plane,
+        Err(response) => return response,
+    };
+    admin_result(
+        control_plane
+            .list_source_model_capabilities(&source_id, &upstream_model_id)
+            .await,
+    )
+}
+
+pub(crate) async fn upsert_source_model_capability(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((source_id, upstream_model_id, protocol)): Path<(String, String, String)>,
+    payload: Result<Json<SourceModelCapabilityWrite>, JsonRejection>,
+) -> Response<Body> {
+    let control_plane = match admin_control_plane(&state, &headers) {
+        Ok(control_plane) => control_plane,
+        Err(response) => return response,
+    };
+    let protocol = match Protocol::from_str(&protocol) {
+        Ok(protocol) => protocol,
+        Err(_) => {
+            return error_response(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "validation_failed",
+                &format!("unknown protocol '{protocol}'"),
+            )
+        }
+    };
+    let write = match json_payload(payload) {
+        Ok(write) => write,
+        Err(response) => return response,
+    };
+    let input = SourceModelCapabilityInput {
+        source_id,
+        upstream_model_id,
+        protocol,
+        status: write.status,
+        mode: write.mode,
+        source_protocol: write.source_protocol,
+        adapter: write.adapter,
+        feature_capabilities: write.feature_capabilities,
+        field_source: MetadataSource::User,
+        observed_at: Utc::now(),
+    };
+    mutation_result(
+        &state,
+        StatusCode::OK,
+        control_plane.upsert_source_model_capability(&input).await,
     )
 }
 

@@ -223,6 +223,22 @@ Content-Type: application/json
 
 任一模型不存在、不可用或元数据非法时整批回滚。confirmed 模型刷新时保持已确认元数据和匹配预设；pending 模型刷新会重算 upstream/preset 字段，但保留所有 `user` 字段。
 
+### SourceModel 协议能力
+
+`GET /admin/sources/:source_id/models/:upstream_model_id/capabilities` 返回该来源模型逐协议的 `source_model_capabilities` 记录；未声明的协议不出现在列表中。
+
+```http
+PUT /admin/sources/deepseek-primary/models/deepseek-v4-flash/capabilities/openai_chat_completions
+Content-Type: application/json
+
+{
+  "status": "confirmed",
+  "mode": "native"
+}
+```
+
+`PUT .../capabilities/:protocol` 按 `(source_id, upstream_model_id, protocol)` upsert 能力声明，字段为 `status`（`pending/confirmed/unavailable`）、`mode`（`unknown/native/adapter/unsupported`），`mode=adapter` 时必须附带 `source_protocol` 和 `adapter`，且来源协议已确认为 `native`。`feature_capabilities` 缺省时从 SourceModel metadata 推导，缺失或非法值的 feature 保持 unknown，不会被猜测为支持。写入与 runtime snapshot 发布在同一事务完成，返回标准 mutation envelope（含 `snapshot_revision`）。`unknown` 模式不能被确认，ModelBinding 只接受 `confirmed` 且 `native/adapter` 的能力。
+
 ## DB runtime 有效能力矩阵
 
 `GET /admin/capabilities` 返回当前已原子发布的 PostgreSQL runtime snapshot 有效能力矩阵，并要求 Admin Key 鉴权。它与 proxy、`/admin/routes/{protocol}/{model}` 和 `/v1/models` 读取同一个不可变 snapshot；不会读取 `GatewayConfig.routes` 作为回退，也不会让初始化 JSON 覆盖运行时事实。

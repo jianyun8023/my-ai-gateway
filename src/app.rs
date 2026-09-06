@@ -115,6 +115,14 @@ pub(crate) fn application(state: AppState) -> Router {
             put(admin::set_source_enabled),
         )
         .route(
+            "/admin/sources/{source_id}/models/{upstream_model_id}/capabilities",
+            get(admin::list_source_model_capabilities),
+        )
+        .route(
+            "/admin/sources/{source_id}/models/{upstream_model_id}/capabilities/{protocol}",
+            put(admin::upsert_source_model_capability),
+        )
+        .route(
             "/admin/accounts",
             get(admin::list_accounts).post(admin::create_account),
         )

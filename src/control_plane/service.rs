@@ -1,5 +1,9 @@
+use super::model_catalog;
 use crate::domain::{
-    catalog::{CatalogAvailability, CatalogStatus, PublishedModel, SourceProtocolMode},
+    catalog::{
+        CatalogAvailability, CatalogStatus, PublishedModel, SourceModelCapabilityInput,
+        SourceProtocolMode,
+    },
     config::{
         adapter_definition, AccountConfig, Capabilities, CapabilityMode, GatewayConfig,
         ProtocolCapability, ProtocolCapabilityMatrix, ProtocolMode, ProviderConfig, RouteConfig,
@@ -1694,6 +1698,45 @@ fn default_true() -> bool {
     true
 }
 
+fn catalog_error(error: model_catalog::CatalogError) -> ControlPlaneError {
+    match error {
+        model_catalog::CatalogError::Database(error) => ControlPlaneError::Database(error),
+        model_catalog::CatalogError::Json(error) => ControlPlaneError::Json(error),
+        model_catalog::CatalogError::NotFound(message) => ControlPlaneError::NotFound(message),
+        model_catalog::CatalogError::InvalidMetadata(message)
+        | model_catalog::CatalogError::InvalidState(message)
+        | model_catalog::CatalogError::ImmutableVersionConflict(message) => {
+            ControlPlaneError::Validation(vec![message])
+        }
+    }
+}
+
+/// 能力声明缺省时从 SourceModel metadata 推导 feature 能力；
+/// 元数据缺失或值非法的 feature 不写入（保持 unknown 语义，不猜测）。
+fn derive_feature_capabilities(
+    metadata: &Value,
+) -> std::collections::BTreeMap<String, crate::domain::catalog::CapabilitySupport> {
+    const FEATURE_KEYS: [&str; 6] = [
+        "tools",
+        "thinking",
+        "web_search",
+        "structured_output",
+        "streaming",
+        "usage",
+    ];
+    FEATURE_KEYS
+        .iter()
+        .filter_map(|key| {
+            let value = metadata.get(*key)?.as_str()?;
+            let support = serde_json::from_value::<crate::domain::catalog::CapabilitySupport>(
+                Value::String(value.to_owned()),
+            )
+            .ok()?;
+            Some(((*key).to_owned(), support))
+        })
+        .collect()
+}
+
 fn default_weight() -> i32 {
     100
 }
@@ -2241,6 +2284,49 @@ impl ControlPlane {
         )
     }
 
+    pub async fn list_source_model_capabilities(
+        &self,
+        source_id: &str,
+        upstream_model_id: &str,
+    ) -> Result<Vec<model_catalog::SourceModelCapabilityRecord>, ControlPlaneError> {
+        let repository = model_catalog::ModelCatalogRepository::new(self.pool.clone());
+        repository
+            .list_source_model_capabilities(source_id, upstream_model_id)
+            .await
+            .map_err(catalog_error)
+    }
+
+    /// UI/API 驱动的能力声明与确认。upsert 与 runtime snapshot 发布在同一事务
+    /// 中完成；`finish_write` 内的 `validate_capability_chains` 兜底 adapter 链合法性。
+    pub async fn upsert_source_model_capability(
+        &self,
+        input: &SourceModelCapabilityInput,
+    ) -> Result<Mutation<model_catalog::SourceModelCapabilityRecord>, ControlPlaneError> {
+        let mut tx = self.begin_write().await?;
+        let model_metadata = sqlx::query_scalar::<_, Option<Value>>(
+            "SELECT metadata FROM source_models WHERE source_id=$1 AND upstream_model_id=$2",
+        )
+        .bind(&input.source_id)
+        .bind(&input.upstream_model_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some(model_metadata) = model_metadata.flatten() else {
+            return Err(ControlPlaneError::Validation(vec![format!(
+                "source model {}/{} not found",
+                input.source_id, input.upstream_model_id
+            )]));
+        };
+        let mut resolved = input.clone();
+        if resolved.feature_capabilities.is_empty() {
+            resolved.feature_capabilities = derive_feature_capabilities(&model_metadata);
+        }
+        let record = model_catalog::upsert_source_model_capability_conn(&mut tx, &resolved)
+            .await
+            .map_err(catalog_error)?;
+        let snapshot = self.finish_write(tx).await?;
+        Ok(Mutation { record, snapshot })
+    }
+
     pub async fn get_model_binding(&self, id: i64) -> Result<ModelBindingView, ControlPlaneError> {
         sqlx::query_as::<_, ModelBindingView>(model_binding_select(Some("WHERE id=$1")))
             .bind(id)
@@ -2495,6 +2581,7 @@ impl ControlPlane {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::catalog::MetadataSource;
     use crate::infra::db::Database;
     use crate::state::{AppState, EnvRestore, TEST_ADMIN_KEY};
     use axum::{
@@ -3393,6 +3480,140 @@ mod tests {
             .expect("load imported bai source");
         assert_eq!(bai.provider_preset_id, "custom");
         assert_eq!(bai.provider_preset_version, 1);
+
+        let pool = database.pool().clone();
+        drop(control_plane);
+        drop(database);
+        pool.close().await;
+        sqlx::query(&format!("DROP SCHEMA \"{schema}\" CASCADE"))
+            .execute(&admin)
+            .await
+            .expect("drop isolated test schema");
+        admin.close().await;
+    }
+
+    #[tokio::test]
+    #[ignore = "requires TEST_DATABASE_URL and runs against an isolated PostgreSQL schema"]
+    async fn postgres_source_model_capability_upsert_confirms_and_publishes_snapshot() {
+        let (database, admin, schema) = isolated_database().await;
+        let control_plane = ControlPlane::new(database.pool().clone(), "127.0.0.1:0");
+
+        let source = SourceCreateWrite {
+            id: "cap-source".into(),
+            display_name: "Capability Source".into(),
+            provider_preset_id: "custom".into(),
+            provider_preset_version: None,
+            base_url: Some("https://cap-source.example".into()),
+            endpoints: Some(HashMap::from([
+                (
+                    Protocol::OpenAiChatCompletions,
+                    "/v1/chat/completions".into(),
+                ),
+                (Protocol::AnthropicMessages, "/v1/messages".into()),
+            ])),
+            endpoint_overrides: HashMap::new(),
+            auth_config: None,
+            protocol_capabilities: None,
+            enabled: true,
+        };
+        control_plane
+            .create_source_from_request(&source)
+            .await
+            .expect("create capability test source");
+
+        sqlx::query("INSERT INTO source_models (source_id,upstream_model_id,confirmation_status,availability_status,raw_snapshot,metadata,field_sources,matched_model_preset_id,matched_model_preset_version,first_discovered_at,last_discovered_at) VALUES ('cap-source','cap-model','pending','available','{}'::jsonb,$1,'{}'::jsonb,NULL,NULL,NOW(),NOW())")
+            .bind(json!({
+                "tools": "supported",
+                "streaming": "supported",
+                "usage": "unsupported",
+                "thinking": "bogus"
+            }))
+            .execute(database.pool())
+            .await
+            .expect("insert pending source model");
+
+        let base_input = SourceModelCapabilityInput {
+            source_id: "cap-source".into(),
+            upstream_model_id: "cap-model".into(),
+            protocol: Protocol::OpenAiChatCompletions,
+            status: CatalogStatus::Pending,
+            mode: SourceProtocolMode::Native,
+            source_protocol: None,
+            adapter: None,
+            feature_capabilities: std::collections::BTreeMap::new(),
+            field_source: MetadataSource::User,
+            observed_at: Utc::now(),
+        };
+
+        // 不存在的 source model 必须显式报错，不能静默建能力行。
+        let mut missing = base_input.clone();
+        missing.upstream_model_id = "missing-model".into();
+        assert!(matches!(
+            control_plane.upsert_source_model_capability(&missing).await,
+            Err(ControlPlaneError::Validation(errors))
+                if errors.iter().any(|message| message.contains("missing-model"))
+        ));
+
+        // 缺省 feature 声明从 source model metadata 推导；非法值不写入。
+        let pending = control_plane
+            .upsert_source_model_capability(&base_input)
+            .await
+            .expect("create pending native capability");
+        assert_eq!(pending.record.status, CatalogStatus::Pending);
+        assert!(pending.record.confirmed_at.is_none());
+        let features = &pending.record.feature_capabilities;
+        assert_eq!(features.get("tools"), Some(&json!("supported")));
+        assert_eq!(features.get("streaming"), Some(&json!("supported")));
+        assert_eq!(features.get("usage"), Some(&json!("unsupported")));
+        assert!(features.get("thinking").is_none());
+
+        // adapter 能力要求 source protocol 已是 confirmed native。
+        let adapter_input = SourceModelCapabilityInput {
+            source_id: "cap-source".into(),
+            upstream_model_id: "cap-model".into(),
+            protocol: Protocol::OpenAiResponses,
+            status: CatalogStatus::Confirmed,
+            mode: SourceProtocolMode::Adapter,
+            source_protocol: Some(Protocol::AnthropicMessages),
+            adapter: Some("kimi_responses_adapter".into()),
+            feature_capabilities: std::collections::BTreeMap::new(),
+            field_source: MetadataSource::User,
+            observed_at: Utc::now(),
+        };
+        assert!(matches!(
+            control_plane
+                .upsert_source_model_capability(&adapter_input)
+                .await,
+            Err(ControlPlaneError::Validation(errors))
+                if errors.iter().any(|message| message.contains("confirmed native"))
+        ));
+
+        // 确认 native source protocol 后 adapter 链合法，两次写入都推进 snapshot。
+        let anthropic_native = SourceModelCapabilityInput {
+            protocol: Protocol::AnthropicMessages,
+            status: CatalogStatus::Confirmed,
+            ..base_input.clone()
+        };
+        let confirmed_native = control_plane
+            .upsert_source_model_capability(&anthropic_native)
+            .await
+            .expect("confirm native anthropic capability");
+        assert_eq!(confirmed_native.record.status, CatalogStatus::Confirmed);
+        assert!(confirmed_native.record.confirmed_at.is_some());
+        assert!(confirmed_native.snapshot.revision > pending.snapshot.revision);
+
+        let adapter_confirmed = control_plane
+            .upsert_source_model_capability(&adapter_input)
+            .await
+            .expect("confirm adapter capability once source protocol is native");
+        assert_eq!(adapter_confirmed.record.mode, SourceProtocolMode::Adapter);
+        assert!(adapter_confirmed.snapshot.revision > confirmed_native.snapshot.revision);
+
+        let listed = control_plane
+            .list_source_model_capabilities("cap-source", "cap-model")
+            .await
+            .expect("list source model capabilities");
+        assert_eq!(listed.len(), 3);
 
         let pool = database.pool().clone();
         drop(control_plane);
