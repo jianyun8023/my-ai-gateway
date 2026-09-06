@@ -9,7 +9,7 @@
 
 export const CONSOLE_PAGES = [
   'overview', 'analysis', 'events',
-  'sources', 'models', 'settings',
+  'sources', 'discovery', 'models', 'capabilities', 'settings',
 ] as const;
 
 export type ConsolePage = typeof CONSOLE_PAGES[number];

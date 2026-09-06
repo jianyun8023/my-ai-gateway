@@ -24,7 +24,9 @@ export const shell = {
     analysis: '用量分析',
     events: '请求事件',
     sources: '来源管理',
+    discovery: '模型发现',
     models: '模型与路由',
+    capabilities: '能力矩阵',
     settings: '系统设置',
   },
 
@@ -34,7 +36,9 @@ export const shell = {
     analysis: 'Token 构成、模型分布、来源分析与延迟诊断',
     events: '查看每次请求的元数据、重试与 Token 明细',
     sources: '管理提供商、来源、账号与连接配置',
+    discovery: '从上游发现模型,对比差异并确认后可路由',
     models: '逻辑模型映射、来源绑定与协议路由配置',
+    capabilities: '按来源与协议查看三协议有效能力矩阵',
     settings: '网关入口、虚拟密钥与配置管理',
   },
 
