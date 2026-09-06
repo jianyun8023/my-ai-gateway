@@ -919,6 +919,10 @@ mod audit_closeout_tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn degraded_warning_covers_primary_unavailable_early_fallback() {
+        // Holds ENV_LOCK because proxy_request and the data-plane auth layer
+        // both read GATEWAY_API_KEY from the process environment.
+        let _environment_lock = ENV_LOCK.lock().await;
+        let _key = EnvRestore::set("GATEWAY_API_KEY", "audit-correct-key");
         let mut fallback_provider = provider("audit-provider", spawn_fallback_upstream().await);
         fallback_provider.native_protocols = vec![Protocol::AnthropicMessages];
         fallback_provider.protocol_capabilities.insert(
