@@ -188,9 +188,7 @@
           }
         },
         "openai_responses": {
-          "mode": "convert",
-          "adapter": "kimi_responses_adapter",
-          "source_protocol": "anthropic_messages",
+          "mode": "native",
           "features": {
             "text":              { "status": "unknown", "evidence": null },
             "multi_turn":        { "status": "unknown", "evidence": null },
@@ -200,7 +198,7 @@
             "tool_choice":       { "status": "unknown", "evidence": null },
             "parallel_tools":    { "status": "unknown", "evidence": null },
             "tool_result":       { "status": "unknown", "evidence": null },
-            "structured_output": { "status": "unsupported", "evidence": null },
+            "structured_output": { "status": "unknown", "evidence": null },
             "reasoning":         { "status": "unknown", "evidence": null },
             "thinking":          { "status": "unknown", "evidence": null },
             "error_envelope":    { "status": "unknown", "evidence": null },

@@ -36,10 +36,6 @@ impl SourceHttpClient {
     pub fn validate_base_url(&self, value: &str) -> Result<Url, SourceUrlPolicyError> {
         self.policy.validate_base_url(value)
     }
-
-    pub fn raw_client(&self) -> Client {
-        self.inner.clone()
-    }
 }
 
 pub fn client(policy: Arc<SourceUrlPolicy>) -> Result<SourceHttpClient, reqwest::Error> {

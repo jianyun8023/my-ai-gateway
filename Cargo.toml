@@ -5,9 +5,6 @@ edition = "2021"
 license = "MIT"
 description = "Rust AI gateway with multi-protocol ingress and account-aware routing"
 
-[workspace]
-members = ["crates/kimi-responses-adapter"]
-
 [dependencies]
 axum = { version = "0.8", features = ["macros"] }
 async-trait = "0.1"
@@ -32,7 +29,6 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 uuid = { version = "1", features = ["v4"] }
 zeroize = "1.9"
-kimi-responses-adapter = { path = "crates/kimi-responses-adapter" }
 metrics = { version = "0.24.6", default-features = false }
 metrics-exporter-prometheus = { version = "0.18.3", default-features = false, features = ["http-listener"] }
 opentelemetry = "0.32"

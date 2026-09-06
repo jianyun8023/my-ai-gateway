@@ -351,12 +351,6 @@ impl EnvRestore {
         std::env::set_var(name, value);
         Self { name, previous }
     }
-
-    pub(crate) fn unset(name: &'static str) -> Self {
-        let previous = std::env::var_os(name);
-        std::env::remove_var(name);
-        Self { name, previous }
-    }
 }
 
 #[cfg(test)]

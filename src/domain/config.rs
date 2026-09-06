@@ -48,30 +48,39 @@ impl AdapterDefinition {
 
 /// Return the built-in adapter registry. A fresh map keeps the registry
 /// immutable to callers while retaining a simple, strongly typed declaration.
+///
+/// No production adapters are registered: Kimi Code, the last adapter-backed
+/// provider, serves OpenAI Responses natively since preset `kimi_code@4`
+/// (issue #157), so any adapter declaration is rejected as unknown. Unit
+/// tests keep a registered entry so the adapter framework (validation,
+/// routing chains, degraded semantics) stays covered.
 pub fn adapter_registry() -> AdapterRegistry {
-    HashMap::from([(
-        "kimi_responses_adapter",
-        AdapterDefinition {
-            name: "kimi_responses_adapter",
-            // Direction is client/route ingress -> provider/upstream protocol.
-            // Kimi Responses accepts OpenAI Responses and emits Anthropic
-            // Messages upstream.
-            from_protocol: Protocol::OpenAiResponses,
-            to_protocol: Protocol::AnthropicMessages,
-            // Kimi's adapter translates these fields/events; file search is
-            // intentionally unsupported rather than silently treated as kept.
-            features: Capabilities {
-                streaming: CapabilityMode::Translated,
-                tools: CapabilityMode::Translated,
-                tool_streaming: CapabilityMode::Translated,
-                thinking: CapabilityMode::Translated,
-                web_search: CapabilityMode::Translated,
-                file_search: CapabilityMode::Unsupported,
-                vision: CapabilityMode::Translated,
-                usage: CapabilityMode::Translated,
+    #[cfg(test)]
+    {
+        HashMap::from([(
+            "kimi_responses_adapter",
+            AdapterDefinition {
+                name: "kimi_responses_adapter",
+                // Direction is client/route ingress -> provider/upstream protocol.
+                from_protocol: Protocol::OpenAiResponses,
+                to_protocol: Protocol::AnthropicMessages,
+                features: Capabilities {
+                    streaming: CapabilityMode::Translated,
+                    tools: CapabilityMode::Translated,
+                    tool_streaming: CapabilityMode::Translated,
+                    thinking: CapabilityMode::Translated,
+                    web_search: CapabilityMode::Translated,
+                    file_search: CapabilityMode::Unsupported,
+                    vision: CapabilityMode::Translated,
+                    usage: CapabilityMode::Translated,
+                },
             },
-        },
-    )])
+        )])
+    }
+    #[cfg(not(test))]
+    {
+        HashMap::new()
+    }
 }
 
 #[allow(dead_code)]
@@ -1149,9 +1158,8 @@ mod tests {
                     "kimi-for-coding-highspeed",
                     Protocol::OpenAiResponses
                 )
-                .adapter
-                .as_deref(),
-            Some("kimi_responses_adapter")
+                .mode,
+            ProtocolMode::Native
         );
     }
 }

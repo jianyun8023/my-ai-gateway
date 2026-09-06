@@ -45,15 +45,16 @@
       "name": "Kimi Code",
       "base_url": "https://api.kimi.com/coding",
       "models": ["kimi-for-coding-highspeed"],
-      "native_protocols": ["openai_chat_completions", "anthropic_messages"],
+      "native_protocols": ["openai_chat_completions", "openai_responses", "anthropic_messages"],
       "endpoints": {
         "openai_chat_completions": "/v1/chat/completions",
+        "openai_responses": "/v1/responses",
         "anthropic_messages": "/v1/messages"
       },
       "capabilities": {"streaming": "native", "tools": "native", "thinking": "native", "web_search": "native", "usage": "native"},
       "protocol_capabilities": {
         "openai_chat_completions": {"mode": "native"},
-        "openai_responses": {"mode": "adapter", "source_protocol": "anthropic_messages", "adapter": "kimi_responses_adapter"},
+        "openai_responses": {"mode": "native"},
         "anthropic_messages": {"mode": "native"}
       },
       "model_overrides": {}
@@ -89,19 +90,9 @@
       "id": "kimi-native",
       "model": "kimi-for-coding-highspeed",
       "provider_id": "kimi_code",
-      "protocols": ["openai_chat_completions", "anthropic_messages"],
+      "protocols": ["openai_chat_completions", "openai_responses", "anthropic_messages"],
       "primary_account_id": "kimi-main",
       "mode": "native"
-    },
-    {
-      "id": "kimi-responses-adapter",
-      "model": "kimi-for-coding-highspeed",
-      "provider_id": "kimi_code",
-      "protocols": ["openai_responses"],
-      "primary_account_id": "kimi-main",
-      "mode": "adapter",
-      "adapter": "kimi_responses_adapter",
-      "allow_lossy_conversion": false
     }
   ]
 }

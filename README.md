@@ -12,7 +12,7 @@ my-ai-gateway 是一个使用 Rust 编写的 AI 网关。它通过统一的下�
 | OpenAI Responses | `POST /v1/responses` | 原生透传，或执行一次明确的 Adapter 转换 |
 | Anthropic Messages | `POST /v1/messages` | 优先原生透传 |
 
-MiniMax、DeepSeek 等原生支持三种协议的 Provider 不经过转换器。Kimi Code 的 Responses 请求由仓库内置的 `kimi-responses-adapter` 处理，无需额外部署 Adapter 服务。
+MiniMax、DeepSeek 等原生支持三种协议的 Provider 不经过转换器。Kimi Code 自 2026-09 起官方原生支持 OpenAI Responses（`/v1/responses`），三协议全部原生透传，不再经过 Adapter。
 
 ## 核心能力
 
@@ -207,7 +207,6 @@ Pull Request 会分别执行以下两个检查：
 
 ```text
 src/                           Rust 网关主程序
-crates/kimi-responses-adapter/ 内置 Kimi Responses Adapter
 migrations/                    PostgreSQL migrations
 docs/                          设计、接口、部署和运维文档
 web/                           React + TypeScript 管理端

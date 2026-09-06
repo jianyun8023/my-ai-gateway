@@ -20,8 +20,8 @@
 
 1. Provider 原生支持某协议时，必须优先原生透传。
 2. Provider 不支持某协议时，使用明确的 Adapter。
-3. MiniMax、DeepSeek 等三协议 Provider 不应进入转换器。
-4. Kimi Responses 使用内置 `kimi-responses-adapter` workspace crate。
+3. MiniMax、DeepSeek、Kimi Code 等三协议 Provider 不应进入转换器；Kimi Code 自 preset `kimi_code@4` 起原生支持 OpenAI Responses，原内置 `kimi-responses-adapter` 已移除（#157）。
+4. 当前生产环境没有注册的 Adapter；adapter 框架（校验、mode 管线、degraded 语义）保留给后续 Provider 接入。
 5. 首选账号固定优先，失败后才进入 fallback 账号池。
 6. 不允许在协议转换中静默丢失 Tools、Web Search、Thinking、Usage 或 Provider 扩展字段。
 7. 默认不保存 prompt/response 正文。
@@ -65,7 +65,6 @@
 
 ```text
 src/                         Rust 网关主程序
-crates/kimi-responses-adapter/ 内置 Kimi Responses Adapter
 migrations/                  PostgreSQL migration
 docs/                        需求、架构、接口和运行文档
 config.example.json          Provider/Account/Route 示例
@@ -108,7 +107,7 @@ python3 -m json.tool config.example.json >/dev/null
 - SSE 转换必须维护事件顺序和状态；
 - 能力不支持时默认返回结构化错误；
 - 允许降级时必须记录 warning 和 `degraded` 状态；
-- Kimi Adapter 的 thinking、signature、tool call、web search 和 usage 变更必须增加回归测试。
+- Adapter 的 thinking、signature、tool call、web search 和 usage 变更必须增加回归测试。
 
 ## 数据库开发要求
 

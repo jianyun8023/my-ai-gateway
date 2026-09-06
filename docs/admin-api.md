@@ -40,7 +40,8 @@ Virtual Key 鉴权时，默认使用 key 的 `name`；若 `name` 为空则回退
 | --- | --- | --- | --- | --- | --- |
 | `deepseek@1` | `https://api.deepseek.com` | `/chat/completions` native | `/responses` native | `/anthropic/v1/messages` native | `GET /models` |
 | `minimax@1` | `https://api.minimax.io` | `/v1/chat/completions` native | `/v1/responses` native | `/anthropic/v1/messages` native | `GET /v1/models` |
-| `kimi_code@1` | `https://api.kimi.com/coding` | `/v1/chat/completions` native | `/v1/messages` via `kimi_responses_adapter` | `/v1/messages` native | 显式 `unsupported` |
+| `kimi_code@1`-`@3` | `https://api.kimi.com/coding` | `/v1/chat/completions` native | `/v1/messages` via `kimi_responses_adapter`（历史快照，#157 已退役） | `/v1/messages` native | 显式 `unsupported` |
+| `kimi_code@4` | `https://api.kimi.com/coding` | `/v1/chat/completions` native | `/v1/responses` native | `/v1/messages` native | 显式 `unsupported` |
 
 预设同时包含 Bearer 认证模板、Anthropic 版本 Header、各协议最小测试请求、默认能力和发现解析规则。Kimi Code 未猜测不存在的模型列表 endpoint；模型元数据可继续使用内置 ModelPreset 和用户编辑。
 
@@ -253,7 +254,7 @@ Content-Type: application/json
   "snapshot_generated_at": "2026-08-31T08:00:00Z",
   "data": [
     {
-      "route_id": "kimi-responses-adapter",
+      "route_id": "kimi-responses-native",
       "source": {
         "source_id": "kimi-code-primary",
         "display_name": "Kimi Code"
@@ -273,37 +274,31 @@ Content-Type: application/json
           "binding_id": 17,
           "selection": "primary",
           "selection_rank": 0,
-          "protocol_upstream": "anthropic_messages",
-          "endpoint": "https://api.kimi.com/coding/v1/messages",
-          "mode": "adapter",
-          "adapter": "kimi_responses_adapter",
+          "protocol_upstream": "openai_responses",
+          "endpoint": "https://api.kimi.com/coding/v1/responses",
+          "mode": "native",
+          "adapter": null,
           "conversion_chain": [
             {
               "protocol_from": "openai_responses",
-              "protocol_to": "anthropic_messages",
-              "mode": "adapter",
-              "adapter": "kimi_responses_adapter"
+              "protocol_to": "openai_responses",
+              "mode": "native",
+              "adapter": null
             }
           ],
           "effective_capabilities": {
-            "streaming": "translated",
-            "tools": "translated",
-            "tool_streaming": "unsupported",
-            "thinking": "translated",
-            "web_search": "translated",
-            "file_search": "unsupported",
-            "vision": "unsupported",
-            "usage": "translated"
+            "streaming": "native",
+            "tools": "native",
+            "tool_streaming": "native",
+            "thinking": "native",
+            "web_search": "native",
+            "file_search": "unknown",
+            "vision": "unknown",
+            "usage": "native"
           },
-          "degraded": true,
-          "degraded_features": [
-            "streaming",
-            "tools",
-            "thinking",
-            "web_search",
-            "usage"
-          ],
-          "allow_lossy_conversion": true,
+          "degraded": false,
+          "degraded_features": [],
+          "allow_lossy_conversion": false,
           "error": null
         }
       ]

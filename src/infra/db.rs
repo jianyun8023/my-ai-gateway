@@ -453,6 +453,11 @@ impl Database {
         ))
         .execute(&mut *tx)
         .await?;
+        sqlx::raw_sql(include_str!(
+            "../../migrations/0023_kimi_native_responses.sql"
+        ))
+        .execute(&mut *tx)
+        .await?;
         tx.commit().await
     }
 
@@ -826,6 +831,138 @@ mod tests {
             .execute(&database.pool)
             .await
             .expect("clean Source auth migration fixtures");
+    }
+
+    #[tokio::test]
+    async fn postgres_migrates_kimi_sources_to_native_responses() {
+        let Some(database) = postgres_test_database().await else {
+            eprintln!(
+                "skipping PostgreSQL Kimi native Responses migration test: TEST_DATABASE_URL is not set"
+            );
+            return;
+        };
+        let repository = ModelCatalogRepository::new(database.pool.clone());
+        install_builtin_presets(&repository)
+            .await
+            .expect("install built-in ProviderPresets");
+        let suffix = uuid::Uuid::new_v4().simple().to_string();
+        let source_id = format!("migration-kimi-native-{suffix}");
+
+        // Seed a kimi_code@3 Source as it existed before #157: Responses
+        // routed through the embedded adapter targeting /v1/messages.
+        sqlx::query("INSERT INTO sources (id,display_name,provider_preset_id,provider_preset_version,provider_preset_snapshot,base_url,endpoints,auth_config,protocol_capabilities) SELECT $1,$1,'kimi_code',3,definition,'https://api.kimi.com/coding',$2,'{}'::jsonb,$3 FROM provider_presets WHERE id='kimi_code' AND version=3")
+            .bind(&source_id)
+            .bind(json!({
+                "openai_chat_completions": "/v1/chat/completions",
+                "openai_responses": "/v1/messages",
+                "anthropic_messages": "/v1/messages"
+            }))
+            .bind(json!({
+                "openai_chat_completions": {"mode":"native"},
+                "openai_responses": {"mode":"adapter","source_protocol":"anthropic_messages","adapter":"kimi_responses_adapter","features":{"streaming":"translated","usage":"translated"}},
+                "anthropic_messages": {"mode":"native"}
+            }))
+            .execute(&database.pool)
+            .await
+            .expect("seed kimi_code@3 Source fixture");
+        sqlx::query("INSERT INTO source_models (source_id,upstream_model_id,confirmation_status,availability_status,confirmed_at) VALUES ($1,'k3','confirmed','available',NOW())")
+            .bind(&source_id)
+            .execute(&database.pool)
+            .await
+            .expect("seed SourceModel fixture");
+        sqlx::query("INSERT INTO source_model_capabilities (source_id,upstream_model_id,protocol,status,mode,source_protocol,adapter,feature_capabilities,field_source,confirmed_at) VALUES ($1,'k3','openai_responses','confirmed','adapter','anthropic_messages','kimi_responses_adapter','{\"streaming\":\"supported\",\"tools\":\"supported\",\"usage\":\"supported\"}'::jsonb,'user',NOW()),($1,'k3','anthropic_messages','confirmed','native',NULL,NULL,'{\"streaming\":\"supported\"}'::jsonb,'user',NOW())")
+            .bind(&source_id)
+            .execute(&database.pool)
+            .await
+            .expect("seed capability fixtures");
+
+        // migrate() already applied 0023 before the fixture existed; clear the
+        // marker and replay it against the pre-#157 rows.
+        sqlx::query("DELETE FROM gateway_schema_migrations WHERE version=23")
+            .execute(&database.pool)
+            .await
+            .expect("clear migration marker");
+        sqlx::raw_sql(include_str!(
+            "../../migrations/0023_kimi_native_responses.sql"
+        ))
+        .execute(&database.pool)
+        .await
+        .expect("replay Kimi native Responses migration");
+
+        let kimi_v4 = crate::domain::provider_preset::builtin_provider_presets()
+            .expect("builtin presets")
+            .into_iter()
+            .find(|preset| preset.id == "kimi_code" && preset.version == 4)
+            .expect("kimi_code@4 preset");
+        let (version, snapshot, endpoints, protocol_capabilities): (
+            i32,
+            Value,
+            Value,
+            Value,
+        ) = sqlx::query_as("SELECT provider_preset_version,provider_preset_snapshot,endpoints,protocol_capabilities FROM sources WHERE id=$1")
+            .bind(&source_id)
+            .fetch_one(&database.pool)
+            .await
+            .expect("read migrated Source");
+        assert_eq!(version, 4);
+        assert_eq!(snapshot, kimi_v4.definition);
+        assert_eq!(endpoints["openai_responses"], "/v1/responses");
+        // Other per-Source endpoint overrides are preserved.
+        assert_eq!(endpoints["openai_chat_completions"], "/v1/chat/completions");
+        assert_eq!(endpoints["anthropic_messages"], "/v1/messages");
+        assert_eq!(protocol_capabilities["openai_responses"]["mode"], "native");
+        assert!(protocol_capabilities["openai_responses"]["adapter"].is_null());
+        assert!(protocol_capabilities["openai_responses"]["source_protocol"].is_null());
+        assert_eq!(
+            protocol_capabilities["openai_responses"]["features"]["web_search"],
+            "supported"
+        );
+        assert_eq!(
+            protocol_capabilities["openai_responses"]["features"]["web_search_citations"],
+            "unknown"
+        );
+
+        let (mode, source_protocol, adapter, status): (
+            String,
+            Option<String>,
+            Option<String>,
+            String,
+        ) = sqlx::query_as("SELECT mode::text,source_protocol::text,adapter,status::text FROM source_model_capabilities WHERE source_id=$1 AND upstream_model_id='k3' AND protocol='openai_responses'")
+            .bind(&source_id)
+            .fetch_one(&database.pool)
+            .await
+            .expect("read migrated capability row");
+        assert_eq!(mode, "native");
+        assert_eq!(source_protocol, None);
+        assert_eq!(adapter, None);
+        // Confirmed status survives the protocol-chain switch.
+        assert_eq!(status, "confirmed");
+
+        // The migration is guarded: a replay must not stomp Source edits made
+        // after the first run.
+        sqlx::query("UPDATE sources SET endpoints = jsonb_set(endpoints, '{openai_responses}', '\"/custom/responses\"') WHERE id=$1")
+            .bind(&source_id)
+            .execute(&database.pool)
+            .await
+            .expect("customize migrated endpoint");
+        sqlx::raw_sql(include_str!(
+            "../../migrations/0023_kimi_native_responses.sql"
+        ))
+        .execute(&database.pool)
+        .await
+        .expect("replay migration is a no-op");
+        let preserved: Value = sqlx::query_scalar("SELECT endpoints FROM sources WHERE id=$1")
+            .bind(&source_id)
+            .fetch_one(&database.pool)
+            .await
+            .expect("read customized endpoint");
+        assert_eq!(preserved["openai_responses"], "/custom/responses");
+
+        sqlx::query("DELETE FROM sources WHERE id=$1")
+            .bind(&source_id)
+            .execute(&database.pool)
+            .await
+            .expect("clean Kimi native migration fixtures");
     }
 
     #[tokio::test]
