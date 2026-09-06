@@ -34,39 +34,39 @@
   {
     "id": "kimi.function",
     "provider": "kimi",
-    "kind": "adapter_function_round_trip",
+    "kind": "native_function_round_trip",
     "cost": "low",
     "required_env": ["KIMI_API_KEY", "KIMI_BASE_URL"],
-    "description": "Responses function call and function_call_output through the Kimi adapter."
+    "description": "Responses function call and function_call_output through Kimi native Responses."
   },
   {
     "id": "kimi.function_stream",
     "provider": "kimi",
-    "kind": "adapter_function_stream",
+    "kind": "native_function_stream",
     "cost": "low",
     "required_env": ["KIMI_API_KEY", "KIMI_BASE_URL"],
-    "description": "Streaming function call argument events through the Kimi adapter."
+    "description": "Streaming function call argument events through Kimi native Responses."
   },
   {
     "id": "kimi.web_search",
     "provider": "kimi",
-    "kind": "adapter_server_search",
+    "kind": "native_server_search",
     "cost": "high",
     "required_env": ["KIMI_API_KEY", "KIMI_BASE_URL"],
-    "description": "Non-streaming web search conversion, sources, status suppression, and usage."
+    "description": "Non-streaming web search events and usage; source visibility recorded as evidence."
   },
   {
     "id": "kimi.web_search_stream",
     "provider": "kimi",
-    "kind": "adapter_server_search_stream",
+    "kind": "native_server_search_stream",
     "cost": "high",
     "required_env": ["KIMI_API_KEY", "KIMI_BASE_URL"],
-    "description": "Streaming web search event order, sources, status suppression, and usage."
+    "description": "Streaming web search event order and usage; source visibility recorded as evidence."
   },
   {
     "id": "kimi.reasoning_signature",
     "provider": "kimi",
-    "kind": "adapter_reasoning_round_trip",
+    "kind": "native_reasoning_round_trip",
     "cost": "high",
     "required_env": ["KIMI_API_KEY", "KIMI_BASE_URL"],
     "description": "Reasoning encrypted_content round-trip; may report not_triggered when upstream emits no thinking block."

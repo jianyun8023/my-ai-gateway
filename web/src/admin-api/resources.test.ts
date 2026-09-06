@@ -103,7 +103,7 @@ describe('GatewayAdminResources', () => {
       status: 'confirmed',
       mode: 'adapter',
       source_protocol: 'anthropic_messages',
-      adapter: 'kimi_responses_adapter',
+      adapter: 'example_adapter',
     });
     expect(transport.json).toHaveBeenCalledWith(
       '/admin/sources/source-a/models/model-a/capabilities/openai_responses',
@@ -113,7 +113,7 @@ describe('GatewayAdminResources', () => {
           status: 'confirmed',
           mode: 'adapter',
           source_protocol: 'anthropic_messages',
-          adapter: 'kimi_responses_adapter',
+          adapter: 'example_adapter',
         }),
       }),
     );

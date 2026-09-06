@@ -10,7 +10,7 @@ Rust AI 网关，用一个下游入口统一代理多个上游 Provider、Source
 | OpenAI Responses | `POST /v1/responses` | 原生透传或一次明确的 Adapter 转换 |
 | Anthropic Messages | `POST /v1/messages` | 原生透传优先 |
 
-MiniMax、DeepSeek 等原生支持三协议的 Provider 不进入转换器。Kimi Code 的 Responses 路径使用仓库内置的 `kimi-responses-adapter`，不需要额外部署 Adapter 服务。
+MiniMax、DeepSeek 等原生支持三协议的 Provider 不进入转换器。Kimi Code 自 2026-09 起官方原生支持 OpenAI Responses（`/v1/responses`），三协议全部原生透传，不再经过 Adapter。
 
 ## 当前能力
 
@@ -76,8 +76,7 @@ curl http://127.0.0.1:8787/healthz
 连接超时发生在上游响应头之前，其他超时发生在 SSE 已建立之后。网关心跳是
 `: gateway-heartbeat` SSE comment，不会进入 Provider 事件、Usage 或序列号，也不影响 TTFT。
 已建立流发生超时会发送脱敏的 `gateway_*_timeout` 错误帧并关闭；客户端断开只取消上游
-读取并将 Usage 记为客户端取消，不会触发 fallback。独立运行 Kimi Adapter 时使用同名的
-`KIMI_SSE_*_MS` 参数。
+读取并将 Usage 记为客户端取消，不会触发 fallback。
 
 反向代理部署时请关闭响应缓冲并保留 `text/event-stream`（例如 Nginx 使用
 `proxy_buffering off`），代理读取超时应大于网关总时限；代理的 stream idle timeout
@@ -267,7 +266,6 @@ TEST_DATABASE_URL='postgres://gateway:gateway@127.0.0.1:5432/gateway_test' \
 
 ```text
 src/                           Rust 网关主程序
-crates/kimi-responses-adapter/ 内置 Kimi Responses Adapter
 migrations/                    PostgreSQL migrations
 docs/                          设计、管理 API 和运行文档
 web/                           React + TypeScript 管理端

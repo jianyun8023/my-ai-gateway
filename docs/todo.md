@@ -5,7 +5,7 @@
 ## 已完成
 
 - [x] 三类北向协议入口与 Provider 原生 JSON/SSE 透传
-- [x] 内置 `kimi-responses-adapter` 及请求、非流式、流式回归
+- [x] 内置 `kimi-responses-adapter` 及请求、非流式、流式回归（已于 #157 移除：Kimi Code 官方原生支持 Responses，迁移至 `kimi_code@4` native）
 - [x] Source/Account/模型级协议能力矩阵、Adapter 注册表和完整路由链（#3、#4、#5）
 - [x] ProviderPreset、ModelPreset、模型发现差异和用户确认 API（#12、#13）
 - [x] PostgreSQL DB-first 启动、一次性 JSON 初始化/显式导入和原子 runtime snapshot（#14）

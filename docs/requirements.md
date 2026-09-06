@@ -29,7 +29,7 @@ OpenAI Chat 与 Responses 的输入/输出模型并不等价，因此转换层�
 
 路由规则按以下顺序解析：精确的“协议 + 模型 + 账号”绑定、模型级默认账号、provider 默认账号。若绑定账号不可用，默认快速失败；只有显式开启 fallback 才允许切换到其他账号，避免请求悄悄落到错误账号。
 
-对于 MiniMax、DeepSeek 这类三种协议均由上游原生提供的渠道，三种入口全部走原生透传，Web Search、Tools、Thinking、Usage 和 provider 扩展字段不进入转换器。Kimi Code 的 Responses 入口才使用专用 `kimi_responses_adapter`。
+对于 MiniMax、DeepSeek、Kimi Code 这类三种协议均由上游原生提供的渠道，三种入口全部走原生透传，Web Search、Tools、Thinking、Usage 和 provider 扩展字段不进入转换器。Kimi Code 自 2026-09 起官方原生支持 OpenAI Responses，原 `kimi_responses_adapter` 已随 #157 退役；当前生产环境无注册的 Adapter，框架保留给后续 Provider 接入。
 
 ## 4. 核心领域模型
 
@@ -57,7 +57,7 @@ OpenAI Chat 与 Responses 的输入/输出模型并不等价，因此转换层�
 - JSON/协议模型：Serde；每种协议独立 request/response/event 类型。
 - 数据库：SQLx + PostgreSQL，迁移文件纳入版本控制。
 - 可观测性：tracing，Prometheus/OpenTelemetry 指标。
-- 适配器接口：`ProviderAdapter::capabilities()`、`send()`、`stream()`；Kimi Responses 适配器复用现有 `kimi-responses-adapter`。
+- 适配器接口：`ProviderAdapter::capabilities()`、`send()`、`stream()`；当前无注册的 Adapter 实现（Kimi Responses 适配器已于 #157 移除）。
 
 ## 8. 分阶段交付
 

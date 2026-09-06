@@ -13,6 +13,11 @@ pub const PROVIDER_PRESET_SCHEMA_VERSION: u32 = 1;
 /// The latest built-in provider preset record version.  Record versions are
 /// immutable snapshots; bumping this value never rewrites an existing Source.
 pub const BUILTIN_PROVIDER_PRESET_VERSION: i32 = 3;
+/// The latest built-in `kimi_code` preset record version.  Kimi runs one
+/// version ahead of the shared builtin line: v4 switches Responses to the
+/// officially supported native `/v1/responses` endpoint and retires the
+/// embedded Responses→Anthropic adapter (issue #157).
+pub const KIMI_CODE_PROVIDER_PRESET_VERSION: i32 = 4;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -327,6 +332,35 @@ pub fn builtin_provider_presets() -> Result<Vec<ProviderPresetInput>, CatalogErr
         CapabilitySupport::Supported,
     );
 
+    // kimi_code v4: Kimi Code officially serves OpenAI Responses natively at
+    // `/v1/responses` (verified 2026-09-06 against api.kimi.com/coding:
+    // reasoning items, streaming function_call events, cached-token usage,
+    // web_search tool accepted).  The embedded Responses→Anthropic adapter is
+    // retired, so Responses becomes a native protocol preset.  Citation and
+    // source visibility on the native endpoint is unverified and stays
+    // unknown rather than being guessed.
+    let mut kimi_v4 = kimi_v3.clone();
+    let mut kimi_v4_responses_features = default_features();
+    kimi_v4_responses_features.insert("web_search".into(), CapabilitySupport::Supported);
+    kimi_v4_responses_features.insert("tool_streaming".into(), CapabilitySupport::Supported);
+    kimi_v4_responses_features.insert("web_search_citations".into(), CapabilitySupport::Unknown);
+    kimi_v4_responses_features.insert("web_search_sources".into(), CapabilitySupport::Unknown);
+    kimi_v4.protocols.insert(
+        Protocol::OpenAiResponses,
+        ProtocolPreset {
+            endpoint: "/v1/responses".into(),
+            mode: SourceProtocolMode::Native,
+            source_protocol: None,
+            adapter: None,
+            headers: BTreeMap::new(),
+            default_capabilities: kimi_v4_responses_features,
+            connection_test: connection_test(
+                "k3",
+                json!({"model":"{{model}}","input":"ping","max_output_tokens":1,"stream":false}),
+            ),
+        },
+    );
+
     [
         (deepseek_id, deepseek_name, 1, deepseek_definition),
         (minimax_id, minimax_name, 1, minimax_definition),
@@ -334,6 +368,7 @@ pub fn builtin_provider_presets() -> Result<Vec<ProviderPresetInput>, CatalogErr
         (deepseek_id, deepseek_name, 2, deepseek_v2),
         (minimax_id, minimax_name, 2, minimax_v2),
         (kimi_id, kimi_name, 2, kimi_v2),
+        (kimi_id, kimi_name, 3, kimi_v3),
         (
             deepseek_id,
             deepseek_name,
@@ -346,7 +381,12 @@ pub fn builtin_provider_presets() -> Result<Vec<ProviderPresetInput>, CatalogErr
             BUILTIN_PROVIDER_PRESET_VERSION,
             minimax_v3,
         ),
-        (kimi_id, kimi_name, BUILTIN_PROVIDER_PRESET_VERSION, kimi_v3),
+        (
+            kimi_id,
+            kimi_name,
+            KIMI_CODE_PROVIDER_PRESET_VERSION,
+            kimi_v4,
+        ),
     ]
     .into_iter()
     .map(|(id, display_name, version, definition)| {
@@ -730,11 +770,11 @@ mod tests {
     #[test]
     fn builtins_are_versioned_complete_and_explicit_about_discovery() {
         let presets = builtin_provider_presets().expect("valid builtins");
-        assert_eq!(presets.len(), 9);
+        assert_eq!(presets.len(), 10);
         for preset in &presets {
             assert!(matches!(
                 preset.version,
-                1 | 2 | BUILTIN_PROVIDER_PRESET_VERSION
+                1 | 2 | BUILTIN_PROVIDER_PRESET_VERSION | KIMI_CODE_PROVIDER_PRESET_VERSION
             ));
             let definition: ProviderPresetDefinition =
                 serde_json::from_value(preset.definition.clone()).unwrap();
@@ -755,28 +795,54 @@ mod tests {
             definition.protocols[&Protocol::OpenAiResponses].mode,
             SourceProtocolMode::Adapter
         );
-        let kimi_v2 = presets
+        // v3 keeps the retired adapter declaration as immutable history.
+        let kimi_v3 = presets
             .iter()
-            .find(|preset| {
-                preset.id == "kimi_code" && preset.version == BUILTIN_PROVIDER_PRESET_VERSION
-            })
+            .find(|preset| preset.id == "kimi_code" && preset.version == 3)
             .unwrap();
-        let kimi_v2_definition: ProviderPresetDefinition =
-            serde_json::from_value(kimi_v2.definition.clone()).unwrap();
+        let kimi_v3_definition: ProviderPresetDefinition =
+            serde_json::from_value(kimi_v3.definition.clone()).unwrap();
         assert_eq!(
-            kimi_v2_definition.protocols[&Protocol::OpenAiResponses].default_capabilities
+            kimi_v3_definition.protocols[&Protocol::OpenAiResponses].default_capabilities
                 ["tool_streaming"],
             CapabilitySupport::Supported
         );
         assert_eq!(
-            kimi_v2_definition.protocols[&Protocol::OpenAiResponses].default_capabilities
+            kimi_v3_definition.protocols[&Protocol::OpenAiResponses].default_capabilities
                 ["web_search_citations"],
             CapabilitySupport::Supported
         );
         assert_eq!(
-            kimi_v2_definition.protocols[&Protocol::OpenAiResponses].default_capabilities
+            kimi_v3_definition.protocols[&Protocol::OpenAiResponses].default_capabilities
                 ["web_search_sources"],
             CapabilitySupport::Supported
+        );
+        // v4 is the native Responses line: no adapter, native endpoint, and
+        // unverified citation/source visibility stays unknown.
+        let kimi_v4 = presets
+            .iter()
+            .find(|preset| {
+                preset.id == "kimi_code" && preset.version == KIMI_CODE_PROVIDER_PRESET_VERSION
+            })
+            .unwrap();
+        let kimi_v4_definition: ProviderPresetDefinition =
+            serde_json::from_value(kimi_v4.definition.clone()).unwrap();
+        let kimi_v4_responses = &kimi_v4_definition.protocols[&Protocol::OpenAiResponses];
+        assert_eq!(kimi_v4_responses.mode, SourceProtocolMode::Native);
+        assert_eq!(kimi_v4_responses.endpoint, "/v1/responses");
+        assert!(kimi_v4_responses.adapter.is_none());
+        assert!(kimi_v4_responses.source_protocol.is_none());
+        assert_eq!(
+            kimi_v4_responses.default_capabilities["tool_streaming"],
+            CapabilitySupport::Supported
+        );
+        assert_eq!(
+            kimi_v4_responses.default_capabilities["web_search"],
+            CapabilitySupport::Supported
+        );
+        assert_eq!(
+            kimi_v4_responses.default_capabilities["web_search_citations"],
+            CapabilitySupport::Unknown
         );
         for provider_id in ["deepseek", "minimax"] {
             let preset = presets

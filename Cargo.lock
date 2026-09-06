@@ -1016,25 +1016,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "kimi-responses-adapter"
-version = "0.1.3"
-dependencies = [
- "axum",
- "base64 0.22.1",
- "futures-util",
- "http-body-util",
- "rand 0.9.5",
- "reqwest",
- "serde",
- "serde_json",
- "tokio",
- "tokio-stream",
- "tokio-util",
- "tower",
- "tracing",
-]
-
-[[package]]
 name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1246,7 +1227,6 @@ dependencies = [
  "futures-util",
  "http-body-util",
  "ipnet",
- "kimi-responses-adapter",
  "metrics",
  "metrics-exporter-prometheus",
  "opentelemetry",
@@ -2494,7 +2474,6 @@ dependencies = [
  "futures-core",
  "pin-project-lite",
  "tokio",
- "tokio-util",
 ]
 
 [[package]]

@@ -131,26 +131,15 @@ Web Search、Tools、Thinking、Vision、Provider 扩展字段在原生透传路
 
 ### 3.3 Kimi Code
 
-Kimi Code 当前按以下方式处理：
+Kimi Code 官方于 2026-09 原生支持 OpenAI Responses（`POST /coding/v1/responses`，2026-09-06 实测返回标准 Responses 语义：reasoning item、流式 function_call 事件、`usage.input_tokens_details.cached_tokens`、`incomplete_details`），三协议全部按原生透传处理：
 
 ```text
 Chat Completions       → 原生透传
 Anthropic Messages     → 原生透传
-OpenAI Responses       → 内置 kimi-responses-adapter
+OpenAI Responses       → 原生透传（/v1/responses，preset kimi_code@4 起）
 ```
 
-`kimi-responses-adapter` 已作为 workspace crate 内置到当前二进制中，不再依赖独立容器或 `adapter_base_url`。
-
-Adapter 负责：
-
-- Responses 请求转换为 Anthropic Messages；
-- Anthropic 响应转换为 Responses；
-- thinking/signature；
-- function call/function call output；
-- web search；
-- Responses SSE；
-- usage 映射；
-- `response.incomplete`。
+原内置 `kimi-responses-adapter`（Responses → Anthropic Messages）已随 #157 移除：workspace crate、运行时 dispatch 和 `kimi_code@1`-`@3` 的 adapter 声明退役，存量 Source 由 migration 0023 迁移到 native。Adapter 框架（注册表校验、mode 管线、degraded 语义）保留给后续 Provider 接入；当前生产注册表为空，声明任何 adapter 都会在配置与 snapshot 校验时 fail closed。
 
 ### 3.4 模型发现与模型元数据
 
@@ -186,7 +175,7 @@ UI 流程为：
 
 字段优先级为：用户覆盖 > 模型预设 > 上游发现 > unknown。刷新模型时不得覆盖用户已经确认的字段；新发现的模型先进入待确认列表，不自动改变现有路由。
 
-当前实现内置版本化 ProviderPreset：`deepseek@1`、`minimax@1`、`kimi_code@1` 保留为历史不可变快照，`@3` 是最新内置版本。`@2` 记录已验证的 Responses `web_search` 与 Kimi Responses Adapter 的 `tool_streaming`；`@3` 进一步显式记录 Responses 的 `web_search_citations` 与 `web_search_sources`：DeepSeek/MiniMax 当前声明为 `unsupported`，Kimi Responses Adapter 声明为 `supported`。启动注册新版本不会改写已经创建的 Source 快照。ProviderPreset 完整声明默认 Base URL、三协议 endpoint/模式、认证和 Header 模板、最小连接测试请求、默认能力及发现规则；Kimi Code 因官方未提供已认证模型列表 endpoint，明确声明 `discovery.support=unsupported`，不会猜测接口。首批 ModelPreset 包括 DeepSeek V4、MiniMax M3/M2.7、Kimi K3/K2.7 Code Model。
+当前实现内置版本化 ProviderPreset：`deepseek@1`、`minimax@1`、`kimi_code@1` 保留为历史不可变快照；DeepSeek/MiniMax 最新为 `@3`，Kimi Code 最新为 `@4`。`@2` 记录已验证的 Responses `web_search` 与 Kimi Responses Adapter 的 `tool_streaming`；`@3` 进一步显式记录 Responses 的 `web_search_citations` 与 `web_search_sources`：DeepSeek/MiniMax 当前声明为 `unsupported`，Kimi（当时走 Adapter）声明为 `supported`。`kimi_code@4`（#157）将 Responses 切换为官方原生 `/v1/responses`：`web_search` 与 `tool_streaming` 声明为 `supported`，原生端点的 citation/source 可见性未验证、保持 `unknown`，不做猜测。启动注册新版本不会改写已经创建的 Source 快照。ProviderPreset 完整声明默认 Base URL、三协议 endpoint/模式、认证和 Header 模板、最小连接测试请求、默认能力及发现规则；Kimi Code 因官方未提供已认证模型列表 endpoint，明确声明 `discovery.support=unsupported`，不会猜测接口。首批 ModelPreset 包括 DeepSeek V4、MiniMax M3/M2.7、Kimi K3/K2.7 Code Model。
 
 管理 API 流程为：
 
@@ -370,18 +359,16 @@ PostgreSQL 是运行时配置入口和事实来源，`DATABASE_URL` 为必填项
 }
 ```
 
-Kimi Adapter：
+Kimi（#157 起三协议全部原生，单一 Route 即可覆盖）：
 
 ```json
 {
-  "id": "kimi-responses-adapter",
+  "id": "kimi-native",
   "model": "kimi-for-coding-highspeed",
   "provider_id": "kimi_code",
-  "protocols": ["openai_responses"],
+  "protocols": ["openai_chat_completions", "openai_responses", "anthropic_messages"],
   "primary_account_id": "kimi-main",
-  "mode": "adapter",
-  "adapter": "kimi_responses_adapter",
-  "allow_lossy_conversion": false
+  "mode": "native"
 }
 ```
 
@@ -424,12 +411,11 @@ Kimi Adapter：
 - 稳定 added/changed/missing、待确认列表、用户编辑和事务化批量确认；
 - 不自动创建 LogicalModel、Binding 或 Route，不改变 `/v1/models` 和运行时路由。
 
-### Kimi Adapter
+### Kimi Adapter（已于 #157 移除）
 
-- 以 workspace crate 内置；
-- 网关进程内直接调用 Adapter Router；
-- 不再需要独立 Adapter 服务；
-- 保留 Kimi 原项目 MIT License。
+- Kimi Code 官方原生支持 OpenAI Responses 后，内置 `kimi-responses-adapter` workspace crate、进程内 dispatch 和相关回归已删除；
+- Adapter 框架（注册表、校验、degraded 管线）保留，生产注册表为空；
+- 存量数据由 migration 0023 迁移到 `kimi_code@4` native。
 
 ### PostgreSQL 基础
 
@@ -519,7 +505,7 @@ Admin 资源为 `/admin/sources`、`/admin/accounts`、`/admin/logical-models`�
 
 PostgreSQL 回归测试只连接显式的 `TEST_DATABASE_URL`，不会复用运行时 `DATABASE_URL`。完整控制面测试为 ignored test，并在实际执行时创建/清理独立 schema；验收必须显式运行，不能把缺少数据库导致的跳过作为通过。
 
-ProviderPreset/模型发现回归使用真实 PostgreSQL 与 mock 上游，覆盖 DeepSeek、MiniMax、Kimi Code 的成功、失败、空列表、重复刷新、模型消失、confirmed/user 覆盖保留、批量确认、版本差异和日志脱敏。内嵌 Kimi Responses Adapter 的非流式 JSON 响应与流式 SSE 都必须把上游 usage 映射到统一 `UsageReport`；缺失 usage 才按既有 `estimated/missing` 规则处理。
+ProviderPreset/模型发现回归使用真实 PostgreSQL 与 mock 上游，覆盖 DeepSeek、MiniMax、Kimi Code 的成功、失败、空列表、重复刷新、模型消失、confirmed/user 覆盖保留、批量确认、版本差异和日志脱敏。非流式 JSON 响应与流式 SSE 都必须把上游 usage 映射到统一 `UsageReport`；缺失 usage 才按既有 `estimated/missing` 规则处理。
 
 账号健康持久化、主动探测和无正文转换历史已由 #52 完成；统一 Admin 写操作审计日志（#48）仍需独立实现。#53 已补齐运维操作自身的审计记录，不把普通应用日志当作审计事实。
 
@@ -563,7 +549,7 @@ CPA Usage Keeper 只复用 React 页面和交互，不复用其 Go 后端、SQLi
 生产化剩余范围均有独立 Issue：
 
 - 健康状态持久化与主动探测（#52）已完成；
-- SSE 心跳、取消和流式超时契约（#54）已完成：三协议原生与 Kimi Adapter 共享可配置心跳、连接/首事件/空闲/总时限和取消清理；
+- SSE 心跳、取消和流式超时契约（#54）已完成：三协议原生透传共享可配置心跳、连接/首事件/空闲/总时限和取消清理；
 - Prometheus 指标采集与 `/metrics` 端点（#50，PR #77）已完成：`gateway_requests_total`、`gateway_upstream_attempts_total`、`gateway_tokens_total`、`gateway_request_duration_seconds`、`gateway_time_to_first_token_seconds`、`gateway_health_cooldowns_total`、`gateway_snapshot_revision`、`gateway_active_streams`；OpenTelemetry tracing 导出可后置；
 - Secret Resolver 与凭据信封加密（#47，PR #73）已完成：AES-256-GCM 信封加密、多版本 keyring、运行时凭据路径和 Admin 加密/轮换端点已集成；
 - Admin 写操作审计日志（#48，PR #74）已完成：请求级 AuditContext、diff 脱敏、事务内/独立审计记录和 Admin 路由中间件已接入；
@@ -576,8 +562,7 @@ Provider URL allowlist、解析后 IP 校验、重定向限制和 SSRF 防护（
 SSE 心跳和超时是进程级运行参数，不属于 PostgreSQL Source/Binding。网关使用
 `GATEWAY_SSE_HEARTBEAT_INTERVAL_MS`、`GATEWAY_SSE_CONNECTION_TIMEOUT_MS`、
 `GATEWAY_SSE_FIRST_EVENT_TIMEOUT_MS`、`GATEWAY_SSE_IDLE_TIMEOUT_MS` 和
-`GATEWAY_SSE_TOTAL_TIMEOUT_MS`；独立运行 `kimi-responses-adapter` 时使用对应的
-`KIMI_SSE_*_MS`。默认值分别为 `15000`、`10000`、`30000`、`60000` 和 `300000`，`0`
+`GATEWAY_SSE_TOTAL_TIMEOUT_MS`。默认值分别为 `15000`、`10000`、`30000`、`60000` 和 `300000`，`0`
 禁用单项限制。也接受带单位的环境值（如 `2s`、`500ms`）。
 
 连接时限只覆盖等待上游响应头；首事件时限从响应头开始，空闲时限在每个完整 Provider

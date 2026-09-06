@@ -1,15 +1,12 @@
 //! OpenAI Responses contract tests.
 //!
-//! Case IDs: responses.text.basic, responses.text.convert,
+//! Case IDs: responses.text.basic,
 //! responses.instructions.basic, responses.multi_turn_or_input_array,
 //! responses.usage.basic, responses.reasoning.shape,
 //! responses.error.400, responses.error.401, responses.error.404.
 //!
 //! Native path:  protocol_in=openai_responses,
 //!               protocol_upstream=openai_responses, mode=native.
-//! Convert path: protocol_in=openai_responses,
-//!               protocol_upstream=anthropic_messages,
-//!               mode=convert (kimi_responses_adapter).
 
 use axum::http::StatusCode;
 use my_ai_gateway::test_support::test_gateway_router;
@@ -75,70 +72,6 @@ async fn responses_text_basic() {
         "credential forwarded"
     );
     assert_eq!(upstream.body["model"], MODEL);
-}
-
-// ── responses.text.convert (Kimi adapter) ───────────────────────────────────
-
-#[tokio::test]
-async fn responses_text_convert() {
-    assert_case!("responses.text.convert");
-    // protocol_in=openai_responses, protocol_upstream=anthropic_messages,
-    // mode=convert (kimi_responses_adapter)
-
-    // The adapter sends Anthropic Messages upstream; use default_response
-    // so the mock returns the messages fixture regardless of x-test-case.
-    let messages_fixture = CaseFixture::json(
-        "messages.text.basic",
-        StatusCode::OK,
-        &crate::support::fixtures::load_fixture("messages/text_basic.json"),
-    );
-    let mock = spawn_mock_with_default(messages_fixture).await;
-    let config = kimi_adapter_config(mock.base_url(), MODEL);
-    let router = test_gateway_router(config);
-
-    let body = json!({
-        "model": MODEL,
-        "input": "Hello"
-    });
-    let response = gateway_post(&router, URI, "responses.text.convert", &body.to_string()).await;
-
-    assert_status(&response, StatusCode::OK);
-    assert_json_content_type(&response);
-
-    let resp_body = json_body(response).await;
-    // The adapter converts Anthropic Messages → Responses format
-    assert_eq!(resp_body["object"], "response");
-    assert_eq!(resp_body["status"], "completed");
-
-    // Output should contain converted message
-    let output = resp_body["output"].as_array().expect("output array");
-    assert!(!output.is_empty(), "output must not be empty");
-
-    // Usage should be mapped from Anthropic format
-    assert!(
-        resp_body["usage"].is_object(),
-        "usage must be present in convert path"
-    );
-    assert!(
-        resp_body["usage"]["input_tokens"].is_number()
-            || resp_body["usage"]["output_tokens"].is_number(),
-        "usage tokens must be numeric"
-    );
-
-    // Upstream request goes to /v1/messages (Anthropic endpoint).
-    // The adapter may also issue model-registry or health requests, so
-    // filter to just the POST /v1/messages call.
-    let requests = mock.take_requests();
-    let messages_requests: Vec<_> = requests
-        .iter()
-        .filter(|r| r.method == "POST" && r.path == "/v1/messages")
-        .collect();
-    assert_eq!(
-        messages_requests.len(),
-        1,
-        "adapter must send exactly one POST /v1/messages (got {} total requests)",
-        requests.len()
-    );
 }
 
 // ── responses.instructions.basic ────────────────────────────────────────────

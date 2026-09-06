@@ -214,8 +214,10 @@ function SourceModelEditor({
   );
 }
 
-// 已注册的转换器(与后端 adapter_registry 保持一致)。
-const ADAPTER_OPTIONS = ['kimi_responses_adapter'] as const;
+// 已注册的转换器(与后端 adapter_registry 保持一致)。当前生产环境无注册的
+// 转换器:Kimi Code 自 preset kimi_code@4 起原生支持 OpenAI Responses(#157),
+// adapter 框架保留,后续 Provider 接入时在此补充。
+const ADAPTER_OPTIONS: string[] = [];
 const CAPABILITY_MODES: SourceProtocolMode[] = ['unknown', 'native', 'adapter', 'unsupported'];
 const CAPABILITY_STATUSES: CatalogStatus[] = ['pending', 'confirmed', 'unavailable'];
 

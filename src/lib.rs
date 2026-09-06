@@ -80,8 +80,6 @@ use infra::{db, health, observability, secrets};
 #[cfg(test)]
 use proxy::service::proxy as proxy_fn;
 #[cfg(test)]
-use proxy::{transport, usage};
-#[cfg(test)]
 use serde_json::{json, Value};
 #[cfg(test)]
 use state::{

@@ -1453,7 +1453,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![
                 "/coding/v1/chat/completions",
-                "/coding/v1/messages",
+                "/coding/v1/responses",
                 "/coding/v1/messages",
                 "/coding/v1/chat/completions",
             ]

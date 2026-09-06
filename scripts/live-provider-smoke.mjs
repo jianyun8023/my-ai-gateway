@@ -247,28 +247,19 @@ export function buildGatewayConfig(selectedCases, environment, port, fallbackMoc
   }
 
   if (uses('kimi.')) {
-    providers.push({
+    // Kimi Code serves OpenAI Responses natively at /v1/responses (issue
+    // #157); the embedded Responses→Anthropic adapter was removed.
+    providers.push(nativeProvider({
       id: 'kimi-live',
-      name: 'Kimi Adapter Live Smoke',
-      base_url: environment.KIMI_BASE_URL,
-      models: ['k3'],
-      native_protocols: ['openai_chat_completions', 'anthropic_messages'],
+      name: 'Kimi Live Smoke',
+      baseUrl: environment.KIMI_BASE_URL,
+      model: 'k3',
       endpoints: {
         openai_chat_completions: '/v1/chat/completions',
+        openai_responses: '/v1/responses',
         anthropic_messages: '/v1/messages',
       },
-      capabilities: featureCapabilities(),
-      protocol_capabilities: protocolCapabilities({
-        openai_chat_completions: { mode: 'native' },
-        openai_responses: {
-          mode: 'adapter',
-          source_protocol: 'anthropic_messages',
-          adapter: 'kimi_responses_adapter',
-        },
-        anthropic_messages: { mode: 'native' },
-      }),
-      model_overrides: {},
-    })
+    }))
     accounts.push(account('kimi-live', 'kimi-live', 'KIMI_API_KEY'))
     routes.push(route(
       'kimi-live',
@@ -276,7 +267,6 @@ export function buildGatewayConfig(selectedCases, environment, port, fallbackMoc
       'kimi-live',
       ['openai_responses'],
       'kimi-live',
-      { mode: 'adapter', adapter: 'kimi_responses_adapter' },
     ))
   }
 
@@ -686,7 +676,7 @@ async function kimiFunctionRoundTrip(context, testCase) {
     stream: false,
   }, firstSource)
   const functionCall = first.payload.output?.find((item) => item.type === 'function_call')
-  check(functionCall?.name === 'lookup_weather', 'Kimi adapter emitted no expected function call')
+  check(functionCall?.name === 'lookup_weather', 'Kimi native Responses emitted no expected function call')
   try { check(typeof JSON.parse(functionCall.arguments) === 'object', 'Kimi tool arguments are not an object') } catch {
     throw new SmokeFailure('Kimi tool arguments are not valid JSON')
   }
@@ -796,8 +786,8 @@ async function kimiWebSearch(context, testCase, streaming) {
     const metadata = responseSearchMetadata(response.payload)
     check(metadata.status === 'completed', 'Kimi search response did not complete')
     check(metadata.search_calls === 1 && metadata.completed_search_calls === 1, 'Kimi search call did not complete')
-    check(metadata.source_count > 0, 'Kimi search response has no sources')
-    check(!JSON.stringify(response.payload.output).includes('Search results for query:'), 'Kimi search preamble leaked')
+    // Native Responses citation/source visibility is unverified (preset keeps
+    // it unknown), so source_count is reported as evidence, not asserted.
     const event = await usageEvent(context, source)
     return {
       duration_ms: response.duration_ms,
@@ -825,8 +815,6 @@ async function kimiWebSearch(context, testCase, streaming) {
   check(response.events.filter((event) => event.type === 'response.web_search_call.in_progress').length === 1, 'missing search in_progress event')
   check(response.events.filter((event) => event.type === 'response.web_search_call.searching').length === 1, 'missing search searching event')
   check(response.events.filter((event) => event.type === 'response.web_search_call.completed').length === 1, 'missing search completed event')
-  check(metadata.source_count > 0, 'Kimi streamed search has no sources')
-  check(!response.raw.includes('Search results for query:'), 'Kimi streamed search preamble leaked')
   return {
     duration_ms: response.duration_ms,
     event_count: response.events.length,

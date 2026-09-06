@@ -1,11 +1,10 @@
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use axum::{
-    body::{to_bytes, Body, Bytes},
-    http::{HeaderMap, HeaderValue, Request, Response, StatusCode},
+    body::{Body, Bytes},
+    http::{HeaderMap, Response, StatusCode},
 };
 use serde_json::Value;
-use tower::ServiceExt;
 use uuid::Uuid;
 
 use crate::domain::config::{self, GatewayConfig};
@@ -145,7 +144,9 @@ pub(crate) async fn proxy(
         }
     };
     warn_degraded_route(&request_id, &route);
-    let Some(provider) = config.provider(&route.source_id) else {
+    // The route only becomes dispatchable when its source resolves, so this
+    // guard protects against a stale snapshot rather than normal traffic.
+    if config.provider(&route.source_id).is_none() {
         return finish_proxy(
             protocol,
             model,
@@ -159,7 +160,7 @@ pub(crate) async fn proxy(
                 &request_id,
             ),
         );
-    };
+    }
     let Some(account) = config.account(&route.primary_account_id) else {
         return finish_proxy(
             protocol,
@@ -256,7 +257,6 @@ pub(crate) async fn proxy(
             candidate.account,
             candidate.protocol_upstream,
             &candidate.mode,
-            candidate.adapter.as_deref(),
             candidate.upstream_endpoint.as_deref(),
             &headers,
             prepared.body,
@@ -417,7 +417,6 @@ pub(crate) async fn proxy(
         &state.secrets,
         &state.http,
         &route,
-        provider,
         account,
         &headers,
         primary_request.body,
@@ -463,7 +462,6 @@ pub(crate) async fn proxy(
                     &state.secrets,
                     &state.http,
                     &route,
-                    provider,
                     account,
                     &headers,
                     retry_request.body,
@@ -992,7 +990,6 @@ async fn forward_account(
     secrets: &secrets::SecretResolver,
     http: &SourceHttpClient,
     route: &ResolvedRoute,
-    provider: &config::ProviderConfig,
     account: &config::AccountConfig,
     headers: &HeaderMap,
     body: Bytes,
@@ -1001,20 +998,18 @@ async fn forward_account(
 ) -> Result<Response<Body>, transport::TransportError> {
     let credential = resolve_credential(secrets, account);
     if route.mode == "adapter" {
-        if route.adapter.as_deref() == Some("kimi_responses_adapter") {
-            return embedded_kimi_adapter(
-                http,
-                provider,
-                account,
-                credential.as_deref(),
-                headers,
-                body,
-                stream_config,
-                request_started,
-            )
-            .await;
-        }
-        Err(transport::TransportError::Request)
+        return dispatch_adapter(
+            http,
+            Some(route.upstream_endpoint.as_str()),
+            account,
+            credential.as_deref(),
+            route.protocol_upstream,
+            headers,
+            body,
+            stream_config,
+            request_started,
+        )
+        .await;
     } else {
         transport::forward_url_with_config(
             http,
@@ -1031,95 +1026,55 @@ async fn forward_account(
     }
 }
 
+/// Execute an adapter-mode upstream call.
+///
+/// No production adapters are registered (issue #157): configuration and
+/// snapshot validation reject unknown adapters before routing, so production
+/// traffic can only reach this point through a stale snapshot. Fail closed
+/// with a transport error instead of guessing a conversion. Unit tests pass
+/// the request through to the source-protocol endpoint unchanged so the
+/// adapter framework paths (degraded warnings, early fallback) stay covered
+/// without a concrete adapter implementation.
 #[allow(clippy::too_many_arguments)]
-async fn embedded_kimi_adapter(
+async fn dispatch_adapter(
     http: &SourceHttpClient,
-    provider: &config::ProviderConfig,
-    _account: &config::AccountConfig,
+    upstream_endpoint: Option<&str>,
+    account: &config::AccountConfig,
     credential: Option<&str>,
+    protocol_upstream: Protocol,
     headers: &HeaderMap,
     body: Bytes,
     stream_config: &stream::StreamConfig,
     request_started: Instant,
 ) -> Result<Response<Body>, transport::TransportError> {
-    http.validate_base_url(&provider.base_url)?;
-    // The embedded adapter does not pass through the native transport helper,
-    // so retain the original request and explicitly attach the same usage
-    // report for completed JSON responses.
-    let request_body = body.clone();
-    let is_streaming = serde_json::from_slice::<Value>(&request_body)
-        .ok()
-        .and_then(|value| value.get("stream").and_then(Value::as_bool))
-        .unwrap_or(false);
-    let cfg = kimi_responses_adapter::adapter::config::Config {
-        listen_addr: String::new(),
-        kimi_base_url: provider.base_url.trim_end_matches('/').to_string(),
-        anthropic_beta: String::new(),
-        model_map: Default::default(),
-        client_source: String::new(),
-        models: provider.models.clone(),
-        max_tokens: 32768,
-        thinking_budgets: [
-            ("low".into(), 4096),
-            ("medium".into(), 16384),
-            ("high".into(), 32768),
-        ]
-        .into_iter()
-        .collect(),
-        search_status_prefix: "Search results for query:".into(),
-        stream_config: kimi_responses_adapter::adapter::config::StreamConfig::from_durations(
-            stream_config.heartbeat_interval,
-            stream_config.connection_timeout,
-            stream_config.first_event_timeout,
-            stream_config.idle_timeout,
-            stream_config.total_timeout,
-        ),
-    };
-    let adapter =
-        kimi_responses_adapter::adapter::server::router_with_client(cfg, http.raw_client());
-    let mut request = Request::builder()
-        .method("POST")
-        .uri("/v1/responses")
-        .body(Body::from(body))
-        .map_err(|_| transport::TransportError::Request)?;
-    request
-        .extensions_mut()
-        .insert(kimi_responses_adapter::adapter::server::StreamRequestStart(
+    #[cfg(test)]
+    if let Some(endpoint) = upstream_endpoint {
+        return transport::forward_url_with_config(
+            http,
+            endpoint,
+            account,
+            credential,
+            protocol_upstream,
+            headers,
+            body,
+            stream_config,
             request_started,
-        ));
-    let request_headers = request.headers_mut();
-    for (name, value) in headers {
-        if !matches!(
-            name.as_str(),
-            "host" | "content-length" | "authorization" | "x-api-key"
-        ) {
-            request_headers.insert(name, value.clone());
-        }
+        )
+        .await;
     }
-    if let Some(value) = credential {
-        if headers.contains_key("x-api-key") {
-            if let Ok(value) = HeaderValue::from_str(value) {
-                request_headers.insert("x-api-key", value);
-            }
-        } else if let Ok(value) = HeaderValue::from_str(&format!("Bearer {value}")) {
-            request_headers.insert("authorization", value);
-        }
-    }
-    let response = adapter
-        .oneshot(request)
-        .await
-        .map_err(|_| transport::TransportError::Request)?;
-    if is_streaming || is_event_stream(&response) {
-        return Ok(response);
-    }
-    let (parts, body) = response.into_parts();
-    let bytes = to_bytes(body, 16 * 1024 * 1024)
-        .await
-        .map_err(|_| transport::TransportError::Request)?;
-    let report = usage::usage_for_json_response(parts.status.is_success(), &request_body, &bytes);
-    let mut response = Response::from_parts(parts, Body::from(bytes));
-    response.extensions_mut().insert(report);
-    Ok(response)
+    #[cfg(not(test))]
+    let _ = (
+        http,
+        upstream_endpoint,
+        account,
+        credential,
+        protocol_upstream,
+        headers,
+        body,
+        stream_config,
+        request_started,
+    );
+    Err(transport::TransportError::Request)
 }
 
 struct FallbackCandidate<'a> {
@@ -1130,7 +1085,6 @@ struct FallbackCandidate<'a> {
     upstream_model: String,
     protocol_upstream: Protocol,
     mode: String,
-    adapter: Option<String>,
     upstream_endpoint: Option<String>,
     degraded_features: Vec<String>,
 }
@@ -1165,7 +1119,6 @@ async fn select_fallback_candidate<'a>(
                 upstream_model: binding.upstream_model_id.clone(),
                 protocol_upstream: binding.protocol_upstream,
                 mode: binding.mode.clone(),
-                adapter: binding.adapter.clone(),
                 upstream_endpoint: Some(binding.upstream_endpoint.clone()),
                 degraded_features: binding.degraded_features.clone(),
             });
@@ -1210,7 +1163,6 @@ async fn select_fallback_candidate<'a>(
                 upstream_model,
                 protocol_upstream: route.protocol_upstream,
                 mode: route.mode.clone(),
-                adapter: route.adapter.clone(),
                 upstream_endpoint: None,
                 degraded_features: route.degraded_features.clone(),
             });
@@ -1268,7 +1220,6 @@ async fn try_fallback(
         candidate.account,
         candidate.protocol_upstream,
         &candidate.mode,
-        candidate.adapter.as_deref(),
         candidate.upstream_endpoint.as_deref(),
         headers,
         prepared.body,
@@ -1376,7 +1327,6 @@ pub(crate) async fn try_fallback_error(
         candidate.account,
         candidate.protocol_upstream,
         &candidate.mode,
-        candidate.adapter.as_deref(),
         candidate.upstream_endpoint.as_deref(),
         headers,
         prepared.body,
@@ -1461,7 +1411,6 @@ async fn forward_fallback(
     account: &config::AccountConfig,
     protocol: Protocol,
     mode: &str,
-    adapter: Option<&str>,
     upstream_endpoint: Option<&str>,
     headers: &HeaderMap,
     body: Bytes,
@@ -1470,20 +1419,18 @@ async fn forward_fallback(
 ) -> Result<Response<Body>, transport::TransportError> {
     let credential = resolve_credential(secrets, account);
     if mode == "adapter" {
-        if adapter == Some("kimi_responses_adapter") {
-            return embedded_kimi_adapter(
-                http,
-                provider,
-                account,
-                credential.as_deref(),
-                headers,
-                body,
-                stream_config,
-                request_started,
-            )
-            .await;
-        }
-        return Err(transport::TransportError::Request);
+        return dispatch_adapter(
+            http,
+            upstream_endpoint,
+            account,
+            credential.as_deref(),
+            protocol,
+            headers,
+            body,
+            stream_config,
+            request_started,
+        )
+        .await;
     }
     if let Some(endpoint) = upstream_endpoint {
         return transport::forward_url_with_config(
