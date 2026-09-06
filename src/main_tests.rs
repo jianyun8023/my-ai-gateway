@@ -177,6 +177,26 @@ mod admin_auth_tests {
     }
 
     #[tokio::test]
+    async fn admin_console_root_redirects_to_trailing_slash_for_relative_assets() {
+        let app = application(state(AdminAuth::test()));
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/admin")
+                    .body(Body::empty())
+                    .expect("console root request"),
+            )
+            .await
+            .expect("console root response");
+        assert_eq!(response.status(), StatusCode::PERMANENT_REDIRECT);
+        assert_eq!(
+            response.headers().get(header::LOCATION),
+            Some(&HeaderValue::from_static("/admin/"))
+        );
+    }
+
+    #[tokio::test]
     async fn every_admin_api_route_rejects_missing_and_data_plane_keys_before_parsing() {
         let app = application(state(AdminAuth::test()));
         for (method, uri) in ADMIN_API_ROUTES {
