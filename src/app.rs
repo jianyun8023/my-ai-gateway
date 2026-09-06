@@ -3,6 +3,7 @@ use axum::{
     extract::State,
     http::{Method, Request, Response, StatusCode},
     middleware::{self, Next},
+    response::{IntoResponse, Redirect},
     routing::{get, post, put},
     Router,
 };
@@ -218,7 +219,18 @@ pub(crate) fn application(state: AppState) -> Router {
         .nest_service("/admin", ServeDir::new("web/dist"))
         .with_state(state)
         .merge(admin_api)
+        // 控制台前端使用相对路径引用静态资源；直接访问 /admin 会让相对路径
+        // 解析到站点根目录而 404。显式路由与 nest_service 同路径注册会冲突，
+        // 因此用中间件把 /admin 统一重定向到带尾斜杠的形式。
+        .layer(middleware::from_fn(redirect_admin_console_root))
         .layer(TraceLayer::new_for_http())
+}
+
+async fn redirect_admin_console_root(request: Request<Body>, next: Next) -> Response<Body> {
+    if request.uri().path() == "/admin" {
+        return Redirect::permanent("/admin/").into_response();
+    }
+    next.run(request).await
 }
 
 async fn audit_middleware(
