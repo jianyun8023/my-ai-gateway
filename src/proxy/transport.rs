@@ -133,6 +133,18 @@ pub fn sanitize_thinking_params(body: &mut Bytes, protocol: Protocol) -> bool {
     }
 }
 
+/// Returns `true` when the `thinking` parameter explicitly disables reasoning
+/// (`{"type": "disabled"}`).  In this mode assistant responses naturally omit
+/// reasoning fields, so the sanitizer must not strip the parameter.
+fn thinking_is_disabled(object: &serde_json::Map<String, Value>) -> bool {
+    object
+        .get("thinking")
+        .and_then(Value::as_object)
+        .and_then(|t| t.get("type"))
+        .and_then(Value::as_str)
+        == Some("disabled")
+}
+
 /// Chat Completions: strip `thinking`, `reasoning_effort`, `reasoning_split`
 /// when assistant messages lack reasoning fields.
 fn sanitize_chat_thinking(body: &mut Bytes) -> bool {
@@ -147,6 +159,15 @@ fn sanitize_chat_thinking(body: &mut Bytes) -> bool {
         .iter()
         .any(|key| object.contains_key(*key));
     if !has_thinking {
+        return false;
+    }
+
+    // When `thinking.type` is `"disabled"`, the client explicitly opted out
+    // of reasoning.  Assistant messages from such turns naturally lack
+    // reasoning fields, so stripping `thinking: {type: "disabled"}` would
+    // cause providers that default to thinking mode (e.g. DeepSeek v4) to
+    // re-enable reasoning and reject the request when `tool_choice` is set.
+    if thinking_is_disabled(object) {
         return false;
     }
 
@@ -1198,6 +1219,94 @@ mod tests {
             &mut body,
             Protocol::OpenAiResponses
         ));
+    }
+
+    #[test]
+    fn chat_sanitize_preserves_thinking_disabled_first_turn_with_tools() {
+        let payload = serde_json::json!({
+            "model": "deepseek-v4-flash",
+            "messages": [{"role":"user","content":"Call lookup_weather for Tokyo. Do not answer directly."}],
+            "tools": [{"type":"function","function":{"name":"lookup_weather","description":"Look up weather","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}}],
+            "tool_choice": "required",
+            "thinking": {"type": "disabled"},
+            "max_tokens": 256,
+            "stream": false
+        });
+        let mut body = Bytes::from(serde_json::to_vec(&payload).unwrap());
+        let stripped = sanitize_thinking_params(&mut body, Protocol::OpenAiChatCompletions);
+        let result: Value = serde_json::from_slice(&body).unwrap();
+        assert!(
+            !stripped,
+            "thinking:disabled on first turn without assistants must NOT be stripped, but was: {result}"
+        );
+        assert!(
+            result.get("thinking").is_some(),
+            "thinking key must be preserved"
+        );
+    }
+
+    #[test]
+    fn chat_sanitize_preserves_thinking_disabled_second_turn_with_tool_result() {
+        let payload = serde_json::json!({
+            "model": "deepseek-v4-flash",
+            "messages": [
+                {"role": "user", "content": "Call lookup_weather for Tokyo."},
+                {
+                    "role": "assistant",
+                    "content": null,
+                    "tool_calls": [{
+                        "id": "call_abc",
+                        "type": "function",
+                        "function": {"name": "lookup_weather", "arguments": "{\"city\":\"Tokyo\"}"}
+                    }]
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": "call_abc",
+                    "content": "{\"temperature_c\": 22}"
+                }
+            ],
+            "tools": [{"type":"function","function":{"name":"lookup_weather","description":"Look up weather","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}}],
+            "tool_choice": "none",
+            "thinking": {"type": "disabled"},
+            "max_tokens": 256,
+            "stream": false
+        });
+        let mut body = Bytes::from(serde_json::to_vec(&payload).unwrap());
+        let stripped = sanitize_thinking_params(&mut body, Protocol::OpenAiChatCompletions);
+        let result: Value = serde_json::from_slice(&body).unwrap();
+        assert!(
+            !stripped,
+            "thinking:disabled on second turn with tool result must NOT be stripped: {result}"
+        );
+        assert!(
+            result.get("thinking").is_some(),
+            "thinking key must be preserved when type is disabled"
+        );
+    }
+
+    #[test]
+    fn chat_sanitize_strips_thinking_enabled_when_assistant_lacks_reasoning() {
+        let payload = serde_json::json!({
+            "model": "deepseek-v4-flash",
+            "messages": [
+                {"role": "user", "content": "hello"},
+                {"role": "assistant", "content": "world"},
+                {"role": "user", "content": "next"}
+            ],
+            "thinking": {"type": "enabled", "budget_tokens": 4096},
+            "stream": true
+        });
+        let mut body = Bytes::from(serde_json::to_vec(&payload).unwrap());
+        assert!(sanitize_thinking_params(
+            &mut body,
+            Protocol::OpenAiChatCompletions
+        ));
+        let result: Value = serde_json::from_slice(&body).unwrap();
+        assert!(
+            result.get("thinking").is_none(),
+            "thinking:enabled should be stripped when assistant lacks reasoning"
+        );
     }
 
     #[test]
