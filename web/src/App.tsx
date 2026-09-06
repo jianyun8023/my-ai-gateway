@@ -11,7 +11,9 @@ import {
   IconDashboardGrid,
   IconFileText,
   IconLayers,
+  IconSearch,
   IconSettings,
+  IconSlidersHorizontal,
   IconSunAsterisk,
 } from './components/ui/icons';
 import {
@@ -36,11 +38,24 @@ const PAGE_ICONS: Record<ConsolePage, React.ReactNode> = {
   analysis: <IconBarChart size={18} />,
   events: <IconFileText size={18} />,
   sources: <IconLayers size={18} />,
+  discovery: <IconSearch size={18} />,
   models: <IconSunAsterisk size={18} />,
+  capabilities: <IconSlidersHorizontal size={18} />,
   settings: <IconSettings size={18} />,
 };
 
 const USAGE_PAGES = new Set<ConsolePage>(['overview', 'analysis', 'events']);
+
+// 侧栏 hash 页（ConsolePage）到管理端内部页面（GatewayManagementPage）的映射。
+type ManagementConsolePage = 'sources' | 'discovery' | 'models' | 'capabilities' | 'settings';
+
+const MANAGEMENT_PAGE_BY_CONSOLE_PAGE: Record<ManagementConsolePage, 'sources' | 'model-discovery' | 'models-routes' | 'capabilities' | 'settings'> = {
+  sources: 'sources',
+  discovery: 'model-discovery',
+  models: 'models-routes',
+  capabilities: 'capabilities',
+  settings: 'settings',
+};
 
 function App() {
   const { t, i18n } = useTranslation('console');
@@ -75,7 +90,7 @@ function App() {
   // page headers and <title> follow the active language.
   const navigationSections: readonly ConsoleNavSection[] = [
     { label: t('shell.section.monitor'), pages: ['overview', 'analysis', 'events'] },
-    { label: t('shell.section.config'), pages: ['sources', 'models'] },
+    { label: t('shell.section.config'), pages: ['sources', 'discovery', 'models', 'capabilities'] },
     { label: t('shell.section.system'), pages: ['settings'] },
   ];
 
@@ -84,7 +99,9 @@ function App() {
     { id: 'analysis', label: t('shell.nav.analysis'), icon: PAGE_ICONS.analysis },
     { id: 'events', label: t('shell.nav.events'), icon: PAGE_ICONS.events },
     { id: 'sources', label: t('shell.nav.sources'), icon: PAGE_ICONS.sources },
+    { id: 'discovery', label: t('shell.nav.discovery'), icon: PAGE_ICONS.discovery },
     { id: 'models', label: t('shell.nav.models'), icon: PAGE_ICONS.models },
+    { id: 'capabilities', label: t('shell.nav.capabilities'), icon: PAGE_ICONS.capabilities },
     { id: 'settings', label: t('shell.nav.settings'), icon: PAGE_ICONS.settings },
   ];
 
@@ -118,7 +135,7 @@ function App() {
                   )
                 : (
                     <GatewayManagementPage
-                      page={page === 'models' ? 'models-routes' : page === 'sources' ? 'sources' : page as 'settings'}
+                      page={MANAGEMENT_PAGE_BY_CONSOLE_PAGE[page as ManagementConsolePage]}
                       getAdminKey={getAdminKey}
                       adminKeyConfigured={adminKeyConfigured}
                       clearAdminKey={clearAdminKey}

@@ -24,7 +24,9 @@ export const shell = {
     analysis: 'Analysis',
     events: 'Request Events',
     sources: 'Sources',
+    discovery: 'Model Discovery',
     models: 'Models & Routes',
+    capabilities: 'Capabilities',
     settings: 'Settings',
   },
 
@@ -34,7 +36,9 @@ export const shell = {
     analysis: 'Token mix, model and source distribution, and latency diagnostics',
     events: 'Inspect request metadata, retries, and token details',
     sources: 'Manage providers, sources, accounts, and connection configuration',
+    discovery: 'Discover upstream models, review diffs, and confirm before routing',
     models: 'Logical model mapping, source bindings, and protocol routing',
+    capabilities: 'Effective three-protocol capability matrix per source and protocol',
     settings: 'Gateway entry points, virtual keys, and configuration',
   },
 
