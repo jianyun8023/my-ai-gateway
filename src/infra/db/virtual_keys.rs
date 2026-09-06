@@ -342,25 +342,37 @@ impl Database {
         })
     }
 
+    #[allow(dead_code)]
     pub async fn authenticate_virtual_key(
         &self,
         raw: &str,
         model: Option<&str>,
     ) -> Result<Option<i64>, sqlx::Error> {
-        self.authenticate_virtual_key_with_scope(raw, model, VIRTUAL_KEY_INVOKE_SCOPE)
+        Ok(self
+            .authenticate_virtual_key_with_identity(raw, model)
+            .await?
+            .map(|(id, _, _)| id))
+    }
+
+    pub async fn authenticate_virtual_key_with_identity(
+        &self,
+        raw: &str,
+        model: Option<&str>,
+    ) -> Result<Option<(i64, String, String)>, sqlx::Error> {
+        self.authenticate_virtual_key_with_identity_scope(raw, model, VIRTUAL_KEY_INVOKE_SCOPE)
             .await
     }
 
-    pub async fn authenticate_virtual_key_with_scope(
+    async fn authenticate_virtual_key_with_identity_scope(
         &self,
         raw: &str,
         model: Option<&str>,
         required_scope: &str,
-    ) -> Result<Option<i64>, sqlx::Error> {
+    ) -> Result<Option<(i64, String, String)>, sqlx::Error> {
         let hash = hash_key(raw);
         let mut tx = self.pool.begin().await?;
-        let row = sqlx::query_as::<_, (i64, Value, Value)>(
-            "SELECT id,allowed_models,scopes FROM virtual_keys
+        let row = sqlx::query_as::<_, (i64, String, String, Value, Value)>(
+            "SELECT id,name,key_prefix,allowed_models,scopes FROM virtual_keys
              WHERE key_hash=$1 AND enabled=TRUE AND revoked_at IS NULL
                AND (expires_at IS NULL OR expires_at > NOW())
                AND (replaced_by_id IS NULL OR (overlap_until IS NOT NULL AND overlap_until > NOW()))
@@ -369,7 +381,7 @@ impl Database {
         .bind(&hash)
         .fetch_optional(&mut *tx)
         .await?;
-        let Some((id, allowed, scopes)) = row else {
+        let Some((id, name, prefix, allowed, scopes)) = row else {
             tx.commit().await?;
             return Ok(None);
         };
@@ -389,7 +401,7 @@ impl Database {
         .execute(&mut *tx)
         .await?;
         tx.commit().await?;
-        Ok((updated.rows_affected() == 1).then_some(id))
+        Ok((updated.rows_affected() == 1).then_some((id, name, prefix)))
     }
 }
 

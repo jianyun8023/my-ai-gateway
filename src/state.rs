@@ -127,6 +127,42 @@ pub(crate) fn key_matches_digest(expected: &[u8; 32], supplied: &str) -> bool {
     bool::from(expected.ct_eq(&key_digest(supplied)))
 }
 
+/// Authentication identity resolved during data-plane authorization.
+#[derive(Clone, Debug)]
+pub(crate) enum AuthIdentity {
+    /// Matched the static `GATEWAY_API_KEY` environment variable.
+    StaticApiKey,
+    /// Matched a database-backed Virtual Key.
+    VirtualKey {
+        id: i64,
+        name: String,
+        prefix: String,
+    },
+}
+
+impl AuthIdentity {
+    pub(crate) fn virtual_key_id(&self) -> Option<i64> {
+        match self {
+            Self::VirtualKey { id, .. } => Some(*id),
+            _ => None,
+        }
+    }
+
+    /// Default client_source value derived from auth identity.
+    pub(crate) fn default_client_source(&self) -> String {
+        match self {
+            Self::StaticApiKey => "static_api_key".to_owned(),
+            Self::VirtualKey { name, prefix, .. } => {
+                if name.is_empty() {
+                    prefix.clone()
+                } else {
+                    name.clone()
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 pub(crate) const TEST_ADMIN_KEY: &str = "test-admin-key";
 
@@ -150,24 +186,26 @@ pub(crate) async fn authorized_with_db(
     state: &AppState,
     headers: &HeaderMap,
     model: Option<&str>,
-) -> Option<Option<i64>> {
+) -> Option<AuthIdentity> {
     if let Ok(expected) = std::env::var("GATEWAY_API_KEY") {
         if supplied_key(headers)
             .is_some_and(|supplied| key_matches_digest(&key_digest(&expected), supplied))
         {
-            return Some(None);
+            return Some(AuthIdentity::StaticApiKey);
         }
     }
     let Some(database) = &state.db else {
-        return std::env::var("GATEWAY_API_KEY").is_err().then_some(None);
+        return std::env::var("GATEWAY_API_KEY")
+            .is_err()
+            .then_some(AuthIdentity::StaticApiKey);
     };
     let key = supplied_key(headers)?;
     database
-        .authenticate_virtual_key(key, model)
+        .authenticate_virtual_key_with_identity(key, model)
         .await
         .ok()
         .flatten()
-        .map(Some)
+        .map(|(id, name, prefix)| AuthIdentity::VirtualKey { id, name, prefix })
 }
 
 pub(crate) fn supplied_key(headers: &HeaderMap) -> Option<&str> {
