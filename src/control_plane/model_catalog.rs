@@ -16,7 +16,7 @@ use crate::domain::{
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use serde_json::Value;
-use sqlx::{PgPool, Postgres, Transaction};
+use sqlx::{PgConnection, PgPool, Postgres, Transaction};
 use std::{collections::BTreeMap, error::Error, fmt};
 
 #[derive(Debug)]
@@ -989,66 +989,8 @@ impl ModelCatalogRepository {
         &self,
         input: &SourceModelCapabilityInput,
     ) -> Result<SourceModelCapabilityRecord, CatalogError> {
-        input.validate()?;
-        if let Some(current_status) = sqlx::query_scalar::<_, CatalogStatus>(
-            "SELECT status FROM source_model_capabilities WHERE source_id=$1 AND upstream_model_id=$2 AND protocol=$3",
-        )
-        .bind(&input.source_id)
-        .bind(&input.upstream_model_id)
-        .bind(input.protocol)
-        .fetch_optional(&self.pool)
-        .await?
-        {
-            ensure_transition(current_status, input.status, "source model capability")?;
-            if current_status == CatalogStatus::Confirmed
-                && input.status == CatalogStatus::Confirmed
-                && input.field_source != MetadataSource::User
-            {
-                return self
-                    .get_source_model_capability(
-                        &input.source_id,
-                        &input.upstream_model_id,
-                        input.protocol,
-                    )
-                    .await;
-            }
-        }
-        if input.mode == SourceProtocolMode::Adapter {
-            let source_protocol = input
-                .source_protocol
-                .expect("validated adapter source protocol");
-            let source = sqlx::query_as::<_, (CatalogStatus, SourceProtocolMode)>("SELECT status,mode FROM source_model_capabilities WHERE source_id=$1 AND upstream_model_id=$2 AND protocol=$3")
-                .bind(&input.source_id)
-                .bind(&input.upstream_model_id)
-                .bind(source_protocol)
-                .fetch_optional(&self.pool)
-                .await?;
-            if source != Some((CatalogStatus::Confirmed, SourceProtocolMode::Native)) {
-                return Err(CatalogError::InvalidState(format!(
-                    "adapter source protocol {source_protocol} must be confirmed native"
-                )));
-            }
-        }
-        let features = serde_json::to_value(&input.feature_capabilities)?;
-        let confirmed_at = (input.status == CatalogStatus::Confirmed).then(Utc::now);
-        let unavailable_at = (input.status == CatalogStatus::Unavailable).then(Utc::now);
-        sqlx::query("INSERT INTO source_model_capabilities (source_id,upstream_model_id,protocol,status,mode,source_protocol,adapter,feature_capabilities,field_source,observed_at,confirmed_at,unavailable_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT (source_id,upstream_model_id,protocol) DO UPDATE SET status=EXCLUDED.status,mode=EXCLUDED.mode,source_protocol=EXCLUDED.source_protocol,adapter=EXCLUDED.adapter,feature_capabilities=EXCLUDED.feature_capabilities,field_source=EXCLUDED.field_source,observed_at=EXCLUDED.observed_at,confirmed_at=CASE WHEN EXCLUDED.status='confirmed' THEN COALESCE(source_model_capabilities.confirmed_at,EXCLUDED.confirmed_at) ELSE source_model_capabilities.confirmed_at END,unavailable_at=EXCLUDED.unavailable_at,updated_at=NOW() WHERE source_model_capabilities.status <> 'confirmed' OR EXCLUDED.status <> 'confirmed' OR EXCLUDED.field_source = 'user'")
-            .bind(&input.source_id)
-            .bind(&input.upstream_model_id)
-            .bind(input.protocol)
-            .bind(input.status)
-            .bind(input.mode)
-            .bind(input.source_protocol)
-            .bind(&input.adapter)
-            .bind(features)
-            .bind(input.field_source.to_string())
-            .bind(input.observed_at)
-            .bind(confirmed_at)
-            .bind(unavailable_at)
-            .execute(&self.pool)
-            .await?;
-        self.get_source_model_capability(&input.source_id, &input.upstream_model_id, input.protocol)
-            .await
+        let mut conn = self.pool.acquire().await?;
+        upsert_source_model_capability_conn(&mut conn, input).await
     }
 
     pub async fn get_source_model_capability(
@@ -1057,13 +999,21 @@ impl ModelCatalogRepository {
         upstream_model_id: &str,
         protocol: Protocol,
     ) -> Result<SourceModelCapabilityRecord, CatalogError> {
-        sqlx::query_as::<_, SourceModelCapabilityRecord>("SELECT source_id,upstream_model_id,protocol,status,mode,source_protocol,adapter,feature_capabilities,field_source,observed_at,confirmed_at,unavailable_at,updated_at FROM source_model_capabilities WHERE source_id=$1 AND upstream_model_id=$2 AND protocol=$3")
+        let mut conn = self.pool.acquire().await?;
+        get_source_model_capability_conn(&mut conn, source_id, upstream_model_id, protocol).await
+    }
+
+    pub async fn list_source_model_capabilities(
+        &self,
+        source_id: &str,
+        upstream_model_id: &str,
+    ) -> Result<Vec<SourceModelCapabilityRecord>, CatalogError> {
+        sqlx::query_as::<_, SourceModelCapabilityRecord>("SELECT source_id,upstream_model_id,protocol,status,mode,source_protocol,adapter,feature_capabilities,field_source,observed_at,confirmed_at,unavailable_at,updated_at FROM source_model_capabilities WHERE source_id=$1 AND upstream_model_id=$2 ORDER BY protocol")
             .bind(source_id)
             .bind(upstream_model_id)
-            .bind(protocol)
-            .fetch_optional(&self.pool)
-            .await?
-            .ok_or_else(|| CatalogError::NotFound(format!("source model capability {source_id}/{upstream_model_id}/{protocol} not found")))
+            .fetch_all(&self.pool)
+            .await
+            .map_err(Into::into)
     }
 
     pub async fn create_model_binding(
@@ -1284,6 +1234,94 @@ fn ensure_transition(
             "invalid {entity} status transition: {current:?} -> {next:?}"
         )))
     }
+}
+
+pub(crate) async fn get_source_model_capability_conn(
+    conn: &mut PgConnection,
+    source_id: &str,
+    upstream_model_id: &str,
+    protocol: Protocol,
+) -> Result<SourceModelCapabilityRecord, CatalogError> {
+    sqlx::query_as::<_, SourceModelCapabilityRecord>("SELECT source_id,upstream_model_id,protocol,status,mode,source_protocol,adapter,feature_capabilities,field_source,observed_at,confirmed_at,unavailable_at,updated_at FROM source_model_capabilities WHERE source_id=$1 AND upstream_model_id=$2 AND protocol=$3")
+        .bind(source_id)
+        .bind(upstream_model_id)
+        .bind(protocol)
+        .fetch_optional(conn)
+        .await?
+        .ok_or_else(|| CatalogError::NotFound(format!("source model capability {source_id}/{upstream_model_id}/{protocol} not found")))
+}
+
+/// 与池化版本共享全部校验与 upsert 语义；供 ControlPlane 在写事务内调用，
+/// 以便能力变更与 runtime snapshot 发布保持原子。
+pub(crate) async fn upsert_source_model_capability_conn(
+    conn: &mut PgConnection,
+    input: &SourceModelCapabilityInput,
+) -> Result<SourceModelCapabilityRecord, CatalogError> {
+    input.validate()?;
+    if let Some(current_status) = sqlx::query_scalar::<_, CatalogStatus>(
+        "SELECT status FROM source_model_capabilities WHERE source_id=$1 AND upstream_model_id=$2 AND protocol=$3",
+    )
+    .bind(&input.source_id)
+    .bind(&input.upstream_model_id)
+    .bind(input.protocol)
+    .fetch_optional(&mut *conn)
+    .await?
+    {
+        ensure_transition(current_status, input.status, "source model capability")?;
+        if current_status == CatalogStatus::Confirmed
+            && input.status == CatalogStatus::Confirmed
+            && input.field_source != MetadataSource::User
+        {
+            return get_source_model_capability_conn(
+                conn,
+                &input.source_id,
+                &input.upstream_model_id,
+                input.protocol,
+            )
+            .await;
+        }
+    }
+    if input.mode == SourceProtocolMode::Adapter {
+        let source_protocol = input
+            .source_protocol
+            .expect("validated adapter source protocol");
+        let source = sqlx::query_as::<_, (CatalogStatus, SourceProtocolMode)>("SELECT status,mode FROM source_model_capabilities WHERE source_id=$1 AND upstream_model_id=$2 AND protocol=$3")
+            .bind(&input.source_id)
+            .bind(&input.upstream_model_id)
+            .bind(source_protocol)
+            .fetch_optional(&mut *conn)
+            .await?;
+        if source != Some((CatalogStatus::Confirmed, SourceProtocolMode::Native)) {
+            return Err(CatalogError::InvalidState(format!(
+                "adapter source protocol {source_protocol} must be confirmed native"
+            )));
+        }
+    }
+    let features = serde_json::to_value(&input.feature_capabilities)?;
+    let confirmed_at = (input.status == CatalogStatus::Confirmed).then(Utc::now);
+    let unavailable_at = (input.status == CatalogStatus::Unavailable).then(Utc::now);
+    sqlx::query("INSERT INTO source_model_capabilities (source_id,upstream_model_id,protocol,status,mode,source_protocol,adapter,feature_capabilities,field_source,observed_at,confirmed_at,unavailable_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT (source_id,upstream_model_id,protocol) DO UPDATE SET status=EXCLUDED.status,mode=EXCLUDED.mode,source_protocol=EXCLUDED.source_protocol,adapter=EXCLUDED.adapter,feature_capabilities=EXCLUDED.feature_capabilities,field_source=EXCLUDED.field_source,observed_at=EXCLUDED.observed_at,confirmed_at=CASE WHEN EXCLUDED.status='confirmed' THEN COALESCE(source_model_capabilities.confirmed_at,EXCLUDED.confirmed_at) ELSE source_model_capabilities.confirmed_at END,unavailable_at=EXCLUDED.unavailable_at,updated_at=NOW() WHERE source_model_capabilities.status <> 'confirmed' OR EXCLUDED.status <> 'confirmed' OR EXCLUDED.field_source = 'user'")
+        .bind(&input.source_id)
+        .bind(&input.upstream_model_id)
+        .bind(input.protocol)
+        .bind(input.status)
+        .bind(input.mode)
+        .bind(input.source_protocol)
+        .bind(&input.adapter)
+        .bind(features)
+        .bind(input.field_source.to_string())
+        .bind(input.observed_at)
+        .bind(confirmed_at)
+        .bind(unavailable_at)
+        .execute(&mut *conn)
+        .await?;
+    get_source_model_capability_conn(
+        conn,
+        &input.source_id,
+        &input.upstream_model_id,
+        input.protocol,
+    )
+    .await
 }
 
 async fn fetch_source_model_for_update(

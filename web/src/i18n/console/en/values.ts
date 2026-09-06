@@ -21,6 +21,8 @@ export const values = {
   mode: {
     native: 'Native',
     adapter: 'Adapter',
+    unsupported: 'Unsupported',
+    unknown: 'Unknown',
   },
   strategy: {
     primary_then_weighted_fallback: 'Primary then weighted fallback',

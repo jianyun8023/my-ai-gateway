@@ -74,6 +74,21 @@ export const discovery = {
   batch_confirm_desc: 'Confirm the {{count}} selected available pending SourceModels. This never implicitly creates LogicalModels, Bindings, or Routes.',
   confirm_models: 'Confirm Models',
 
+  // Protocol capability editing
+  capabilities_action: 'Capabilities',
+  capabilities_title: 'Protocol capabilities — {{model}}',
+  capabilities_subtitle: 'Declare how each ingress protocol is handled; bindings require a confirmed capability.',
+  capability_loading: 'Loading protocol capabilities…',
+  capability_undeclared: 'Undeclared',
+  capability_mode: 'Mode',
+  capability_status: 'Status',
+  capability_source_protocol: 'Upstream protocol',
+  capability_adapter: 'Adapter',
+  capability_save: 'Save capability',
+  capability_saved: '{{protocol}} capability saved.',
+  capability_unknown_confirm_hint: 'Unknown capabilities cannot be confirmed.',
+  capability_adapter_hint: 'Adapter mode requires a confirmed native upstream protocol.',
+
   // 表格
   column: {
     upstream_model: 'Upstream model',

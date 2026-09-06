@@ -85,6 +85,40 @@ describe('GatewayAdminResources', () => {
     );
   });
 
+  it('lists and upserts source model capabilities on encoded nested paths', async () => {
+    const transport = transportWith(async () => ({
+      data: { protocol: 'openai_responses' },
+      snapshot_revision: 5,
+      snapshot_generated_at: '2026-09-06T00:00:00Z',
+    }));
+    const api = new GatewayAdminResources(transport);
+
+    await api.sourceModelCapabilities('source-a', 'model/with space');
+    expect(transport.json).toHaveBeenCalledWith(
+      '/admin/sources/source-a/models/model%2Fwith%20space/capabilities',
+      expect.any(Object),
+    );
+
+    await api.upsertSourceModelCapability('source-a', 'model-a', 'openai_responses', {
+      status: 'confirmed',
+      mode: 'adapter',
+      source_protocol: 'anthropic_messages',
+      adapter: 'kimi_responses_adapter',
+    });
+    expect(transport.json).toHaveBeenCalledWith(
+      '/admin/sources/source-a/models/model-a/capabilities/openai_responses',
+      expect.objectContaining({
+        method: 'PUT',
+        body: JSON.stringify({
+          status: 'confirmed',
+          mode: 'adapter',
+          source_protocol: 'anthropic_messages',
+          adapter: 'kimi_responses_adapter',
+        }),
+      }),
+    );
+  });
+
   it('uses the explicit secret endpoint to reveal one Virtual Key', async () => {
     const transport = transportWith(async () => ({ data: { id: 7, key: 'gw_secret' } }));
 

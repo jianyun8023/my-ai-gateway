@@ -713,6 +713,24 @@
   font-size: 13px;
 }
 
+.capabilityRow {
+  min-width: 0;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  background: var(--bg-secondary);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.capabilityRowHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .diffColumn > span {
   display: block;
   margin-top: 12px;

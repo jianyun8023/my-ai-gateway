@@ -74,6 +74,21 @@ export const discovery = {
   batch_confirm_desc: '将确认当前选择的 {{count}} 个可用待确认来源模型。此操作不会隐式创建逻辑模型、绑定或路由。',
   confirm_models: '确认模型',
 
+  // 协议能力编辑
+  capabilities_action: '协议能力',
+  capabilities_title: '协议能力 — {{model}}',
+  capabilities_subtitle: '声明每个北向协议的处理方式;绑定要求能力已确认。',
+  capability_loading: '正在加载协议能力…',
+  capability_undeclared: '未声明',
+  capability_mode: '处理方式',
+  capability_status: '确认状态',
+  capability_source_protocol: '上游协议',
+  capability_adapter: '转换器',
+  capability_save: '保存能力',
+  capability_saved: '{{protocol}} 能力已保存。',
+  capability_unknown_confirm_hint: '未知能力不能被确认。',
+  capability_adapter_hint: '转换模式要求上游协议已确认为原生。',
+
   // 表格
   column: {
     upstream_model: '上游模型',

@@ -8,5 +8,6 @@ export const errors = {
   usage_api_failed: '用量 API 请求失败',
   export_failed: '用量导出失败',
   http: '请求失败(HTTP {{status}})。',
+  validation_failed: '请求未通过校验:{{message}}',
   unknown: '发生未知错误。',
 } as const;

@@ -21,6 +21,8 @@ export const values = {
   mode: {
     native: '原生',
     adapter: '转换',
+    unsupported: '不支持',
+    unknown: '未知',
   },
   strategy: {
     primary_then_weighted_fallback: '固定主选 → 加权回退',
