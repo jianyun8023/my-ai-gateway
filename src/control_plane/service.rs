@@ -448,6 +448,28 @@ fn normalize_object(value: Value, field: &str) -> Result<Value, ControlPlaneErro
     Ok(value)
 }
 
+async fn validate_custom_preset_not_shadowing_builtin(
+    pool: &PgPool,
+    source_id: &str,
+    provider_preset_id: &str,
+) -> Result<(), ControlPlaneError> {
+    if provider_preset_id != "custom" {
+        return Ok(());
+    }
+    let has_builtin: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM provider_presets WHERE id=$1 AND id <> 'custom')",
+    )
+    .bind(source_id)
+    .fetch_one(pool)
+    .await?;
+    if has_builtin {
+        return Err(ControlPlaneError::Validation(vec![format!(
+            "source '{source_id}' matches a built-in provider preset; use provider_preset_id '{source_id}' instead of 'custom'"
+        )]));
+    }
+    Ok(())
+}
+
 fn validate_source_input(
     input: &SourceWrite,
     source_url_policy: &SourceUrlPolicy,
@@ -1211,6 +1233,29 @@ fn capabilities_from_catalog(value: &Value) -> Result<Capabilities, String> {
     })
 }
 
+async fn resolve_import_provider_preset(
+    tx: &mut Transaction<'_, Postgres>,
+    provider: &ProviderConfig,
+) -> Result<(String, i32, Value), ControlPlaneError> {
+    if let Some((version, definition)) = sqlx::query_as::<_, (i32, Value)>(
+        "SELECT version, definition FROM provider_presets WHERE id=$1 AND id <> 'custom' ORDER BY version DESC LIMIT 1",
+    )
+    .bind(&provider.id)
+    .fetch_optional(&mut **tx)
+    .await?
+    {
+        return Ok((provider.id.clone(), version, definition));
+    }
+    let snapshot = json!({
+        "base_url": provider.base_url,
+        "endpoints": provider.endpoints,
+        "protocol_capabilities": provider.protocol_capabilities,
+        "native_protocols": provider.native_protocols,
+        "capabilities": provider.capabilities,
+    });
+    Ok(("custom".to_owned(), 1, snapshot))
+}
+
 async fn import_gateway_config(
     tx: &mut Transaction<'_, Postgres>,
     config: &GatewayConfig,
@@ -1218,17 +1263,14 @@ async fn import_gateway_config(
     for provider in &config.providers {
         let endpoints = serde_json::to_value(&provider.endpoints)?;
         let protocol_capabilities = serde_json::to_value(&provider.protocol_capabilities)?;
-        let snapshot = json!({
-            "base_url": provider.base_url,
-            "endpoints": provider.endpoints,
-            "protocol_capabilities": provider.protocol_capabilities,
-            "native_protocols": provider.native_protocols,
-            "capabilities": provider.capabilities,
-        });
-        sqlx::query("INSERT INTO sources (id,display_name,provider_preset_id,provider_preset_version,provider_preset_snapshot,base_url,endpoints,auth_config,protocol_capabilities,enabled) VALUES ($1,$2,'custom',1,$3,$4,$5,'{}'::jsonb,$6,TRUE)")
+        let (preset_id, preset_version, preset_snapshot) =
+            resolve_import_provider_preset(tx, provider).await?;
+        sqlx::query("INSERT INTO sources (id,display_name,provider_preset_id,provider_preset_version,provider_preset_snapshot,base_url,endpoints,auth_config,protocol_capabilities,enabled) VALUES ($1,$2,$3,$4,$5,$6,$7,'{}'::jsonb,$8,TRUE)")
             .bind(&provider.id)
             .bind(&provider.name)
-            .bind(snapshot)
+            .bind(preset_id)
+            .bind(preset_version)
+            .bind(preset_snapshot)
             .bind(&provider.base_url)
             .bind(endpoints)
             .bind(protocol_capabilities)
@@ -1709,6 +1751,12 @@ impl ControlPlane {
         if !errors.is_empty() {
             return Err(ControlPlaneError::Validation(errors));
         }
+        validate_custom_preset_not_shadowing_builtin(
+            &self.pool,
+            &input.id,
+            &input.provider_preset_id,
+        )
+        .await?;
         let preset: Option<(i32, Value)> = match input.provider_preset_version {
             Some(version) => {
                 sqlx::query_as(
@@ -3186,6 +3234,167 @@ mod tests {
             Err(ControlPlaneError::NotFound(_))
         ));
 
+        drop(control_plane);
+        drop(database);
+        pool.close().await;
+        sqlx::query(&format!("DROP SCHEMA \"{schema}\" CASCADE"))
+            .execute(&admin)
+            .await
+            .expect("drop isolated test schema");
+        admin.close().await;
+    }
+
+    #[tokio::test]
+    #[ignore = "requires TEST_DATABASE_URL and runs against an isolated PostgreSQL schema"]
+    async fn create_source_rejects_custom_preset_for_builtin_provider_ids() {
+        use crate::control_plane::model_catalog::{
+            install_builtin_presets, ModelCatalogRepository,
+        };
+        use crate::domain::provider_preset::BUILTIN_PROVIDER_PRESET_VERSION;
+
+        let (database, admin, schema) = isolated_database().await;
+        let control_plane = ControlPlane::new(database.pool().clone(), "127.0.0.1:0");
+        install_builtin_presets(&ModelCatalogRepository::new(database.pool().clone()))
+            .await
+            .expect("install built-in provider presets");
+
+        let custom_builtin = SourceCreateWrite {
+            id: "minimax".into(),
+            display_name: "MiniMax".into(),
+            provider_preset_id: "custom".into(),
+            provider_preset_version: None,
+            base_url: Some("https://minimax.example".into()),
+            endpoints: Some(HashMap::from([(
+                Protocol::OpenAiChatCompletions,
+                "/v1/chat/completions".into(),
+            )])),
+            endpoint_overrides: HashMap::new(),
+            auth_config: None,
+            protocol_capabilities: None,
+            enabled: true,
+        };
+        assert!(matches!(
+            control_plane
+                .create_source_from_request(&custom_builtin)
+                .await,
+            Err(ControlPlaneError::Validation(errors))
+                if errors.iter().any(|message| message.contains("built-in provider preset"))
+        ));
+
+        let custom_unknown = SourceCreateWrite {
+            id: "my-custom-provider".into(),
+            display_name: "My Custom Provider".into(),
+            provider_preset_id: "custom".into(),
+            provider_preset_version: None,
+            base_url: Some("https://custom.example".into()),
+            endpoints: Some(HashMap::from([(
+                Protocol::OpenAiChatCompletions,
+                "/v1/chat/completions".into(),
+            )])),
+            endpoint_overrides: HashMap::new(),
+            auth_config: None,
+            protocol_capabilities: None,
+            enabled: true,
+        };
+        control_plane
+            .create_source_from_request(&custom_unknown)
+            .await
+            .expect("custom preset is allowed for non-built-in source ids");
+
+        let managed_builtin = SourceCreateWrite {
+            id: "minimax-managed".into(),
+            display_name: "MiniMax Managed".into(),
+            provider_preset_id: "minimax".into(),
+            provider_preset_version: Some(BUILTIN_PROVIDER_PRESET_VERSION),
+            base_url: None,
+            endpoints: None,
+            endpoint_overrides: HashMap::new(),
+            auth_config: None,
+            protocol_capabilities: None,
+            enabled: true,
+        };
+        let created = control_plane
+            .create_source_from_request(&managed_builtin)
+            .await
+            .expect("built-in preset resolves for minimax source");
+        assert_eq!(created.record.provider_preset_id, "minimax");
+        assert_eq!(
+            created.record.provider_preset_version,
+            BUILTIN_PROVIDER_PRESET_VERSION
+        );
+
+        let pool = database.pool().clone();
+        drop(control_plane);
+        drop(database);
+        pool.close().await;
+        sqlx::query(&format!("DROP SCHEMA \"{schema}\" CASCADE"))
+            .execute(&admin)
+            .await
+            .expect("drop isolated test schema");
+        admin.close().await;
+    }
+
+    #[tokio::test]
+    #[ignore = "requires TEST_DATABASE_URL and runs against an isolated PostgreSQL schema"]
+    async fn import_gateway_config_assigns_builtin_provider_presets() {
+        use crate::control_plane::model_catalog::{
+            install_builtin_presets, ModelCatalogRepository,
+        };
+        use crate::domain::provider_preset::BUILTIN_PROVIDER_PRESET_VERSION;
+
+        let (database, admin, schema) = isolated_database().await;
+        install_builtin_presets(&ModelCatalogRepository::new(database.pool().clone()))
+            .await
+            .expect("install built-in provider presets");
+        let control_plane = ControlPlane::new(database.pool().clone(), "127.0.0.1:0");
+
+        let config: GatewayConfig = serde_json::from_value(json!({
+            "listen_addr": "127.0.0.1:0",
+            "providers": [{
+                "id": "minimax",
+                "name": "MiniMax",
+                "base_url": "https://minimax-import.example",
+                "models": ["MiniMax-M3"],
+                "endpoints": {"openai_chat_completions": "/v1/chat/completions"},
+                "protocol_capabilities": {"openai_chat_completions": {"mode": "native"}},
+                "capabilities": {"streaming": "native", "tools": "native", "usage": "native"}
+            }, {
+                "id": "bai",
+                "name": "Bai",
+                "base_url": "https://bai-import.example",
+                "models": ["bai-model"],
+                "endpoints": {"openai_chat_completions": "/v1/chat/completions"},
+                "protocol_capabilities": {"openai_chat_completions": {"mode": "native"}},
+                "capabilities": {"streaming": "native", "tools": "native", "usage": "native"}
+            }],
+            "accounts": [],
+            "routes": []
+        }))
+        .expect("build import config");
+        control_plane
+            .initialize_from_config(&config, false)
+            .await
+            .expect("import config")
+            .expect("empty control plane imports once");
+
+        let minimax = control_plane
+            .get_source("minimax")
+            .await
+            .expect("load imported minimax source");
+        assert_eq!(minimax.provider_preset_id, "minimax");
+        assert_eq!(
+            minimax.provider_preset_version,
+            BUILTIN_PROVIDER_PRESET_VERSION
+        );
+
+        let bai = control_plane
+            .get_source("bai")
+            .await
+            .expect("load imported bai source");
+        assert_eq!(bai.provider_preset_id, "custom");
+        assert_eq!(bai.provider_preset_version, 1);
+
+        let pool = database.pool().clone();
         drop(control_plane);
         drop(database);
         pool.close().await;
