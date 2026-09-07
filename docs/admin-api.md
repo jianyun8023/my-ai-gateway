@@ -370,7 +370,7 @@ dry-run 只统计候选，不删除数据。正式清理按 attempt → logical 
 
 完整的 PostgreSQL `pg_dump`、新库恢复、Docker Compose 和本地 CLI 步骤见 [`docs/operations.md`](./operations.md)。物理 dump 可能包含数据库内的加密凭据和全部历史，必须按高敏感备份保护；脱敏迁移请使用控制面 JSON 导出。
 
-矩阵聚合直接复用真实 `RouteResolver`，不复制选择算法。Adapter 翻译或显式允许的能力损失会列入 `degraded_features`，`degraded` 只在实际发生翻译或损失时为 `true`。响应不包含 `credential_env`、加密/明文凭据、Authorization、API Key 或请求/响应正文。Web UI 展示仍是后续工作。
+矩阵聚合直接复用真实 `RouteResolver`，不复制选择算法。Adapter 翻译或显式允许的能力损失会列入 `degraded_features`，`degraded` 只在实际发生翻译或损失时为 `true`。响应不包含 `credential_env`、加密/明文凭据、Authorization、API Key 或请求/响应正文。控制台的“能力矩阵”页面展示该响应。
 
 ## 错误与安全
 

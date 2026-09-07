@@ -83,8 +83,7 @@ body {
   font-family: var(--font-body);
 }
 
-/* Dark is an application compatibility extension; the canonical light tokens
- * and component semantics remain defined by docs/brand-spec.md. */
+/* Dark theme uses the same semantic tokens as light. */
 [data-theme='dark'] body {
   color-scheme: dark;
   --bg: oklch(17% 0.012 250);

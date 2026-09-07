@@ -338,7 +338,7 @@ function TokenComposition({ summary }: { summary: UsageSummaryViewModel }) {
   const totalFormatted = formatCompactWithTitle(total);
 
   return (
-    <Card title={t('usage.composition.title')} subtitle={t('usage.composition.subtitle')}>
+    <Card title={t('usage.composition.title')}>
       <div className={styles.tokenComposition}>
         <div className={styles.tokenTotal}>
           <span>{t('usage.legend.total')}</span>
@@ -426,7 +426,7 @@ function Overview({ data, metric, onMetricChange }: { data: UsageOverviewViewMod
         <TokenComposition summary={summary} />
       </div>
       <div className={styles.overviewLowerGrid}>
-        <Card title={t('usage.recent.title')} subtitle={t('usage.recent.subtitle')} data-od-id="recent-activity">
+        <Card title={t('usage.recent.title')} data-od-id="recent-activity">
           {data.recentEvents.length === 0 ? <EmptyState title={t('usage.recent.empty')} /> : (
             <div className={styles.recentList}>{data.recentEvents.map((event) => (
               <div key={`${event.id}:${event.createdAt}`}>
@@ -612,7 +612,6 @@ function EventDetails({ event, onClose, client }: { event: UsageEventViewModel; 
           )}
         </Card>
         {event.errorSummary && <Card title={t('usage.detail.error_summary')}><p className={styles.errorSummary}>{event.errorSummary}</p></Card>}
-        <p className={styles.noBodyNotice}>{t('usage.detail.no_body_notice')}</p>
       </aside>
     </div>
   );
@@ -650,7 +649,7 @@ function EventsTable({ events, hasMore, loadingMore, onLoadMore, visibleColumns,
   if (events.length === 0) return <EmptyState title={t('usage.events.empty_title')} description={t('usage.events.empty_desc')} />;
 
   return (
-    <Card variant="flush" title={t('usage.events.title')} subtitle={t('usage.events.subtitle')} data-od-id="events-table" extra={<div className={styles.eventActions}><details><summary>{t('common.column_prefs')}</summary><div className={styles.columnMenu}>{EVENT_COLUMNS.map((column) => <label key={column}><input type="checkbox" checked={visibleColumns.includes(column)} onChange={() => onVisibleColumnsChange(visibleColumns.includes(column) ? visibleColumns.filter((item) => item !== column) : EVENT_COLUMNS.filter((item) => visibleColumns.includes(item) || item === column))} />{t(EVENT_COLUMN_LABELS[column])}</label>)}</div></details><Button size="sm" variant="secondary" onClick={() => onExport('csv')}>{t('common.export_csv')}</Button><Button size="sm" variant="secondary" onClick={() => onExport('json')}>{t('common.export_json')}</Button></div>}>
+    <Card variant="flush" title={t('usage.events.title')} data-od-id="events-table" extra={<div className={styles.eventActions}><details><summary>{t('common.column_prefs')}</summary><div className={styles.columnMenu}>{EVENT_COLUMNS.map((column) => <label key={column}><input type="checkbox" checked={visibleColumns.includes(column)} onChange={() => onVisibleColumnsChange(visibleColumns.includes(column) ? visibleColumns.filter((item) => item !== column) : EVENT_COLUMNS.filter((item) => visibleColumns.includes(item) || item === column))} />{t(EVENT_COLUMN_LABELS[column])}</label>)}</div></details><Button size="sm" variant="secondary" onClick={() => onExport('csv')}>{t('common.export_csv')}</Button><Button size="sm" variant="secondary" onClick={() => onExport('json')}>{t('common.export_json')}</Button></div>}>
       <div className={styles.eventTable} style={{ '--event-columns': visibleColumns.length } as CSSProperties}>
         <div className={styles.eventHeader}>{visibleColumns.map((column) => <span key={column}>{t(EVENT_COLUMN_LABELS[column])}</span>)}</div>
         <div ref={parentRef} className={styles.eventScroll}>

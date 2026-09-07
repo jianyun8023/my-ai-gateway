@@ -92,15 +92,13 @@ export const sources = {
     sources_title: 'No sources configured yet',
     sources_desc: 'Create your first source from a provider preset.',
     accounts_title: 'No accounts configured yet',
-    accounts_desc: 'Accounts belong to a single Source.',
+    accounts_desc: 'Select a source and add account credentials.',
   },
   add_source: 'New Source',
   add_account: 'New Account',
   card: {
     sources_title: 'Sources',
-    sources_subtitle: 'Provider preset snapshots, protocol endpoints, and runtime switches are independent',
     accounts_title: 'Accounts',
-    accounts_subtitle: 'Credentials are referenced as server-side environment variables or ciphertext; secrets are never shown',
   },
   table: {
     header_credentials: 'Credentials',
@@ -136,8 +134,8 @@ export const sources = {
   },
   confirm: {
     delete_source_title: 'Delete Source',
-    delete_source_body: 'Delete {{id}}? If resources reference it, the backend rejects the request with a structured error.',
+    delete_source_body: 'Delete {{id}}? Remove linked resources first.',
     delete_account_title: 'Delete Account',
-    delete_account_body: 'Delete {{id}}? If resources reference it, the backend rejects the request with a structured error.',
+    delete_account_body: 'Delete {{id}}? Remove linked resources first.',
   },
 } as const;

@@ -44,7 +44,6 @@ interface GatewayConsoleShellProps {
   navigationItems: readonly GatewayConsoleNavItem[];
   onNavigate: (page: string) => void;
   title: string;
-  description: string;
   refreshable?: boolean;
   children: (context: GatewayConsoleContentContext) => ReactNode;
 }
@@ -72,7 +71,6 @@ export function GatewayConsoleShell({
   navigationItems,
   onNavigate,
   title,
-  description,
   refreshable = false,
   children,
 }: GatewayConsoleShellProps) {
@@ -272,13 +270,9 @@ export function GatewayConsoleShell({
           </div>
         </header>
 
-        {/* Content — matches prototype: simple h1 + description + content */}
         <div className={styles.content}>
           <div className={styles.pageHeader}>
-            <div>
-              <h1>{title}</h1>
-              <p className={styles.pageDesc}>{description}</p>
-            </div>
+            <h1>{title}</h1>
           </div>
           {/* eslint-disable-next-line react-hooks/refs -- render prop pattern; ref callbacks are memoized */}
           {children(contentContext)}

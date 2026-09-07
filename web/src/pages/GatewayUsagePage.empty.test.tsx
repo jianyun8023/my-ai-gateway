@@ -41,7 +41,7 @@ describe('GatewayUsagePage empty state', () => {
       await new Promise((resolve) => setTimeout(resolve, 100));
     });
     expect(container.textContent).toContain('当前范围暂无用量');
-    expect(container.textContent).toContain('Token 统计不依赖价格配置');
+    expect(container.textContent).toContain('调整时间范围或筛选条件后重试');
     expect(container.textContent).not.toMatch(/Ranking|Auth Files|充值|配额/);
   });
 });

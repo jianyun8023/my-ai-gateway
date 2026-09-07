@@ -92,15 +92,13 @@ export const sources = {
     sources_title: '尚未配置来源',
     sources_desc: '从提供商预设创建第一个来源。',
     accounts_title: '尚未配置账号',
-    accounts_desc: '账号独立关联到一个来源。',
+    accounts_desc: '选择来源并添加账号凭据。',
   },
   add_source: '新增来源',
   add_account: '新增账号',
   card: {
     sources_title: '来源',
-    sources_subtitle: '提供商预设快照、协议端点与运行期开关彼此独立',
     accounts_title: '账号',
-    accounts_subtitle: '凭据只以服务端环境变量或密文引用提交,界面不展示秘密',
   },
   table: {
     header_credentials: '凭据',
@@ -136,8 +134,8 @@ export const sources = {
   },
   confirm: {
     delete_source_title: '删除来源',
-    delete_source_body: '确认删除 {{id}}?有关联资源时,后端会拒绝并返回结构化错误。',
+    delete_source_body: '确认删除 {{id}}？请先移除关联资源。',
     delete_account_title: '删除账号',
-    delete_account_body: '确认删除 {{id}}?有关联资源时,后端会拒绝并返回结构化错误。',
+    delete_account_body: '确认删除 {{id}}？请先移除关联资源。',
   },
 } as const;

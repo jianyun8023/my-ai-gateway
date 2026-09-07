@@ -322,12 +322,6 @@
   }
 }
 
-.pageDesc {
-  font-size: 13px;
-  color: var(--text-secondary);
-  margin-top: 4px;
-}
-
 /* ─── responsive: tablet ≤ 920px ───────────────────────────── */
 @media (max-width: 920px) {
   .mobileMenuBtn {
@@ -396,8 +390,7 @@
   .mobileKeySection { display: flex; }
 
   .pageHeader h1 { font-size: 20px; }
-  .pageDesc { font-size: 12px; }
-}
+  }
 
 /* ─── responsive: small phone ≤ 380px ──────────────────────── */
 @media (max-width: 380px) {

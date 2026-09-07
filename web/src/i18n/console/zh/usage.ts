@@ -99,11 +99,10 @@ export const usage = {
   },
   trend: {
     title: '用量趋势',
-    subtitle: 'UTC 存储,按浏览器本地时区展示',
+    subtitle: '时间按本地时区显示',
   },
   composition: {
     title: 'Token 构成',
-    subtitle: '原始 Token 口径,不依赖价格配置',
     cache_rate: '缓存命中率: {{rate}}%',
   },
   distribution: {
@@ -113,7 +112,6 @@ export const usage = {
   },
   recent: {
     title: '最近活动',
-    subtitle: '仅显示请求元数据,不包含 prompt / response 正文',
     empty: '暂无最近请求',
   },
 
@@ -138,9 +136,9 @@ export const usage = {
   // —— 空态 ——
   empty: {
     overview_title: '当前范围暂无用量',
-    overview_desc: '调整时间范围或筛选条件后重试。Token 统计不依赖价格配置。',
+    overview_desc: '调整时间范围或筛选条件后重试。',
     analysis_title: '当前范围暂无分析数据',
-    analysis_desc: '分布数据由网关用量 API 提供。',
+    analysis_desc: '调整时间范围或筛选条件后重试。',
   },
 
   // —— 事件状态与行 ——
@@ -158,21 +156,19 @@ export const usage = {
     token_title: 'Token',
     token_subtitle: '最终逻辑请求口径,不因回退重复累计',
     attempts_title: '上游尝试',
-    attempts_subtitle: '失败尝试没有可确认用量时不会虚构 Token',
+    attempts_subtitle: '未报告用量的失败尝试不计 Token',
     attempts_loading: '正在加载尝试明细…',
     attempts_empty_title: '没有独立尝试明细',
     attempts_empty_desc: '事件仍保留最终账号与重试次数。',
     primary_skipped: '主账号不可用，未向其发送请求；本次请求由回退账号完成。',
     error_summary: '脱敏错误摘要',
-    no_body_notice: '安全边界:此详情不读取或显示 prompt、response body 或请求日志正文。',
   },
 
   // —— 事件表 ——
   events: {
     empty_title: '当前范围没有请求事件',
-    empty_desc: '事件详情只包含元数据与脱敏错误摘要。',
+    empty_desc: '调整时间范围或筛选条件后重试。',
     title: '请求事件',
-    subtitle: '稳定游标分页 · 虚拟滚动',
   },
 
   // —— 页面级 ——

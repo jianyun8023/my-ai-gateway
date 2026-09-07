@@ -32,18 +32,6 @@ export const shell = {
     settings: 'Settings',
   },
 
-  // 页面描述
-  desc: {
-    overview: 'Gateway operating status for the last 24 hours',
-    analysis: 'Token mix, model and source distribution, and latency diagnostics',
-    events: 'Inspect request metadata, retries, and token details',
-    sources: 'Manage providers, sources, accounts, and connection configuration',
-    discovery: 'Discover upstream models, review diffs, and confirm before routing',
-    models: 'Logical model mapping, source bindings, and protocol routing',
-    capabilities: 'Effective three-protocol capability matrix per source and protocol',
-    settings: 'Gateway entry points, virtual keys, and configuration',
-  },
-
   // 顶栏
   admin_key_label: 'Admin Key',
   admin_key_placeholder: 'GATEWAY_ADMIN_KEY',

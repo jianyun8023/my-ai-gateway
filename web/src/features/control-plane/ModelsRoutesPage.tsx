@@ -596,7 +596,7 @@ export function ModelsRoutesPage({ api, refreshRevision = 0, onBusyChange }: Mod
 
       <div role="tabpanel" id="models-tabs-panel" aria-labelledby={`models-tabs-${tab}`} tabIndex={0}>
       {tab === 'logical-models' && (data.logicalModels.length === 0 ? <EmptyTable title={t('models.empty.lm_title')} description={t('models.empty.lm_desc')} /> : (
-        <Card variant="flush" title={t('models.card.lm_title')} subtitle={t('models.card.lm_subtitle')}>
+        <Card variant="flush" title={t('models.card.lm_title')}>
           <TableScroll label={t('models.table.region_logical_models')}><table className={styles.table}>
             <thead><tr><th>{t('models.field.lm')}</th><th>{t('models.field.public_name')}</th><th>{t('models.table.header_catalog_status')}</th><th>{t('models.table.header_bindings')}</th><th>{t('models.table.header_routes')}</th><th>{t('models.table.header_enabled')}</th><th>{t('common.actions')}</th></tr></thead>
             <tbody>{data.logicalModels.map((model) => (
@@ -650,7 +650,7 @@ export function ModelsRoutesPage({ api, refreshRevision = 0, onBusyChange }: Mod
       ))}
 
       {tab === 'routes' && (data.routes.length === 0 ? <EmptyTable title={t('models.empty.route_title')} description={t('models.empty.route_desc')} /> : (
-        <Card variant="flush" title={t('models.card.route_title')} subtitle={t('models.card.route_subtitle')}>
+        <Card variant="flush" title={t('models.card.route_title')}>
           <TableScroll label={t('models.table.region_routes')}><table className={`${styles.table} ${styles.routesTable}`}>
             <thead><tr><th>{t('models.field.route_id')}</th><th>{t('models.field.lm')}</th><th>{t('models.field.protocols')}</th><th>{t('models.field.strategy')}</th><th>{t('models.table.header_runtime_rows')}</th><th>{t('models.field.lossy_value')}</th><th>{t('models.table.header_enabled')}</th><th>{t('common.actions')}</th></tr></thead>
             <tbody>{data.routes.map((route) => {

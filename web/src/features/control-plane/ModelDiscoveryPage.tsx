@@ -531,7 +531,7 @@ export function ModelDiscoveryPage({ api, refreshRevision = 0, onBusyChange }: M
         </div>
       )}
 
-      <Card title={t('discovery.latest_run_card')} subtitle={t('discovery.latest_run_subtitle')} extra={<StatusPill tone="accent">{source?.provider_preset_id}@{source?.provider_preset_version}</StatusPill>}>
+      <Card title={t('discovery.latest_run_card')} extra={<StatusPill tone="accent">{source?.provider_preset_id}@{source?.provider_preset_version}</StatusPill>}>
         {discoveryQuery.loading && !discovery ? <LoadingState label={t('discovery.loading_run')} /> : discoveryQuery.error ? <ErrorState error={discoveryQuery.error} onRetry={discoveryQuery.reload} /> : <LatestRunPanel latest={discovery?.latest?.run.source_id === effectiveSourceId ? discovery.latest : null} />}
       </Card>
 
@@ -547,7 +547,7 @@ export function ModelDiscoveryPage({ api, refreshRevision = 0, onBusyChange }: M
           description={discovery?.latest?.run.status === 'failed' ? t('discovery.empty_no_match_desc') : t('discovery.empty_no_auto_desc')}
         />
       ) : (
-        <Card variant="flush" title={t('discovery.models_card')} subtitle={t('discovery.models_subtitle')} extra={(
+        <Card variant="flush" title={t('discovery.models_card')} extra={(
           <div className={styles.rowActions}>
             <StatusPill tone="warning">{t('discovery.selected_count', { count: selectedModels.size })}</StatusPill>
             <Button size="sm" variant="secondary" onClick={() => setConfirmOpen(true)} disabled={selectedModels.size === 0 || mutationBusy}><IconCircleCheck size={14} />{t('discovery.confirm_selected')}</Button>

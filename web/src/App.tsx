@@ -120,7 +120,6 @@ function App() {
           navigationItems={navigationItems}
           onNavigate={navigate}
           title={t(`shell.nav.${page}`)}
-          description={t(`shell.desc.${page}`)}
           refreshable
         >
           {({ getAdminKey, adminKeyConfigured, clearAdminKey, refreshRevision, setRefreshing }) => (

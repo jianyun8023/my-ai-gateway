@@ -234,7 +234,7 @@ export function CapabilitiesPage({ api, refreshRevision = 0, onBusyChange }: Cap
       {response.data.length === 0 ? (
         <EmptyTable title={t('capabilities.empty_snapshot_title')} description={t('capabilities.empty_snapshot_desc')} />
       ) : rows.length === 0 ? <EmptyTable title={t('capabilities.empty_filter')} /> : (
-        <Card variant="flush" title={t('capabilities.card_title')} subtitle={t('capabilities.card_subtitle')}>
+        <Card variant="flush" title={t('capabilities.card_title')}>
           <TableScroll label={t('capabilities.matrix_aria')}>
             <table className={`${styles.table} ${styles.capabilitiesTable}`}>
               <thead><tr><th>{t('capabilities.column_route')}</th><th>{t('capabilities.column_source_account')}</th>{GATEWAY_PROTOCOLS.map((protocol) => <th key={protocol}>{PROTOCOL_LABELS[protocol]}</th>)}<th>{t('common.actions')}</th></tr></thead>

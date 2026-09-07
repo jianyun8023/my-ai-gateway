@@ -214,7 +214,7 @@ export function SettingsPage({
     <section className={styles.page} data-od-id="page-settings">
       <PageActions>
         <div className={styles.snapshotMeta}>
-          <span><strong>{t('settings.resources_card')}</strong><small>{t('settings.resources_subtitle')}</small></span>
+          <span><strong>{t('settings.resources_card')}</strong></span>
           <StatusPill tone="accent">{t('settings.runtime_revision', { revision: snapshotRevision })}</StatusPill>
         </div>
         <Button variant="secondary" onClick={query.reload} loading={query.refreshing}><IconRefreshCw size={14} />{t('common.refresh')}</Button>
@@ -227,14 +227,14 @@ export function SettingsPage({
         <Card title={t('settings.card.key_session')} subtitle={t('settings.card.key_session_subtitle')}>
           <div className={styles.settingsStatus}>
             <IconShield size={20} />
-            <span><strong>{adminKeyConfigured ? t('settings.card.key_configured') : t('settings.card.key_not_configured')}</strong><small>{adminKeyConfigured ? t('settings.card.key_loaded_hint') : t('settings.card.key_hint')}</small></span>
+            <span><strong>{adminKeyConfigured ? t('settings.card.key_configured') : t('settings.card.key_not_configured')}</strong>{!adminKeyConfigured && <small>{t('settings.card.key_hint')}</small>}</span>
           </div>
           <div className={styles.cardActions}>
             <Button variant="secondary" onClick={() => { onClearAdminKey(); setNotice(t('settings.key_cleared')); }} disabled={!adminKeyConfigured}>{t('settings.clear_key')}</Button>
           </div>
         </Card>
 
-        <Card title={t('settings.card.runtime')} subtitle={t('settings.card.runtime_subtitle')}>
+        <Card title={t('settings.card.runtime')}>
           <DetailList>
             <DetailItem label={t('settings.snapshot_field.revision')}><code>{snapshotRevision}</code></DetailItem>
             <DetailItem label={t('settings.snapshot_field.generated_at')}>{formatDateTime(snapshotGeneratedAt)}</DetailItem>
@@ -246,7 +246,7 @@ export function SettingsPage({
           </div>
         </Card>
 
-        <Card title={t('settings.card.export')} subtitle={t('settings.card.export_subtitle')}>
+        <Card title={t('settings.card.export')}>
           <div className={styles.settingsStatus}>
             <IconDownload size={20} />
             <span><strong>{t('settings.card.export_redacted')}</strong><small>{t('settings.card.export_redacted_hint')}</small></span>
@@ -257,7 +257,7 @@ export function SettingsPage({
         </Card>
       </div>
 
-      <Card variant="flush" title={t('settings.card.keys')} subtitle={t('settings.card.keys_subtitle')} extra={<Button size="sm" variant="primary" onClick={() => setCreateOpen(true)}><IconPlus size={14} />{t('settings.new_key')}</Button>}>
+      <Card variant="flush" title={t('settings.card.keys')} extra={<Button size="sm" variant="primary" onClick={() => setCreateOpen(true)}><IconPlus size={14} />{t('settings.new_key')}</Button>}>
         {data.keys.length === 0 ? <EmptyTable title={t('settings.keys_empty')} /> : (
           <TableScroll label={t('settings.keys_table_aria')}>
             <table className={styles.table}>
@@ -303,7 +303,6 @@ export function SettingsPage({
           <IconKey size={22} />
           <div>
             <strong>{copyStatus === 'copied' ? t('settings.api_key_copied') : copyStatus === 'failed' ? t('settings.api_key_copy_denied') : t('settings.modal.reveal_subtitle')}</strong>
-            <span>{t('settings.modal.reveal_decrypt_note')}</span>
             {revealedKey && <code className={styles.secretValue}>{revealedKey.key}</code>}
           </div>
           <Button variant="primary" onClick={() => void copyRevealedKey()}><IconCopy size={14} />{t('common.copy_api_key')}</Button>

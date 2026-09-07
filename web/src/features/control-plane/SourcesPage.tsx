@@ -713,7 +713,7 @@ export function SourcesPage({ api, refreshRevision = 0, onBusyChange }: SourcesP
       <div role="tabpanel" id="sources-tabs-panel" aria-labelledby={`sources-tabs-${tab}`} tabIndex={0}>
       {tab === 'sources' ? (
         data.sources.length === 0 ? <EmptyTable title={t('sources.empty.sources_title')} description={t('sources.empty.sources_desc')} /> : (
-          <Card variant="flush" title={t('sources.card.sources_title')} subtitle={t('sources.card.sources_subtitle')}>
+          <Card variant="flush" title={t('sources.card.sources_title')}>
             <TableScroll label={t('sources.table.sources_region')}>
               <table className={styles.table}>
                 <thead><tr>
@@ -748,7 +748,7 @@ export function SourcesPage({ api, refreshRevision = 0, onBusyChange }: SourcesP
           </Card>
         )
       ) : data.accounts.length === 0 ? <EmptyTable title={t('sources.empty.accounts_title')} description={t('sources.empty.accounts_desc')} /> : (
-        <Card variant="flush" title={t('sources.card.accounts_title')} subtitle={t('sources.card.accounts_subtitle')}>
+        <Card variant="flush" title={t('sources.card.accounts_title')}>
           <TableScroll label={t('sources.table.accounts_region')}>
             <table className={styles.table}>
               <thead><tr>
