@@ -1,5 +1,7 @@
 // 控制台外壳/导航文案(简体中文)——命名空间 console.shell
 export const shell = {
+  switch_to_light: '切换为浅色主题',
+  switch_to_dark: '切换为深色主题',
   // 品牌与侧栏
   brand_name: 'AI Gateway',
   sidebar_aria: '控制台侧栏',

@@ -4,17 +4,6 @@
   --gateway-accent-soft: var(--accent-soft);
   --gateway-sidebar-width: 220px;
   --gateway-topbar-h: 52px;
-  --keeper-card-radius: 12px;
-  --keeper-card-padding: 20px;
-  --keeper-card-header-padding-x: 20px;
-  --keeper-card-header-padding-top: 18px;
-  --keeper-card-header-padding-bottom: 14px;
-  --keeper-card-title-size: var(--fs-h3);
-  --keeper-card-title-track-height: 26px;
-  --keeper-card-subtitle-size: var(--fs-meta);
-  --primary-color: var(--accent);
-  --primary-hover: color-mix(in oklch, var(--accent) 85%, black);
-  --primary-active: color-mix(in oklch, var(--accent) 74%, black);
 
   display: flex;
   min-height: 100vh;
@@ -22,22 +11,6 @@
   color: var(--fg);
   font-family: var(--font-body);
   font-size: var(--fs-body);
-}
-
-.shell :global(.card) {
-  border: 1px solid var(--border-color);
-  background: var(--floating-surface);
-  box-shadow: none;
-}
-
-.shell :global(.card-flush) {
-  padding: 0;
-  overflow: hidden;
-}
-
-.shell :global(.btn):focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
 }
 
 /* ─── sidebar ───────────────────────────────────────────────── */

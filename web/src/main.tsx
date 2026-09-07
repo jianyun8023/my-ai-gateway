@@ -6,10 +6,10 @@ import faviconUrl from './assets/gateway-icon.svg';
 import './styles/reset.scss';
 import './styles/variables.scss';
 import './styles/themes.scss';
-import './styles/gateway-brand.scss';
 import './styles/layout.scss';
 import './styles/components.scss';
 import './styles/global.scss';
+import './styles/gateway-brand.scss';
 import { useThemeStore } from './stores/useThemeStore';
 
 const faviconEl = document.querySelector<HTMLLinkElement>('link[rel="icon"]') ?? document.createElement('link');

@@ -287,10 +287,10 @@ textarea {
 }
 
 .keeper-card-surface {
-  background-color: var(--bg-primary);
+  background-color: var(--floating-surface);
   border: 1px solid var(--border-color);
   border-radius: var(--keeper-card-radius);
-  box-shadow: var(--shadow-lg);
+  box-shadow: none;
 }
 
 .card {
@@ -300,6 +300,7 @@ textarea {
 
 .card-flush {
   padding: 0;
+  overflow: hidden;
 }
 
 .card-header {
@@ -1138,4 +1139,39 @@ textarea {
 
 .hint {
   color: var(--text-secondary);
+}
+
+// Shared interaction details apply to both the shell and body-level Portals.
+:where(button, a, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: var(--focus-ring, 2px solid var(--accent));
+  outline-offset: 2px;
+}
+
+.card, .keeper-card-actions, .empty-state, .empty-content { min-width: 0; }
+.keeper-card-title, .keeper-card-subtitle, .empty-title, .empty-desc { overflow-wrap: anywhere; }
+.keeper-card-actions { flex-wrap: wrap; gap: 8px; }
+.empty-icon { flex-shrink: 0; }
+.empty-state[data-layout='centered'] {
+  min-height: 180px;
+  flex-direction: column;
+  justify-content: center;
+  text-align: center;
+  border-style: solid;
+  background: var(--floating-surface);
+  .empty-content { flex-direction: column; gap: 12px; max-width: 360px; }
+  .empty-desc { font-size: var(--fs-meta); line-height: 1.5; }
+}
+
+@media (max-width: 920px) {
+  .btn, .btn.btn-sm { min-height: 44px; }
+}
+@media (max-width: 600px) {
+  .card-header { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .keeper-card-actions { justify-content: flex-start; }
+  .empty-state { flex-direction: column; align-items: stretch; }
+  .empty-action > button { width: 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .btn { transition: none; }
+  .btn-action:hover:not(:disabled) { transform: none; }
 }

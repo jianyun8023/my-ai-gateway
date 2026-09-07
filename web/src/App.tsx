@@ -2,6 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import './index.css';
 import './App.css';
+import { LoadingState } from './components/ui/LoadingState';
 import {
   GatewayConsoleShell,
   type GatewayConsoleNavItem,
@@ -123,7 +124,7 @@ function App() {
           refreshable
         >
           {({ getAdminKey, adminKeyConfigured, clearAdminKey, refreshRevision, setRefreshing }) => (
-            <Suspense fallback={<div className="app-route-loading" role="status" aria-busy="true">{t('shell.page_loading')}</div>}>
+            <Suspense fallback={<LoadingState label={t('shell.page_loading')} />}>
               {USAGE_PAGES.has(page)
                 ? (
                     <GatewayUsagePage

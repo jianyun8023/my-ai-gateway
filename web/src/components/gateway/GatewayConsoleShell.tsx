@@ -6,9 +6,11 @@ import {
   useState,
   type ReactNode,
 } from 'react';
+import { IconButton } from '@/components/ui/IconButton';
 import { Button } from '@/components/ui/Button';
 import {
   IconMenu,
+  IconSunAsterisk,
   IconRefreshCw,
   IconX,
 } from '@/components/ui/icons';
@@ -256,14 +258,14 @@ export function GatewayConsoleShell({
               />
               <Button size="sm" variant="secondary" onClick={applyAdminKey}>{t('common.apply')}</Button>
             </label>
-            <Button size="sm" variant="ghost" onClick={() => setTheme(theme === 'dark' ? 'white' : 'dark')}>
-              {theme === 'dark' ? '☀' : '☽'}
-            </Button>
+            <IconButton label={t(theme === 'dark' ? 'shell.switch_to_light' : 'shell.switch_to_dark')} onClick={() => setTheme(theme === 'dark' ? 'white' : 'dark')}>
+              <IconSunAsterisk size={18} />
+            </IconButton>
             <div className={styles.topbarLanguage}>
               <LanguageSwitcher />
             </div>
             {refreshable && (
-              <Button size="sm" variant="secondary" onClick={() => setRefreshRevision((c) => c + 1)} loading={refreshing}>
+              <Button size="sm" variant="secondary" aria-label={t('common.refresh')} title={t('common.refresh')} onClick={() => setRefreshRevision((c) => c + 1)} loading={refreshing}>
                 <IconRefreshCw size={14} />
               </Button>
             )}

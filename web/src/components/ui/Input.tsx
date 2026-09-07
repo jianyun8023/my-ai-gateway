@@ -19,11 +19,11 @@ export function Input({ label, hint, error, rightElement, className = '', id, ..
       {label && <label htmlFor={inputId}>{label}</label>}
       <div style={{ position: 'relative' }}>
         <input
+          {...rest}
           id={inputId}
           className={`input ${className}`.trim()}
           aria-invalid={Boolean(error) || rest['aria-invalid']}
           aria-describedby={describedBy}
-          {...rest}
         />
         {rightElement && (
           <div style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)' }}>

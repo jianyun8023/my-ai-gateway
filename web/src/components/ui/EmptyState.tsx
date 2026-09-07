@@ -5,11 +5,12 @@ interface EmptyStateProps {
   title: string;
   description?: string;
   action?: ReactNode;
+  layout?: 'inline' | 'centered';
 }
 
-export function EmptyState({ title, description, action }: EmptyStateProps) {
+export function EmptyState({ title, description, action, layout = 'inline' }: EmptyStateProps) {
   return (
-    <div className="empty-state">
+    <div className="empty-state" data-layout={layout}>
       <div className="empty-content">
         <div className="empty-icon" aria-hidden="true">
           <IconInbox size={20} />
