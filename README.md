@@ -238,9 +238,3 @@ docs/                          设计、接口、部署和运维文档
 web/                           React + TypeScript 管理端
 config.example.json            初始化与导入示例
 ```
-
-## 第三方代码
-
-my-ai-gateway 不是 CPA Usage Keeper，也不使用其 Go 后端、SQLite、Redis queue、CPA Management API、Auth Files、Ranking、配额或充值逻辑。
-
-管理端的 Overview、Analysis 和 Request Events 页面结构及部分 React 交互基于 CPA Usage Keeper 的 MIT 代码适配。来源、复用边界和许可证见 [`web/THIRD_PARTY_NOTICES.md`](web/THIRD_PARTY_NOTICES.md) 与 [`web/licenses/CPA_USAGE_KEEPER_LICENSE`](web/licenses/CPA_USAGE_KEEPER_LICENSE)。
