@@ -6,9 +6,11 @@ import {
   useState,
   type ReactNode,
 } from 'react';
+import { IconButton } from '@/components/ui/IconButton';
 import { Button } from '@/components/ui/Button';
 import {
   IconMenu,
+  IconSunAsterisk,
   IconRefreshCw,
   IconX,
 } from '@/components/ui/icons';
@@ -42,7 +44,6 @@ interface GatewayConsoleShellProps {
   navigationItems: readonly GatewayConsoleNavItem[];
   onNavigate: (page: string) => void;
   title: string;
-  description: string;
   refreshable?: boolean;
   children: (context: GatewayConsoleContentContext) => ReactNode;
 }
@@ -70,7 +71,6 @@ export function GatewayConsoleShell({
   navigationItems,
   onNavigate,
   title,
-  description,
   refreshable = false,
   children,
 }: GatewayConsoleShellProps) {
@@ -215,17 +215,12 @@ export function GatewayConsoleShell({
           <Button size="sm" variant="secondary" onClick={applyAdminKey}>{t('shell.mobile_key_apply')}</Button>
         </div>
 
-        {/* Footer — matches prototype: status dot + running info */}
-        <div className={styles.sidebarFooter}>
-          <div className={styles.statusDot} />
-          <span>{t('shell.running_status')}</span>
-        </div>
       </aside>
 
       <button type="button" className={styles.mobileOverlay} data-open={mobileNavOpen} aria-label={t('shell.close_overlay')} tabIndex={mobileNavOpen ? 0 : -1} onClick={() => closeMobileNav(true)} />
 
       <div className={styles.mainArea}>
-        {/* Topbar — matches prototype: title + endpoint + search + admin key */}
+        {/* Topbar — matches prototype: title + endpoint + admin key */}
         <header className={styles.topbar} data-od-id="topbar">
           <button ref={menuButtonRef} type="button" className={styles.mobileMenuBtn} aria-label={t('shell.open_nav')} aria-controls="gateway-navigation" aria-expanded={mobileNavOpen} onClick={() => setMobileNavOpen(true)}>
             <IconMenu size={20} />
@@ -233,13 +228,7 @@ export function GatewayConsoleShell({
           <span className={styles.topbarTitle}>{title}</span>
           <div className={styles.topbarRight}>
             <div className={styles.endpointDisplay}>
-              <div className={styles.endpointDot} />
               <span>{gatewayEndpoint}</span>
-            </div>
-            <div className={styles.topbarSearch}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /></svg>
-              {t('shell.search')}
-              <kbd>{t('shell.search_hint')}</kbd>
             </div>
             <label className={styles.keyInput}>
               <span>{t('shell.admin_key_label')}</span>
@@ -256,27 +245,23 @@ export function GatewayConsoleShell({
               />
               <Button size="sm" variant="secondary" onClick={applyAdminKey}>{t('common.apply')}</Button>
             </label>
-            <Button size="sm" variant="ghost" onClick={() => setTheme(theme === 'dark' ? 'white' : 'dark')}>
-              {theme === 'dark' ? '☀' : '☽'}
-            </Button>
+            <IconButton label={t(theme === 'dark' ? 'shell.switch_to_light' : 'shell.switch_to_dark')} onClick={() => setTheme(theme === 'dark' ? 'white' : 'dark')}>
+              <IconSunAsterisk size={18} />
+            </IconButton>
             <div className={styles.topbarLanguage}>
               <LanguageSwitcher />
             </div>
             {refreshable && (
-              <Button size="sm" variant="secondary" onClick={() => setRefreshRevision((c) => c + 1)} loading={refreshing}>
+              <Button size="sm" variant="secondary" aria-label={t('common.refresh')} title={t('common.refresh')} onClick={() => setRefreshRevision((c) => c + 1)} loading={refreshing}>
                 <IconRefreshCw size={14} />
               </Button>
             )}
           </div>
         </header>
 
-        {/* Content — matches prototype: simple h1 + description + content */}
         <div className={styles.content}>
           <div className={styles.pageHeader}>
-            <div>
-              <h1>{title}</h1>
-              <p className={styles.pageDesc}>{description}</p>
-            </div>
+            <h1>{title}</h1>
           </div>
           {/* eslint-disable-next-line react-hooks/refs -- render prop pattern; ref callbacks are memoized */}
           {children(contentContext)}

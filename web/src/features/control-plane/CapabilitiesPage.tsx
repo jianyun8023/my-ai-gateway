@@ -1,3 +1,10 @@
+import { IconButton } from '@/components/ui/IconButton';
+import { LoadingState } from '@/components/ui/LoadingState';
+import { StatusPill } from '@/components/ui/StatusPill';
+import { TableScroll } from '@/components/ui/TableScroll';
+import { Button } from '@/components/ui/Button';
+import { Card } from '@/components/ui/Card';
+import { Modal } from '@/components/ui/Modal';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
@@ -9,9 +16,6 @@ import type {
   GatewayProtocol,
 } from '@/admin-api';
 import { GATEWAY_PROTOCOLS } from '@/admin-api';
-import { Button } from '@/components/ui/Button';
-import { Card } from '@/components/ui/Card';
-import { Modal } from '@/components/ui/Modal';
 import {
   IconEye,
   IconRefreshCw,
@@ -23,13 +27,9 @@ import {
   EmptyTable,
   ErrorState,
   FilterBar,
-  IconButton,
-  LoadingState,
   PROTOCOL_LABELS,
   PageActions,
   ProtocolPill,
-  StatusPill,
-  TableScroll,
   formatDateTime,
 } from './shared';
 import { useAdminQuery } from './useAdminQuery';
@@ -234,7 +234,7 @@ export function CapabilitiesPage({ api, refreshRevision = 0, onBusyChange }: Cap
       {response.data.length === 0 ? (
         <EmptyTable title={t('capabilities.empty_snapshot_title')} description={t('capabilities.empty_snapshot_desc')} />
       ) : rows.length === 0 ? <EmptyTable title={t('capabilities.empty_filter')} /> : (
-        <Card variant="flush" title={t('capabilities.card_title')} subtitle={t('capabilities.card_subtitle')}>
+        <Card variant="flush" title={t('capabilities.card_title')}>
           <TableScroll label={t('capabilities.matrix_aria')}>
             <table className={`${styles.table} ${styles.capabilitiesTable}`}>
               <thead><tr><th>{t('capabilities.column_route')}</th><th>{t('capabilities.column_source_account')}</th>{GATEWAY_PROTOCOLS.map((protocol) => <th key={protocol}>{PROTOCOL_LABELS[protocol]}</th>)}<th>{t('common.actions')}</th></tr></thead>

@@ -1,5 +1,7 @@
 // 控制台外壳/导航文案(简体中文)——命名空间 console.shell
 export const shell = {
+  switch_to_light: '切换为浅色主题',
+  switch_to_dark: '切换为深色主题',
   // 品牌与侧栏
   brand_name: 'AI Gateway',
   sidebar_aria: '控制台侧栏',
@@ -9,7 +11,6 @@ export const shell = {
   open_nav: '打开导航',
   mobile_key_label: 'Admin Key',
   mobile_key_apply: '应用',
-  running_status: '网关运行中',
 
   // 导航分组
   section: {
@@ -30,23 +31,9 @@ export const shell = {
     settings: '系统设置',
   },
 
-  // 页面描述
-  desc: {
-    overview: '过去 24 小时的网关运行状态',
-    analysis: 'Token 构成、模型分布、来源分析与延迟诊断',
-    events: '查看每次请求的元数据、重试与 Token 明细',
-    sources: '管理提供商、来源、账号与连接配置',
-    discovery: '从上游发现模型,对比差异并确认后可路由',
-    models: '逻辑模型映射、来源绑定与协议路由配置',
-    capabilities: '按来源与协议查看三协议有效能力矩阵',
-    settings: '网关入口、虚拟密钥与配置管理',
-  },
-
   // 顶栏
   admin_key_label: 'Admin Key',
   admin_key_placeholder: 'GATEWAY_ADMIN_KEY',
-  search: '搜索…',
-  search_hint: '⌘K',
 
   // 通用占位
   page_loading: '正在加载页面…',

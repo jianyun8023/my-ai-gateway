@@ -1,3 +1,5 @@
+import { SelectField, TextField } from '@/components/ui/FormField';
+import { StatusPill } from '@/components/ui/StatusPill';
 import type {
   MetadataSource,
   ModelMetadataField,
@@ -5,7 +7,7 @@ import type {
 } from '@/admin-api';
 import { MODEL_METADATA_FIELDS } from '@/admin-api';
 import { useTranslation } from 'react-i18next';
-import { SelectField, StatusPill, TextField } from './shared';
+import {} from './shared';
 import styles from './ControlPlane.module.scss';
 
 export type MetadataDraft = Record<ModelMetadataField, string>;

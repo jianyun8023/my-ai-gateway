@@ -524,15 +524,11 @@ UsageEvent 已记录实际 `upstream_model_id`、`route_id`、`streamed`、脱�
 
 Provider 与 Source 已使用独立运行时身份：Provider 按 Source 固化的 ProviderPreset 聚合，Source 保留每次实际 Binding/attempt 的具体来源；组合筛选不会重复逻辑请求或 Token。
 
-### 7.4 统计接口和页面
+### 7.4 控制台
 
-已完成稳定 v1 `/admin/usage/summary`、`timeseries`、`breakdown`、`events`、`export` 查询契约、组合筛选、确定性游标分页和 CSV/JSON 导出。活动 Web 应用已经收敛为网关原生 Overview、Analysis、Request Events 三页，只请求 `/admin/usage/*`，不挂载 CPA Session、Ranking、Auth Files、配额、定价或请求正文功能。
+控制台提供总览、用量分析、请求事件、来源管理、模型发现、模型与路由、能力矩阵、系统设置八个入口。用量页面通过 `/admin/usage/*` 查询统计与请求明细；管理页面通过对应 `/admin/*` 资源完成接入、模型确认、路由和 Virtual Key 管理。
 
-可复用控制台外壳与独立 Management 空间（#42）已经完成；管理产品面的剩余工作是有效能力矩阵页面（#43），以及 Source 接入和模型发现/确认页面（#45）。Admin API 已 fail closed 并与数据面 Key 完全分离；当前不把 CPA 登录或 Admin Session 当作已有能力。
-
-2026-08-31 控制台原型评审后，视觉基线采用 Tech-Utility 设计语言、Signal Green、固定桌面侧栏、紧凑顶部栏、卡片/表格和右侧详情抽屉；正式主导航仍只包含 Overview、Analysis、Request Events。设计 Token 与组件约束维护在 [`brand-spec.md`](brand-spec.md)，原型归档在 [`prototypes/ai-gateway-prototype.html`](prototypes/ai-gateway-prototype.html)，只作为设计参考，不参与构建。Source/Account、LogicalModel/SourceModel/ModelBinding/Route 必须继续按领域职责分离，不能照静态原型合并。响应式按 `<= 920px` overlay 侧栏、`<= 600px` 单列筛选/全宽 drawer、`<= 380px` 紧凑 KPI 渐进降级。实施与验收记录见 GitHub Issue #33。
-
-CPA Usage Keeper 只复用 React 页面和交互，不复用其 Go 后端、SQLite、CPA Redis queue 或 CPA Management API。[CPA Usage Keeper](https://github.com/Willxup/cpa-usage-keeper)
+`GatewayConsoleShell` 统一导航与 Admin Key 连接。用量视图与管理视图分别由 `GatewayUsagePage`、`GatewayManagementPage` 接入，公共组件位于 `web/src/components/ui`。视觉与交互规范见 [design.md](../design.md)，目录与开发命令见 [前端 README](../web/README.md)。
 
 ### 7.5 账号健康和生产化
 
@@ -601,7 +597,7 @@ SSE usage 解析失败日志只记录 request_id、成功状态、字节长度�
 
 上述真实环境基线之后，主线已通过 mock 上游和真实 PostgreSQL 回归补齐实际 `upstream_model_id`、流式 TTFT、首选账号不可用时的 early fallback、HTTP/传输错误统一加权选择、全部失败归因和跨 Source attempt 审计。三家真实 Provider 尚未在这些修复后完整重跑，因此这是待复验项，不再作为“功能未实现”记录。
 
-Usage 的 `provider_id` 与 `source_id` 已在 DB-first snapshot、主路径、early fallback、HTTP/传输 fallback、全失败与流式路径中分离，并有真实 PostgreSQL 回归。活动 Web 源码只请求 `/admin/usage/*`；`web/dist` 是构建产物，必须由当前源码生成，不能复用历史 Keeper 构建。
+Usage 的 `provider_id` 与 `source_id` 已在 DB-first snapshot、主路径、early fallback、HTTP/传输 fallback、全失败与流式路径中分离，并有真实 PostgreSQL 回归。用量页面请求 `/admin/usage/*`；`web/dist` 是构建产物，必须由当前源码生成，不能复用历史 Keeper 构建。
 
 ## 8. 验收标准
 
@@ -625,7 +621,7 @@ Usage 的 `provider_id` 与 `source_id` 已在 DB-first snapshot、主路径、e
 
 - Chat Completions 原生透传；
 - Anthropic Messages 原生透传；
-- Responses 使用内置 Adapter；
+- Responses 原生透传至 `/v1/responses`；
 - thinking/signature 保留；
 - function call 保留；
 - web search 保留；
@@ -639,12 +635,6 @@ Usage 的 `provider_id` 与 `source_id` 已在 DB-first snapshot、主路径、e
 - 上游 usage 优先；
 - 缺失 usage 时明确标记估算或缺失。
 
-## 9. 开发顺序
+## 9. 后续工作
 
-以下顺序以当前开放 Issue 和依赖关系为准，互不冲突的切片可以并行：
-
-1. 在已完成自动验证门禁、Admin Key 分离和 URL/SSRF 防护（#49、#44、#46）的基础上，继续收口 Secret 和审计安全基线（#47、#48）。
-2. 在已完成独立 Management 外壳（#42）的基础上，并行接入有效能力矩阵（#43）和 Source/模型发现确认流（#45）。
-3. 完成 #8 用量分析 Epic 的最终验收并关闭。
-4. 完成 Virtual Key 生命周期和 SSE 生命周期契约（#51、#54）；健康持久化/主动探测（#52）已完成。
-5. Prometheus/OpenTelemetry 和数据保留、备份与恢复流程已实现（#50、#53）；复核部署配置和运行证据。
+开放任务、依赖与发布验收统一维护在 [todo.md](todo.md)。

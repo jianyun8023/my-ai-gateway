@@ -1,5 +1,14 @@
 // 系统设置页文案(英文)——命名空间 console.settings
 export const settings = {
+  overlap_seconds: "Overlap (seconds)",
+  overlap_hint: "0–86400 seconds. The old key remains valid during overlap, subject to its original expiry.",
+  overlap_invalid: "Enter a whole number between 0 and 86400 seconds.",
+  rotation_hint: "Generate a new key and set its model allowlist. The old key keeps its existing model permissions.",
+  rotation_immediate: "With no overlap, the old key stops working immediately after rotation.",
+  key_rotated_overlap: "{{name}} rotated. The old key is valid until at most {{until}}. Update your clients before then.",
+  key_rotated_immediate: "{{name}} rotated. The old key is no longer valid. Update your client key.",
+  valid_until: "Valid until at most {{until}}",
+  rotate_key_aria: "Rotate {{name}}",
   // 表单与校验
   key_name_required: 'Key name cannot be empty.',
   key_name: 'Key name',
@@ -7,10 +16,10 @@ export const settings = {
   allowed_models_hint: 'Comma-separated; leave empty to allow all models.',
 
   // 消息
-  key_created: 'Virtual Key created and stored encrypted; you can view it again at any time.',
+  key_created: 'Virtual key created. You can view or copy it.',
   key_revoked: 'Virtual Key {{name}} revoked.',
-  runtime_reloaded: 'Runtime snapshot reloaded from PostgreSQL.',
-  export_done: 'Exported the current admin resources snapshot; the file contains no credential references.',
+  runtime_reloaded: 'Runtime configuration reloaded.',
+  export_done: 'Configuration exported.',
   key_cleared: 'The Admin Key for this tab has been cleared.',
   api_key_copied: 'API Key copied to clipboard.',
   api_key_copy_denied: 'The browser did not allow automatic copying.',
@@ -18,23 +27,18 @@ export const settings = {
   // 主页面
   loading: 'Loading settings…',
   resources_card: 'Admin resources',
-  resources_subtitle: 'Live control-plane contract',
   runtime_revision: 'runtime revision {{revision}}',
   card: {
-    key_session: 'Admin Key Session',
-    key_session_subtitle: 'Stored only in this tab\u2019s sessionStorage and used solely for /admin/* authorization',
+    key_session: 'Admin connection',
+    key_session_subtitle: 'The Admin Key is stored only in this tab.',
     key_configured: 'Admin Key configured for this tab',
     key_not_configured: 'No Admin Key configured for this tab',
-    key_hint: 'Enter an Admin Key above to reach the control-plane API.',
-    key_loaded_hint: 'This page loaded successfully, which only means the Admin API is currently reachable; it does not imply that backend authentication is enabled.',
+    key_hint: 'Enter an Admin Key in the navigation bar.',
     runtime: 'Runtime Snapshot',
-    runtime_subtitle: 'Fact source: GET /admin/capabilities; reload: POST /admin/config/reload',
     export: 'Configuration Export',
-    export_subtitle: 'Combines current Sources, Accounts, LogicalModels, Bindings, Routes, and the runtime revision',
     export_redacted: 'Redacted JSON',
-    export_redacted_hint: 'Credential references are replaced with placeholders; no secrets are exported.',
+    export_redacted_hint: 'Includes sources, accounts, models and routes, without keys.',
     keys: 'Virtual Keys',
-    keys_subtitle: 'Authentication uses an irreversible hash; raw values are stored encrypted and require the Admin Key to view or copy',
   },
   clear_key: 'Clear session key',
   reload_runtime: 'Reload Runtime',
@@ -63,6 +67,9 @@ export const settings = {
   all_models: 'All models',
   row_id: 'ID {{id}}',
   key_status: {
+    expired: "Expired",
+    overlap: "Overlap",
+    rotated: "Rotated",
     active: 'Active',
     disabled: 'Disabled',
     revoked: 'Revoked',
@@ -73,11 +80,12 @@ export const settings = {
 
   // 弹窗
   modal: {
+    rotate_title: "Rotate key · {{name}}",
+    rotate_confirm: "Rotate Key",
     new_key: 'New Virtual Key',
     create_key: 'Create Key',
     reveal_title: 'Virtual Key · {{name}}',
     reveal_subtitle: 'API Key can be viewed and copied now.',
-    reveal_decrypt_note: 'This value is returned decrypted only through the Admin API; data-plane authentication still uses the irreversible hash stored in the database.',
     revoke_title: 'Revoke Virtual Key',
     revoke_body: 'Revoke {{name}}? Revoked keys cannot be restored.',
     revoke_confirm: 'Revoke',

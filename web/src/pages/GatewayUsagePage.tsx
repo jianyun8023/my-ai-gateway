@@ -1,3 +1,7 @@
+import { StatusPill, type StatusTone } from '@/components/ui/StatusPill';
+import { LoadingState } from '@/components/ui/LoadingState';
+import { Notice } from '@/components/ui/Notice';
+import { SegmentedTabs } from '@/components/ui/SegmentedTabs';
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 import { currentIntlLocale } from '@/i18n/intl';
@@ -242,6 +246,7 @@ function FilterBar({ draft, onChange, onApply, onPresetSelect, onReset, loading 
             <button
               key={preset.key}
               type="button"
+              aria-pressed={draft.relativePreset === preset.key && draft.timeMode === 'relative'}
               data-active={draft.relativePreset === preset.key && draft.timeMode === 'relative'}
               onClick={() => onPresetSelect(preset.key)}
             >
@@ -250,6 +255,7 @@ function FilterBar({ draft, onChange, onApply, onPresetSelect, onReset, loading 
           ))}
           <button
             type="button"
+            aria-pressed={draft.timeMode === 'absolute'}
             data-active={draft.timeMode === 'absolute'}
             onClick={selectCustom}
           >
@@ -265,7 +271,7 @@ function FilterBar({ draft, onChange, onApply, onPresetSelect, onReset, loading 
         <label>{t('usage.field.logical_model')}<input value={draft.logicalModel ?? ''} onChange={(event) => update('logicalModel', event.target.value)} placeholder={t('common.all')} /></label>
         <label>{t('usage.field.provider')}<input value={draft.provider ?? ''} onChange={(event) => update('provider', event.target.value)} placeholder={t('common.all')} /></label>
         <label>{t('usage.field.status')}<select value={draft.status ?? ''} onChange={(event) => update('status', event.target.value)}><option value="">{t('common.all')}</option><option value="success">{t('usage.filter.status_success')}</option><option value="failure">{t('usage.filter.status_failure')}</option></select></label>
-        <Button variant="ghost" onClick={() => setShowAdvanced(!showAdvanced)}>
+        <Button variant="ghost" aria-expanded={showAdvanced} onClick={() => setShowAdvanced(!showAdvanced)}>
           {t('usage.filter.advanced')}{advancedCount > 0 ? ` (${advancedCount})` : ''}
         </Button>
         <Button variant="ghost" onClick={onReset}>{t('usage.filter.reset')}</Button>
@@ -332,7 +338,7 @@ function TokenComposition({ summary }: { summary: UsageSummaryViewModel }) {
   const totalFormatted = formatCompactWithTitle(total);
 
   return (
-    <Card title={t('usage.composition.title')} subtitle={t('usage.composition.subtitle')}>
+    <Card title={t('usage.composition.title')}>
       <div className={styles.tokenComposition}>
         <div className={styles.tokenTotal}>
           <span>{t('usage.legend.total')}</span>
@@ -420,7 +426,7 @@ function Overview({ data, metric, onMetricChange }: { data: UsageOverviewViewMod
         <TokenComposition summary={summary} />
       </div>
       <div className={styles.overviewLowerGrid}>
-        <Card title={t('usage.recent.title')} subtitle={t('usage.recent.subtitle')} data-od-id="recent-activity">
+        <Card title={t('usage.recent.title')} data-od-id="recent-activity">
           {data.recentEvents.length === 0 ? <EmptyState title={t('usage.recent.empty')} /> : (
             <div className={styles.recentList}>{data.recentEvents.map((event) => (
               <div key={`${event.id}:${event.createdAt}`}>
@@ -488,7 +494,8 @@ function Analysis({ breakdowns, summary }: { breakdowns: Partial<Record<UsageBre
 
 function UsageBadge({ source }: { source: string }) {
   const { t } = useTranslation('console');
-  return <span className={styles.usageBadge} data-source={source}>{t(`usage.usage_source.${source}`, { defaultValue: source })}</span>;
+  const tones: Record<string, StatusTone> = { upstream: 'success', estimated: 'warning', missing: 'danger' };
+  return <StatusPill tone={tones[source] ?? 'muted'}>{t(`usage.usage_source.${source}`, { defaultValue: source })}</StatusPill>;
 }
 
 const renderEventCell = (event: UsageEventViewModel, column: EventColumn, t: TFunction) => {
@@ -500,7 +507,7 @@ const renderEventCell = (event: UsageEventViewModel, column: EventColumn, t: TFu
     case 'sourceAccount': return <span>{event.sourceId}<small>{event.account}</small></span>;
     case 'clientSource': return event.clientSource;
     case 'protocol': return <span>{event.protocolIn}<small>→ {event.protocolUpstream}</small></span>;
-    case 'status': return <span className={styles.statusBadge} data-success={event.success}>{event.statusCode || '—'} · {event.success ? t('usage.event.success') : t('usage.event.failure')}</span>;
+    case 'status': return <StatusPill tone={event.success ? 'success' : 'danger'}>{event.statusCode || '—'} · {event.success ? t('usage.event.success') : t('usage.event.failure')}</StatusPill>;
     case 'retries': {
       if (!event.fallback) return String(event.retryCount);
       const label = event.retryCount > 0
@@ -605,7 +612,6 @@ function EventDetails({ event, onClose, client }: { event: UsageEventViewModel; 
           )}
         </Card>
         {event.errorSummary && <Card title={t('usage.detail.error_summary')}><p className={styles.errorSummary}>{event.errorSummary}</p></Card>}
-        <p className={styles.noBodyNotice}>{t('usage.detail.no_body_notice')}</p>
       </aside>
     </div>
   );
@@ -643,7 +649,7 @@ function EventsTable({ events, hasMore, loadingMore, onLoadMore, visibleColumns,
   if (events.length === 0) return <EmptyState title={t('usage.events.empty_title')} description={t('usage.events.empty_desc')} />;
 
   return (
-    <Card variant="flush" title={t('usage.events.title')} subtitle={t('usage.events.subtitle')} data-od-id="events-table" extra={<div className={styles.eventActions}><details><summary>{t('common.column_prefs')}</summary><div className={styles.columnMenu}>{EVENT_COLUMNS.map((column) => <label key={column}><input type="checkbox" checked={visibleColumns.includes(column)} onChange={() => onVisibleColumnsChange(visibleColumns.includes(column) ? visibleColumns.filter((item) => item !== column) : EVENT_COLUMNS.filter((item) => visibleColumns.includes(item) || item === column))} />{t(EVENT_COLUMN_LABELS[column])}</label>)}</div></details><Button size="sm" variant="secondary" onClick={() => onExport('csv')}>{t('common.export_csv')}</Button><Button size="sm" variant="secondary" onClick={() => onExport('json')}>{t('common.export_json')}</Button></div>}>
+    <Card variant="flush" title={t('usage.events.title')} data-od-id="events-table" extra={<div className={styles.eventActions}><details><summary>{t('common.column_prefs')}</summary><div className={styles.columnMenu}>{EVENT_COLUMNS.map((column) => <label key={column}><input type="checkbox" checked={visibleColumns.includes(column)} onChange={() => onVisibleColumnsChange(visibleColumns.includes(column) ? visibleColumns.filter((item) => item !== column) : EVENT_COLUMNS.filter((item) => visibleColumns.includes(item) || item === column))} />{t(EVENT_COLUMN_LABELS[column])}</label>)}</div></details><Button size="sm" variant="secondary" onClick={() => onExport('csv')}>{t('common.export_csv')}</Button><Button size="sm" variant="secondary" onClick={() => onExport('json')}>{t('common.export_json')}</Button></div>}>
       <div className={styles.eventTable} style={{ '--event-columns': visibleColumns.length } as CSSProperties}>
         <div className={styles.eventHeader}>{visibleColumns.map((column) => <span key={column}>{t(EVENT_COLUMN_LABELS[column])}</span>)}</div>
         <div ref={parentRef} className={styles.eventScroll}>
@@ -825,15 +831,15 @@ export function GatewayUsagePage({
       {activeTab === 'overview' && (
         <div className={styles.granularityBar}>
           <span>{t('usage.granularity.label')}</span>
-          {(['auto', 'hour', 'day'] as const).map((g) => (
-            <button key={g} data-active={granularity === g} onClick={() => setGranularity(g)}>
-              {g === 'auto' ? t('usage.granularity.auto') : g === 'hour' ? t('usage.granularity.hour') : t('usage.granularity.day')}
-            </button>
-          ))}
+          <SegmentedTabs mode="group" label={t('usage.granularity.label')} value={granularity} onChange={setGranularity} options={[
+            { value: 'auto', label: t('usage.granularity.auto') },
+            { value: 'hour', label: t('usage.granularity.hour') },
+            { value: 'day', label: t('usage.granularity.day') },
+          ]} />
         </div>
       )}
-      {error && <div className={styles.errorBanner} role="alert"><span>{error}</span><Button size="sm" variant="secondary" onClick={() => void loadActiveTab()}>{t('common.retry')}</Button></div>}
-      {loading && !error ? <div className={styles.loadingState} aria-busy="true">{t('usage.page.loading')}</div> : (
+      {error && <Notice action={<Button size="sm" variant="secondary" onClick={() => void loadActiveTab()}>{t('common.retry')}</Button>}>{error}</Notice>}
+      {loading && !error ? <LoadingState label={t('usage.page.loading')} /> : (
         activeTab === 'overview'
           ? overview && <Overview data={overview} metric={trendMetric} onMetricChange={setTrendMetric} />
           : activeTab === 'analysis'

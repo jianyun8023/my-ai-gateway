@@ -39,7 +39,6 @@ describe('GatewayConsoleShell Admin key boundary', () => {
           navigationItems={[{ id: 'overview', label: '总览', icon: <IconDashboardGrid /> }]}
           onNavigate={() => {}}
           title="总览"
-          description="Token"
           refreshable
         >
           {(context) => {

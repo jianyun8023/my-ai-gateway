@@ -1,4 +1,12 @@
-import { useCallback, useState, type FormEvent } from 'react';
+import { IconButton } from '@/components/ui/IconButton';
+import { LoadingState } from '@/components/ui/LoadingState';
+import { StatusPill } from '@/components/ui/StatusPill';
+import { TableScroll } from '@/components/ui/TableScroll';
+import { TextAreaField, TextField } from '@/components/ui/FormField';
+import { Button } from '@/components/ui/Button';
+import { Card } from '@/components/ui/Card';
+import { Modal } from '@/components/ui/Modal';
+import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import type {
   AdminErrorShape,
@@ -6,12 +14,10 @@ import type {
   GatewayAdminResources,
   RuntimeReloadResult,
   VirtualKey,
+  VirtualKeyRotateInput,
 } from '@/admin-api';
 import { normalizeAdminError } from '@/admin-api';
 import { useLocalizedApiError } from '@/hooks/useLocalizedApiError';
-import { Button } from '@/components/ui/Button';
-import { Card } from '@/components/ui/Card';
-import { Modal } from '@/components/ui/Modal';
 import {
   IconCopy,
   IconDatabase,
@@ -31,17 +37,12 @@ import {
   ErrorState,
   FormError,
   FormGrid,
-  IconButton,
-  LoadingState,
   PageActions,
-  StatusPill,
   SuccessNotice,
-  TableScroll,
-  TextAreaField,
-  TextField,
   formatDateTime,
 } from './shared';
 import { useAdminQuery } from './useAdminQuery';
+import { VirtualKeyRotationForm } from './VirtualKeyRotationForm';
 import styles from './ControlPlane.module.scss';
 
 interface SettingsPageProps {
@@ -108,6 +109,8 @@ export function SettingsPage({
   const [revealedKey, setRevealedKey] = useState<{ id: number; name: string; key: string }>();
   const [copyStatus, setCopyStatus] = useState<'copied' | 'pending' | 'failed'>('pending');
   const [revokeTarget, setRevokeTarget] = useState<VirtualKey>();
+  const [rotateTarget, setRotateTarget] = useState<VirtualKey>();
+  const [now, setNow] = useState(Date.now);
   const [mutationBusy, setMutationBusy] = useState(false);
   const [mutationError, setMutationError] = useState<AdminErrorShape>();
   const [notice, setNotice] = useState('');
@@ -122,6 +125,12 @@ export function SettingsPage({
   }, [api]);
   const query = useAdminQuery({ load, refreshRevision, onBusyChange });
   const data = query.data;
+
+  useEffect(() => {
+    if (!data?.keys.some((key) => key.expires_at || key.overlap_until)) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [data]);
 
   const mutate = async (operation: () => Promise<void>, successMessage?: string) => {
     if (mutationBusy) return;
@@ -174,6 +183,24 @@ export function SettingsPage({
     });
   };
 
+  const rotateKey = (input: VirtualKeyRotateInput) => {
+    if (!rotateTarget) return;
+    void mutate(async () => {
+      const result = await api.rotateVirtualKey(rotateTarget.id, input);
+      // An earlier expiry still applies to the old key during the overlap.
+      const validUntil = result.overlap_until && rotateTarget.expires_at
+        ? new Date(Math.min(Date.parse(result.overlap_until), Date.parse(rotateTarget.expires_at))).toISOString()
+        : result.overlap_until;
+      setRevealedKey({ id: result.new_id, name: rotateTarget.name, key: result.key });
+      setCopyStatus('pending');
+      setNotice(validUntil
+        ? t('settings.key_rotated_overlap', { name: rotateTarget.name, until: formatDateTime(validUntil) })
+        : t('settings.key_rotated_immediate', { name: rotateTarget.name }));
+      setRotateTarget(undefined);
+      query.reload();
+    });
+  };
+
   const revokeKey = () => {
     if (!revokeTarget) return;
     void mutate(async () => {
@@ -215,27 +242,27 @@ export function SettingsPage({
     <section className={styles.page} data-od-id="page-settings">
       <PageActions>
         <div className={styles.snapshotMeta}>
-          <span><strong>{t('settings.resources_card')}</strong><small>{t('settings.resources_subtitle')}</small></span>
+          <span><strong>{t('settings.resources_card')}</strong></span>
           <StatusPill tone="accent">{t('settings.runtime_revision', { revision: snapshotRevision })}</StatusPill>
         </div>
         <Button variant="secondary" onClick={query.reload} loading={query.refreshing}><IconRefreshCw size={14} />{t('common.refresh')}</Button>
       </PageActions>
       <SuccessNotice message={notice} onDismiss={() => setNotice('')} />
       {query.error && <ErrorState error={query.error} onRetry={query.reload} />}
-      {mutationError && !createOpen && !revokeTarget && <ErrorState error={mutationError} />}
+      {mutationError && !createOpen && !revokeTarget && !rotateTarget && <ErrorState error={mutationError} />}
 
       <div className={styles.settingsGrid}>
         <Card title={t('settings.card.key_session')} subtitle={t('settings.card.key_session_subtitle')}>
           <div className={styles.settingsStatus}>
             <IconShield size={20} />
-            <span><strong>{adminKeyConfigured ? t('settings.card.key_configured') : t('settings.card.key_not_configured')}</strong><small>{adminKeyConfigured ? t('settings.card.key_loaded_hint') : t('settings.card.key_hint')}</small></span>
+            <span><strong>{adminKeyConfigured ? t('settings.card.key_configured') : t('settings.card.key_not_configured')}</strong>{!adminKeyConfigured && <small>{t('settings.card.key_hint')}</small>}</span>
           </div>
           <div className={styles.cardActions}>
             <Button variant="secondary" onClick={() => { onClearAdminKey(); setNotice(t('settings.key_cleared')); }} disabled={!adminKeyConfigured}>{t('settings.clear_key')}</Button>
           </div>
         </Card>
 
-        <Card title={t('settings.card.runtime')} subtitle={t('settings.card.runtime_subtitle')}>
+        <Card title={t('settings.card.runtime')}>
           <DetailList>
             <DetailItem label={t('settings.snapshot_field.revision')}><code>{snapshotRevision}</code></DetailItem>
             <DetailItem label={t('settings.snapshot_field.generated_at')}>{formatDateTime(snapshotGeneratedAt)}</DetailItem>
@@ -247,7 +274,7 @@ export function SettingsPage({
           </div>
         </Card>
 
-        <Card title={t('settings.card.export')} subtitle={t('settings.card.export_subtitle')}>
+        <Card title={t('settings.card.export')}>
           <div className={styles.settingsStatus}>
             <IconDownload size={20} />
             <span><strong>{t('settings.card.export_redacted')}</strong><small>{t('settings.card.export_redacted_hint')}</small></span>
@@ -258,25 +285,34 @@ export function SettingsPage({
         </Card>
       </div>
 
-      <Card variant="flush" title={t('settings.card.keys')} subtitle={t('settings.card.keys_subtitle')} extra={<Button size="sm" variant="primary" onClick={() => setCreateOpen(true)}><IconPlus size={14} />{t('settings.new_key')}</Button>}>
+      <Card variant="flush" title={t('settings.card.keys')} extra={<Button size="sm" variant="primary" onClick={() => setCreateOpen(true)}><IconPlus size={14} />{t('settings.new_key')}</Button>}>
         {data.keys.length === 0 ? <EmptyTable title={t('settings.keys_empty')} /> : (
           <TableScroll label={t('settings.keys_table_aria')}>
             <table className={styles.table}>
               <thead><tr><th>{t('settings.keys_column.name')}</th><th>{t('settings.keys_column.prefix')}</th><th>{t('settings.keys_column.allowed_models')}</th><th>{t('settings.keys_column.created')}</th><th>{t('settings.keys_column.last_used')}</th><th>{t('settings.keys_column.status')}</th><th>{t('common.actions')}</th></tr></thead>
-              <tbody>{data.keys.map((key) => (
+              <tbody>{data.keys.map((key) => {
+                const expired = Boolean(key.expires_at && Date.parse(key.expires_at) <= now);
+                const replaced = key.replaced_by_id != null;
+                const overlapActive = replaced && Boolean(key.overlap_until && Date.parse(key.overlap_until) > now);
+                const status = key.revoked_at ? 'revoked' : !key.enabled ? 'disabled' : expired ? 'expired' : replaced ? overlapActive ? 'overlap' : 'rotated' : 'active';
+                const validUntil = key.overlap_until && key.expires_at
+                  ? new Date(Math.min(Date.parse(key.overlap_until), Date.parse(key.expires_at))).toISOString()
+                  : key.overlap_until;
+                return (
                 <tr key={key.id}>
                   <td><span className={styles.primaryText}><strong>{key.name}</strong><small>{t('settings.row_id', { id: key.id })}</small></span></td>
                   <td><code>{key.key_prefix}…</code></td>
                   <td>{key.allowed_models.length === 0 ? <StatusPill>{t('settings.all_models')}</StatusPill> : <span className={styles.inlineActions}>{key.allowed_models.map((model) => <StatusPill key={model}>{model}</StatusPill>)}</span>}</td>
                   <td>{formatDateTime(key.created_at)}</td>
                   <td>{formatDateTime(key.last_used_at)}</td>
-                  <td><StatusPill tone={key.enabled && !key.revoked_at ? 'success' : 'muted'}>{key.revoked_at ? t('settings.key_status.revoked') : key.enabled ? t('settings.key_status.active') : t('settings.key_status.disabled')}</StatusPill></td>
+                  <td><span className={styles.primaryText}><StatusPill tone={status === 'active' ? 'success' : status === 'overlap' ? 'warning' : 'muted'}>{t(`settings.key_status.${status}`)}</StatusPill>{overlapActive && status === 'overlap' && <small>{t('settings.valid_until', { until: formatDateTime(validUntil) })}</small>}</span></td>
                   <td><span className={styles.inlineActions}>
-                    <IconButton label={key.key_recoverable ? t('settings.view_key_aria', { name: key.name }) : t('settings.view_key_unavailable_aria', { name: key.name })} disabled={!key.key_recoverable} onClick={() => revealKey(key)}><IconEye size={16} /></IconButton>
+                    <IconButton label={key.key_recoverable ? t('settings.view_key_aria', { name: key.name }) : t('settings.view_key_unavailable_aria', { name: key.name })} disabled={mutationBusy || !key.key_recoverable} onClick={() => revealKey(key)}><IconEye size={16} /></IconButton>
+                    <IconButton label={t('settings.rotate_key_aria', { name: key.name })} disabled={mutationBusy || status !== 'active'} onClick={() => { setMutationError(undefined); setRotateTarget(key); }}><IconRefreshCw size={16} /></IconButton>
                     <IconButton label={t('settings.revoke_key_aria', { name: key.name })} className={styles.dangerIcon} disabled={!key.enabled || Boolean(key.revoked_at)} onClick={() => setRevokeTarget(key)}><IconTrash2 size={16} /></IconButton>
                   </span></td>
                 </tr>
-              ))}</tbody>
+              ); })}</tbody>
             </table>
           </TableScroll>
         )}
@@ -294,6 +330,17 @@ export function SettingsPage({
       </Modal>
 
       <Modal
+        open={Boolean(rotateTarget)}
+        title={t('settings.modal.rotate_title', { name: rotateTarget?.name })}
+        width={560}
+        onClose={() => !mutationBusy && setRotateTarget(undefined)}
+        closeDisabled={mutationBusy}
+        footer={<><Button variant="secondary" disabled={mutationBusy} onClick={() => setRotateTarget(undefined)}>{t('common.cancel')}</Button><Button type="submit" form="virtual-key-rotation-form" loading={mutationBusy}><IconRefreshCw size={14} />{t('settings.modal.rotate_confirm')}</Button></>}
+      >
+        {rotateTarget && <VirtualKeyRotationForm key={rotateTarget.id} target={rotateTarget} busy={mutationBusy} error={mutationError ? localizedApiError(mutationError) : undefined} onSubmit={rotateKey} />}
+      </Modal>
+
+      <Modal
         open={Boolean(revealedKey)}
         title={revealedKey ? t('settings.modal.reveal_title', { name: revealedKey.name }) : ''}
         width={520}
@@ -304,7 +351,6 @@ export function SettingsPage({
           <IconKey size={22} />
           <div>
             <strong>{copyStatus === 'copied' ? t('settings.api_key_copied') : copyStatus === 'failed' ? t('settings.api_key_copy_denied') : t('settings.modal.reveal_subtitle')}</strong>
-            <span>{t('settings.modal.reveal_decrypt_note')}</span>
             {revealedKey && <code className={styles.secretValue}>{revealedKey.key}</code>}
           </div>
           <Button variant="primary" onClick={() => void copyRevealedKey()}><IconCopy size={14} />{t('common.copy_api_key')}</Button>

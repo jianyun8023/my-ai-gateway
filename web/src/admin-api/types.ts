@@ -461,6 +461,9 @@ export interface VirtualKey {
   created_at: string;
   last_used_at?: string | null;
   revoked_at?: string | null;
+  expires_at?: string | null;
+  replaced_by_id?: number | null;
+  overlap_until?: string | null;
 }
 
 export interface VirtualKeySecret {
@@ -476,6 +479,19 @@ export interface VirtualKeyCreateInput {
 export interface VirtualKeyCreateResult extends VirtualKeyCreateInput {
   id: number;
   key: string;
+}
+
+export interface VirtualKeyRotateInput {
+  overlap_secs: number;
+  allowed_models: string[];
+}
+
+export interface VirtualKeyRotateResult {
+  old_id: number;
+  new_id: number;
+  key_prefix: string;
+  key: string;
+  overlap_until: string | null;
 }
 
 export interface RuntimeReloadResult {

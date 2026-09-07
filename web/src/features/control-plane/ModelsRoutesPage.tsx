@@ -1,3 +1,12 @@
+import { IconButton } from '@/components/ui/IconButton';
+import { LoadingState } from '@/components/ui/LoadingState';
+import { SegmentedTabs } from '@/components/ui/SegmentedTabs';
+import { SelectField, TextField } from '@/components/ui/FormField';
+import { StatusPill } from '@/components/ui/StatusPill';
+import { TableScroll } from '@/components/ui/TableScroll';
+import { Button } from '@/components/ui/Button';
+import { Card } from '@/components/ui/Card';
+import { Modal } from '@/components/ui/Modal';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import type {
@@ -20,9 +29,6 @@ import type {
   SourceModel,
 } from '@/admin-api';
 import { GATEWAY_PROTOCOLS, normalizeAdminError } from '@/admin-api';
-import { Button } from '@/components/ui/Button';
-import { Card } from '@/components/ui/Card';
-import { Modal } from '@/components/ui/Modal';
 import {
   IconEye,
   IconPencil,
@@ -41,17 +47,10 @@ import {
   ErrorState,
   FormError,
   FormGrid,
-  IconButton,
-  LoadingState,
   PROTOCOL_LABELS,
   PageActions,
   ProtocolPill,
-  SegmentedTabs,
-  SelectField,
-  StatusPill,
   SuccessNotice,
-  TableScroll,
-  TextField,
   Toggle,
   formatDateTime,
 } from './shared';
@@ -581,7 +580,7 @@ export function ModelsRoutesPage({ api, refreshRevision = 0, onBusyChange }: Mod
   return (
     <section className={styles.page} data-od-id="page-models-routes">
       <PageActions>
-        <SegmentedTabs value={tab} label={t('models.region_aria')} options={[
+        <SegmentedTabs id="models-tabs" value={tab} label={t('models.region_aria')} options={[
           { value: 'logical-models', label: t('models.tab.logical_models'), count: data.logicalModels.length },
           { value: 'bindings', label: t('models.tab.bindings'), count: data.bindings.length },
           { value: 'routes', label: t('models.tab.routes'), count: data.routes.length },
@@ -595,8 +594,9 @@ export function ModelsRoutesPage({ api, refreshRevision = 0, onBusyChange }: Mod
       {query.error && <ErrorState error={query.error} onRetry={query.reload} />}
       {mutationError && !editor && !deleteTarget && <ErrorState error={mutationError} />}
 
+      <div role="tabpanel" id="models-tabs-panel" aria-labelledby={`models-tabs-${tab}`} tabIndex={0}>
       {tab === 'logical-models' && (data.logicalModels.length === 0 ? <EmptyTable title={t('models.empty.lm_title')} description={t('models.empty.lm_desc')} /> : (
-        <Card variant="flush" title={t('models.card.lm_title')} subtitle={t('models.card.lm_subtitle')}>
+        <Card variant="flush" title={t('models.card.lm_title')}>
           <TableScroll label={t('models.table.region_logical_models')}><table className={styles.table}>
             <thead><tr><th>{t('models.field.lm')}</th><th>{t('models.field.public_name')}</th><th>{t('models.table.header_catalog_status')}</th><th>{t('models.table.header_bindings')}</th><th>{t('models.table.header_routes')}</th><th>{t('models.table.header_enabled')}</th><th>{t('common.actions')}</th></tr></thead>
             <tbody>{data.logicalModels.map((model) => (
@@ -650,7 +650,7 @@ export function ModelsRoutesPage({ api, refreshRevision = 0, onBusyChange }: Mod
       ))}
 
       {tab === 'routes' && (data.routes.length === 0 ? <EmptyTable title={t('models.empty.route_title')} description={t('models.empty.route_desc')} /> : (
-        <Card variant="flush" title={t('models.card.route_title')} subtitle={t('models.card.route_subtitle')}>
+        <Card variant="flush" title={t('models.card.route_title')}>
           <TableScroll label={t('models.table.region_routes')}><table className={`${styles.table} ${styles.routesTable}`}>
             <thead><tr><th>{t('models.field.route_id')}</th><th>{t('models.field.lm')}</th><th>{t('models.field.protocols')}</th><th>{t('models.field.strategy')}</th><th>{t('models.table.header_runtime_rows')}</th><th>{t('models.field.lossy_value')}</th><th>{t('models.table.header_enabled')}</th><th>{t('common.actions')}</th></tr></thead>
             <tbody>{data.routes.map((route) => {
@@ -680,6 +680,7 @@ export function ModelsRoutesPage({ api, refreshRevision = 0, onBusyChange }: Mod
         </Card>
       ))}
 
+      </div>
       <Modal
         open={Boolean(editor)}
         title={editorTitle}

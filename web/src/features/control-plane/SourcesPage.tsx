@@ -1,3 +1,12 @@
+import { IconButton } from '@/components/ui/IconButton';
+import { LoadingState } from '@/components/ui/LoadingState';
+import { SegmentedTabs } from '@/components/ui/SegmentedTabs';
+import { SelectField, TextAreaField, TextField } from '@/components/ui/FormField';
+import { StatusPill } from '@/components/ui/StatusPill';
+import { TableScroll } from '@/components/ui/TableScroll';
+import { Button } from '@/components/ui/Button';
+import { Card } from '@/components/ui/Card';
+import { Modal } from '@/components/ui/Modal';
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLocalizedApiError } from '@/hooks/useLocalizedApiError';
@@ -16,9 +25,6 @@ import type {
   SourceWriteInput,
 } from '@/admin-api';
 import { GATEWAY_PROTOCOLS, normalizeAdminError } from '@/admin-api';
-import { Button } from '@/components/ui/Button';
-import { Card } from '@/components/ui/Card';
-import { Modal } from '@/components/ui/Modal';
 import {
   IconCircleCheck,
   IconEye,
@@ -40,18 +46,10 @@ import {
   ErrorState,
   FormError,
   FormGrid,
-  IconButton,
-  LoadingState,
   PROTOCOL_LABELS,
   PageActions,
   ProtocolPill,
-  SegmentedTabs,
-  SelectField,
-  StatusPill,
   SuccessNotice,
-  TableScroll,
-  TextAreaField,
-  TextField,
   Toggle,
   formatDateTime,
   formatJsonValue,
@@ -691,6 +689,7 @@ export function SourcesPage({ api, refreshRevision = 0, onBusyChange }: SourcesP
     <section className={styles.page} data-od-id="page-sources">
       <PageActions>
         <SegmentedTabs
+          id="sources-tabs"
           value={tab}
           label={t('sources.region_aria')}
           options={[
@@ -711,9 +710,10 @@ export function SourcesPage({ api, refreshRevision = 0, onBusyChange }: SourcesP
       {query.error && <ErrorState error={query.error} onRetry={query.reload} />}
       {mutationError && !editor && !deleteTarget && <ErrorState error={mutationError} />}
 
+      <div role="tabpanel" id="sources-tabs-panel" aria-labelledby={`sources-tabs-${tab}`} tabIndex={0}>
       {tab === 'sources' ? (
         data.sources.length === 0 ? <EmptyTable title={t('sources.empty.sources_title')} description={t('sources.empty.sources_desc')} /> : (
-          <Card variant="flush" title={t('sources.card.sources_title')} subtitle={t('sources.card.sources_subtitle')}>
+          <Card variant="flush" title={t('sources.card.sources_title')}>
             <TableScroll label={t('sources.table.sources_region')}>
               <table className={styles.table}>
                 <thead><tr>
@@ -748,7 +748,7 @@ export function SourcesPage({ api, refreshRevision = 0, onBusyChange }: SourcesP
           </Card>
         )
       ) : data.accounts.length === 0 ? <EmptyTable title={t('sources.empty.accounts_title')} description={t('sources.empty.accounts_desc')} /> : (
-        <Card variant="flush" title={t('sources.card.accounts_title')} subtitle={t('sources.card.accounts_subtitle')}>
+        <Card variant="flush" title={t('sources.card.accounts_title')}>
           <TableScroll label={t('sources.table.accounts_region')}>
             <table className={styles.table}>
               <thead><tr>
@@ -782,6 +782,7 @@ export function SourcesPage({ api, refreshRevision = 0, onBusyChange }: SourcesP
         </Card>
       )}
 
+      </div>
       {selectedSource && (
         <SourceDetailDrawer
           key={selectedSource.id}

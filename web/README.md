@@ -1,54 +1,36 @@
-# my-ai-gateway Usage Console
+# AI Gateway 控制台
 
-The active web application is a gateway-native, token-first usage console with
-three pages in a desktop-first sidebar shell:
+React + TypeScript + Vite 应用，构建后由网关挂载在 `/admin/`。
 
-- Overview: logical requests, upstream attempts, success rate, token
-  composition, timeseries, and recent activity.
-- Analysis: logical/upstream model, Provider, Source, Account, protocol, and
-  latency breakdowns.
-- Request Events: combination filters, deterministic cursor pagination,
-  virtual scrolling, column preferences, metadata-only details, and CSV/JSON
-  exports.
+- **监控**：总览、用量分析、请求事件。
+- **配置**：来源管理、模型发现、模型与路由、能力矩阵。
+- **系统**：系统设置与 Virtual Key 管理。
 
-## Data boundary
+## 开发
 
-Runtime requests are restricted to `/admin/usage/*`. The UI does not call CPA
-Usage Keeper endpoints and does not mount its session, Ranking, Auth Files,
-AI Provider credentials, quota, pricing, Management API, or request-log body
-features.
-
-The `src/gateway-usage` boundary isolates the HTTP wire contract from page view
-models. Its client mirrors the versioned `data`/`page` envelope, combination
-filters, deterministic cursor, breakdown dimensions, and export routes provided
-by the current `/admin/usage/*` backend. Fixtures keep those semantics testable
-without a live gateway. Usage events distinguish logical requests from upstream
-attempts, store UTC boundaries, and display timestamps in the browser's local
-timezone.
-
-The Admin API accepts only the dedicated `GATEWAY_ADMIN_KEY`; it never falls
-back to the data-plane `GATEWAY_API_KEY`. If the Admin key is not configured,
-all Admin API requests fail closed with `401`. The Web console keeps the entered
-Admin key only in `sessionStorage`; no Admin Session login is implemented here.
-
-The information hierarchy is adapted from the reviewed single-file prototype
-archived at `docs/prototypes/ai-gateway-prototype.html`. The executable design
-tokens in `src/styles/gateway-brand.scss` trace back to `docs/brand-spec.md`.
-The prototype is not imported by the web build, and its Source/Account and
-model/routing forms are intentionally not treated as domain contracts.
-Responsive behavior uses an overlay navigation drawer at 920px, stacked phone
-controls and a full-width detail drawer at 600px, and compact single-column KPI
-rows at 380px.
-
-## Development
+在仓库根目录运行，工具版本由 `mise.toml` 固定：
 
 ```bash
-npm ci
-npm run typecheck
-npm run lint
-npm test
-npm run build
+mise run install
+mise run dev
+mise exec -- npm --prefix web run lint
+mise exec -- npm --prefix web run typecheck
+mise exec -- npm --prefix web test
+mise exec -- npm --prefix web run build
 ```
 
-See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for CPA Usage Keeper
-attribution and the preserved MIT License.
+## 代码入口
+
+| 路径 | 职责 |
+| --- | --- |
+| `src/App.tsx`、`src/lib/consoleNavigation.ts` | 页面与 hash 导航 |
+| `src/components/gateway`、`src/components/ui` | 控制台外壳与公共组件 |
+| `src/pages/GatewayUsagePage.tsx`、`src/gateway-usage` | 用量页面、API 适配与测试夹具 |
+| `src/features/control-plane`、`src/admin-api` | 管理页面与资源 API |
+| `src/i18n/console` | 中英文文案 |
+
+用量页面请求 `/admin/usage/*`，管理页面请求对应 `/admin/*` 资源。Admin Key 保存在当前标签页的 `sessionStorage`，用于 Admin API 鉴权。
+
+系统设置支持 Virtual Key 创建、查看/复制、轮换与撤销。轮换时可调整新密钥的模型白名单，并为客户端切换设置最多 24 小时的重叠期；旧密钥原有的到期时间仍然生效。
+
+设计与组件规则见 [design.md](../design.md)，接口见 [Admin API](../docs/admin-api.md)，测试见 [testing.md](../docs/testing.md)。CPA Usage Keeper 的 MIT 来源与许可保留在 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

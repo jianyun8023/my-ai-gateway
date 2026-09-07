@@ -26,7 +26,7 @@ MiniMax、DeepSeek 等原生支持三种协议的 Provider 不经过转换器。
 - PostgreSQL-backed Virtual Key 支持模型白名单、轮换、撤销、scopes 和 key group。
 - 账号健康状态支持被动失败冷却、主动探测、stale 过期放行、指数退避、重启恢复和人工启停。
 - 凭据使用 AES-256-GCM 信封加密，支持多版本 keyring 和渐进式轮换；Admin 写操作具备脱敏审计日志。
-- 管理端提供 Overview、Analysis 和 Request Events 页面。
+- 管理端包含总览、用量分析、请求事件、来源管理、模型发现、模型与路由、能力矩阵和系统设置。
 - `/metrics` 提供 Prometheus 指标；配置 `OTEL_EXPORTER_OTLP_ENDPOINT` 后可通过 OTLP/gRPC 导出 OpenTelemetry trace。
 
 完整设计、当前进度和管理 API 契约分别见：
@@ -34,6 +34,7 @@ MiniMax、DeepSeek 等原生支持三种协议的 Provider 不经过转换器。
 - [`docs/ai-gateway-design.md`](docs/ai-gateway-design.md)
 - [`docs/todo.md`](docs/todo.md)
 - [`docs/admin-api.md`](docs/admin-api.md)
+- [前端设计与组件规范](design.md)
 
 ## 快速开始
 

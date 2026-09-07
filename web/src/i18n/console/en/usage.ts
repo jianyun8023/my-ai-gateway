@@ -99,11 +99,10 @@ export const usage = {
   },
   trend: {
     title: 'Usage Trend',
-    subtitle: 'Stored in UTC, displayed in your local time zone',
+    subtitle: 'Times shown in your local timezone',
   },
   composition: {
     title: 'Token Composition',
-    subtitle: 'Raw token counts, independent of pricing configuration',
     cache_rate: 'Cache hit rate: {{rate}}%',
   },
   distribution: {
@@ -113,7 +112,6 @@ export const usage = {
   },
   recent: {
     title: 'Recent Activity',
-    subtitle: 'Request metadata only; prompt / response bodies are not stored',
     empty: 'No recent requests',
   },
 
@@ -138,9 +136,9 @@ export const usage = {
   // —— 空态 ——
   empty: {
     overview_title: 'No usage in the selected range',
-    overview_desc: 'Adjust the time range or filters and try again. Token statistics do not depend on pricing configuration.',
+    overview_desc: 'Try a different time range or filters.',
     analysis_title: 'No analysis data in the selected range',
-    analysis_desc: 'Breakdown data is provided by the gateway usage API.',
+    analysis_desc: 'Try a different time range or filters.',
   },
 
   // —— 事件状态与行 ——
@@ -158,21 +156,19 @@ export const usage = {
     token_title: 'Tokens',
     token_subtitle: 'Final logical request accounting; never duplicated across fallbacks',
     attempts_title: 'Upstream Attempts',
-    attempts_subtitle: 'Failed attempts without confirmed usage do not fabricate tokens',
+    attempts_subtitle: 'Failed attempts without reported usage add no tokens',
     attempts_loading: 'Loading attempt details…',
     attempts_empty_title: 'No standalone attempt details',
     attempts_empty_desc: 'The event retains the final account and retry count.',
     primary_skipped: 'The primary account was unavailable, so no request was sent to it; the fallback account served this event.',
     error_summary: 'Sanitized error summary',
-    no_body_notice: 'Privacy boundary: this view never reads or displays prompt, response body, or request log bodies.',
   },
 
   // —— 事件表 ——
   events: {
     empty_title: 'No request events in the selected range',
-    empty_desc: 'Event details contain metadata and sanitized error summaries only.',
+    empty_desc: 'Try a different time range or filters.',
     title: 'Request Events',
-    subtitle: 'Stable cursor pagination · virtual scrolling',
   },
 
   // —— 页面级 ——

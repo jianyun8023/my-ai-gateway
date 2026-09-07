@@ -22,14 +22,6 @@
   flex-direction: column;
 }
 
-.app-route-loading {
-  min-height: 180px;
-  display: grid;
-  place-items: center;
-  color: var(--text-secondary);
-  font-size: var(--fs-meta);
-}
-
 .app-checking {
   min-height: 100%;
 }
