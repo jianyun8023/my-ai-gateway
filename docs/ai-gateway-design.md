@@ -559,10 +559,11 @@ Provider URL allowlist、解析后 IP 校验、重定向限制和 SSRF 防护（
 SSE 心跳和超时是进程级运行参数，不属于 PostgreSQL Source/Binding。网关使用
 `GATEWAY_SSE_HEARTBEAT_INTERVAL_MS`、`GATEWAY_SSE_CONNECTION_TIMEOUT_MS`、
 `GATEWAY_SSE_FIRST_EVENT_TIMEOUT_MS`、`GATEWAY_SSE_IDLE_TIMEOUT_MS` 和
-`GATEWAY_SSE_TOTAL_TIMEOUT_MS`。默认值分别为 `15000`、`10000`、`30000`、`60000` 和 `300000`，`0`
+`GATEWAY_SSE_TOTAL_TIMEOUT_MS`。默认值分别为 `15000`、`120000`、`30000`、`60000` 和 `300000`，`0`
 禁用单项限制。也接受带单位的环境值（如 `2s`、`500ms`）。
 
-连接时限只覆盖等待上游响应头；首事件时限从响应头开始，空闲时限在每个完整 Provider
+连接时限覆盖流式和非流式请求等待上游响应头的阶段，默认 120 秒；总时限也用于非流式响应体读取。
+首事件时限从响应头开始，空闲时限在每个完整 Provider
 SSE 事件后重置，总时限从逻辑请求开始计算。心跳固定为 `: gateway-heartbeat` SSE
 comment，单独作为下游 Body chunk 发送，不进入 Provider 事件、序列号、Usage 捕获或 TTFT。
 已发出响应头后不能 fallback：正常 EOF 保留原始顺序并结束；Chat 仅在所有已出现的 choice 都报告非空 `finish_reason` 时补缺失的 `[DONE]`，缺少完成证据则报告上游错误，后续 usage chunk 不提前截断。空流发送

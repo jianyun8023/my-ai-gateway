@@ -42,7 +42,7 @@ impl Default for StreamConfig {
     fn default() -> Self {
         Self {
             heartbeat_interval: Duration::from_secs(15),
-            connection_timeout: Duration::from_secs(10),
+            connection_timeout: Duration::from_secs(120),
             first_event_timeout: Duration::from_secs(30),
             idle_timeout: Duration::from_secs(60),
             total_timeout: Duration::from_secs(300),
@@ -781,7 +781,7 @@ mod tests {
     fn defaults_are_explicit_and_duration_parser_accepts_units() {
         let defaults = StreamConfig::default();
         assert_eq!(defaults.heartbeat_interval, Duration::from_secs(15));
-        assert_eq!(defaults.connection_timeout, Duration::from_secs(10));
+        assert_eq!(defaults.connection_timeout, Duration::from_secs(120));
         assert_eq!(defaults.first_event_timeout, Duration::from_secs(30));
         assert_eq!(defaults.idle_timeout, Duration::from_secs(60));
         assert_eq!(defaults.total_timeout, Duration::from_secs(300));

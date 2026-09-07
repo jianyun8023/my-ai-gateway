@@ -1,6 +1,6 @@
 # my-ai-gateway
 
-my-ai-gateway 是一个使用 Rust 编写的 AI 网关。它通过统一的下游入口代理多个上游 Provider、Source 和账号，并提供协议感知路由、故障切换、用量统计与控制面管理能力。
+my-ai-gateway 是一个面向单用户自托管的 AI Provider 聚合网关。Rust 服务通过统一入口代理多个 Provider、Source 和账号，React 控制台负责来源接入、模型发现、协议感知路由、用量分析与日常运维。
 
 项目仍处于持续开发阶段，配置、HTTP API 和数据库 Schema 尚未承诺向后兼容，不建议在未经额外加固的情况下直接暴露到不可信网络。
 
@@ -9,10 +9,10 @@ my-ai-gateway 是一个使用 Rust 编写的 AI 网关。它通过统一的下�
 | 协议 | 网关入口 | 上游处理方式 |
 | --- | --- | --- |
 | OpenAI Chat Completions | `POST /v1/chat/completions` | 优先原生透传 |
-| OpenAI Responses | `POST /v1/responses` | 原生透传，或执行一次明确的 Adapter 转换 |
+| OpenAI Responses | `POST /v1/responses` | 优先原生透传 |
 | Anthropic Messages | `POST /v1/messages` | 优先原生透传 |
 
-MiniMax、DeepSeek 等原生支持三种协议的 Provider 不经过转换器。Kimi Code 自 2026-09 起官方原生支持 OpenAI Responses（`/v1/responses`），三协议全部原生透传，不再经过 Adapter。
+当前内置的 `deepseek@3`、`minimax@3` 和 `kimi_code@4` 预设均声明三协议原生路径；Kimi Responses 使用 `/v1/responses`。实际可用协议和功能以 Source 的模型级能力声明及有效能力矩阵为准。生产 Adapter 注册表当前为空，不能配置未注册的转换器。
 
 ## 核心能力
 
@@ -32,7 +32,8 @@ MiniMax、DeepSeek 等原生支持三种协议的 Provider 不经过转换器。
 完整设计、当前进度和管理 API 契约分别见：
 
 - [`docs/ai-gateway-design.md`](docs/ai-gateway-design.md)
-- [`docs/todo.md`](docs/todo.md)
+- [GitHub Issues](https://github.com/jianyun8023/my-ai-gateway/issues) 与 [Pull Requests](https://github.com/jianyun8023/my-ai-gateway/pulls)（实时任务和验证记录）
+- [`docs/todo.md`](docs/todo.md)（任务索引）
 - [`docs/admin-api.md`](docs/admin-api.md)
 - [前端设计与组件规范](design.md)
 
@@ -51,7 +52,7 @@ mise run install
 
 ### 本地运行
 
-复制开发环境配置，并至少填写 `DATABASE_URL`：
+准备 PostgreSQL 数据库，复制开发环境配置，填写 `DATABASE_URL`、独立的 Admin Key 和凭据主密钥：
 
 ```bash
 cp .env.example .env
@@ -65,7 +66,7 @@ mise run dev
 curl http://127.0.0.1:8787/healthz
 ```
 
-网关与管理端静态页面默认监听 `127.0.0.1:8787`，Vite 开发服务器使用 `5173`。需要从局域网访问时，在 `.env` 中设置：
+网关默认监听 `127.0.0.1:8787`。开发时访问 [Vite 控制台](http://127.0.0.1:5173/)；执行 `mise run build` 后，网关也会在 [管理端入口](http://127.0.0.1:8787/admin/) 提供 `web/dist` 静态页面。需要从局域网访问时，在 `.env` 中设置：
 
 ```dotenv
 GATEWAY_LISTEN_ADDR=0.0.0.0:8787
@@ -76,7 +77,14 @@ VITE_DEV_HOST=0.0.0.0
 
 ### 初始化控制面
 
-空控制面首次启动时，可以通过 `GATEWAY_CONFIG_JSON` 导入 [`config.example.json`](config.example.json)：
+首次使用可在控制台中完成接入：
+
+1. 使用 `GATEWAY_ADMIN_KEY` 登录，添加来源及账号凭据，选择对应 Provider 预设。
+2. 测试连接、发现模型，核对能力声明并确认模型。
+3. 配置逻辑模型、Binding 和路由，确认有效能力矩阵中存在可用路径。
+4. 在设置中签发 Virtual Key，使用该 Key 调用 `/v1/models` 查看可用模型。
+
+也可以在启动前将 [`config.example.json`](config.example.json) 写入 `.env` 中的 `GATEWAY_CONFIG_JSON`，由 `mise run dev` 加载。若所需环境变量已导出到当前 shell，可使用：
 
 ```bash
 export GATEWAY_CONFIG_JSON="$(<config.example.json)"
@@ -128,13 +136,13 @@ ghcr.io/jianyun8023/my-ai-gateway:<tag>
 正式客户端使用 PostgreSQL-backed Virtual Key；静态 `GATEWAY_API_KEY` 只保留为过渡兼容入口。三种协议入口都接受 `Authorization: Bearer ...`，兼容客户端也可以使用 `x-api-key`。
 
 ```bash
-curl http://127.0.0.1:8787/v1/responses \
+curl -N http://127.0.0.1:8787/v1/responses \
   -H "Authorization: Bearer $GATEWAY_VIRTUAL_KEY" \
   -H "Content-Type: application/json" \
   -d '{"model":"kimi-for-coding-highspeed","input":"hello","stream":true}'
 ```
 
-Kimi Responses 路由会在进程内完成 Responses 与 Anthropic Messages 的转换，并保留 thinking/signature、tool call、web search、Usage 和 SSE 事件顺序。
+先将签发的 Key 保存到环境变量 `GATEWAY_VIRTUAL_KEY`，并将示例 `model` 替换为 `/v1/models` 返回的逻辑模型 ID。当前 Kimi Responses 路由原生转发到上游 `/v1/responses`。
 
 ## 控制面与 Usage
 
@@ -164,9 +172,23 @@ curl http://127.0.0.1:8787/admin/keys/1/value \
 
 Usage API 统一使用 UTC，并支持按时间、逻辑模型、上游模型、Provider、Source、账号、协议、Virtual Key、状态和 `usage_source` 组合筛选。逻辑事件只累计最终 Usage；每次上游尝试通过 `upstream_attempts` 单独统计。事件与导出默认不保存 prompt/response 正文。
 
-## 流式请求
+## 请求超时与流式请求
 
-`GATEWAY_SSE_*_MS` 用于配置心跳、连接、首事件、空闲和总时限，具体参数见 [`.env.example`](.env.example)。网关心跳使用 `: gateway-heartbeat` SSE comment，不会改变 Provider 事件顺序、Usage、序列号或 TTFT。
+三种协议的流式与非流式请求，默认等待上游响应头的时限为 **120 秒**。来源连接测试和账号健康探测的上游请求时限也为 **120 秒**。
+
+数据面使用以下进程级环境变量，单位为毫秒，`0` 表示禁用对应限制：
+
+| 环境变量 | 默认值 | 作用范围 |
+| --- | --- | --- |
+| `GATEWAY_SSE_CONNECTION_TIMEOUT_MS` | `120000`（120 秒） | 每次上游尝试等待响应头，适用于 JSON 和 SSE |
+| `GATEWAY_SSE_FIRST_EVENT_TIMEOUT_MS` | `30000`（30 秒） | 收到响应头后等待首个 Provider SSE 事件 |
+| `GATEWAY_SSE_IDLE_TIMEOUT_MS` | `60000`（60 秒） | Provider SSE 事件之间的空闲时限 |
+| `GATEWAY_SSE_TOTAL_TIMEOUT_MS` | `300000`（300 秒） | 从逻辑请求开始计算的总时限，适用于 JSON 和 SSE |
+| `GATEWAY_SSE_HEARTBEAT_INTERVAL_MS` | `15000`（15 秒） | SSE 心跳间隔 |
+
+来源连接测试和健康探测使用独立的 120 秒时限，不受 `GATEWAY_SSE_*` 配置影响。已有部署若显式设置了 `GATEWAY_SSE_CONNECTION_TIMEOUT_MS=10000`，需改为 `120000` 并重启服务；代码默认值不会覆盖环境变量。
+
+完整环境示例见 [`.env.example`](.env.example) 和 [`.env.compose.example`](.env.compose.example)。网关心跳使用 `: gateway-heartbeat` SSE comment，不会改变 Provider 事件顺序、Usage、序列号或 TTFT。
 
 反向代理部署时应关闭响应缓冲、保留 `text/event-stream`，并将代理读取超时设置为大于网关总时限。代理的 stream idle timeout 应长于心跳间隔，且不能合并、删除或改写以 `:` 开头的 SSE comment。
 
@@ -188,9 +210,10 @@ Usage API 统一使用 UTC，并支持按时间、逻辑模型、上游模型、
 mise run dev          # 启动网关与前端开发服务器
 mise run build        # 构建前端静态资源与 Rust 网关
 mise run lint         # Rust 与前端静态检查
-mise run test         # Rust、前端和本地契约测试
+mise run test         # Rust、前端和脚本单测
+mise run test-contract # Mock Provider 与三协议 Contract 测试
 mise run test-db      # 使用 .env.test 运行完整 PostgreSQL 回归
-mise run verify       # 完整本地门禁
+mise run verify       # 本地门禁；未设置 TEST_DATABASE_URL 时跳过 PostgreSQL 集成测试
 ```
 
 Pull Request 会分别执行以下两个检查：
@@ -203,6 +226,8 @@ Pull Request 会分别执行以下两个检查：
 - [`docs/live-provider-smoke.md`](docs/live-provider-smoke.md)
 - [`docs/codex-e2e.md`](docs/codex-e2e.md)
 - [`docs/ci.md`](docs/ci.md)
+
+测试分层、故障注入和本地负载命令见 [`docs/testing.md`](docs/testing.md) 与 [`tests/load/README.md`](tests/load/README.md)；当前验收证据及未覆盖项见 [`docs/v0.1.0-acceptance.md`](docs/v0.1.0-acceptance.md)。本地 Mock 结果不能替代真实 Provider 或部署后的验收。
 
 ## 项目结构
 
