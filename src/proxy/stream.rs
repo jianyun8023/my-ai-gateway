@@ -9,7 +9,7 @@ use axum::body::{Body, Bytes};
 use futures_util::{stream, Stream, StreamExt};
 use serde_json::{json, Value};
 use std::{
-    collections::VecDeque,
+    collections::{BTreeSet, VecDeque},
     io,
     pin::Pin,
     time::{Duration, Instant},
@@ -218,6 +218,8 @@ pub struct SseEventTracker {
     frame_non_comment: bool,
     saw_provider_event: bool,
     saw_sse_frame: bool,
+    unfinished_chat_choices: BTreeSet<u64>,
+    saw_chat_finish: bool,
     terminal: Option<StreamTermination>,
 }
 
@@ -319,6 +321,25 @@ impl SseEventTracker {
         let event_name = std::mem::take(&mut self.event_name);
         let data = std::mem::take(&mut self.data_lines).join("\n");
         let frame_non_comment = std::mem::take(&mut self.frame_non_comment);
+        // finish_reason is completion evidence only at clean EOF. Keep consuming
+        // later usage chunks and wait for every observed choice to finish.
+        if let Ok(value) = serde_json::from_str::<Value>(&data) {
+            if let Some(choices) = value.get("choices").and_then(Value::as_array) {
+                for choice in choices {
+                    let index = choice.get("index").and_then(Value::as_u64).unwrap_or(0);
+                    if choice
+                        .get("finish_reason")
+                        .and_then(Value::as_str)
+                        .is_some_and(|v| !v.is_empty())
+                    {
+                        self.saw_chat_finish = true;
+                        self.unfinished_chat_choices.remove(&index);
+                    } else {
+                        self.unfinished_chat_choices.insert(index);
+                    }
+                }
+            }
+        }
         let (terminal, error, gateway) = classify_frame(&event_name, &data);
         if gateway.is_some() {
             activity.error |= gateway.is_some_and(StreamTermination::is_failure);
@@ -687,9 +708,12 @@ async fn next_native(mut state: NativeState) -> Option<(Result<Bytes, io::Error>
                                 state.queue_failure(StreamTermination::EmptyStream)
                             }
                             None if state.tracker.saw_sse_frame() => {
-                                if state.protocol == Protocol::OpenAiChatCompletions {
+                                if state.protocol == Protocol::OpenAiChatCompletions
+                                    && state.tracker.saw_chat_finish
+                                    && state.tracker.unfinished_chat_choices.is_empty()
+                                {
                                     // Some Chat Completions upstreams (notably MiniMax)
-                                    // close the stream cleanly without sending the
+                                    // report finish_reason, then close cleanly without the
                                     // OpenAI-mandated `data: [DONE]` sentinel.  Inject
                                     // one so strict clients can detect end-of-stream
                                     // and report the request as completed rather than

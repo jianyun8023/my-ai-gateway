@@ -8,7 +8,7 @@ run = "npm --prefix web ci"
 
 [tasks.config-check]
 description = "校验仓库 JSON 配置和测试元数据"
-run = "node -e \"const fs=require('node:fs'); for (const file of ['config.example.json','tests/live/provider-smoke.cases.json','tests/codex/cases.json','tests/tooling/versions.json','tests/coverage/capability-matrix.json','tests/coverage/test-result.schema.json','tests/conformance/config.json','tests/differential/cases.json']) JSON.parse(fs.readFileSync(file, 'utf8'))\""
+run = "node -e \"const fs=require('node:fs'); for (const file of ['config.example.json','tests/live/provider-smoke.cases.json','tests/codex/cases.json','tests/tooling/versions.json','tests/coverage/capability-matrix.json','tests/coverage/test-result.schema.json','tests/conformance/config.json','tests/differential/cases.json','tests/load/scenarios.json']) JSON.parse(fs.readFileSync(file, 'utf8'))\""
 
 [tasks.dev]
 description = "启动 Rust 网关与前端开发环境"
@@ -42,7 +42,7 @@ run = "npm --prefix web run build && cargo build"
 
 [tasks.test]
 description = "运行 Rust 与前端单元测试"
-run = "cargo test --workspace --features test-support -- --test-threads=1 && npm --prefix web test && node --test scripts/live-provider-smoke.test.mjs scripts/codex-e2e-smoke.test.mjs scripts/conformance/conformance.test.mjs scripts/differential/differential.test.mjs"
+run = "cargo test --workspace --features test-support -- --test-threads=1 && npm --prefix web test && node --test scripts/live-provider-smoke.test.mjs scripts/codex-e2e-smoke.test.mjs scripts/conformance/conformance.test.mjs scripts/differential/differential.test.mjs scripts/load/load.test.mjs"
 
 [tasks.test-live]
 description = "显式运行真实 Provider 工具、搜索与 fallback smoke 测试"
@@ -213,21 +213,16 @@ node scripts/differential/run.mjs "$@"
 '''
 
 [tasks.test-faults]
-description = "运行故障注入与异常行为测试（#120）"
-run = '''
-echo "ERROR: test-faults 尚未实现。" >&2
-echo "该命令将由 #120 建立 Rust 故障注入测试。" >&2
-exit 1
-'''
+description = "运行确定性故障、SSE 生命周期与 attempt 归因回归（#120）"
+run = "cargo test --features test-support --test contract_tests faults:: -- --test-threads=1 && cargo test --lib proxy::stream::tests -- --test-threads=1 && cargo test --lib api::runtime_usage_tests -- --test-threads=1"
 
 [tasks.test-load]
-description = "运行 k6/xk6-sse 性能基线测试（#120）"
-run = '''
-echo "ERROR: test-load 尚未实现。" >&2
-echo "该命令将由 #120 接入 k6 和 xk6-sse 性能测试。" >&2
-echo "工具版本见 tests/tooling/versions.json。" >&2
-exit 1
-'''
+description = "显式运行固定版本 k6/xk6-sse 的 Direct/Gateway 性能基线（#120）"
+run = "node scripts/load/run.mjs"
+
+[tasks.build-load-tools]
+description = "构建固定版本 k6 与 xk6-sse（首次需要下载 Go 依赖）"
+run = "node scripts/load/build-tools.mjs"
 
 [tasks.test-all-offline]
 description = "聚合离线门禁：无 Secret、无公网的完整协议验证"
@@ -265,7 +260,7 @@ else
 fi
 
 echo "--- [4/6] test-differential ---"
-if mise run test-differential; then
+if DIFFERENTIAL_TESTS=0 mise run test-differential; then
   echo "  ✓ test-differential passed"
 else
   echo "  ✗ test-differential failed (exit $?)"
@@ -281,7 +276,7 @@ else
 fi
 
 echo "--- [6/6] test-load ---"
-if mise run test-load; then
+if mise run test-load -- --target mock; then
   echo "  ✓ test-load passed"
 else
   echo "  ✗ test-load failed (exit $?)"

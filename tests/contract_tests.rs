@@ -45,3 +45,6 @@ mod tools;
 
 #[path = "contract_tests/reasoning.rs"]
 mod reasoning;
+
+#[path = "contract_tests/faults.rs"]
+mod faults;

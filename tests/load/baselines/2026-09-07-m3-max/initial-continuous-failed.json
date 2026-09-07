@@ -1,0 +1,891 @@
+{
+  "started_at": "2026-09-07T04:33:52.702Z",
+  "target": "mock",
+  "profile": "release/test-support/no-database",
+  "versions": {
+    "llmprobe": "0.6.1",
+    "compatcanary": "0.2.2",
+    "k6": "2.2.0",
+    "xk6_sse": "0.1.13-0.20260818094211-37cc4724690d",
+    "_comment": "版本事实来源。升级工具需显式修改此文件并在 PR 记录理由。禁止 latest。",
+    "xk6": "1.4.12"
+  },
+  "environment": {
+    "os": "darwin",
+    "arch": "arm64",
+    "release": "27.0.0",
+    "cpu": "Apple M3 Max",
+    "logical_cpus": 16,
+    "memory_bytes": 68719476736,
+    "node": "v24.11.1",
+    "gateway_commit": "c4da71703117a566a34eac09a2099d41f95c1c7f",
+    "working_tree_dirty": true,
+    "network": "loopback, Mock and Gateway share a process",
+    "iterations_per_vu": 100,
+    "concurrency": [
+      1,
+      5,
+      10,
+      25,
+      50,
+      100
+    ]
+  },
+  "limitations": [
+    "本地 Mock 使用 release/test-support，不包含 PostgreSQL Usage 持久化、真实 Provider 或生产网络开销。",
+    "每个组合先执行 5 次未计入指标的预热；Direct/Gateway 按档位交替执行先后顺序。",
+    "TTFT/SSE 总时长使用客户端毫秒时钟；JSON 总时长采用 k6 HTTP duration（不含 DNS/连接建立）；吞吐分母为 k6 testRunDurationMs。",
+    "短样本的 p95/p99 仅用于探索；负差值表示测量噪声/调度差异，不截为零。",
+    "未达到请求数或完成率门限判 FAIL，工具失败不会记为 SKIPPED/PASS；失败后的更高并发标为 SKIPPED/PRIOR_FAILURE。"
+  ],
+  "rows": [
+    {
+      "case_id": "chat.json",
+      "concurrency": 1,
+      "direct": {
+        "result": "PASS",
+        "request_count": 100,
+        "expected_request_count": 100,
+        "success_rate": 1,
+        "total_latency_ms": {
+          "p50": 0.087,
+          "p95": 0.13204999999999992,
+          "p99": 0.18503999999999998
+        },
+        "ttft_ms": null,
+        "stream_completion_rate": null,
+        "requests_per_second": 6321.112515802781
+      },
+      "gateway": {
+        "result": "PASS",
+        "request_count": 100,
+        "expected_request_count": 100,
+        "success_rate": 1,
+        "total_latency_ms": {
+          "p50": 0.186,
+          "p95": 0.24004999999999999,
+          "p99": 0.28029999999999994
+        },
+        "ttft_ms": null,
+        "stream_completion_rate": null,
+        "requests_per_second": 3862.3459889536907
+      },
+      "result": "PASS",
+      "gateway_added_ttft_ms": null,
+      "gateway_added_total_latency_ms": {
+        "p50": 0.099,
+        "p95": 0.10800000000000007,
+        "p99": 0.09525999999999996
+      }
+    },
+    {
+      "case_id": "chat.sse",
+      "concurrency": 1,
+      "direct": {
+        "result": "PASS",
+        "request_count": 100,
+        "expected_request_count": 100,
+        "success_rate": 1,
+        "total_latency_ms": {
+          "p50": 35,
+          "p95": 38.05,
+          "p99": 41.12999999999999
+        },
+        "ttft_ms": {
+          "p50": 8,
+          "p95": 9,
+          "p99": 11.01
+        },
+        "stream_completion_rate": 1,
+        "requests_per_second": 26.887813555598754
+      },
+      "gateway": {
+        "result": "PASS",
+        "request_count": 100,
+        "expected_request_count": 100,
+        "success_rate": 1,
+        "total_latency_ms": {
+          "p50": 35,
+          "p95": 38,
+          "p99": 39
+        },
+        "ttft_ms": {
+          "p50": 8,
+          "p95": 10,
+          "p99": 12.01
+        },
+        "stream_completion_rate": 1,
+        "requests_per_second": 27.18295433046209
+      },
+      "result": "PASS",
+      "gateway_added_ttft_ms": {
+        "p50": 0,
+        "p95": 1,
+        "p99": 1
+      },
+      "gateway_added_total_latency_ms": {
+        "p50": 0,
+        "p95": -0.04999999999999716,
+        "p99": -2.1299999999999883
+      }
+    },
+    {
+      "case_id": "responses.json",
+      "concurrency": 1,
+      "direct": {
+        "result": "PASS",
+        "request_count": 100,
+        "expected_request_count": 100,
+        "success_rate": 1,
+        "total_latency_ms": {
+          "p50": 0.0915,
+          "p95": 0.16019999999999998,
+          "p99": 0.17404999999999998
+        },
+        "ttft_ms": null,
+        "stream_completion_rate": null,
+        "requests_per_second": 5635.707844905321
+      },
+      "gateway": {
+        "result": "PASS",
+        "request_count": 100,
+        "expected_request_count": 100,
+        "success_rate": 1,
+        "total_latency_ms": {
+          "p50": 0.201,
+          "p95": 0.27405,
+          "p99": 0.30117999999999995
+        },
+        "ttft_ms": null,
+        "stream_completion_rate": null,
+        "requests_per_second": 3488.9400600097692
+      },
+      "result": "PASS",
+      "gateway_added_ttft_ms": null,
+      "gateway_added_total_latency_ms": {
+        "p50": 0.10950000000000001,
+        "p95": 0.11385000000000003,
+        "p99": 0.12712999999999997
+      }
+    },
+    {
+      "case_id": "responses.sse",
+      "concurrency": 1,
+      "direct": {
+        "result": "PASS",
+        "request_count": 100,
+        "expected_request_count": 100,
+        "success_rate": 1,
+        "total_latency_ms": {
+          "p50": 48,
+          "p95": 51,
+          "p99": 51.01
+        },
+        "ttft_ms": {
+          "p50": 21,
+          "p95": 23,
+          "p99": 23
+        },
+        "stream_completion_rate": 1,
+        "requests_per_second": 19.669412254358544
+      },
+      "gateway": {
+        "result": "PASS",
+        "request_count": 100,
+        "expected_request_count": 100,
+        "success_rate": 1,
+        "total_latency_ms": {
+          "p50": 48,
+          "p95": 52.05,
+          "p99": 56.019999999999996
+        },
+        "ttft_ms": {
+          "p50": 21,
+          "p95": 23.049999999999997,
+          "p99": 25.049999999999997
+        },
+        "stream_completion_rate": 1,
+        "requests_per_second": 19.539119074908683
+      },
+      "result": "PASS",
+      "gateway_added_ttft_ms": {
+        "p50": 0,
+        "p95": 0.04999999999999716,
+        "p99": 2.049999999999997
+      },
+      "gateway_added_total_latency_ms": {
+        "p50": 0,
+        "p95": 1.0499999999999972,
+        "p99": 5.009999999999998
+      }
+    },
+    {
+      "case_id": "chat.json",
+      "concurrency": 5,
+      "gateway": {
+        "result": "PASS",
+        "request_count": 500,
+        "expected_request_count": 500,
+        "success_rate": 1,
+        "total_latency_ms": {
+          "p50": 0.26,
+          "p95": 0.36605,
+          "p99": 0.47955999999999926
+        },
+        "ttft_ms": null,
+        "stream_completion_rate": null,
+        "requests_per_second": 14882.724133825459
+      },
+      "direct": {
+        "result": "PASS",
+        "request_count": 500,
+        "expected_request_count": 500,
+        "success_rate": 1,
+        "total_latency_ms": {
+          "p50": 0.092,
+          "p95": 0.18904999999999997,
+          "p99": 0.26305
+        },
+        "ttft_ms": null,
+        "stream_completion_rate": null,
+        "requests_per_second": 30538.080986990775
+      },
+      "result": "PASS",
+      "gateway_added_ttft_ms": null,
+      "gateway_added_total_latency_ms": {
+        "p50": 0.168,
+        "p95": 0.17700000000000002,
+        "p99": 0.21650999999999926
+      }
+    },
+    {
+      "case_id": "chat.sse",
+      "concurrency": 5,
+      "gateway": {
+        "result": "PASS",
+        "request_count": 500,
+        "expected_request_count": 500,
+        "success_rate": 1,
+        "total_latency_ms": {
+          "p50": 35,
+          "p95": 38,
+          "p99": 40.059999999999974
+        },
+        "ttft_ms": {
+          "p50": 8,
+          "p95": 10,
+          "p99": 12
+        },
+        "stream_completion_rate": 1,
+        "requests_per_second": 135.76980392667994
+      },
+      "direct": {
+        "result": "PASS",
+        "request_count": 500,
+        "expected_request_count": 500,
+        "success_rate": 1,
+        "total_latency_ms": {
+          "p50": 34,
+          "p95": 38.049999999999976,
+          "p99": 45.049999999999976
+        },
+        "ttft_ms": {
+          "p50": 7,
+          "p95": 10,
+          "p99": 13
+        },
+        "stream_completion_rate": 1,
+        "requests_per_second": 139.1714068447838
+      },
+      "result": "PASS",
+      "gateway_added_ttft_ms": {
+        "p50": 1,
+        "p95": 0,
+        "p99": -1
+      },
+      "gateway_added_total_latency_ms": {
+        "p50": 1,
+        "p95": -0.04999999999997584,
+        "p99": -4.990000000000002
+      }
+    },
+    {
+      "case_id": "responses.json",
+      "concurrency": 5,
+      "gateway": {
+        "result": "PASS",
+        "request_count": 500,
+        "expected_request_count": 500,
+        "success_rate": 1,
+        "total_latency_ms": {
+          "p50": 0.2655,
+          "p95": 0.39505,
+          "p99": 0.46213
+        },
+        "ttft_ms": null,
+        "stream_completion_rate": null,
+        "requests_per_second": 13733.245440562512
+      },
+      "direct": {
+        "result": "PASS",
+        "request_count": 500,
+        "expected_request_count": 500,
+        "success_rate": 1,
+        "total_latency_ms": {
+          "p50": 0.09,
+          "p95": 0.216,
+          "p99": 0.2962399999999999
+        },
+        "ttft_ms": null,
+        "stream_completion_rate": null,
+        "requests_per_second": 27319.418642771285
+      },
+      "result": "PASS",
+      "gateway_added_ttft_ms": null,
+      "gateway_added_total_latency_ms": {
+        "p50": 0.17550000000000002,
+        "p95": 0.17905000000000001,
+        "p99": 0.1658900000000001
+      }
+    },
+    {
+      "case_id": "responses.sse",
+      "concurrency": 5,
+      "gateway": {
+        "result": "PASS",
+        "request_count": 500,
+        "expected_request_count": 500,
+        "success_rate": 1,
+        "total_latency_ms": {
+          "p50": 47,
+          "p95": 57,
+          "p99": 61
+        },
+        "ttft_ms": {
+          "p50": 21,
+          "p95": 25.04999999999998,
+          "p99": 34.01
+        },
+        "stream_completion_rate": 1,
+        "requests_per_second": 98.19706265090434
+      },
+      "direct": {
+        "result": "PASS",
+        "request_count": 500,
+        "expected_request_count": 500,
+        "success_rate": 1,
+        "total_latency_ms": {
+          "p50": 47,
+          "p95": 58.049999999999976,
+          "p99": 72
+        },
+        "ttft_ms": {
+          "p50": 21,
+          "p95": 27,
+          "p99": 37
+        },
+        "stream_completion_rate": 1,
+        "requests_per_second": 97.50994698969242
+      },
+      "result": "PASS",
+      "gateway_added_ttft_ms": {
+        "p50": 0,
+        "p95": -1.9500000000000206,
+        "p99": -2.990000000000002
+      },
+      "gateway_added_total_latency_ms": {
+        "p50": 0,
+        "p95": -1.0499999999999758,
+        "p99": -11
+      }
+    },
+    {
+      "case_id": "chat.json",
+      "concurrency": 10,
+      "direct": {
+        "result": "PASS",
+        "request_count": 1000,
+        "expected_request_count": 1000,
+        "success_rate": 1,
+        "total_latency_ms": {
+          "p50": 0.262,
+          "p95": 0.57705,
+          "p99": 0.668
+        },
+        "ttft_ms": null,
+        "stream_completion_rate": null,
+        "requests_per_second": 26237.07823896731
+      },
+      "gateway": {
+        "result": "PASS",
+        "request_count": 1000,
+        "expected_request_count": 1000,
+        "success_rate": 1,
+        "total_latency_ms": {
+          "p50": 0.272,
+          "p95": 0.5710999999999998,
+          "p99": 0.67807
+        },
+        "ttft_ms": null,
+        "stream_completion_rate": null,
+        "requests_per_second": 25320.942951915527
+      },
+      "result": "PASS",
+      "gateway_added_ttft_ms": null,
+      "gateway_added_total_latency_ms": {
+        "p50": 0.010000000000000009,
+        "p95": -0.005950000000000122,
+        "p99": 0.010069999999999912
+      }
+    },
+    {
+      "case_id": "chat.sse",
+      "concurrency": 10,
+      "direct": {
+        "result": "PASS",
+        "request_count": 1000,
+        "expected_request_count": 1000,
+        "success_rate": 1,
+        "total_latency_ms": {
+          "p50": 34,
+          "p95": 41,
+          "p99": 47
+        },
+        "ttft_ms": {
+          "p50": 8,
+          "p95": 12,
+          "p99": 20
+        },
+        "stream_completion_rate": 1,
+        "requests_per_second": 270.3071635452947
+      },
+      "gateway": {
+        "result": "PASS",
+        "request_count": 1000,
+        "expected_request_count": 1000,
+        "success_rate": 1,
+        "total_latency_ms": {
+          "p50": 35,
+          "p95": 42,
+          "p99": 50.02999999999997
+        },
+        "ttft_ms": {
+          "p50": 9,
+          "p95": 13,
+          "p99": 16
+        },
+        "stream_completion_rate": 1,
+        "requests_per_second": 262.37112658226187
+      },
+      "result": "PASS",
+      "gateway_added_ttft_ms": {
+        "p50": 1,
+        "p95": 1,
+        "p99": -4
+      },
+      "gateway_added_total_latency_ms": {
+        "p50": 1,
+        "p95": 1,
+        "p99": 3.0299999999999727
+      }
+    },
+    {
+      "case_id": "responses.json",
+      "concurrency": 10,
+      "direct": {
+        "result": "PASS",
+        "request_count": 1000,
+        "expected_request_count": 1000,
+        "success_rate": 1,
+        "total_latency_ms": {
+          "p50": 0.195,
+          "p95": 0.33604999999999996,
+          "p99": 0.45707
+        },
+        "ttft_ms": null,
+        "stream_completion_rate": null,
+        "requests_per_second": 34182.19107844813
+      },
+      "gateway": {
+        "result": "PASS",
+        "request_count": 1000,
+        "expected_request_count": 1000,
+        "success_rate": 1,
+        "total_latency_ms": {
+          "p50": 0.266,
+          "p95": 0.5200999999999999,
+          "p99": 0.63301
+        },
+        "ttft_ms": null,
+        "stream_completion_rate": null,
+        "requests_per_second": 25744.664418299304
+      },
+      "result": "PASS",
+      "gateway_added_ttft_ms": null,
+      "gateway_added_total_latency_ms": {
+        "p50": 0.07100000000000001,
+        "p95": 0.18404999999999994,
+        "p99": 0.17593999999999999
+      }
+    },
+    {
+      "case_id": "responses.sse",
+      "concurrency": 10,
+      "direct": {
+        "result": "PASS",
+        "request_count": 1000,
+        "expected_request_count": 1000,
+        "success_rate": 1,
+        "total_latency_ms": {
+          "p50": 48,
+          "p95": 56,
+          "p99": 59
+        },
+        "ttft_ms": {
+          "p50": 21,
+          "p95": 27,
+          "p99": 29
+        },
+        "stream_completion_rate": 1,
+        "requests_per_second": 192.82505676769674
+      },
+      "gateway": {
+        "result": "PASS",
+        "request_count": 1000,
+        "expected_request_count": 1000,
+        "success_rate": 1,
+        "total_latency_ms": {
+          "p50": 50,
+          "p95": 58,
+          "p99": 63
+        },
+        "ttft_ms": {
+          "p50": 22,
+          "p95": 26,
+          "p99": 28
+        },
+        "stream_completion_rate": 1,
+        "requests_per_second": 187.18694153945913
+      },
+      "result": "PASS",
+      "gateway_added_ttft_ms": {
+        "p50": 1,
+        "p95": -1,
+        "p99": -1
+      },
+      "gateway_added_total_latency_ms": {
+        "p50": 2,
+        "p95": 2,
+        "p99": 4
+      }
+    },
+    {
+      "case_id": "chat.json",
+      "concurrency": 25,
+      "gateway": {
+        "result": "PASS",
+        "request_count": 2500,
+        "expected_request_count": 2500,
+        "success_rate": 1,
+        "total_latency_ms": {
+          "p50": 0.726,
+          "p95": 1.4590999999999998,
+          "p99": 1.73304
+        },
+        "ttft_ms": null,
+        "stream_completion_rate": null,
+        "requests_per_second": 26393.023795950256
+      },
+      "direct": {
+        "result": "PASS",
+        "request_count": 2500,
+        "expected_request_count": 2500,
+        "success_rate": 1,
+        "total_latency_ms": {
+          "p50": 0.224,
+          "p95": 0.4570999999999998,
+          "p99": 0.6570599999999999
+        },
+        "ttft_ms": null,
+        "stream_completion_rate": null,
+        "requests_per_second": 72352.61771770903
+      },
+      "result": "PASS",
+      "gateway_added_ttft_ms": null,
+      "gateway_added_total_latency_ms": {
+        "p50": 0.502,
+        "p95": 1.002,
+        "p99": 1.07598
+      }
+    },
+    {
+      "case_id": "chat.sse",
+      "concurrency": 25,
+      "gateway": {
+        "result": "PASS",
+        "request_count": 2500,
+        "expected_request_count": 2500,
+        "success_rate": 1,
+        "total_latency_ms": {
+          "p50": 34,
+          "p95": 38,
+          "p99": 41
+        },
+        "ttft_ms": {
+          "p50": 9,
+          "p95": 11,
+          "p99": 12
+        },
+        "stream_completion_rate": 1,
+        "requests_per_second": 684.4388983600023
+      },
+      "direct": {
+        "result": "PASS",
+        "request_count": 2500,
+        "expected_request_count": 2500,
+        "success_rate": 1,
+        "total_latency_ms": {
+          "p50": 34,
+          "p95": 41,
+          "p99": 45
+        },
+        "ttft_ms": {
+          "p50": 8,
+          "p95": 11,
+          "p99": 14
+        },
+        "stream_completion_rate": 1,
+        "requests_per_second": 684.5974608006339
+      },
+      "result": "PASS",
+      "gateway_added_ttft_ms": {
+        "p50": 1,
+        "p95": 0,
+        "p99": -2
+      },
+      "gateway_added_total_latency_ms": {
+        "p50": 0,
+        "p95": -3,
+        "p99": -4
+      }
+    },
+    {
+      "case_id": "responses.json",
+      "concurrency": 25,
+      "gateway": {
+        "result": "PASS",
+        "request_count": 2500,
+        "expected_request_count": 2500,
+        "success_rate": 1,
+        "total_latency_ms": {
+          "p50": 1.046,
+          "p95": 3.6156999999999986,
+          "p99": 5.05602
+        },
+        "ttft_ms": null,
+        "stream_completion_rate": null,
+        "requests_per_second": 15411.93006682613
+      },
+      "direct": {
+        "result": "PASS",
+        "request_count": 2500,
+        "expected_request_count": 2500,
+        "success_rate": 1,
+        "total_latency_ms": {
+          "p50": 0.258,
+          "p95": 0.6170499999999999,
+          "p99": 1.1701899999999996
+        },
+        "ttft_ms": null,
+        "stream_completion_rate": null,
+        "requests_per_second": 55889.65147213342
+      },
+      "result": "PASS",
+      "gateway_added_ttft_ms": null,
+      "gateway_added_total_latency_ms": {
+        "p50": 0.788,
+        "p95": 2.9986499999999987,
+        "p99": 3.8858300000000003
+      }
+    },
+    {
+      "case_id": "responses.sse",
+      "concurrency": 25,
+      "gateway": {
+        "result": "PASS",
+        "request_count": 2500,
+        "expected_request_count": 2500,
+        "success_rate": 1,
+        "total_latency_ms": {
+          "p50": 47,
+          "p95": 54.04999999999989,
+          "p99": 69.00999999999998
+        },
+        "ttft_ms": {
+          "p50": 21,
+          "p95": 24,
+          "p99": 41
+        },
+        "stream_completion_rate": 1,
+        "requests_per_second": 493.10987434771425
+      },
+      "direct": {
+        "result": "PASS",
+        "request_count": 2500,
+        "expected_request_count": 2500,
+        "success_rate": 1,
+        "total_latency_ms": {
+          "p50": 48,
+          "p95": 54,
+          "p99": 72
+        },
+        "ttft_ms": {
+          "p50": 21,
+          "p95": 25,
+          "p99": 30
+        },
+        "stream_completion_rate": 1,
+        "requests_per_second": 489.2810269734759
+      },
+      "result": "PASS",
+      "gateway_added_ttft_ms": {
+        "p50": 0,
+        "p95": -1,
+        "p99": 11
+      },
+      "gateway_added_total_latency_ms": {
+        "p50": -1,
+        "p95": 0.049999999999890576,
+        "p99": -2.9900000000000233
+      }
+    },
+    {
+      "case_id": "chat.json",
+      "concurrency": 50,
+      "direct": {
+        "result": "PASS",
+        "request_count": 5000,
+        "expected_request_count": 5000,
+        "success_rate": 1,
+        "total_latency_ms": {
+          "p50": 0.507,
+          "p95": 1.521,
+          "p99": 1.87103
+        },
+        "ttft_ms": null,
+        "stream_completion_rate": null,
+        "requests_per_second": 62012.427290429
+      },
+      "gateway": {
+        "result": "PASS",
+        "request_count": 5000,
+        "expected_request_count": 5000,
+        "success_rate": 1,
+        "total_latency_ms": {
+          "p50": 1.346,
+          "p95": 1.572,
+          "p99": 1.8651099999999996
+        },
+        "ttft_ms": null,
+        "stream_completion_rate": null,
+        "requests_per_second": 34685.850254247285
+      },
+      "result": "PASS",
+      "gateway_added_ttft_ms": null,
+      "gateway_added_total_latency_ms": {
+        "p50": 0.8390000000000001,
+        "p95": 0.051000000000000156,
+        "p99": -0.005920000000000369
+      }
+    },
+    {
+      "case_id": "chat.sse",
+      "concurrency": 50,
+      "direct": {
+        "result": "FAIL",
+        "request_count": 5000,
+        "expected_request_count": 5000,
+        "success_rate": 0.8258,
+        "total_latency_ms": {
+          "p50": 34,
+          "p95": 40,
+          "p99": 76
+        },
+        "ttft_ms": {
+          "p50": 9,
+          "p95": 13,
+          "p99": 131
+        },
+        "stream_completion_rate": 0.8258,
+        "requests_per_second": 1228.2088122017142
+      },
+      "gateway": {
+        "result": "FAIL",
+        "request_count": 5000,
+        "expected_request_count": 5000,
+        "success_rate": 0.1882,
+        "total_latency_ms": {
+          "p50": 22,
+          "p95": 57,
+          "p99": 777
+        },
+        "ttft_ms": {
+          "p50": 9,
+          "p95": 245,
+          "p99": 780
+        },
+        "stream_completion_rate": 0.1882,
+        "requests_per_second": 1027.236772118
+      },
+      "result": "FAIL",
+      "gateway_added_ttft_ms": {
+        "p50": 0,
+        "p95": 232,
+        "p99": 649
+      },
+      "gateway_added_total_latency_ms": {
+        "p50": -12,
+        "p95": 17,
+        "p99": 701
+      }
+    },
+    {
+      "case_id": "responses.json",
+      "concurrency": 50,
+      "result": "SKIPPED",
+      "reason": "PRIOR_FAILURE: earlier measurement failed; inspect its result first"
+    },
+    {
+      "case_id": "responses.sse",
+      "concurrency": 50,
+      "result": "SKIPPED",
+      "reason": "PRIOR_FAILURE: earlier measurement failed; inspect its result first"
+    },
+    {
+      "case_id": "chat.json",
+      "concurrency": 100,
+      "result": "SKIPPED",
+      "reason": "PRIOR_FAILURE: earlier measurement failed; inspect its result first"
+    },
+    {
+      "case_id": "chat.sse",
+      "concurrency": 100,
+      "result": "SKIPPED",
+      "reason": "PRIOR_FAILURE: earlier measurement failed; inspect its result first"
+    },
+    {
+      "case_id": "responses.json",
+      "concurrency": 100,
+      "result": "SKIPPED",
+      "reason": "PRIOR_FAILURE: earlier measurement failed; inspect its result first"
+    },
+    {
+      "case_id": "responses.sse",
+      "concurrency": 100,
+      "result": "SKIPPED",
+      "reason": "PRIOR_FAILURE: earlier measurement failed; inspect its result first"
+    }
+  ],
+  "finished_at": "2026-09-07T04:35:15.086Z",
+  "result": "FAIL"
+}

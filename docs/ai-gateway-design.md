@@ -466,7 +466,7 @@ v1 响应 envelope 固定如下：summary 为 `{version, timezone, range, data}`
 - diff 只保留字段名和类型，不保留标量值；敏感字段（credential、token、prompt 等 14 类）自动标记并排除；
 - Admin 路由中间件已接入，自动从请求方法、路径和 payload 推导 `action`、`resource_type` 和 `resource_id`。
 
-### Prometheus 可观测性
+### Prometheus 与 OpenTelemetry 可观测性
 
 - `GET /metrics` 返回 Prometheus 文本格式指标；
 - 请求级：`gateway_requests_total`（protocol/model/status/mode）、`gateway_request_duration_seconds`；
@@ -475,6 +475,7 @@ v1 响应 envelope 固定如下：summary 为 `{version, timezone, range, data}`
 - 流式：`gateway_time_to_first_token_seconds`、`gateway_active_streams`；
 - 运维：`gateway_health_cooldowns_total`、`gateway_snapshot_revision`；
 - 非流式和流式路径均已接入 `record_proxy_request`；5 秒 upkeep 周期。
+- OpenTelemetry OTLP/gRPC tracing 已由 PR #80 实现；设置 `OTEL_EXPORTER_OTLP_ENDPOINT` 启用，`OTEL_SERVICE_NAME` 默认 `my-ai-gateway`。未配置时仅本地日志；初始化失败会告警并回退本地日志。生产 collector 接收情况需另行验证。
 
 ### 部署
 
@@ -487,7 +488,7 @@ v1 响应 envelope 固定如下：summary 为 `{version, timezone, range, data}`
 - PostgreSQL 16；
 - Gateway + PostgreSQL 单机部署结构，PostgreSQL 使用命名卷持久化，默认不向宿主机发布数据库端口。
 
-## 7. 当前未完成工作
+## 7. 分领域现状与剩余验收
 
 ### 7.1 Virtual Key 正式系统
 
@@ -550,7 +551,7 @@ CPA Usage Keeper 只复用 React 页面和交互，不复用其 Go 后端、SQLi
 
 - 健康状态持久化与主动探测（#52）已完成；
 - SSE 心跳、取消和流式超时契约（#54）已完成：三协议原生透传共享可配置心跳、连接/首事件/空闲/总时限和取消清理；
-- Prometheus 指标采集与 `/metrics` 端点（#50，PR #77）已完成：`gateway_requests_total`、`gateway_upstream_attempts_total`、`gateway_tokens_total`、`gateway_request_duration_seconds`、`gateway_time_to_first_token_seconds`、`gateway_health_cooldowns_total`、`gateway_snapshot_revision`、`gateway_active_streams`；OpenTelemetry tracing 导出可后置；
+- Prometheus 指标采集与 `/metrics` 端点（#50，PR #77）已完成：`gateway_requests_total`、`gateway_upstream_attempts_total`、`gateway_tokens_total`、`gateway_request_duration_seconds`、`gateway_time_to_first_token_seconds`、`gateway_health_cooldowns_total`、`gateway_snapshot_revision`、`gateway_active_streams`；OpenTelemetry OTLP/gRPC tracing 已由 PR #80 完成；
 - Secret Resolver 与凭据信封加密（#47，PR #73）已完成：AES-256-GCM 信封加密、多版本 keyring、运行时凭据路径和 Admin 加密/轮换端点已集成；
 - Admin 写操作审计日志（#48，PR #74）已完成：请求级 AuditContext、diff 脱敏、事务内/独立审计记录和 Admin 路由中间件已接入；
 - 数据保留、清理、备份和恢复（#53，第一版已完成；后续仅按运行反馈加固）。
@@ -568,19 +569,20 @@ SSE 心跳和超时是进程级运行参数，不属于 PostgreSQL Source/Bindin
 连接时限只覆盖等待上游响应头；首事件时限从响应头开始，空闲时限在每个完整 Provider
 SSE 事件后重置，总时限从逻辑请求开始计算。心跳固定为 `: gateway-heartbeat` SSE
 comment，单独作为下游 Body chunk 发送，不进入 Provider 事件、序列号、Usage 捕获或 TTFT。
-已发出响应头后不能 fallback：正常 EOF 保留原始顺序并结束，空流发送
+已发出响应头后不能 fallback：正常 EOF 保留原始顺序并结束；Chat 仅在所有已出现的 choice 都报告非空 `finish_reason` 时补缺失的 `[DONE]`，缺少完成证据则报告上游错误，后续 usage chunk 不提前截断。空流发送
 `gateway_empty_stream`，上游读取错误发送 `gateway_upstream_error`，首事件/空闲/总时限
 分别发送对应的 `gateway_*_timeout` 错误帧后关闭。下游 Body 被丢弃时立即 drop Reqwest
 上游流，Usage 以 `499` 和 `client disconnected` 记录；这些错误摘要只含稳定脱敏文本，
 不保存 prompt/response 正文。每次流结束还通过 tracing 输出低基数的终止原因、TTFT 和
-转发字节数，便于后续 Prometheus/OpenTelemetry（#50）接入；不使用 request id、模型全文
+转发字节数，并已接入 Prometheus/OpenTelemetry（#50）；不使用 request id、模型全文
 或凭据作为指标标签。
+
+SSE usage 解析失败日志只记录 request_id、成功状态、字节长度、行数、JSON 解析失败计数、无 usage 计数及最终 usage_source；不输出正文预览、Base64/hex 编码片段或正文指纹（2026-09-07 收尾修复）。
 
 ### 7.6 测试
 
-- 已增加 Kimi 内置 Adapter 的 mock 上游端到端测试；
-- 已覆盖非流式 thinking/web search 转换；
-- 已覆盖流式 Anthropic SSE → Responses SSE；
+- Kimi 内置 Adapter 及其转换测试已随 #157 移除，当前测试以三协议原生契约为主；保留通用 Adapter 框架校验与 degraded 语义回归；
+- 原生 thinking/web search/tool calling 与 usage 由 JSON/SSE Contract 覆盖；
 - 已增加 OpenAI/Anthropic usage JSON 和 SSE 提取单测；
 - 已覆盖主账号和 fallback 的三协议模型重写、408/429/5xx/传输错误、首选账号不可用、全部失败和流式 TTFT；
 - 已覆盖失败请求 `missing/0`、真实 upstream model、逻辑事件/attempt 归因及跨 Source fallback；
@@ -645,4 +647,4 @@ Usage 的 `provider_id` 与 `source_id` 已在 DB-first snapshot、主路径、e
 2. 在已完成独立 Management 外壳（#42）的基础上，并行接入有效能力矩阵（#43）和 Source/模型发现确认流（#45）。
 3. 完成 #8 用量分析 Epic 的最终验收并关闭。
 4. 完成 Virtual Key 生命周期和 SSE 生命周期契约（#51、#54）；健康持久化/主动探测（#52）已完成。
-5. 接入 Prometheus/OpenTelemetry，并建立数据保留、备份与恢复流程（#50、#53）。
+5. Prometheus/OpenTelemetry 和数据保留、备份与恢复流程已实现（#50、#53）；复核部署配置和运行证据。

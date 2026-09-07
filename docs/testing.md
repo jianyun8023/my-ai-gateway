@@ -101,11 +101,12 @@ SDK 解析失败"的情况。
   "llmprobe": "0.6.1",
   "compatcanary": "0.2.2",
   "k6": "2.2.0",
-  "xk6_sse": "0.1.12"
+  "xk6_sse": "0.1.13-0.20260818094211-37cc4724690d",
+  "xk6": "1.4.12"
 }
 ```
 
-> 以上版本基于 2026-09-04 各工具的最新稳定版本。
+> 以上为 2026-09-07 本轮测试锁定版本；xk6-sse 使用支持 k6 v2 的不可变提交版本。
 > - **llmprobe 0.6.1**：npm `llmprobe`，ddalcu/responses-chat-messages-validator。
 >   单次运行探测端点的全部 surface（chat / responses / messages / models 等），
 >   没有 `--spec`/`--filter`/`--base-url` CLI 参数；实际调用方式为
@@ -120,8 +121,7 @@ SDK 解析失败"的情况。
 > - **CompatCanary 0.2.2**：npm `compatcanary`，CognizenOrg/compatcanary。
 >   支持 `--profile chat|modern` 和 `--format json|markdown`。
 > - **k6 2.2.0**：Grafana k6，2026-08-10 发布。
-> - **xk6-sse 0.1.12**：phymbert/xk6-sse，k6 community extension。
->   k6 ≥ 2.x 可直接 `import sse from "k6/x/sse"` 自动解析，无需自定义构建。
+> - **xk6-sse 0.1.13-0.20260818094211-37cc4724690d**：锁定上游 k6 v2 适配提交；0.1.12 与 k6 2.x 模块路径不兼容，已实测无法激活。使用固定 xk6 1.4.12 构建，不依赖自动扩展解析。
 >   已知限制：`sse.open()` 阻塞事件循环，不支持单 VU 并行 SSE 连接。
 
 ## 5. Mise 命令设计
@@ -162,7 +162,7 @@ SDK 解析失败"的情况。
      （content block 状态机）、Tool Calling 17 case（single/parallel/required/named/
      none/result_roundtrip/stream_arguments × 三协议）、Reasoning/Thinking 8 case
      （separate_from_text/stream/multi_turn #88 回归）；
-   - 合计 81 个 case，全部离线、确定性、无 Provider Secret。
+   - 原有 80 个 case（Kimi converted 路径移除后）及 #120 新增 10 个故障测试，全部离线、确定性、无 Provider Secret。
 
 所有 case 完全离线（无 Provider Secret、无公网访问），使用进程内 MockProvider
 作为确定性上游，通过 `test-support` cargo feature 暴露的 `test_gateway_router()`
@@ -171,6 +171,12 @@ SDK 解析失败"的情况。
 `cargo test --workspace` 也会自动包含 `contract_tests`（当 `test-support` feature
 启用时），因此 `mise run test` 已隐式覆盖这些测试。若只跑 Rust 部分，可直接执行
 `cargo test --workspace --features test-support -- --test-threads=1`。
+
+### `test-faults` / `test-load` 运行方式
+
+#120 的故障入口和本地负载工具已实现，详见 [负载/故障说明](../tests/load/README.md)。`test-faults` 运行 Router 故障回归、SSE 生命周期和 attempt 归因；`test-load` 使用固定 k6 + xk6-sse 对比 Direct/Gateway，默认覆盖四类请求与六档并发。先运行 `mise run build-load-tools`，结果写入 `target/test-reports/load/`。真实 Provider 压测要求独立的 `LOAD_TESTS=1` 显式启用。
+
+`test-all-offline` 包含本地负载，强制 `--target mock` 与 `DIFFERENTIAL_TESTS=0`；普通 `verify` 只纳入新增 Contract 和 runner 单测。
 
 ### `test-conformance` 运行方式
 

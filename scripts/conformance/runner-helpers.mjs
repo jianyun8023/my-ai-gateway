@@ -74,12 +74,13 @@ export async function startConformanceTarget(opts = {}) {
     const env = { ...process.env, CARGO_HOME: cargoHome }
     const child = spawn(
       'cargo',
-      ['run', '--example', 'conformance-target', '--features', 'test-support'],
+      ['run', ...(opts.release ? ['--release'] : []), '--example', 'conformance-target', '--features', 'test-support'],
       { cwd: REPO_ROOT, env, stdio: ['ignore', 'pipe', 'pipe'] },
     )
 
     let baseUrl = null
     let model = null
+    let mockUrl = null
     let ready = false
     let stderr = ''
     const timer = setTimeout(() => {
@@ -94,6 +95,7 @@ export async function startConformanceTarget(opts = {}) {
         if (trimmed.startsWith('CONFORMANCE_GATEWAY_URL=')) {
           baseUrl = trimmed.split('=', 2)[1]
         }
+        if (trimmed.startsWith('CONFORMANCE_MOCK_URL=')) mockUrl = trimmed.split('=', 2)[1]
         if (trimmed.startsWith('CONFORMANCE_MODEL=')) {
           model = trimmed.split('=', 2)[1]
         }
@@ -107,6 +109,7 @@ export async function startConformanceTarget(opts = {}) {
           process: child,
           baseUrl,
           model,
+          mockUrl,
           cleanup: () => {
             child.kill('SIGTERM')
             return new Promise((res) => child.on('exit', res))

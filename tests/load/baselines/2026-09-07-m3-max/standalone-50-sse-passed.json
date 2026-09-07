@@ -1,0 +1,91 @@
+{
+  "started_at": "2026-09-07T04:37:36.427Z",
+  "target": "mock",
+  "profile": "release/test-support/no-database",
+  "versions": {
+    "llmprobe": "0.6.1",
+    "compatcanary": "0.2.2",
+    "k6": "2.2.0",
+    "xk6_sse": "0.1.13-0.20260818094211-37cc4724690d",
+    "_comment": "版本事实来源。升级工具需显式修改此文件并在 PR 记录理由。禁止 latest。",
+    "xk6": "1.4.12"
+  },
+  "environment": {
+    "os": "darwin",
+    "arch": "arm64",
+    "release": "27.0.0",
+    "cpu": "Apple M3 Max",
+    "logical_cpus": 16,
+    "memory_bytes": 68719476736,
+    "node": "v24.11.1",
+    "gateway_commit": "c4da71703117a566a34eac09a2099d41f95c1c7f",
+    "working_tree_dirty": true,
+    "network": "loopback, Mock and Gateway share a process",
+    "iterations_per_vu": 100,
+    "concurrency": [
+      50
+    ]
+  },
+  "limitations": [
+    "本地 Mock 使用 release/test-support，不包含 PostgreSQL Usage 持久化、真实 Provider 或生产网络开销。",
+    "每个组合先执行 5 次未计入指标的预热；Direct/Gateway 按档位交替执行先后顺序。",
+    "TTFT/SSE 总时长使用客户端毫秒时钟；JSON 总时长采用 k6 HTTP duration（不含 DNS/连接建立）；吞吐分母为 k6 testRunDurationMs。",
+    "短样本的 p95/p99 仅用于探索；负差值表示测量噪声/调度差异，不截为零。",
+    "未达到请求数或完成率门限判 FAIL，工具失败不会记为 SKIPPED/PASS；失败后的更高并发标为 SKIPPED/PRIOR_FAILURE。"
+  ],
+  "rows": [
+    {
+      "case_id": "chat.sse",
+      "concurrency": 50,
+      "direct": {
+        "result": "PASS",
+        "request_count": 5000,
+        "expected_request_count": 5000,
+        "success_rate": 1,
+        "total_latency_ms": {
+          "p50": 34,
+          "p95": 40,
+          "p99": 46
+        },
+        "ttft_ms": {
+          "p50": 8,
+          "p95": 11,
+          "p99": 22
+        },
+        "stream_completion_rate": 1,
+        "requests_per_second": 1344.8238670733056
+      },
+      "gateway": {
+        "result": "PASS",
+        "request_count": 5000,
+        "expected_request_count": 5000,
+        "success_rate": 1,
+        "total_latency_ms": {
+          "p50": 33,
+          "p95": 38,
+          "p99": 66.00999999999996
+        },
+        "ttft_ms": {
+          "p50": 8,
+          "p95": 11,
+          "p99": 18
+        },
+        "stream_completion_rate": 1,
+        "requests_per_second": 1361.7603530554363
+      },
+      "result": "PASS",
+      "gateway_added_ttft_ms": {
+        "p50": 0,
+        "p95": 0,
+        "p99": -4
+      },
+      "gateway_added_total_latency_ms": {
+        "p50": -1,
+        "p95": -2,
+        "p99": 20.009999999999962
+      }
+    }
+  ],
+  "finished_at": "2026-09-07T04:37:45.883Z",
+  "result": "PASS"
+}

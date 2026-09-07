@@ -1,0 +1,10 @@
+{
+  "concurrency": [1, 5, 10, 25, 50, 100],
+  "iterations_per_vu": 100,
+  "cases": [
+    {"id": "chat.json", "protocol": "chat", "stream": false},
+    {"id": "chat.sse", "protocol": "chat", "stream": true},
+    {"id": "responses.json", "protocol": "responses", "stream": false},
+    {"id": "responses.sse", "protocol": "responses", "stream": true}
+  ]
+}

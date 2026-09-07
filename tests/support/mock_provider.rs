@@ -114,6 +114,7 @@ impl MockProvider {
         MockProviderBuilder {
             cases: HashMap::new(),
             default_response: None,
+            sequence: Vec::new(),
         }
     }
 
@@ -162,9 +163,17 @@ impl Drop for MockProvider {
 pub struct MockProviderBuilder {
     cases: HashMap<String, CaseFixture>,
     default_response: Option<CaseFixture>,
+    sequence: Vec<CaseFixture>,
 }
 
 impl MockProviderBuilder {
+    /// Deterministic retry/fallback responses, repeating the last after exhaustion.
+    pub fn sequence(mut self, responses: Vec<CaseFixture>) -> Self {
+        assert!(!responses.is_empty());
+        self.sequence = responses;
+        self
+    }
+
     /// Register a fixture for a given case ID (e.g. `chat.text.basic`).
     pub fn case(mut self, case_id: &str, fixture: CaseFixture) -> Self {
         self.cases.insert(case_id.to_owned(), fixture);
@@ -182,6 +191,7 @@ impl MockProviderBuilder {
         SpawnableMock {
             cases: Arc::new(self.cases),
             default_response: self.default_response.map(Arc::new),
+            sequence: Arc::new(self.sequence),
         }
     }
 }
@@ -190,6 +200,7 @@ impl MockProviderBuilder {
 pub struct SpawnableMock {
     cases: Arc<HashMap<String, CaseFixture>>,
     default_response: Option<Arc<CaseFixture>>,
+    sequence: Arc<Vec<CaseFixture>>,
 }
 
 impl SpawnableMock {
@@ -197,6 +208,7 @@ impl SpawnableMock {
         let requests: Arc<Mutex<Vec<RecordedRequest>>> = Arc::new(Mutex::new(Vec::new()));
         let cases = self.cases;
         let default_response = self.default_response;
+        let sequence = self.sequence;
 
         let app = Router::new().route(
             "/{*path}",
@@ -204,13 +216,21 @@ impl SpawnableMock {
                 let requests = requests.clone();
                 let cases = cases.clone();
                 let default_response = default_response.clone();
+                let sequence = sequence.clone();
                 move |request: Request| {
                     let requests = requests.clone();
                     let cases = cases.clone();
                     let default_response = default_response.clone();
+                    let sequence = sequence.clone();
                     async move {
-                        handle_request(request, &requests, &cases, default_response.as_deref())
-                            .await
+                        handle_request(
+                            request,
+                            &requests,
+                            &cases,
+                            default_response.as_deref(),
+                            &sequence,
+                        )
+                        .await
                     }
                 }
             }),
@@ -245,6 +265,7 @@ async fn handle_request(
     requests: &Arc<Mutex<Vec<RecordedRequest>>>,
     cases: &HashMap<String, CaseFixture>,
     default_response: Option<&CaseFixture>,
+    sequence: &[CaseFixture],
 ) -> Response<Body> {
     let (parts, body) = request.into_parts();
 
@@ -274,14 +295,17 @@ async fn handle_request(
         });
         order
     };
-    let _ = arrival_order;
 
     let case_id = parts
         .headers
         .get(TEST_CASE_HEADER)
         .and_then(|v| v.to_str().ok());
 
-    let fixture = case_id.and_then(|id| cases.get(id)).or(default_response);
+    let fixture = sequence
+        .get(arrival_order)
+        .or_else(|| sequence.last())
+        .or_else(|| case_id.and_then(|id| cases.get(id)))
+        .or(default_response);
 
     match fixture {
         Some(f) => build_response(f).await,
