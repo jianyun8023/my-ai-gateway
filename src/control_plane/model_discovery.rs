@@ -264,7 +264,7 @@ impl ModelDiscoveryService {
                 .iter()
                 .chain(protocol_preset.headers.iter()),
         )?
-        .timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(120))
         .body(serde_json::to_vec(&body).map_err(|_| DiscoveryServiceError::InvalidPreset)?);
         let response = match request.send().await {
             Ok(response) => response,

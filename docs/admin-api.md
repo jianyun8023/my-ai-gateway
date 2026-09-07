@@ -112,9 +112,9 @@ Source 生命周期还提供 `GET/PUT/DELETE /admin/sources/:source_id` 和 `PUT
 }
 ```
 
-Kimi Responses 返回 `protocol=openai_responses`、`upstream_protocol=anthropic_messages`、`mode=adapter`。上游非 2xx、超时或连接失败也返回持久化后的结构化结果，`status=failed`，错误消息为固定脱敏文本；不会读取或保存完整失败正文。
+当前 `kimi_code@4` 预设的 Kimi Responses 返回 `protocol=openai_responses`、`upstream_protocol=openai_responses`、`mode=native`。上游非 2xx、超时或连接失败也返回持久化后的结构化结果，`status=failed`，错误消息为固定脱敏文本；不会读取或保存完整失败正文。
 
-连接测试会产生一个最小的真实模型请求，可能消耗少量上游 Token。
+连接测试会产生一个最小的真实模型请求，可能消耗少量上游 Token。上游请求超时为 120 秒；账号健康探测复用该连接测试。此时限独立于数据面的 `GATEWAY_SSE_*` 配置。
 
 ## 账号健康与主动探测
 
