@@ -12,6 +12,14 @@
 
 每次查看都会写入 `virtual_key.reveal` 元数据审计事件；审计记录、日志和控制面导出均不会包含 Key 明文或加密恢复副本。
 
+### 控制台轮换
+
+系统设置中的轮换操作调用 `POST /admin/keys/:id/rotate`，提交 `overlap_secs` 和 `allowed_models`。重叠期为 0–86400 的整数秒，控制台默认 3600 秒；0 表示旧密钥立即失效。模型白名单预填旧密钥的值，修改只影响新密钥，空数组表示不限制模型。
+
+接口返回 `old_id`、`new_id`、`key_prefix`、`key` 和 `overlap_until`，控制台展示新密钥供显式复制，并刷新列表。重叠期不会延长旧密钥原有的 `expires_at`；旧密钥仍按原模型权限工作。未提交的名称、权限范围和到期时间沿用已有轮换规则。
+
+列表中的 `replaced_by_id`、`overlap_until`、`expires_at` 用于展示重叠期和失效状态；已轮换、已过期、禁用或撤销的密钥不可再次轮换。状态显示不替代服务端鉴权，轮换错误保留在表单内供处理后重试。
+
 ## 客户端归因（Client Source）
 
 数据面请求可通过 `X-Client-Source` header 上报客户端来源；这是网关与下游 SDK 之间的协议约定，客户端 SDK 默认应带上该 header，以便用量统计和 Request Events 能准确归因。

@@ -215,17 +215,12 @@ export function GatewayConsoleShell({
           <Button size="sm" variant="secondary" onClick={applyAdminKey}>{t('shell.mobile_key_apply')}</Button>
         </div>
 
-        {/* Footer — matches prototype: status dot + running info */}
-        <div className={styles.sidebarFooter}>
-          <div className={styles.statusDot} />
-          <span>{t('shell.running_status')}</span>
-        </div>
       </aside>
 
       <button type="button" className={styles.mobileOverlay} data-open={mobileNavOpen} aria-label={t('shell.close_overlay')} tabIndex={mobileNavOpen ? 0 : -1} onClick={() => closeMobileNav(true)} />
 
       <div className={styles.mainArea}>
-        {/* Topbar — matches prototype: title + endpoint + search + admin key */}
+        {/* Topbar — matches prototype: title + endpoint + admin key */}
         <header className={styles.topbar} data-od-id="topbar">
           <button ref={menuButtonRef} type="button" className={styles.mobileMenuBtn} aria-label={t('shell.open_nav')} aria-controls="gateway-navigation" aria-expanded={mobileNavOpen} onClick={() => setMobileNavOpen(true)}>
             <IconMenu size={20} />
@@ -233,13 +228,7 @@ export function GatewayConsoleShell({
           <span className={styles.topbarTitle}>{title}</span>
           <div className={styles.topbarRight}>
             <div className={styles.endpointDisplay}>
-              <div className={styles.endpointDot} />
               <span>{gatewayEndpoint}</span>
-            </div>
-            <div className={styles.topbarSearch}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /></svg>
-              {t('shell.search')}
-              <kbd>{t('shell.search_hint')}</kbd>
             </div>
             <label className={styles.keyInput}>
               <span>{t('shell.admin_key_label')}</span>

@@ -146,25 +146,6 @@
   }
 }
 
-/* Sidebar footer — status dot + info */
-.sidebarFooter {
-  padding: 12px 16px;
-  border-top: 1px solid var(--border-color);
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 13px;
-  color: var(--text-secondary);
-}
-
-.statusDot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--success, oklch(62% 0.16 145));
-  flex-shrink: 0;
-}
-
 /* Close / mobile nav controls — hidden on desktop */
 .sidebarClose,
 .mobileMenuBtn,
@@ -247,35 +228,6 @@
   font-family: var(--font-mono);
   font-size: var(--fs-meta);
   color: var(--text-secondary);
-}
-
-.endpointDot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--success, oklch(62% 0.16 145));
-}
-
-.topbarSearch {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
-  background: var(--bg);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  color: var(--text-secondary);
-  font-size: 13px;
-  cursor: pointer;
-
-  kbd {
-    font-family: var(--font-mono);
-    font-size: var(--fs-small);
-    background: var(--floating-surface);
-    border: 1px solid var(--border-color);
-    border-radius: 4px;
-    padding: 1px 5px;
-  }
 }
 
 .keyInput {
@@ -368,7 +320,6 @@
   .content { padding: 16px; }
 
   .topbar { padding: 0 16px; gap: 10px; }
-  .topbarSearch { display: none; }
   .topbarLanguage { display: none; }
   .sidebarLanguageArea { display: flex; }
   .endpointDisplay { font-size: 11px; padding: 4px 8px; }

@@ -1,5 +1,14 @@
 // 系统设置页文案(简体中文)——命名空间 console.settings
 export const settings = {
+  overlap_seconds: "重叠期（秒）",
+  overlap_hint: "0–86400 秒。重叠期内旧密钥仍可使用，原到期时间仍然有效。",
+  overlap_invalid: "请输入 0–86400 之间的整数秒数。",
+  rotation_hint: "生成新密钥，并为新密钥设置模型白名单；旧密钥的模型权限保持不变。",
+  rotation_immediate: "重叠期为 0，轮换后旧密钥立即失效。",
+  key_rotated_overlap: "{{name}} 已轮换。旧密钥最晚有效至 {{until}}，请在此前更新客户端。",
+  key_rotated_immediate: "{{name}} 已轮换，旧密钥已失效。请更新客户端密钥。",
+  valid_until: "最晚有效至 {{until}}",
+  rotate_key_aria: "轮换 {{name}}",
   // 表单与校验
   key_name_required: '密钥名称不能为空。',
   key_name: '密钥名称',
@@ -58,6 +67,9 @@ export const settings = {
   all_models: '全部模型',
   row_id: 'ID {{id}}',
   key_status: {
+    expired: "已过期",
+    overlap: "重叠期",
+    rotated: "已轮换",
     active: '已启用',
     disabled: '已停用',
     revoked: '已撤销',
@@ -68,6 +80,8 @@ export const settings = {
 
   // 弹窗
   modal: {
+    rotate_title: "轮换密钥 · {{name}}",
+    rotate_confirm: "轮换密钥",
     new_key: '新建虚拟密钥',
     create_key: '创建密钥',
     reveal_title: '虚拟密钥 · {{name}}',

@@ -11,7 +11,6 @@ export const shell = {
   open_nav: 'Open navigation',
   mobile_key_label: 'Admin Key',
   mobile_key_apply: 'Apply',
-  running_status: 'Gateway running',
 
   // 导航分组
   section: {
@@ -35,8 +34,6 @@ export const shell = {
   // 顶栏
   admin_key_label: 'Admin Key',
   admin_key_placeholder: 'GATEWAY_ADMIN_KEY',
-  search: 'Search…',
-  search_hint: '⌘K',
 
   // 通用占位
   page_loading: 'Loading page…',

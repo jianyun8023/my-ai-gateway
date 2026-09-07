@@ -6,7 +6,7 @@ import { TextAreaField, TextField } from '@/components/ui/FormField';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Modal } from '@/components/ui/Modal';
-import { useCallback, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import type {
   AdminErrorShape,
@@ -14,6 +14,7 @@ import type {
   GatewayAdminResources,
   RuntimeReloadResult,
   VirtualKey,
+  VirtualKeyRotateInput,
 } from '@/admin-api';
 import { normalizeAdminError } from '@/admin-api';
 import { useLocalizedApiError } from '@/hooks/useLocalizedApiError';
@@ -41,6 +42,7 @@ import {
   formatDateTime,
 } from './shared';
 import { useAdminQuery } from './useAdminQuery';
+import { VirtualKeyRotationForm } from './VirtualKeyRotationForm';
 import styles from './ControlPlane.module.scss';
 
 interface SettingsPageProps {
@@ -107,6 +109,8 @@ export function SettingsPage({
   const [revealedKey, setRevealedKey] = useState<{ id: number; name: string; key: string }>();
   const [copyStatus, setCopyStatus] = useState<'copied' | 'pending' | 'failed'>('pending');
   const [revokeTarget, setRevokeTarget] = useState<VirtualKey>();
+  const [rotateTarget, setRotateTarget] = useState<VirtualKey>();
+  const [now, setNow] = useState(Date.now);
   const [mutationBusy, setMutationBusy] = useState(false);
   const [mutationError, setMutationError] = useState<AdminErrorShape>();
   const [notice, setNotice] = useState('');
@@ -121,6 +125,12 @@ export function SettingsPage({
   }, [api]);
   const query = useAdminQuery({ load, refreshRevision, onBusyChange });
   const data = query.data;
+
+  useEffect(() => {
+    if (!data?.keys.some((key) => key.expires_at || key.overlap_until)) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [data]);
 
   const mutate = async (operation: () => Promise<void>, successMessage?: string) => {
     if (mutationBusy) return;
@@ -173,6 +183,24 @@ export function SettingsPage({
     });
   };
 
+  const rotateKey = (input: VirtualKeyRotateInput) => {
+    if (!rotateTarget) return;
+    void mutate(async () => {
+      const result = await api.rotateVirtualKey(rotateTarget.id, input);
+      // An earlier expiry still applies to the old key during the overlap.
+      const validUntil = result.overlap_until && rotateTarget.expires_at
+        ? new Date(Math.min(Date.parse(result.overlap_until), Date.parse(rotateTarget.expires_at))).toISOString()
+        : result.overlap_until;
+      setRevealedKey({ id: result.new_id, name: rotateTarget.name, key: result.key });
+      setCopyStatus('pending');
+      setNotice(validUntil
+        ? t('settings.key_rotated_overlap', { name: rotateTarget.name, until: formatDateTime(validUntil) })
+        : t('settings.key_rotated_immediate', { name: rotateTarget.name }));
+      setRotateTarget(undefined);
+      query.reload();
+    });
+  };
+
   const revokeKey = () => {
     if (!revokeTarget) return;
     void mutate(async () => {
@@ -221,7 +249,7 @@ export function SettingsPage({
       </PageActions>
       <SuccessNotice message={notice} onDismiss={() => setNotice('')} />
       {query.error && <ErrorState error={query.error} onRetry={query.reload} />}
-      {mutationError && !createOpen && !revokeTarget && <ErrorState error={mutationError} />}
+      {mutationError && !createOpen && !revokeTarget && !rotateTarget && <ErrorState error={mutationError} />}
 
       <div className={styles.settingsGrid}>
         <Card title={t('settings.card.key_session')} subtitle={t('settings.card.key_session_subtitle')}>
@@ -262,20 +290,29 @@ export function SettingsPage({
           <TableScroll label={t('settings.keys_table_aria')}>
             <table className={styles.table}>
               <thead><tr><th>{t('settings.keys_column.name')}</th><th>{t('settings.keys_column.prefix')}</th><th>{t('settings.keys_column.allowed_models')}</th><th>{t('settings.keys_column.created')}</th><th>{t('settings.keys_column.last_used')}</th><th>{t('settings.keys_column.status')}</th><th>{t('common.actions')}</th></tr></thead>
-              <tbody>{data.keys.map((key) => (
+              <tbody>{data.keys.map((key) => {
+                const expired = Boolean(key.expires_at && Date.parse(key.expires_at) <= now);
+                const replaced = key.replaced_by_id != null;
+                const overlapActive = replaced && Boolean(key.overlap_until && Date.parse(key.overlap_until) > now);
+                const status = key.revoked_at ? 'revoked' : !key.enabled ? 'disabled' : expired ? 'expired' : replaced ? overlapActive ? 'overlap' : 'rotated' : 'active';
+                const validUntil = key.overlap_until && key.expires_at
+                  ? new Date(Math.min(Date.parse(key.overlap_until), Date.parse(key.expires_at))).toISOString()
+                  : key.overlap_until;
+                return (
                 <tr key={key.id}>
                   <td><span className={styles.primaryText}><strong>{key.name}</strong><small>{t('settings.row_id', { id: key.id })}</small></span></td>
                   <td><code>{key.key_prefix}…</code></td>
                   <td>{key.allowed_models.length === 0 ? <StatusPill>{t('settings.all_models')}</StatusPill> : <span className={styles.inlineActions}>{key.allowed_models.map((model) => <StatusPill key={model}>{model}</StatusPill>)}</span>}</td>
                   <td>{formatDateTime(key.created_at)}</td>
                   <td>{formatDateTime(key.last_used_at)}</td>
-                  <td><StatusPill tone={key.enabled && !key.revoked_at ? 'success' : 'muted'}>{key.revoked_at ? t('settings.key_status.revoked') : key.enabled ? t('settings.key_status.active') : t('settings.key_status.disabled')}</StatusPill></td>
+                  <td><span className={styles.primaryText}><StatusPill tone={status === 'active' ? 'success' : status === 'overlap' ? 'warning' : 'muted'}>{t(`settings.key_status.${status}`)}</StatusPill>{overlapActive && status === 'overlap' && <small>{t('settings.valid_until', { until: formatDateTime(validUntil) })}</small>}</span></td>
                   <td><span className={styles.inlineActions}>
-                    <IconButton label={key.key_recoverable ? t('settings.view_key_aria', { name: key.name }) : t('settings.view_key_unavailable_aria', { name: key.name })} disabled={!key.key_recoverable} onClick={() => revealKey(key)}><IconEye size={16} /></IconButton>
+                    <IconButton label={key.key_recoverable ? t('settings.view_key_aria', { name: key.name }) : t('settings.view_key_unavailable_aria', { name: key.name })} disabled={mutationBusy || !key.key_recoverable} onClick={() => revealKey(key)}><IconEye size={16} /></IconButton>
+                    <IconButton label={t('settings.rotate_key_aria', { name: key.name })} disabled={mutationBusy || status !== 'active'} onClick={() => { setMutationError(undefined); setRotateTarget(key); }}><IconRefreshCw size={16} /></IconButton>
                     <IconButton label={t('settings.revoke_key_aria', { name: key.name })} className={styles.dangerIcon} disabled={!key.enabled || Boolean(key.revoked_at)} onClick={() => setRevokeTarget(key)}><IconTrash2 size={16} /></IconButton>
                   </span></td>
                 </tr>
-              ))}</tbody>
+              ); })}</tbody>
             </table>
           </TableScroll>
         )}
@@ -290,6 +327,17 @@ export function SettingsPage({
         footer={<><Button variant="secondary" onClick={() => setCreateOpen(false)} disabled={mutationBusy}>{t('common.cancel')}</Button><Button type="submit" form="virtual-key-editor-form" loading={mutationBusy}><IconKey size={14} />{t('settings.modal.create_key')}</Button></>}
       >
         <VirtualKeyForm busy={mutationBusy} error={mutationError ? localizedApiError(mutationError) : undefined} onSubmit={createKey} />
+      </Modal>
+
+      <Modal
+        open={Boolean(rotateTarget)}
+        title={t('settings.modal.rotate_title', { name: rotateTarget?.name })}
+        width={560}
+        onClose={() => !mutationBusy && setRotateTarget(undefined)}
+        closeDisabled={mutationBusy}
+        footer={<><Button variant="secondary" disabled={mutationBusy} onClick={() => setRotateTarget(undefined)}>{t('common.cancel')}</Button><Button type="submit" form="virtual-key-rotation-form" loading={mutationBusy}><IconRefreshCw size={14} />{t('settings.modal.rotate_confirm')}</Button></>}
+      >
+        {rotateTarget && <VirtualKeyRotationForm key={rotateTarget.id} target={rotateTarget} busy={mutationBusy} error={mutationError ? localizedApiError(mutationError) : undefined} onSubmit={rotateKey} />}
       </Modal>
 
       <Modal

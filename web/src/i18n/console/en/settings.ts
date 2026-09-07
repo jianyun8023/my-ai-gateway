@@ -1,5 +1,14 @@
 // 系统设置页文案(英文)——命名空间 console.settings
 export const settings = {
+  overlap_seconds: "Overlap (seconds)",
+  overlap_hint: "0–86400 seconds. The old key remains valid during overlap, subject to its original expiry.",
+  overlap_invalid: "Enter a whole number between 0 and 86400 seconds.",
+  rotation_hint: "Generate a new key and set its model allowlist. The old key keeps its existing model permissions.",
+  rotation_immediate: "With no overlap, the old key stops working immediately after rotation.",
+  key_rotated_overlap: "{{name}} rotated. The old key is valid until at most {{until}}. Update your clients before then.",
+  key_rotated_immediate: "{{name}} rotated. The old key is no longer valid. Update your client key.",
+  valid_until: "Valid until at most {{until}}",
+  rotate_key_aria: "Rotate {{name}}",
   // 表单与校验
   key_name_required: 'Key name cannot be empty.',
   key_name: 'Key name',
@@ -58,6 +67,9 @@ export const settings = {
   all_models: 'All models',
   row_id: 'ID {{id}}',
   key_status: {
+    expired: "Expired",
+    overlap: "Overlap",
+    rotated: "Rotated",
     active: 'Active',
     disabled: 'Disabled',
     revoked: 'Revoked',
@@ -68,6 +80,8 @@ export const settings = {
 
   // 弹窗
   modal: {
+    rotate_title: "Rotate key · {{name}}",
+    rotate_confirm: "Rotate Key",
     new_key: 'New Virtual Key',
     create_key: 'Create Key',
     reveal_title: 'Virtual Key · {{name}}',

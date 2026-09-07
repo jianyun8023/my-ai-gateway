@@ -33,6 +33,8 @@ import type {
   VirtualKeyCreateInput,
   VirtualKeyCreateResult,
   VirtualKeySecret,
+  VirtualKeyRotateInput,
+  VirtualKeyRotateResult,
 } from './types';
 
 export interface AdminTransport {
@@ -351,6 +353,10 @@ export class GatewayAdminResources {
 
   async revokeVirtualKey(id: number, signal?: AbortSignal): Promise<void> {
     await this.transport.json(`/admin/keys/${encodePath(id)}/revoke`, jsonInit('POST', {}, signal));
+  }
+
+  rotateVirtualKey(id: number, input: VirtualKeyRotateInput, signal?: AbortSignal): Promise<VirtualKeyRotateResult> {
+    return this.transport.json(`/admin/keys/${encodePath(id)}/rotate`, jsonInit('POST', input, signal));
   }
 
   reloadRuntime(signal?: AbortSignal): Promise<RuntimeReloadResult> {
