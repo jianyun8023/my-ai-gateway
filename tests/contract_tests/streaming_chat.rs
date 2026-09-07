@@ -205,7 +205,7 @@ async fn chat_stream_chunk_split() {
 async fn chat_stream_incomplete() {
     assert_case!("chat.stream.incomplete");
     // Incomplete stream (no finish_reason, no [DONE]) must still be handled
-    // gracefully. For Chat Completions, gateway injects [DONE] on clean EOF.
+    // gracefully, with an error before the closing [DONE] frame.
 
     let mock = spawn_mock_with_catalog().await;
     let config = native_config(mock.base_url(), MODEL);
@@ -229,11 +229,12 @@ async fn chat_stream_incomplete() {
     let json_events: Vec<_> = events.iter().filter(|e| !e.is_done()).collect();
     assert!(json_events.len() >= 1, "at least one content event");
 
-    let has_done = events.iter().any(|e| e.is_done());
     assert!(
-        has_done,
-        "gateway must inject [DONE] on clean Chat stream EOF"
+        body.contains("gateway_upstream_error"),
+        "truncation must not look successful"
     );
+    let has_done = events.iter().any(|e| e.is_done());
+    assert!(has_done, "gateway closes the error stream with [DONE]");
 }
 
 // ── chat.stream.upstream_error ──────────────────────────────────────────────

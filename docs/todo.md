@@ -1,6 +1,6 @@
 # 实施 TODO
 
-> 状态基线：`origin/main`（2026-09-03 更新）。实现事实以当前代码和已合并 PR 为准；开放任务以 GitHub Issue 为准。
+> 状态基线：`main c4da717` + `codex/113-release-test-closeout` 本地收尾（2026-09-07 更新，未推送）。实现事实以当前代码和已合并 PR 为准；开放任务以 GitHub Issue 为准。
 
 ## 已完成
 
@@ -31,18 +31,20 @@
 - [x] Virtual Key 轮换、权限更新和静态 Key 迁移（#51；PR #75）——rotate/revoke/scopes 端点、DB 层事务和 migration 0015 已集成
 - [x] Prometheus 指标采集与 `/metrics` 端点（#50；PR #77）——请求/attempt/Token/延迟/TTFT/冷却/snapshot/活跃流指标已接入非流式和流式路径
 
+- [x] OpenTelemetry OTLP/gRPC tracing 导出（#50；PR #80），由 `OTEL_EXPORTER_OTLP_ENDPOINT` 显式启用
+
 ## 当前开放任务
 
-### 可观测性
-
-- [ ] OpenTelemetry tracing 导出（#50 剩余范围）——Prometheus 指标已就绪，OTel span/trace 导出尚未实现，可后置不阻塞 v0.1.0
+- [ ] #113 测试总计划：本地收尾包含 Contract、外部扫描、SDK、故障与性能基线；GitHub 状态尚未回写。
+- [ ] #120 性能/故障验证：本地工具与测试已实现，运行结果见验收清单及 `tests/load/`；真实 Provider 性能未执行。
+- [ ] #110 运行时事件中心：设计讨论，不属于本轮发布前测试。
 
 ### 验收与收口
 
-- [x] v0.1.0 验收执行：完整分步清单见 [v0.1.0-acceptance.md](v0.1.0-acceptance.md)——Step 0/1/2/4/5 已完成
-- [ ] 生产数据复验 #96/#97/#98 [需要人工]
+- [x] v0.1.0 验收执行：完整分步清单见 [v0.1.0-acceptance.md](v0.1.0-acceptance.md)——已有历史执行记录；本轮新增验证单独记录，不把历史勾选视为当前版本全覆盖
+- [ ] 生产数据复验 #96/#97/#98 [需要人工]：三个 Issue 虽已关闭，生产修复/观测证据仍未补齐；#98 仅完成诊断，不能认定已定位根因。
 - [x] 浏览器验收 #43/#45/#52/#54/#60 相关的 Web 页面功能——2026-09-06 浏览器自动化验收通过，过程缺口已修复（#151/#153/#155，PR #152/#154/#156）
-- [x] 真实 Provider 联调复验（三家 Provider 在 #73/#74/#75/#77 之后的完整重跑）——live smoke 5/5 passed
+- [x] 真实 Provider 联调复验（历史 2026-09-06、Kimi 原生切换之前）——低成本 live smoke 5/5 passed；不等于三家三协议全覆盖，当前版本仍需显式复验
 - [ ] 打 v0.1.0 Release tag
 
 ## Epic 状态
@@ -51,6 +53,6 @@
 - #6 已关闭：后端模型目录和发现链 + Web UI (#45) 全部完成。
 - #8 已关闭：Usage 三主导航 + Provider/Source 归因 + 验收证据。
 - #24 已关闭：后端 API + Web 有效能力矩阵 (#43) 完成。
-- #1 待 OTel 和最终验收后关闭。
+- #1、#50 已关闭；代码完成与生产验收状态分开记录。
 
 本文件的主线状态同步和中文 README 修正由 #55 完成。

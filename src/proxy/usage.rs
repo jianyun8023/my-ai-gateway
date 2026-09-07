@@ -411,9 +411,8 @@ pub fn extract_sse(text: &str) -> Option<UsageReport> {
 /// provider-confirmed usage remains missing instead of inventing tokens.
 ///
 /// When `extract_sse` returns `None` and we have to fall back to the
-/// tiktoken-based `estimate`, log a `tracing::warn!` with the captured
-/// bytes' head/tail and total length so the next estimated `usage_events`
-/// row can be diagnosed after the fact (issue #98).
+/// tiktoken-based `estimate`, log metadata-only diagnostics for issue #98.
+/// Never emit response bytes, reversible previews, or body fingerprints.
 pub fn usage_for_sse_response(
     request_id: &str,
     success: bool,
@@ -438,25 +437,8 @@ pub fn usage_for_sse_response(
 }
 
 fn log_sse_extraction_failure(request_id: &str, success: bool, captured: &[u8]) {
-    const PREVIEW: usize = 512;
-    let head_end = captured.len().min(PREVIEW);
-    let tail_start = captured.len().saturating_sub(PREVIEW);
-    let head = &captured[..head_end];
-    let tail = &captured[tail_start..];
-    let count_lines = text::count_lines(captured);
-    let count_data = text::count_data_lines(captured);
-    tracing::warn!(
-        request_id = %request_id,
-        success,
-        captured_len = captured.len(),
-        line_count = count_lines,
-        data_line_count = count_data,
-        head_base64 = %text::encode_base64(head),
-        tail_base64 = %text::encode_base64(tail),
-        "SSE usage extraction failed: extract_sse returned None; falling back to tiktoken estimate"
-    );
-    // Trace-level extended diagnostics for issue #98
     let text = String::from_utf8_lossy(captured);
+    let mut data_line_count = 0usize;
     let mut json_parse_failures = 0usize;
     let mut json_without_usage = 0usize;
     for line in text.lines() {
@@ -466,6 +448,7 @@ fn log_sse_extraction_failure(request_id: &str, success: bool, captured: &[u8]) 
         if data.is_empty() || data == "[DONE]" {
             continue;
         }
+        data_line_count += 1;
         match serde_json::from_str::<Value>(data) {
             Ok(value) => {
                 if value.get("usage").is_none()
@@ -476,89 +459,20 @@ fn log_sse_extraction_failure(request_id: &str, success: bool, captured: &[u8]) 
                     json_without_usage += 1;
                 }
             }
-            Err(_) => {
-                json_parse_failures += 1;
-            }
+            Err(_) => json_parse_failures += 1,
         }
     }
-    tracing::trace!(
+    tracing::warn!(
         request_id = %request_id,
-        captured_sha256 = %text::sha256_hex(captured),
+        success,
+        captured_len = captured.len(),
+        line_count = text.lines().count(),
+        data_line_count,
         json_parse_failures,
         json_without_usage,
-        data_lines_with_content = count_data.saturating_sub(json_parse_failures + json_without_usage),
-        "SSE extraction failure diagnostics (issue #98)"
+        usage_source = if success { "estimated" } else { "missing" },
+        "SSE usage extraction failed; no provider-confirmed usage"
     );
-}
-
-mod text {
-    pub fn count_lines(bytes: &[u8]) -> usize {
-        let mut count = 0usize;
-        let mut last_was_newline = true;
-        for byte in bytes {
-            if *byte == b'\n' {
-                count += 1;
-                last_was_newline = true;
-            } else if !last_was_newline {
-                // No-op: continues an existing line.
-            } else {
-                last_was_newline = false;
-            }
-        }
-        if !last_was_newline && !bytes.is_empty() {
-            count += 1;
-        }
-        count
-    }
-
-    pub fn count_data_lines(bytes: &[u8]) -> usize {
-        String::from_utf8_lossy(bytes)
-            .lines()
-            .filter(|line| line.trim_start().starts_with("data:"))
-            .count()
-    }
-
-    pub fn sha256_hex(bytes: &[u8]) -> String {
-        use sha2::{Digest, Sha256};
-        format!("{:x}", Sha256::digest(bytes))
-    }
-
-    pub fn encode_base64(bytes: &[u8]) -> String {
-        const TABLE: &[u8; 64] =
-            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-        let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
-        let mut i = 0;
-        while i + 3 <= bytes.len() {
-            let b0 = bytes[i];
-            let b1 = bytes[i + 1];
-            let b2 = bytes[i + 2];
-            out.push(TABLE[(b0 >> 2) as usize] as char);
-            out.push(TABLE[(((b0 & 0b0000_0011) << 4) | (b1 >> 4)) as usize] as char);
-            out.push(TABLE[(((b1 & 0b0000_1111) << 2) | (b2 >> 6)) as usize] as char);
-            out.push(TABLE[(b2 & 0b0011_1111) as usize] as char);
-            i += 3;
-        }
-        let remaining = &bytes[i..];
-        match remaining.len() {
-            1 => {
-                let b0 = remaining[0];
-                out.push(TABLE[(b0 >> 2) as usize] as char);
-                out.push(TABLE[((b0 & 0b0000_0011) << 4) as usize] as char);
-                out.push('=');
-                out.push('=');
-            }
-            2 => {
-                let b0 = remaining[0];
-                let b1 = remaining[1];
-                out.push(TABLE[(b0 >> 2) as usize] as char);
-                out.push(TABLE[(((b0 & 0b0000_0011) << 4) | (b1 >> 4)) as usize] as char);
-                out.push(TABLE[((b1 & 0b0000_1111) << 2) as usize] as char);
-                out.push('=');
-            }
-            _ => {}
-        }
-        out
-    }
 }
 
 #[cfg(test)]
@@ -574,6 +488,71 @@ mod tests {
         },
         time::Duration,
     };
+
+    #[test]
+    fn sse_extraction_diagnostics_only_emit_metadata() {
+        use std::collections::BTreeMap;
+        use std::sync::Mutex;
+        use tracing::field::{Field, Visit};
+        use tracing_subscriber::{layer::Context, prelude::*, Layer};
+
+        #[derive(Clone, Default)]
+        struct Events(Arc<Mutex<Vec<BTreeMap<String, String>>>>);
+
+        struct Fields(BTreeMap<String, String>);
+        impl Visit for Fields {
+            fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+                self.0.insert(field.name().into(), format!("{value:?}"));
+            }
+        }
+        impl<S: tracing::Subscriber> Layer<S> for Events {
+            fn on_event(&self, event: &tracing::Event<'_>, _: Context<'_, S>) {
+                let mut fields = Fields(BTreeMap::new());
+                event.record(&mut fields);
+                self.0.lock().unwrap().push(fields.0);
+            }
+        }
+
+        let events = Events::default();
+        let subscriber = tracing_subscriber::registry().with(events.clone());
+        tracing::subscriber::with_default(subscriber, || {
+            for success in [true, false] {
+                let report = usage_for_sse_response(
+                    "diagnostic-request",
+                    success,
+                    br#"{"input":"PRIVATE-PROMPT"}"#,
+                    b"data: {\"choices\":[{\"delta\":{\"content\":\"PRIVATE-RESPONSE\"}}]}\n\ndata: {invalid}\n\ndata: [DONE]\n\n",
+                );
+                assert_eq!(report.source, if success { "estimated" } else { "missing" });
+                if !success {
+                    assert_eq!(report.total_tokens, 0);
+                }
+            }
+        });
+        let records = events.0.lock().unwrap();
+        assert_eq!(records.len(), 2, "diagnostics must actually be captured");
+        let allowed = [
+            "captured_len",
+            "data_line_count",
+            "json_parse_failures",
+            "json_without_usage",
+            "line_count",
+            "message",
+            "request_id",
+            "success",
+            "usage_source",
+        ];
+        for record in records.iter() {
+            assert_eq!(
+                record.keys().map(String::as_str).collect::<Vec<_>>(),
+                allowed
+            );
+            assert_eq!(record["data_line_count"], "2");
+            assert_eq!(record["json_parse_failures"], "1");
+            assert_eq!(record["json_without_usage"], "1");
+            assert!(!format!("{record:?}").contains("PRIVATE-"));
+        }
+    }
 
     #[test]
     fn extracts_openai_chat_usage() {

@@ -1,136 +1,131 @@
 # my-ai-gateway 项目协作规范
 
-本文件适用于仓库根目录及其所有子目录。若更深层目录存在 `AGENTS.md` 或 `AGENTS.override.md`，以更深层文件为准；直接的用户、开发者和系统指令优先于本文件。
+本文件适用于仓库根目录及其所有子目录；更深层的 `AGENTS.md` / `AGENTS.override.md` 优先，系统、开发者和直接用户指令优先于本文件。优先使用中文沟通。
 
-## 项目定位
+## 1. 项目定位与事实来源
 
-这是一个 Rust AI 网关项目，用于统一代理多个上游 Provider 和多个上游账号。
+这是一个单用户、自托管、界面优先的 AI Provider 聚合端：Rust 网关统一代理多个 Provider / Source 和上游账号，React 控制台负责接入、路由、用量与运维。正式支持 OpenAI Chat Completions、OpenAI Responses、Anthropic Messages 三类北向协议。
 
-项目当前处于持续开发阶段，尚未承诺稳定版本或后向兼容。配置、HTTP API、数据库 Schema、内部类型和行为都可以按最新设计直接调整；除非用户明确要求，不要为了旧版本增加兼容别名、双写/双读、迁移垫片或废弃字段保留。发生破坏性调整时，应同步更新文档、示例、迁移和测试，并以当前代码与设计基线为准。
+项目持续开发中，尚未承诺稳定版本或内部后向兼容。不要为历史配置、HTTP API、Schema 或内部类型主动增加兼容别名、双读/双写、迁移垫片或废弃字段；外部协议兼容目标和明确的用户要求除外。
 
-项目托管在 [GitHub](https://github.com/jianyun8023/my-ai-gateway)。GitHub Issues 用于维护问题、需求和开发任务，Pull Request 用于修复、评审和合并。任务进展、方案变更和验证结果应记录到对应 Issue/PR；只有在任务已关联 Issue/PR、具备访问权限且用户授权外部写入时才直接回写，否则在最终报告中提供待同步内容，不能让本地会话或临时文件成为唯一记录。
+| 要确认的信息 | 主要依据 |
+| --- | --- |
+| 实际行为、已接入端点与测试 | 当前任务分支的源码、路由注册、migration、测试；已合并 PR 用于追溯 |
+| 架构与领域设计约束 | [设计文档](docs/ai-gateway-design.md)与本文件 |
+| 需求、任务状态、评审及验证记录 | [GitHub Issues](https://github.com/jianyun8023/my-ai-gateway/issues) / [Pull Requests](https://github.com/jianyun8023/my-ai-gateway/pulls) |
+| HTTP 接口与配置 | [Admin API](docs/admin-api.md)、[README.zh.md](README.zh.md)、[配置示例](config.example.json)、[环境变量示例](.env.example) |
+| 测试与发布验收 | [测试说明](docs/testing.md)、[CI 说明](docs/ci.md)、[v0.1.0 验收清单](docs/v0.1.0-acceptance.md) |
+| 部署与运维 | [部署](docs/deployment.md)、[Kubernetes](docs/kubernetes.md)、[运维](docs/operations.md)、[安全](docs/security.md) |
 
-当前正式支持三类北向协议：
+发现设计、TODO、Issue 状态与代码不一致时，明确指出差异；不要通过改写约束掩盖实现缺口。Issue 关闭、PR 合并、CI 通过和生产验收完成是不同事实。[docs/todo.md](docs/todo.md)仅作索引，不能替代实时 Issue 状态和验收证据。
 
-- OpenAI Chat Completions；
-- OpenAI Responses；
-- Anthropic Messages。
+## 2. 当前实现快照
 
-## 核心架构约束
+以下在 **2026-09-07、main `c4da717` + 本地 `codex/113-release-test-closeout`** 核对（收尾变更尚未推送）；用于避免重复实现，后续任务仍需检查自己的分支。
 
-1. Provider 原生支持某协议时，必须优先原生透传。
-2. Provider 不支持某协议时，使用明确的 Adapter。
-3. MiniMax、DeepSeek、Kimi Code 等三协议 Provider 不应进入转换器；Kimi Code 自 preset `kimi_code@4` 起原生支持 OpenAI Responses，原内置 `kimi-responses-adapter` 已移除（#157）。
-4. 当前生产环境没有注册的 Adapter；adapter 框架（校验、mode 管线、degraded 语义）保留给后续 Provider 接入。
-5. 首选账号固定优先，失败后才进入 fallback 账号池。
-6. 不允许在协议转换中静默丢失 Tools、Web Search、Thinking、Usage 或 Provider 扩展字段。
-7. 默认不保存 prompt/response 正文。
-8. 不实现余额、充值、额度扣减或规避 Provider 风控的逻辑。
+- **数据面**：三协议 JSON/SSE 原生转发、首选账号与跨 Source/Provider fallback、健康冷却/主动探测、SSE 心跳/取消/超时、请求及 attempt 用量记录均已接入。
+- **控制面**：启动必须配置 PostgreSQL；Source / Account / LogicalModel / ModelBinding / Route CRUD、模型发现与确认、模型级协议能力声明、有效能力矩阵、runtime snapshot 更新已实现。
+- **鉴权与运维**：PostgreSQL-backed Virtual Key 已实现创建、查询、轮换、撤销、模型白名单及 Admin 显式读取加密保存的 Key；已有 Secret Resolver、凭据信封加密、Admin 写审计、保留清理、控制面导入/导出。`GATEWAY_API_KEY` 仍有过渡静态入口实现，不能再把 Virtual Key 写成未来功能。
+- **可观测性**：Prometheus `/metrics` 已接入；OpenTelemetry OTLP/gRPC tracing 已由 [PR #80](https://github.com/jianyun8023/my-ai-gateway/pull/80) 实现，通过 `OTEL_EXPORTER_OTLP_ENDPOINT` 启用，未设置时仅本地 tracing 日志。是否在生产配置、采集成功需另外验证。
+- **控制台**：`/admin/` 下已有总览、用量分析、请求事件、来源、模型发现、模型与路由、能力矩阵、设置八个导航入口；前三项是用量主导航，不是全部产品页面。
+- **Provider / Adapter**：DeepSeek、MiniMax 最新内置 preset 为 `@3`，Kimi Code 为 `@4`；通用 `BUILTIN_PROVIDER_PRESET_VERSION` 仍为 `3`，Kimi 单独版本常量为 `4`。Kimi Responses 已改为原生 `/v1/responses`，迁移见 `0023_kimi_native_responses.sql`（[PR #158](https://github.com/jianyun8023/my-ai-gateway/pull/158)）。生产 Adapter 注册表为空，原 `crates/kimi-responses-adapter` 已删除；`cfg(test)` 中的旧名称用于框架测试，不代表生产支持。
 
-## 已确认的设计基线
+当前跟踪与验收边界：
 
-以下决策来自当前需求讨论，后续实现默认遵循；如需改变，先更新设计文档和相关任务说明：
+- 开放任务是 [#113 测试总计划](https://github.com/jianyun8023/my-ai-gateway/issues/113)、[#120 性能基线与故障注入](https://github.com/jianyun8023/my-ai-gateway/issues/120)、[#110 事件中心设计讨论](https://github.com/jianyun8023/my-ai-gateway/issues/110)。本地收尾已实现 `test-faults` / `test-load`，运行证据与覆盖边界见验收清单；不能将本地 Mock 性能视为生产性能或完整 live 验收。
+- #1、#50 已关闭；本轮已修正 TODO / 设计文档中的 OTel 待办等过时描述。#96 / #97 / #98 已关闭，但验收清单的生产复验未勾选，#98 评论仍明确缺根因结论；不得据关闭状态宣称生产问题已经验证解决。
+- 本地收尾修复：SSE usage 提取失败日志仅记录元数据，移除 Base64 正文预览与正文指纹；Chat 缺少 `[DONE]` 时，只有所有已出现 choice 均提供 `finish_reason` 才补结束标记，否则报告流截断错误。
+- 尚无 GitHub Release 或 tag。已有验收记录早于 Kimi 原生切换；完整 live 覆盖、部署后的 migration / Provider 行为与生产数据复验应按实际证据报告，不由历史勾选推断。
 
-- `Source` 负责 Base URL、协议 endpoint、模型目录和能力矩阵；`Account` 负责凭据、启用状态、权重和健康状态。第一版允许一对一，但类型和职责不能合并。
-- PostgreSQL 是控制面事实来源；开发阶段的 `GATEWAY_CONFIG_JSON` 仅用于初始化、导入和测试。`UsageEvent` 区分逻辑请求与上游尝试，持久化时间统一使用 UTC。
-- 路由结果保留 `protocol_in → protocol_upstream → endpoint/Adapter` 完整链路及能力状态；原生能力优先，Adapter 只允许一次直接转换。未知或 `unsupported` 能力不得猜测为支持，允许的损失必须显式标记为 `degraded`。
-- 模型拆分为 `ProviderPreset`、`SourceModel`、`LogicalModel`、`ModelPreset` 和 `PricingProfile`；模型发现必须经过预设补齐和用户确认，刷新不得静默覆盖已确认字段。
-- 模型展示列表与实际可路由 Binding 分离；`/v1/models` 只公开已确认且至少有可用 Binding 的逻辑模型。`SourceModelCapability` 按 `(source_id, upstream_model_id, protocol)` 记录，待确认、不可用和未知能力不能被隐式公开或路由。
-- 第一版管理端主导航为 Overview、Analysis、Request Events；Token 时序、模型/Provider/Source 分布和请求归因优先，价格/成本只是可选次级视图。CPA 专属的 Auth Files、Ranking、配额和充值功能不属于本项目产品面。
-- 可参考 New API 的接入向导、模型发现差异预览、模型广场、参数覆盖、健康路由和用量交互，但只借鉴产品思路与字段语义，不直接复制其代码或页面；协议感知路由和本项目的能力矩阵优先。
+本节不维护完整已完成任务清单；新进展记录到关联 Issue/PR，更新快照时保留日期与代码依据。
 
-详细架构、字段定义和流程说明以 [`docs/ai-gateway-design.md`](docs/ai-gateway-design.md) 为准；本文件只保留执行任务时必须遵守的约束，避免与设计文档长期重复。
+## 3. 必须保持的领域与协议约束
 
-### 开发阶段的变更原则
+改变以下设计基线前，同步更新设计文档与关联任务说明。
 
-- 以当前任务工作分支的基线和 `docs/ai-gateway-design.md` 为准；若任务明确要求从 `main` 开始，再以 `main` 为基线。不为历史分支、旧配置或旧客户端保留隐式行为。
-- 破坏性变更应一次性完成调用方、示例配置、迁移、文档和回归测试的更新；不要通过静默降级掩盖不匹配。
-- 数据库 Schema 变化仍必须新增 migration，但 migration 面向当前开发基线的前进演进，不要求兼容尚未稳定的旧 Schema。
-- 若任务明确要求兼容某个外部协议或 Provider，那是协议兼容目标，不等同于本项目内部 API 或配置的后向兼容承诺。
-- 开始实现前优先确认对应的 GitHub Issue、分支和已有 PR；完成后在具备权限且得到授权时于 Issue/PR 中记录范围、提交、测试结果和未覆盖风险，否则在最终报告中给出完整同步摘要。临时本地说明只能作为工作材料，不能替代正式记录。
+### 来源、模型与路由
 
-### Issue、worktree 与 PR 工作流
+- `Source` 负责 Base URL、协议 endpoint、模型目录和能力矩阵；`Account` 负责凭据、启用状态、权重及健康状态。允许一对一部署，但职责与类型不能合并。
+- 模型分为 `ProviderPreset`、`SourceModel`、`LogicalModel`、`ModelPreset`、`PricingProfile`；模型发现经过预设补齐与用户确认，刷新不得静默覆盖已确认字段。版本化 preset 是不可变快照；更新存量 Source 必须有明确变更路径。
+- 模型展示目录与可路由 Binding 分离。`SourceModelCapability` 按 `(source_id, upstream_model_id, protocol)` 记录；`/v1/models` 只公开已确认且至少有可用 Binding 的逻辑模型，并遵守账号启用/健康过滤。待确认、不可用、未知能力不得隐式公开或路由。
+- Provider 支持原生协议时优先透传，不能仅因 Provider 名称就猜测所有模型/功能均支持。非原生路径必须有明确注册的 Adapter，只允许一次直接转换；当前没有生产 Adapter，不能配置不存在的转换器。
+- 路由保留 `protocol_in → protocol_upstream → endpoint/Adapter` 完整链和能力状态。`unknown` / `unsupported` 不得当作支持，能力不支持时默认返回结构化错误；允许的能力损失必须显式标为 `degraded` 并记录 warning。
+- 首选账号固定优先，失败后才进入 fallback 池；保留账号级模型重写和逐 attempt 的实际 Source / Provider / upstream model 归因。
+- 不得静默丢失 Tools、Web Search、Thinking、signature、Usage 或 Provider 扩展字段。每个 Adapter 转换路径单独命名，分别覆盖请求、非流式响应与 SSE；SSE 必须保持事件顺序、状态和异常终止语义。
 
-问题修复和新特性默认通过 GitHub Issue、独立 worktree 和 Pull Request 完成。在具备仓库访问权限且当前任务已授权外部写入时，按以下流程执行：
+### 持久化与用量
 
-1. 开始实现前搜索已有 Issue 和 PR；存在相同任务时复用并补充信息，避免重复创建。没有对应任务时优先新建 Issue，写明背景、范围、验收标准和验证方式。
-2. 从目标分支的最新提交创建专用分支和独立 worktree。分支名应关联 Issue，例如 `codex/123-short-description`；不要把任务改动直接混入已有脏工作区或其他任务分支。
-3. 只在该 worktree 中实现、补充测试和文档，并运行与改动范围匹配的验证。提交信息和 PR 描述应引用 Issue；可以在合并后关闭的任务使用 `Closes #123`。
-4. 推送分支并创建 PR，在 PR 中记录改动范围、设计取舍、验证命令和结果。CI、必要评审及任务要求的验证通过后再合并 PR；未获合并授权时停在可评审状态并明确报告。
-5. 确认 PR 已合并且目标分支包含对应提交后，检查 worktree 无未提交或未推送改动，再移除该 worktree并清理本地任务分支；远端分支按仓库策略删除。不得为了清理而丢弃未保存工作。
+- PostgreSQL 是运行期控制面的事实来源。`GATEWAY_CONFIG_JSON` 仅用于空库初始化、显式导入和测试；强制导入由 `GATEWAY_CONFIG_IMPORT` 控制，不能回退成长期配置真源。
+- 控制面变更遵循事务写入、验证并构建 snapshot、原子替换运行时快照的既有流程；不要绕开 repository/service 直接拼接运行配置。
+- 所有 Schema 变化新增 migration，面向当前开发基线前进演进；破坏性调整同步调用方、示例、文档和回归测试，不以静默降级掩盖不匹配。
+- `request_id` 标识逻辑请求并用于 Usage 幂等；上游尝试按 `(request_id, attempt_no)` 记录。fallback/retry 不得重复统计最终请求或 Token。
+- 同时保留 requested/logical model 与实际 upstream model，区分 Provider、实际 `source_id`、客户端 `client_source` 与 Virtual Key。显式 `X-Client-Source` 优先，缺失时已有鉴权身份回填逻辑。
+- Token 必须记录 `usage_source`，区分上游报告、流式解析、估算与缺失；失败且无上游 usage 时不得估算出 Token。缓存、推理 Token 语义以现有契约为准。
+- 时间统一 UTC 持久化；统计支持按时间、模型、Provider、Source、账号、协议及 Virtual Key 筛选。默认不保存 prompt/response 正文，不把正文日志作为统计来源。
 
-纯只读调查、问答或不值得单独跟踪的轻量维护可以不新建 Issue；若问题或特性任务跳过 Issue、worktree 或 PR，应在结果中说明原因。无法访问 GitHub 或未获外部写入授权时，不执行远端操作，但应提供可直接用于创建 Issue/PR 的标题、正文和验证摘要。
+### 安全与产品范围
 
-## 目录约定
+- 生产上游凭据通过 `credential_env` / Secret 注入或数据库密文解析；真实 Key 不得进入仓库、日志、审计 diff 或普通管理响应。Virtual Key 的显式读取端点属于已有受 Admin 鉴权保护的例外，不能扩展到普通列表/导出。
+- Admin API 使用 `GATEWAY_ADMIN_KEY`，与下游 Virtual Key / `GATEWAY_API_KEY` 分离；未配置 Admin Key 时管理 API 必须拒绝请求。
+- Provider URL 必须经过 `SourceUrlPolicy` / 共享 HTTP client 的 allowlist、DNS 与重定向校验，禁止客户端任意指定上游 URL；私网自托管来源必须显式放行。
+- 日志禁止输出 Authorization、API Key 和完整请求正文；默认不记录响应正文片段。Base64/hex 是可逆编码，不能当作正文脱敏。
+- 账号代理必须遵守上游服务条款。不实现余额、充值、账单、额度扣减、规避 Provider 风控、TLS 指纹/请求伪装或反封禁；不扩展为多租户 SaaS、复杂 RBAC 或大规模账号运营产品。
+- 用量界面优先 Token 时序、模型/Provider/Source 分布和请求归因，价格/成本仅为可选次级视图；协议感知路由与本项目能力矩阵优先于外部产品范例。
+- 可复用 CPA Usage Keeper 的 MIT 页面组件、结构与交互，保留 License 和来源说明；不复用其 Go 后端、SQLite、Redis queue、CPA Management API、Auth Files、Ranking 或凭据/配额逻辑。New API 只借鉴接入、发现、模型与用量的产品思路/字段语义，不复制 AGPL 代码或 UI。
 
-```text
-src/                         Rust 网关主程序
-migrations/                  PostgreSQL migration
-docs/                        需求、架构、接口和运行文档
-config.example.json          Provider/Account/Route 示例
-```
+## 4. 代码导航与修改入口
 
-## 技术栈
+| 路径 | 职责 |
+| --- | --- |
+| `src/main.rs` → `src/lib.rs` → `src/runtime.rs` | 启动、DB-first 初始化、探测循环、ops CLI |
+| `src/app.rs`、`src/api/` | HTTP 路由、Admin 鉴权/审计中间件、协议与管理处理器 |
+| `src/state.rs` | 运行快照、鉴权身份、凭据及错误响应辅助 |
+| `src/domain/` | 配置、协议、preset、模型目录、路由及能力矩阵 |
+| `src/control_plane/` | 事务 CRUD、snapshot 构建、模型发现/确认 |
+| `src/proxy/` | 请求编排、上游 transport、SSE 生命周期、usage 提取 |
+| `src/http.rs`、`src/source_url.rs` | 共享上游 HTTP client 与 URL/SSRF 边界 |
+| `src/infra/`、`src/infra/db/` | PostgreSQL、健康、Secret、审计、运维、指标/trace |
+| `migrations/` | SQLx 前进式数据库迁移；按现有最大编号新增 |
+| `web/src/App.tsx`、`web/src/lib/consoleNavigation.ts` | 控制台导航与页面接入 |
+| `web/src/pages/`、`web/src/features/control-plane/` | 用量页面和控制面功能；API client 在 `web/src/admin-api/` 等目录 |
+| `tests/`、`scripts/`、`examples/conformance_target.rs` | Mock、Contract、覆盖矩阵、外部扫描、SDK、差分和 live smoke |
+| `deploy/`、`Dockerfile`、`.github/workflows/` | 部署配置、镜像构建、PR CI |
 
-- Mise：工具链与任务管理（Rust、Node 版本固定在 `mise.toml`，常用任务见 `mise tasks`）；
-- Tokio + Axum：HTTP/SSE 服务；
-- Reqwest：上游 HTTP；
-- Serde：协议和配置模型；
-- SQLx + PostgreSQL：持久化；
-- Tracing：日志；
-- Prometheus/OpenTelemetry：后续可观测性；
-- React + TypeScript：复用并适配 CPA Usage Keeper 的 Overview、Analysis、Request Events 页面交互。
+技术栈：Tokio + Axum、Reqwest、Serde、SQLx/PostgreSQL、Tracing + Prometheus/OpenTelemetry；前端 React + TypeScript + Vite。Rust / Node 版本与命令以 `mise.toml` 为准，不另建平行工具链。
 
-## 配置和凭据
+调查时追踪本次修改的实际调用链。例如数据面是 `app → api/proxy → proxy/service → routing/transport/stream → usage/db`，控制面是 `app → api/admin → control_plane → transaction/snapshot → state.reload_snapshot`。不要仅凭文件名或旧文档判断功能是否已接入。
 
-- 开发阶段初始化、导入和测试可使用 `GATEWAY_CONFIG_JSON`；运行期配置以 PostgreSQL 控制面为准；
-- 生产凭据使用 `credential_env` 或加密后的数据库字段；
-- 不要把真实 API Key 提交到仓库；
-- `GATEWAY_API_KEY` 当前只是临时静态入口保护，后续必须替换为 PostgreSQL-backed Virtual Key。
+## 5. Issue、worktree 与 PR 工作流
 
-## 验证命令
+1. 开始前检查本地状态、当前分支、相关 Issue 和已有 PR，复用同一任务，避免重复创建。以当前任务分支与设计基线为准；明确从 `main` 开始的任务使用最新 `main`。
+2. 问题修复/新特性默认使用独立 worktree 和关联分支（如 `codex/123-short-description`）；从目标分支最新提交创建，不混入脏工作区或其他任务改动。
+3. 具备访问权限且用户已授权外部写入时，没有对应 Issue 则创建，写清背景、范围、验收与验证；实现后提交、推送并创建 PR，记录最终范围、取舍、验证结果和未覆盖项。可随合并关闭的任务使用 `Closes #123`；仅诊断或部分修复不要据此关闭未完成的验收。
+4. CI、必要评审和任务要求验证通过后，按已有合并授权处理；未获合并授权时停在可评审状态。确认目标分支包含提交，且 worktree 无未提交/未推送工作后，再清理 worktree 与本地分支；远端分支按仓库策略清理，不丢弃未保存工作。
+5. 只有在任务关联 Issue/PR、具备权限且已有外部写入授权时回写进展/结论。没有授权或无法访问时，完成可执行的本地工作，并在最终报告给出可直接同步的标题、范围、验证摘要及未覆盖风险；临时文件和会话不能成为唯一任务记录。
 
-```bash
-CARGO_HOME=/tmp/my-ai-gateway-cargo cargo fmt --all -- --check
-CARGO_HOME=/tmp/my-ai-gateway-cargo cargo check
-CARGO_HOME=/tmp/my-ai-gateway-cargo cargo clippy --all-targets -- -D warnings
-CARGO_HOME=/tmp/my-ai-gateway-cargo cargo test
-python3 -m json.tool config.example.json >/dev/null
-```
+纯调查、问答和轻量文档维护可以不单独创建 Issue/worktree/PR；跳过时说明原因。不要为了遵循工作流擅自向 GitHub 写入或请求用户重复授权。
 
-以上命令用于验证，不应主动修改无关文件；需要修复格式时才单独运行 `CARGO_HOME=/tmp/my-ai-gateway-cargo cargo fmt --all`。如环境允许，也可以直接使用普通 `cargo` 命令。当前开发环境默认 Cargo 缓存目录可能不可写，因此优先使用临时 `CARGO_HOME`。工具链由 Mise 管理时，也可以用 `mise run lint`（Rust + 前端静态检查）和 `mise run verify`（静态检查 + 构建 + 测试）作为组合门禁。
+## 6. 验证与外部资料
 
-## Adapter 开发要求
+按修改范围选择必要验证；只改文档时检查 diff、路径/链接和事实即可，不为其重跑完整 Provider/数据库验收。不要将未执行、跳过或占位命令记为通过。
 
-- 每个协议转换路径单独命名；
-- 请求、非流式响应和流式事件分别测试；
-- SSE 转换必须维护事件顺序和状态；
-- 能力不支持时默认返回结构化错误；
-- 允许降级时必须记录 warning 和 `degraded` 状态；
-- Adapter 的 thinking、signature、tool call、web search 和 usage 变更必须增加回归测试。
+| 场景 | 命令 / 要求 |
+| --- | --- |
+| 配置和测试元数据 JSON | `mise run config-check` |
+| Rust + Web 静态检查 | `mise run lint`（fmt check、cargo check/clippy、ESLint、TypeScript） |
+| 构建 | `mise run build` |
+| 默认回归 | `mise run test`（Rust 含 `test-support`、串行执行，Web 和脚本单测） |
+| 故障 / 本地性能 | `test-faults`；先 `build-load-tools` 再 `test-load`，详见 `tests/load/README.md`；`test-all-offline` 包含本地负载 |
+| 三协议 Contract | `mise run test-contract` |
+| PostgreSQL 集成 | 独立测试库设置 `TEST_DATABASE_URL` 后运行 `mise run test-postgres`；`test-db` 从 `.env.test` 读取配置 |
+| 组合门禁 | `mise run verify`；未设置 `TEST_DATABASE_URL` 会跳过 ignored PostgreSQL 测试，必须如实报告 |
+| 外部协议 / SDK / 差分 | `test-conformance`、`test-sdk-smoke`、`test-differential`；先读 `docs/testing.md` 中目标服务与 opt-in 要求 |
+| 真实 Provider / Codex E2E | `test-live` / `test-codex-e2e`；按 `docs/live-provider-smoke.md` / `docs/codex-e2e.md` 使用独立测试库与显式 opt-in，普通 CI 不发送真实模型请求 |
 
-## 数据库开发要求
+默认 Cargo 缓存不可写时，对上述命令设置 `CARGO_HOME=/tmp/my-ai-gateway-cargo`。单独验证 Rust 可用 `cargo fmt --all -- --check`、`cargo check --workspace`、`cargo clippy --all-targets -- -D warnings`、`cargo test --workspace --features test-support -- --test-threads=1`；需要修复本次格式问题才运行 `cargo fmt --all`，不格式化无关文件。
 
-- 所有 schema 变化必须新增 migration；
-- `request_id` 用于 usage 事件幂等；
-- Usage 事件必须同时保留 logical/requested model 与实际 upstream model，并区分逻辑请求和上游尝试；fallback 重试不得重复统计最终请求或 Token；
-- Token 统计必须记录 `usage_source`；
-- 不将正文日志作为统计系统的默认数据源；
-- 统计查询必须支持按时间、模型、Provider、账号、协议和 Virtual Key 过滤。
+PR CI 定义在 `.github/workflows/pull-request.yml`，包含静态检查/构建和单元/Contract/PostgreSQL 测试。镜像发布工作流为 `main` 与版本 tag 构建 Linux amd64/arm64 镜像；镜像发布成功不等于已部署或生产复验通过。
 
-## 安全要求
-
-- 日志中禁止输出 Authorization、API Key 和完整请求正文；
-- Provider URL 需要 allowlist，禁止客户端任意指定上游 URL；
-- 上游凭据需要加密或通过 Secret 注入；
-- Admin API 与下游 Virtual Key 分离；
-- 账号代理功能必须遵守上游服务条款；
-- 不实现 TLS 指纹伪装、请求伪装或反封禁能力。
-
-## 文档和外部资料
-
-- API、SDK 或框架文档查询必须优先使用 Context7；Context7 不可用时，使用相关项目的官方文档或仓库内已有资料，并在结果中说明替代来源；
-- 架构、接口和实现基线维护在 `docs/ai-gateway-design.md`；问题、需求、任务状态、修复和评审记录维护在 GitHub Issues/PR；
-- CPA Usage Keeper 只复用页面结构、React 组件和交互；不得复用其 Go 后端、SQLite、Redis queue、CPA Management API 或凭据/配额逻辑。复用代码时保留其 MIT License 和来源说明；New API 只借鉴思路，不复制其 AGPL 代码或 UI；
-- 新增环境变量、接口或数据库字段时，必须同步更新文档；
-- Python 辅助项目优先使用 `uv` 管理环境，除非用户明确要求其他工具。
+- API、SDK、框架文档查询优先使用 Context7；不可用时用官方文档或仓库资料，并说明替代来源。仓库状态查询直接使用 GitHub 与代码依据。
+- Python 辅助项目优先 `uv run` / `uv sync` / `uv add`，除非明确要求，不使用 pip、conda 或系统 Python；现有 JSON 校验优先复用 `mise run config-check`。
+- 新增环境变量、接口或数据库字段必须同步相关文档；改协议、Adapter、thinking、signature、tool call、web search、usage 或 SSE 时补充对应行为回归。

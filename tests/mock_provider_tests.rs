@@ -735,3 +735,34 @@ async fn mock_accepts_any_path() {
     assert_eq!(requests[2].path, "/v1/messages");
     assert_eq!(requests[3].path, "/any/arbitrary/path");
 }
+
+#[tokio::test]
+async fn response_sequence_repeats_last_fixture_and_records_attempt_order() {
+    let mock = MockProvider::builder()
+        .sequence(vec![
+            CaseFixture::json("first", StatusCode::TOO_MANY_REQUESTS, "{}"),
+            CaseFixture::json("recovered", StatusCode::OK, "{}"),
+        ])
+        .build()
+        .spawn()
+        .await;
+    for status in [429, 200, 200] {
+        assert_eq!(
+            get(
+                &format!("{}/v1/chat/completions", mock.base_url()),
+                "unused"
+            )
+            .await
+            .status()
+            .as_u16(),
+            status
+        );
+    }
+    assert_eq!(
+        mock.requests()
+            .iter()
+            .map(|r| r.arrival_order)
+            .collect::<Vec<_>>(),
+        vec![0, 1, 2]
+    );
+}
