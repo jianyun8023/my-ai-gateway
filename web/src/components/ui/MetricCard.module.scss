@@ -1,0 +1,21 @@
+.card {
+  min-width: 0;
+  min-height: 118px;
+  display: grid;
+  align-content: start;
+  gap: 7px;
+  padding: 17px 18px;
+  border-color: var(--border);
+  border-radius: var(--radius-lg, 12px);
+  background: var(--surface);
+  overflow-wrap: anywhere;
+}
+.label { color: var(--muted); font-size: var(--fs-meta); font-weight: 600; }
+.value { font-family: var(--font-mono); font-size: clamp(24px, 2.3vw, 32px); line-height: 1.15; font-variant-numeric: tabular-nums; }
+.hint { color: var(--muted); font-size: var(--fs-small); }
+.card[data-tone='success'] .hint { color: var(--success); }
+.card[data-tone='warning'] .hint { color: var(--warn); }
+@media (max-width: 600px) {
+  .card { min-height: 98px; padding: 14px 15px; }
+  .value { font-size: 25px; }
+}

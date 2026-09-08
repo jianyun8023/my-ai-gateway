@@ -33,6 +33,7 @@ Tech-Utility：冷灰底色、绿色强调、紧凑数据布局。使用固定�
 | --- | --- |
 | `GatewayConsoleShell` | 导航、页面标题、Admin 连接、主题、语言和刷新 |
 | `Card` | Mantine Paper/Title/Text 组合；标题、可选说明与操作区，`flush` 用于表格，沿用品牌尺度并在窄屏堆叠操作区 |
+| `MetricCard` | Mantine Paper/Text 薄组合；标签、数值、辅助信息及可选精确值；精确值通过 title/可访问名称提供，网格列数由页面维护 |
 | `Button` / `IconButton` | Mantine Button/ActionIcon，主次操作、禁用、加载与可访问名称；图标提示用 Tooltip，提交按钮显式设置 `type="submit"` |
 | `TextField` / `SelectField` / `TextAreaField` | Mantine TextInput/NativeSelect/Textarea，共用 label、hint、error 关联；保留调用方描述 ID 和原生 change 事件 |
 | `CheckboxField` | Mantine Checkbox 的表单组合，label/hint、禁用与布尔值回调；位于 UI 层，控制面共享入口仅转导出 |
@@ -100,3 +101,13 @@ Shell 保留原生 CSS Grid/Flex 布局与现有 hash 导航、刷新版本及 s
 - 页面加载/刷新失败、字段及提交失败继续用 `Notice` / `ErrorState` / `FormError`，保留错误码、重试、已有目录和表单草稿。保存成功通知仅表示写操作已完成，后续列表刷新失败仍由持久错误独立说明。
 - 模型发现的 succeeded / failed / unsupported 都交给“最新运行”展示，不另发操作成功通知。结果刷新失败只显示可重试错误，保留已有目录，不提前宣告发现成功。协议能力保存保持编辑框打开，统一通知在浮层上方可见；行错误保留在对应编辑区。批量确认提交错误位于确认框内。
 - Virtual Key 创建、读取、轮换以结果 Modal 为唯一结果入口，复制状态只在 Modal 内播报，不把 Key 正文放入 live region 或通知。轮换结果保留旧 Key 最晚有效时间（取重叠期和原到期时间的较早者）或立即失效说明；复制不清除时限。关闭即清除 Key 与复制状态，不等待退出动画。
+
+## 用量指标、数值与来源状态
+
+总览四项 KPI 使用 `MetricCard`，页面只保留网格布局；标签和辅助信息可换行，数字使用 mono 与 tabular-nums。`utils/formatCompact.ts` 保留既有 K/M/B/T 阈值，百分比统一由 `formatPercent` 接收比率并输出一位小数。`features/usage/formatters.ts` 的 `formatDuration` 用于总览、分析和事件：真实 0 为 `0 ms`，无值为 `—`，概览使用 ms/s，详情使用精确整数毫秒，不使用 K/M/B。详情 Token 使用带分隔符的精确数值。
+
+请求结果由 `UsageStatus` 映射公共 `StatusPill`，成功/失败必须有文字，不能只靠颜色点。`UsageBadge` 单独表达 upstream / parsed / estimated / missing / unknown；成功请求也可能 missing，不能用来源推导请求成功率。事件 missing/unknown 的零 Token 显示 `—` 或来源标签并提供说明，上游真实上报的零仍显示 0，unknown 的非零读数保留并标注来源不确定。
+
+`GatewayUsageClient.summary` 每次并行读取 summary 与一条 `breakdown=usage_source`，共享完整 filters 和 AbortSignal，经 adapter 用 `key/logical_requests` 组装来源计数。两项都成功才发布 summary，任一失败进入既有错误/重试流程；组件、分页和导出不额外查询来源。`useUsageData` 继续丢弃已取消会话的迟到响应。前端同筛选、同轮发布不等于后端数据库事务快照一致。
+
+总览和分析的构成区域显示真实来源请求计数及 missing/estimated 解释。全部计数来源均缺失/未知且汇总为记账零时，KPI、构成和分布显示不可用说明与 `—`；混合来源保留已有汇总值，明确估算已计入、missing 未计入。独立 Total、Input/Output、推理和缓存语义不变，趋势仍展示原有记账数据，不依据来源重算 Token。

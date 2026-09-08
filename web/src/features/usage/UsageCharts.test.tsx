@@ -95,6 +95,13 @@ describe('usage charts and accessible data', () => {
     expect(container.querySelector('table')!.textContent).not.toContain('excluded provider');
   });
 
+  it('shows unavailable totals for an all-missing analysis instead of hiding the provenance', () => {
+    act(() => root.render(<Analysis summary={{ ...summary, tokens: { ...tokens, input: 0, output: 0, total: 0 }, usageSources: { missing: 20 } }} breakdowns={{ source_id: [row('missing source', 0)] }} />));
+    expect(container.textContent).toContain('accounting zero is not a confirmed zero');
+    expect(container.textContent).toContain('— Token · —');
+    expect(container.textContent).not.toContain('0 Token ·');
+  });
+
   it('shows an explicit empty trend rather than a blank canvas', () => {
     act(() => root.render(<UsageTrend points={[]} metric="composition" onMetricChange={() => {}} />));
     expect(container.querySelector('output')).toBeNull();

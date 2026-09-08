@@ -6,14 +6,14 @@ import { Checkbox, Popover } from '@/components/ui/overlays';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { EmptyState } from '@/components/ui/EmptyState';
-import { StatusPill } from '@/components/ui/StatusPill';
+import { UsageStatus } from './UsageStatus';
+import { isUnreportedUsage } from './usageQuality';
 import { EVENT_COLUMNS, EVENT_COLUMN_LABELS, type EventColumn } from '@/features/usage/eventColumns';
-import { formatFallbackReason, formatTime } from '@/features/usage/formatters';
+import { formatDuration, formatFallbackReason, formatTime, formatUsageTokens } from '@/features/usage/formatters';
 import styles from '@/features/usage/Usage.module.scss';
 import { UsageBadge } from '@/features/usage/UsageBadge';
 import { EventDetails } from '@/features/usage/UsageEventDetails';
 import { GatewayUsageClient, type UsageEventViewModel } from '@/gateway-usage';
-import { formatCompact, formatExactInteger } from '@/utils/formatCompact';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { TFunction } from 'i18next';
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
@@ -31,7 +31,7 @@ const renderEventCell = (event: UsageEventViewModel, column: EventColumn, t: TFu
     case 'sourceAccount': return <span>{event.sourceId}<small>{event.account}</small></span>;
     case 'clientSource': return event.clientSource;
     case 'protocol': return <span>{event.protocolIn}<small>→ {event.protocolUpstream}</small></span>;
-    case 'status': return <StatusPill tone={event.success ? 'success' : 'danger'}>{event.statusCode || '—'} · {event.success ? t('usage.event.success') : t('usage.event.failure')}</StatusPill>;
+    case 'status': return <UsageStatus success={event.success} statusCode={event.statusCode} />;
     case 'retries': {
       if (!event.fallback) return String(event.retryCount);
       const label = event.retryCount > 0
@@ -41,8 +41,8 @@ const renderEventCell = (event: UsageEventViewModel, column: EventColumn, t: TFu
         ? <span title={formatFallbackReason(t, event.fallbackReason)}>{label}</span>
         : label;
     }
-    case 'latency': return `${formatExactInteger(event.latencyMs)} ms`;
-    case 'tokens': return formatCompact(event.tokens.total);
+    case 'latency': return <span title={formatDuration(event.latencyMs, true)}>{formatDuration(event.latencyMs)}</span>;
+    case 'tokens': return event.tokens.total === 0 && isUnreportedUsage(event.usageSource) ? <UsageBadge source={event.usageSource} /> : <span title={formatUsageTokens(event.tokens.total, event.usageSource, true)}>{formatUsageTokens(event.tokens.total, event.usageSource)}</span>;
     case 'usageSource': return <UsageBadge source={event.usageSource} />;
   }
 };

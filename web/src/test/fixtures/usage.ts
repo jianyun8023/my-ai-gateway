@@ -1,15 +1,38 @@
 export const gatewayUsageSummaryFixture = {
-  version: 'v1',
-  timezone: 'UTC',
-  logical_requests: { total: 3, successes: 2, failures: 1 },
-  upstream_attempts: { total: 5, retries: 2 },
-  average_latency_ms: 940,
-  p95_latency_ms: 1280,
-  tokens: { input: 1200, output: 420, reasoning: 160, cached: 300, cache_read_tokens: 250, cache_creation_tokens: 50, total: 1780 },
-  usage_sources: [
-    { usage_source: 'upstream', requests: 1 },
-    { usage_source: 'estimated', requests: 1 },
-    { usage_source: 'missing', requests: 1 },
+  version: 'v1', timezone: 'UTC',
+  range: { from: '2026-08-30T00:00:00Z', to: '2026-08-31T00:00:00Z' },
+  data: {
+    logical_requests: 3, successes: 2, failures: 1, success_rate: 2 / 3, upstream_attempts: 5, retries: 2,
+    average_latency_ms: 940, p95_latency_ms: 1280,
+    input_tokens: 1200, output_tokens: 420, reasoning_tokens: 160, cached_tokens: 300,
+    cache_read_tokens: 250, cache_creation_tokens: 50, total_tokens: 1780,
+  },
+};
+export const gatewayUsageSourcesFixture = {
+  version: 'v1', timezone: 'UTC', range: gatewayUsageSummaryFixture.range,
+  dimension: 'usage_source',
+  data: [
+    {
+      key: 'upstream', logical_requests: 1, upstream_attempts: 1, retries: 0,
+      successes: 1, failures: 0, success_rate: 1, logical_request_share: 1 / 3, total_token_share: 800 / 1780,
+      average_latency_ms: 1040, p95_latency_ms: 1040,
+      input_tokens: 520, output_tokens: 200, reasoning_tokens: 80, cached_tokens: 180,
+      cache_read_tokens: 150, cache_creation_tokens: 30, total_tokens: 800,
+    },
+    {
+      key: 'estimated', logical_requests: 1, upstream_attempts: 2, retries: 1,
+      successes: 1, failures: 0, success_rate: 1, logical_request_share: 1 / 3, total_token_share: 980 / 1780,
+      average_latency_ms: 1280, p95_latency_ms: 1280,
+      input_tokens: 680, output_tokens: 220, reasoning_tokens: 80, cached_tokens: 120,
+      cache_read_tokens: 100, cache_creation_tokens: 20, total_tokens: 980,
+    },
+    {
+      key: 'missing', logical_requests: 1, upstream_attempts: 2, retries: 1,
+      successes: 0, failures: 1, success_rate: 0, logical_request_share: 1 / 3, total_token_share: 0,
+      average_latency_ms: 500, p95_latency_ms: 500,
+      input_tokens: 0, output_tokens: 0, reasoning_tokens: 0, cached_tokens: 0,
+      cache_read_tokens: 0, cache_creation_tokens: 0, total_tokens: 0,
+    },
   ],
 };
 export const gatewayUsageTimeseriesFixture = {

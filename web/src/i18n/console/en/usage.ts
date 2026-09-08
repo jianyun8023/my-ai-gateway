@@ -25,6 +25,7 @@ export const usage = {
 
   // —— 用量来源枚举展示(值保持枚举原形)——
   usage_source: {
+    unknown: 'Unknown',
     upstream: 'Upstream',
     parsed: 'Parsed',
     estimated: 'Estimated',
@@ -110,6 +111,9 @@ export const usage = {
     subtitle: 'Times shown in your local timezone',
   },
   composition: {
+    unreported: 'Token usage is unavailable; an accounting zero is not a confirmed zero.',
+    estimated: '{{count}} requests use estimated tokens, included in totals.',
+    unknown: '{{count}} requests have an unknown usage source; token provenance is unconfirmed.',
     chart_title: 'Input / output split',
     empty: 'No input or output tokens reported',
     total_difference: 'Input + output: {{combined}}; reported total: {{total}}. The split uses input + output.',

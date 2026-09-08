@@ -40,8 +40,8 @@ export interface UsageSummaryViewModel {
   successRate: number;
   upstreamAttempts: number;
   retries: number;
-  averageLatencyMs: number;
-  p95LatencyMs: number;
+  averageLatencyMs?: number;
+  p95LatencyMs?: number;
   tokens: TokenTotals;
   usageSources: Record<string, number>;
 }
@@ -86,7 +86,7 @@ export interface UsageAttemptViewModel {
   protocolUpstream: string;
   statusCode: number;
   success: boolean;
-  latencyMs: number;
+  latencyMs?: number;
 }
 
 export interface UsageEventViewModel {
@@ -107,7 +107,7 @@ export interface UsageEventViewModel {
   retryCount: number;
   fallback: boolean;
   fallbackReason?: string;
-  latencyMs: number;
+  latencyMs?: number;
   tokens: TokenTotals;
   usageSource: UsageSource;
   degraded: boolean;

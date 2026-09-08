@@ -35,3 +35,8 @@ export function formatCompactWithTitle(value: number): { display: string; exact:
 export function formatExactInteger(value: number): string {
   return new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(value);
 }
+
+/** Input is a ratio, e.g. 0.125 → 12.5%. */
+export function formatPercent(value?: number | null): string {
+  return value == null || !Number.isFinite(value) ? '—' : `${(value * 100).toFixed(1)}%`;
+}

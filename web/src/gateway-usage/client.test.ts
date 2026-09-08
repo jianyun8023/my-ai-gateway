@@ -1,3 +1,4 @@
+import type { AdminTransport } from '@/admin-api/client';
 import { AdminClient } from '@/admin-api/client';
 import { describe, expect, it, vi } from 'vitest';
 import { buildGatewayUsageURL, GatewayUsageClient } from './client';
@@ -47,6 +48,7 @@ describe('GatewayUsageClient', () => {
     await client.exportEvents(filters, 'csv');
 
     expect(urls.length).toBeGreaterThan(0);
+    expect(urls.filter(url => url.includes('breakdown=usage_source'))).toHaveLength(1);
     for (const url of urls) {
       expect(url.startsWith('/admin/usage/')).toBe(true);
       expect(url).not.toMatch(/\/api\/v1|quota|pricing|ranking|auth-files|request-log|management\.html/i);
@@ -58,4 +60,24 @@ describe('GatewayUsageClient', () => {
       expect(init.redirect).toBe('error');
     }
   });
+});
+
+it('joins real summary and usage_source responses once with identical filters and signal', async () => {
+  const { gatewayUsageSummaryFixture, gatewayUsageSourcesFixture } = await import('@/test/fixtures/usage');
+  const signal = new AbortController().signal;
+  const json = vi.fn(async (url: string) => url.includes('/summary') ? gatewayUsageSummaryFixture : gatewayUsageSourcesFixture);
+  const client = new GatewayUsageClient({ json: json as AdminTransport['json'], blob: vi.fn() });
+  const summary = await client.summary(filters, signal);
+  expect(summary.usageSources).toEqual({ upstream: 1, estimated: 1, missing: 1 });
+  expect(summary.logicalRequests).toBe(3);
+  expect(json).toHaveBeenCalledTimes(2);
+  expect(json).toHaveBeenCalledWith(buildGatewayUsageURL('summary', filters), { signal });
+  expect(json).toHaveBeenCalledWith(buildGatewayUsageURL('breakdown', filters, { breakdown: 'usage_source' }), { signal });
+});
+
+it.each(['summary', 'breakdown'])('rejects a failed %s instead of publishing fabricated source counts', async (failed) => {
+  const json = vi.fn(async (url: string) => { if (url.includes(`/${failed}`)) throw new Error('unavailable'); return { data: [] }; });
+  const client = new GatewayUsageClient({ json: json as AdminTransport['json'], blob: vi.fn() });
+  await expect(client.summary(filters)).rejects.toThrow('unavailable');
+  expect(json).toHaveBeenCalledTimes(2);
 });
