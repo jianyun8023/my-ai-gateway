@@ -10,7 +10,7 @@ import { RuntimeBindingSummary } from '@/features/control-plane/models/RuntimeBi
 import { DetailItem, DetailList, DrawerSection, EmptyTable, ProtocolPill } from '@/features/control-plane/shared';
 import { PROTOCOL_LABELS } from '@/lib/protocols';
 import { formatDateTime } from '@/utils/format';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 export function EntityDetailDrawer({
@@ -26,16 +26,12 @@ export function EntityDetailDrawer({
 }) {
   const { t } = useTranslation('console');
   const [open, setOpen] = useState(true);
-  useEffect(() => {
-    if (open) return;
-    const timer = window.setTimeout(onClose, 380);
-    return () => window.clearTimeout(timer);
-  }, [onClose, open]);
+  const [editAfterExit, setEditAfterExit] = useState(false);
   const title = target.kind === 'logical-model' ? t('models.detail.lm_title') : target.kind === 'binding' ? t('models.detail.binding_title') : t('models.detail.route_title');
   const bindingCells = target.kind === 'binding' ? resolvedCellsForBinding(data.capabilities, target.record.id) : [];
   const routeRows = target.kind === 'route' ? data.capabilities.data.filter((row) => row.route_id === target.record.id) : [];
   return (
-    <Modal open={open} variant="drawer" width={600} title={title} onClose={() => setOpen(false)} footer={<><Button variant="secondary" onClick={() => setOpen(false)}>{t('common.close')}</Button><Button onClick={onEdit}><IconPencil size={14} />{t('common.edit')}</Button></>}>
+    <Modal open={open} variant="drawer" width={600} title={title} onClose={() => setOpen(false)} onExitTransitionEnd={editAfterExit ? onEdit : onClose} footer={<><Button variant="secondary" onClick={() => setOpen(false)}>{t('common.close')}</Button><Button onClick={() => { setEditAfterExit(true); setOpen(false); }}><IconPencil size={14} />{t('common.edit')}</Button></>}>
       <DrawerSection title={t('models.detail.domain_record')}>
         {target.kind === 'logical-model' && <DetailList>
           <DetailItem label={t('models.field.lm_id')}><code>{target.record.id}</code></DetailItem>

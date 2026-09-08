@@ -1,3 +1,4 @@
+import { useOverlayState } from '@/components/ui/useOverlayState';
 import type {
   AdminErrorShape,
   GatewayAdminResources,
@@ -47,8 +48,8 @@ export function ModelsRoutesPage({ api, refreshRevision = 0, onBusyChange }: Mod
   const { t } = useTranslation('console');
   const apiErrorText = useLocalizedApiError();
   const [tab, setTab] = useState<CatalogTab>('logical-models');
-  const [editor, setEditor] = useState<Editor>();
-  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget>();
+  const { value: editor, setValue: setEditor, opened: editorOpen, afterExit: editorAfterExit } = useOverlayState<Editor>();
+  const { value: deleteTarget, setValue: setDeleteTarget, opened: deleteTargetOpen, afterExit: deleteTargetAfterExit } = useOverlayState<DeleteTarget>();
   const [detailTarget, setDetailTarget] = useState<DetailTarget>();
   const [mutationBusy, setMutationBusy] = useState(false);
   const [mutationError, setMutationError] = useState<AdminErrorShape>();
@@ -254,7 +255,8 @@ export function ModelsRoutesPage({ api, refreshRevision = 0, onBusyChange }: Mod
 
       </div>
       <Modal
-        open={Boolean(editor)}
+        open={editorOpen}
+        onExitTransitionEnd={editorAfterExit}
         title={editorTitle}
         width={editor?.kind === 'logical-model' ? 780 : 700}
         onClose={() => !mutationBusy && setEditor(undefined)}
@@ -267,7 +269,8 @@ export function ModelsRoutesPage({ api, refreshRevision = 0, onBusyChange }: Mod
       </Modal>
 
       <ConfirmDialog
-        open={Boolean(deleteTarget)}
+        open={deleteTargetOpen}
+        onExitTransitionEnd={deleteTargetAfterExit}
         title={confirmTitle}
         description={deleteTarget ? <div className={styles.page}>{t('models.confirm.delete_body', { id: deleteTarget.record.id })}<FormError message={mutationErrorMessage} /></div> : null}
         confirmLabel={t('common.delete')}

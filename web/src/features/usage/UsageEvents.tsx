@@ -1,3 +1,4 @@
+import { Checkbox, Popover } from '@/components/ui/overlays';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -53,6 +54,7 @@ interface EventsTableProps {
 export function EventsTable({ events, hasMore, loadingMore, onLoadMore, visibleColumns, onVisibleColumnsChange, onExport, client }: EventsTableProps) {
   const { t } = useTranslation('console');
   const parentRef = useRef<HTMLDivElement>(null);
+  const [columnsOpen, setColumnsOpen] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<UsageEventViewModel>();
   // TanStack Virtual intentionally exposes imperative measurement helpers.
   // eslint-disable-next-line react-hooks/incompatible-library
@@ -71,7 +73,12 @@ export function EventsTable({ events, hasMore, loadingMore, onLoadMore, visibleC
   if (events.length === 0) return <EmptyState title={t('usage.events.empty_title')} description={t('usage.events.empty_desc')} />;
 
   return (
-    <Card variant="flush" title={t('usage.events.title')} data-od-id="events-table" extra={<div className={styles.eventActions}><details><summary>{t('common.column_prefs')}</summary><div className={styles.columnMenu}>{EVENT_COLUMNS.map((column) => <label key={column}><input type="checkbox" checked={visibleColumns.includes(column)} onChange={() => onVisibleColumnsChange(visibleColumns.includes(column) ? visibleColumns.filter((item) => item !== column) : EVENT_COLUMNS.filter((item) => visibleColumns.includes(item) || item === column))} />{t(EVENT_COLUMN_LABELS[column])}</label>)}</div></details><Button size="sm" variant="secondary" onClick={() => onExport('csv')}>{t('common.export_csv')}</Button><Button size="sm" variant="secondary" onClick={() => onExport('json')}>{t('common.export_json')}</Button></div>}>
+    <Card variant="flush" title={t('usage.events.title')} data-od-id="events-table" extra={<div className={styles.eventActions}><Popover opened={columnsOpen} onChange={setColumnsOpen} position="bottom-end" width={240} trapFocus>
+        <Popover.Target><Button size="sm" variant="secondary" onClick={() => setColumnsOpen((value) => !value)}>{t('common.column_prefs')}</Button></Popover.Target>
+        <Popover.Dropdown aria-label={t('common.column_prefs')} inert={!columnsOpen}>
+          <div className={styles.columnMenu}>{EVENT_COLUMNS.map((column) => <Checkbox key={column} label={t(EVENT_COLUMN_LABELS[column])} checked={visibleColumns.includes(column)} onChange={() => onVisibleColumnsChange(visibleColumns.includes(column) ? visibleColumns.filter((item) => item !== column) : EVENT_COLUMNS.filter((item) => visibleColumns.includes(item) || item === column))} />)}</div>
+        </Popover.Dropdown>
+      </Popover><Button size="sm" variant="secondary" onClick={() => onExport('csv')}>{t('common.export_csv')}</Button><Button size="sm" variant="secondary" onClick={() => onExport('json')}>{t('common.export_json')}</Button></div>}>
       <div className={styles.eventTable} style={{ '--event-columns': visibleColumns.length } as CSSProperties}>
         <div className={styles.eventHeader}>{visibleColumns.map((column) => <span key={column}>{t(EVENT_COLUMN_LABELS[column])}</span>)}</div>
         <div ref={parentRef} className={styles.eventScroll}>

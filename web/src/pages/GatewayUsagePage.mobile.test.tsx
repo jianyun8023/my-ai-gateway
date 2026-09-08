@@ -2,7 +2,7 @@
 import App from '@/App';
 import { setTestLanguage } from '@/test/setup';
 import { act } from 'react';
-import { createRoot } from 'react-dom/client';
+import { createRoot } from '@/test/render';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 describe('GatewayUsagePage mobile navigation', () => {
@@ -11,6 +11,8 @@ describe('GatewayUsagePage mobile navigation', () => {
 
   beforeEach(async () => {
     await setTestLanguage('zh');
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches: query.includes('max-width'), media: query,
+      addEventListener: () => {}, removeEventListener: () => {} }));
     globalThis.IS_REACT_ACT_ENVIRONMENT = true;
     window.location.hash = '#overview';
     document.body.style.overflow = '';
@@ -33,28 +35,19 @@ describe('GatewayUsagePage mobile navigation', () => {
     vi.unstubAllGlobals();
   });
 
-  it('locks background scrolling and closes on Escape', async () => {
+  it('removes closed navigation from the accessible tree and closes on Escape', async () => {
     await act(async () => {
       root.render(<App />);
       await new Promise((resolve) => setTimeout(resolve, 20));
     });
-
-    const openButton = container.querySelector<HTMLButtonElement>('button[aria-label="打开导航"]');
-    const sidebar = container.querySelector<HTMLElement>('[data-od-id="sidebar"]');
-    expect(openButton).not.toBeNull();
-    expect(sidebar?.dataset.open).toBe('false');
-
-    act(() => openButton?.click());
-    expect(sidebar?.dataset.open).toBe('true');
-    expect(document.body.style.overflow).toBe('hidden');
-    await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
-    expect(document.activeElement?.getAttribute('aria-label')).toBe('关闭导航');
-
-    act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })));
-    expect(sidebar?.dataset.open).toBe('false');
-    expect(document.body.style.overflow).toBe('');
-    await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
-    expect(document.activeElement).toBe(openButton);
+    const openButton = container.querySelector<HTMLButtonElement>('button[aria-label="打开导航"]')!;
+    expect(container.querySelector('nav')).toBeNull();
+    act(() => { openButton.focus(); openButton.click(); });
+    expect(container.querySelector('[role="dialog"] nav')).not.toBeNull();
+    const close = container.querySelector<HTMLButtonElement>('button[aria-label="关闭"]')!;
+    act(() => close.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    expect(container.querySelector('nav')).toBeNull();
+    expect(openButton.getAttribute('aria-expanded')).toBe('false');
   });
 
   it('closes the drawer after navigation', async () => {
@@ -68,7 +61,7 @@ describe('GatewayUsagePage mobile navigation', () => {
       .find((button) => button.textContent?.includes('用量分析'));
     act(() => analysisButton?.click());
 
-    expect(container.querySelector<HTMLElement>('[data-od-id="sidebar"]')?.dataset.open).toBe('false');
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
     expect(document.body.style.overflow).toBe('');
   });
 
@@ -84,6 +77,6 @@ describe('GatewayUsagePage mobile navigation', () => {
     act(() => sourcesButton?.click());
 
     expect(window.location.hash).toBe('#sources');
-    expect(container.querySelector<HTMLElement>('[data-od-id="sidebar"]')?.dataset.open).toBe('false');
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
   });
 });

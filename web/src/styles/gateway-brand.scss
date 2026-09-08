@@ -3,11 +3,11 @@
  * The legacy Keeper variable names remain mapped so shared Card/Button
  * components consume one source of truth without changing their public API.
  *
- * Brand, typography and spacing live on body so that React
+ * Brand, typography and spacing live on :root so that Mantine variables and React
  * Portal overlays (modals, drawers, notifications) rendered outside
  * .app-frame still resolve var(--radius) etc.
  */
-body {
+:root {
   --bg: oklch(98% 0.005 250);
   --surface: oklch(100% 0 0);
   --fg: oklch(22% 0.02 240);
@@ -84,7 +84,7 @@ body {
 }
 
 /* Dark theme uses the same semantic tokens as light. */
-[data-theme='dark'] body {
+:root[data-theme='dark'] {
   color-scheme: dark;
   --bg: oklch(17% 0.012 250);
   --surface: oklch(22% 0.012 245);

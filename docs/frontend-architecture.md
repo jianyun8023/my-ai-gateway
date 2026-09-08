@@ -65,6 +65,8 @@ App → GatewayManagementPage → features/control-plane → useAdminQuery / 资
 
 ## 与 Mantine 全局治理 #166 的衔接
 
+2026-09-08 后续实施：#166 已从 `main c99455e` 开始，首批接入 Mantine 9.6.0 的 Provider、Modal/Drawer、移动导航和列偏好 Popover。以下表格保留 #168 交接时的历史范围；当前组件职责及逐页证据以 [design.md](../design.md) 与 [迁移清单](mantine-migration.md) 为准。首批不代表 #166 全页面治理与验收完成。
+
 [#166](https://github.com/jianyun8023/my-ai-gateway/issues/166) 负责采用 Mantine 统一八个页面的设计系统；本轮架构治理不改变这项决策，也不完成其全页面 UI 迁移与验收。该 Issue 的调查链接固定在旧提交，后续清单应按本轮的新入口更新。
 
 以下路径相对于 `web/src/`：

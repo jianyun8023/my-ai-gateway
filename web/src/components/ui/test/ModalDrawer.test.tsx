@@ -1,83 +1,106 @@
 // @vitest-environment happy-dom
+import { act, useState } from 'react';
+import { createRoot } from '@/test/render';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { setTestLanguage } from '@/test/setup';
+import { Modal } from '../Modal';
+import { useThemeStore } from '@/stores/useThemeStore';
 
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
-import { act } from 'react'
-import { createRoot } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { Modal } from '../Modal'
+const escape = () => (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
 
-vi.mock('react-i18next', () => {
-  const t = (key: string) => key
-  return {
-    initReactI18next: { type: '3rdParty', init: () => undefined },
-    useTranslation: () => ({ t }),
-  }
-})
+describe('console overlay composition', () => {
+  let container: HTMLDivElement;
+  let root: ReturnType<typeof createRoot>;
+  beforeEach(async () => {
+    await setTestLanguage('zh');
+    globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+  afterEach(() => {
+    act(() => root.unmount());
+    container.remove();
+    vi.restoreAllMocks();
+  });
 
-const componentsStyles = readFileSync(resolve(process.cwd(), 'src/styles/components.scss'), 'utf8').replace(/\r\n/g, '\n')
+  it('labels dialog and drawer content and preserves external form submission', async () => {
+    const submit = vi.fn((event: React.FormEvent) => event.preventDefault());
+    await act(async () => root.render(<Modal open title="编辑来源" variant="drawer" onClose={() => {}}
+      footer={<button type="submit" form="source-form">保存</button>}>
+      <form id="source-form" onSubmit={submit}><label>名称<input defaultValue="source-a" /></label></form>
+    </Modal>));
+    const dialog = document.querySelector('[role="dialog"]')!;
+    expect(document.getElementById(dialog.getAttribute('aria-labelledby')!)?.textContent).toBe('编辑来源');
+    expect(dialog.getAttribute('aria-modal')).toBe('true');
+    act(() => dialog.querySelector<HTMLButtonElement>('button[form="source-form"]')!.click());
+    expect(submit).toHaveBeenCalledOnce();
+  });
 
-describe('Modal drawer variant', () => {
-  let container: HTMLDivElement
-  let root: ReturnType<typeof createRoot>
+  it('closes only the last opened overlay across dialog/drawer types', async () => {
+    const parentClose = vi.fn();
+    const childClose = vi.fn();
+    function Flow() {
+      const [child, setChild] = useState(false);
+      return <Modal open title="详情" variant="drawer" onClose={parentClose}>
+        <button onClick={() => setChild(true)}>确认</button>
+        <Modal open={child} title="危险操作" onClose={() => { childClose(); setChild(false); }}>说明</Modal>
+      </Modal>;
+    }
+    await act(async () => root.render(<Flow />));
+    act(() => [...container.querySelectorAll('button')].find(b => b.textContent === '确认')!.click());
+    const dialogs = [...document.querySelectorAll<HTMLElement>('[role="dialog"]')];
+    dialogs.at(-1)!.querySelector<HTMLElement>('button')!.focus();
+    act(escape);
+    expect(childClose).toHaveBeenCalledOnce();
+    expect(parentClose).not.toHaveBeenCalled();
+    dialogs[0].querySelector<HTMLElement>('button')!.focus();
+    act(escape);
+    expect(parentClose).toHaveBeenCalledOnce();
+  });
 
-  beforeEach(() => {
-    globalThis.IS_REACT_ACT_ENVIRONMENT = true
-    container = document.createElement('div')
-    document.body.appendChild(container)
-    root = createRoot(container)
-  })
+  it('keeps busy confirmation open for Escape, close button and backdrop', async () => {
+    const onClose = vi.fn();
+    await act(async () => root.render(<Modal open title="提交中" closeDisabled onClose={onClose}>保存中</Modal>));
+    const close = container.querySelector<HTMLButtonElement>('button[aria-label="关闭"]')!;
+    expect(close.disabled).toBe(true);
+    act(() => { close.click(); escape(); container.querySelector<HTMLElement>('.mantine-Modal-overlay')?.click(); });
+    expect(onClose).not.toHaveBeenCalled();
+  });
 
-  afterEach(async () => {
-    await act(async () => root.unmount())
-    container.remove()
-    document.body.innerHTML = ''
-  })
+  it('unregisters a conditionally unmounted drawer before opening another dialog', async () => {
+    const close = vi.fn();
+    await act(async () => root.render(<Modal key="detail" open variant="drawer" title="来源详情" onClose={() => {}}>详情</Modal>));
+    await act(async () => root.render(<Modal key="editor" open title="编辑来源" onClose={close}>表单</Modal>));
+    container.querySelector<HTMLButtonElement>('button[aria-label="关闭"]')!.focus();
+    act(escape);
+    expect(close).toHaveBeenCalledOnce();
+  });
 
-  it('renders a right-aligned full-height drawer while preserving dialog semantics', async () => {
-    await act(async () => {
-      root.render(
-        <Modal open title="Credential" variant="drawer" width={840} onClose={() => undefined}>
-          Detail
-        </Modal>,
-      )
-      await Promise.resolve()
-    })
+  it('applies the existing theme state to Mantine while an overlay is open', async () => {
+    await act(async () => root.render(<Modal open title="主题" onClose={() => {}}>内容</Modal>));
+    act(() => useThemeStore.getState().setTheme('dark'));
+    expect(document.documentElement.getAttribute('data-mantine-color-scheme')).toBe('dark');
+    expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
+    act(() => useThemeStore.getState().setTheme('white'));
+    expect(document.documentElement.getAttribute('data-mantine-color-scheme')).toBe('light');
+  });
 
-    const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]')
-    expect(dialog).not.toBeNull()
-    expect(dialog?.classList.contains('modal-drawer')).toBe(true)
-    expect(dialog?.parentElement?.classList.contains('modal-overlay-drawer')).toBe(true)
-    expect(dialog?.getAttribute('aria-modal')).toBe('true')
-  })
-
-  it('keeps the drawer flush with the viewport and scrolls only its body', () => {
-    expect(componentsStyles).toMatch(/\.modal-overlay-drawer\s*\{[\s\S]*?align-items:\s*stretch;[\s\S]*?justify-content:\s*flex-end;[\s\S]*?padding:\s*0;/)
-    expect(componentsStyles).toMatch(/\.modal-drawer\s*\{[\s\S]*?height:\s*100vh;[\s\S]*?max-height:\s*100vh;/)
-    expect(componentsStyles).toMatch(/\.modal-drawer\s*\{[\s\S]*?\.modal-body\s*\{[\s\S]*?flex:\s*1 1 auto;[\s\S]*?max-height:\s*none;/)
-  })
-
-  it('lets only the topmost nested modal handle Escape', async () => {
-    const closeDrawer = vi.fn()
-    const closeNested = vi.fn()
-    await act(async () => {
-      root.render(
-        <Modal open title="Credential" variant="drawer" onClose={closeDrawer}>
-          <Modal open title="Request log" onClose={closeNested}>Log</Modal>
-        </Modal>,
-      )
-      await Promise.resolve()
-    })
-
-    const nestedDialog = Array.from(document.body.querySelectorAll<HTMLElement>('[role="dialog"]'))
-      .find((dialog) => dialog.querySelector('.modal-title')?.textContent === 'Request log')
-    nestedDialog?.querySelector<HTMLButtonElement>('.modal-close-floating')?.focus()
-
-    await act(async () => {
-      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
-    })
-
-    expect(closeNested).toHaveBeenCalledTimes(1)
-    expect(closeDrawer).not.toHaveBeenCalled()
-  })
-})
+  it('returns focus to the trigger after a conditionally mounted detail drawer closes', async () => {
+    function Detail({ onExit }: { onExit: () => void }) {
+      const [open, setOpen] = useState(true);
+      return <Modal open={open} variant="drawer" title="详情" onClose={() => setOpen(false)} onExitTransitionEnd={onExit}>内容</Modal>;
+    }
+    function Page() {
+      const [selected, setSelected] = useState(false);
+      return <><button onClick={() => setSelected(true)}>查看</button>{selected && <Detail onExit={() => setSelected(false)} />}</>;
+    }
+    await act(async () => root.render(<Page />));
+    const trigger = container.querySelector<HTMLButtonElement>('button')!;
+    await act(async () => { trigger.focus(); trigger.click(); });
+    const close = container.querySelector<HTMLButtonElement>('button[aria-label="关闭"]')!;
+    act(() => { close.focus(); close.click(); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 30)); });
+    expect(document.activeElement).toBe(trigger);
+  });
+});

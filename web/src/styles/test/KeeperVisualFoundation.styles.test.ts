@@ -20,7 +20,7 @@ describe('Keeper visual foundation', () => {
     expect(reset).toMatch(/body\s*\{[\s\S]*?font-size:\s*var\(--keeper-body-font-size\);/);
   });
 
-  it('makes cards, modals, titles, subtitles, and buttons consume the global contract', () => {
+  it('makes retained cards, titles, subtitles, and buttons consume the global contract', () => {
     expect(components).toMatch(/\.keeper-card-surface\s*\{[\s\S]*?border-radius:\s*var\(--keeper-card-radius\);/);
     expect(components).toMatch(/\.card\s*\{[\s\S]*?padding:\s*var\(--keeper-card-padding\);/);
     expect(components).toMatch(/\.card-flush\s*\{[\s\S]*?padding:\s*0;/);
@@ -28,7 +28,5 @@ describe('Keeper visual foundation', () => {
     expect(components).toMatch(/\.keeper-card-subtitle\s*\{[\s\S]*?font-size:\s*var\(--keeper-card-subtitle-size\);[\s\S]*?font-weight:\s*var\(--keeper-card-subtitle-weight\);/);
     expect(components).toMatch(/\.btn\s*\{[\s\S]*?min-height:\s*var\(--keeper-control-height-md\);[\s\S]*?font-size:\s*var\(--keeper-control-font-size\);/);
     expect(components).toMatch(/&\.btn-sm\s*\{[\s\S]*?min-height:\s*var\(--keeper-control-height-sm\);[\s\S]*?font-size:\s*var\(--keeper-control-font-size\);/);
-    expect(components).toMatch(/\.modal\s*\{[\s\S]*?border-radius:\s*var\(--keeper-card-radius\);/);
-    expect(components).toMatch(/@media \(max-width:\s*\$breakpoint-mobile\)[\s\S]*?\.modal\s*\{[\s\S]*?border-radius:\s*var\(--keeper-card-radius\);/);
   });
 });

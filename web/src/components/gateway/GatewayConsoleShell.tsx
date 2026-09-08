@@ -1,3 +1,5 @@
+import { useMediaQuery } from '@mantine/hooks';
+import { Modal } from '@/components/ui/Modal';
 import {
   useCallback,
   useEffect,
@@ -12,7 +14,6 @@ import {
   IconMenu,
   IconSunAsterisk,
   IconRefreshCw,
-  IconX,
 } from '@/components/ui/icons';
 import { LanguageSwitcher } from '@/components/ui/LanguageSwitcher';
 import type { ConsolePage, ConsoleNavSection } from '@/lib/consoleNavigation';
@@ -80,8 +81,7 @@ export function GatewayConsoleShell({
   const [refreshRevision, setRefreshRevision] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const menuButtonRef = useRef<HTMLButtonElement>(null);
-  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const mobile = useMediaQuery('(max-width: 920px)');
   const theme = useThemeStore((state) => state.theme);
   const setTheme = useThemeStore((state) => state.setTheme);
   const { t } = useTranslation('console');
@@ -99,30 +99,8 @@ export function GatewayConsoleShell({
     persistAdminKey('');
     setRefreshRevision((c) => c + 1);
   }, []);
-  const closeMobileNav = useCallback((restoreFocus = false) => {
-    setMobileNavOpen(false);
-    if (restoreFocus) window.setTimeout(() => menuButtonRef.current?.focus(), 0);
-  }, []);
-
   useEffect(() => { setMobileNavOpen(false); }, [activePage]);
-
-  useEffect(() => {
-    if (!mobileNavOpen) return;
-    const prev = document.body.style.overflow;
-    const t = window.setTimeout(() => closeButtonRef.current?.focus(), 0);
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closeMobileNav(true); };
-    document.body.style.overflow = 'hidden';
-    window.addEventListener('keydown', onKey);
-    return () => { window.clearTimeout(t); window.removeEventListener('keydown', onKey); document.body.style.overflow = prev; };
-  }, [closeMobileNav, mobileNavOpen]);
-
-  useEffect(() => {
-    const mq = window.matchMedia?.('(max-width: 920px)');
-    if (!mq) return;
-    const close = () => { if (!mq.matches) setMobileNavOpen(false); };
-    mq.addEventListener('change', close);
-    return () => mq.removeEventListener('change', close);
-  }, []);
+  useEffect(() => { if (!mobile) setMobileNavOpen(false); }, [mobile]);
 
   const applyAdminKey = () => {
     const k = adminKeyDraft.trim();
@@ -152,13 +130,7 @@ export function GatewayConsoleShell({
     setRefreshing,
   }), [adminKeyConfigured, clearAdminKey, getAdminKey, refreshRevision]);
 
-  return (
-    <div className={styles.shell} data-od-id="console">
-      <aside id="gateway-navigation" className={styles.sidebar} data-open={mobileNavOpen} data-od-id="sidebar" aria-label={t('shell.sidebar_aria')}>
-        <button ref={closeButtonRef} type="button" className={styles.sidebarClose} aria-label={t('shell.close_nav')} onClick={() => closeMobileNav(true)}>
-          <IconX size={18} />
-        </button>
-
+  const navigation = <div id="gateway-navigation" className={styles.navigationContent}>
         {/* Brand — matches prototype: AG icon + AI Gateway + version */}
         <div className={styles.brand}>
           <div className={styles.brandIcon}>AG</div>
@@ -215,14 +187,22 @@ export function GatewayConsoleShell({
           <Button size="sm" variant="secondary" onClick={applyAdminKey}>{t('shell.mobile_key_apply')}</Button>
         </div>
 
-      </aside>
+  </div>;
 
-      <button type="button" className={styles.mobileOverlay} data-open={mobileNavOpen} aria-label={t('shell.close_overlay')} tabIndex={mobileNavOpen ? 0 : -1} onClick={() => closeMobileNav(true)} />
+  return (
+    <div className={styles.shell} data-od-id="console">
+      {mobile ? (
+        <Modal open={mobileNavOpen} variant="drawer" position="left" width={320} title={t('shell.nav_aria')} onClose={() => setMobileNavOpen(false)}>
+          {navigation}
+        </Modal>
+      ) : <aside className={styles.sidebar} data-od-id="sidebar" aria-label={t('shell.sidebar_aria')}>{navigation}</aside>}
+
+
 
       <div className={styles.mainArea}>
         {/* Topbar — matches prototype: title + endpoint + admin key */}
         <header className={styles.topbar} data-od-id="topbar">
-          <button ref={menuButtonRef} type="button" className={styles.mobileMenuBtn} aria-label={t('shell.open_nav')} aria-controls="gateway-navigation" aria-expanded={mobileNavOpen} onClick={() => setMobileNavOpen(true)}>
+          <button type="button" className={styles.mobileMenuBtn} aria-label={t('shell.open_nav')} aria-controls="gateway-navigation" aria-expanded={mobileNavOpen} onClick={() => setMobileNavOpen(true)}>
             <IconMenu size={20} />
           </button>
           <span className={styles.topbarTitle}>{title}</span>

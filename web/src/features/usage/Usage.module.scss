@@ -225,11 +225,6 @@
 .breakdownChart { height: 280px; }
 
 .eventActions { display: flex; align-items: center; gap: 6px; }
-.eventActions details { position: relative; }
-.eventActions summary { cursor: pointer; list-style: none; padding: 8px 10px; border: 1px solid var(--border-color); border-radius: var(--radius); font-size: var(--fs-small); }
-.eventActions summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.columnMenu { position: absolute; right: 0; top: calc(100% + 7px); z-index: 10; width: 220px; display: grid; gap: 8px; padding: 12px; border: 1px solid var(--border-color); border-radius: 9px; background: var(--floating-surface); box-shadow: var(--shadow-lg); }
-.columnMenu label { display: flex; gap: 8px; align-items: center; font-size: var(--fs-small); }
 
 .eventTable { overflow-x: auto; }
 .eventHeader,
@@ -340,8 +335,6 @@
   .distributionList span { white-space: normal; text-align: right; }
 
   .eventActions { flex-wrap: wrap; }
-  .eventActions summary { min-height: 44px; display: flex; align-items: center; }
-  .columnMenu { right: auto; left: 0; max-width: calc(100vw - 48px); }
 
   .detailGrid { grid-template-columns: 1fr; }
   .tokenDetails { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -363,3 +356,5 @@
   .stat strong { grid-column: 2; grid-row: 1 / 3; align-self: center; font-size: 22px; }
   .chartLarge { height: 210px; }
 }
+
+.columnMenu { display: grid; gap: 8px; max-height: min(440px, 65dvh); overflow-y: auto; }

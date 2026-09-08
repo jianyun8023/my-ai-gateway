@@ -10,7 +10,7 @@ Tech-Utility：冷灰底色、绿色强调、紧凑数据布局。使用固定�
 
 ## Token 与尺度
 
-品牌 Token 统一维护在 [gateway-brand.scss](web/src/styles/gateway-brand.scss)，位于 `body`，页面与 Portal 浮层共享继承。`html[data-theme='dark']` 切换深色；原生表单通过 `color-scheme` 跟随主题。
+品牌 Token 统一维护在 [gateway-brand.scss](web/src/styles/gateway-brand.scss) 的 `:root`，页面、Mantine CSS 变量和 Portal 共享继承。主题选择与持久化仍由 `useThemeStore` 唯一管理，`ConsoleProvider` 将 `resolvedTheme` 传给 Mantine 的 `forceColorScheme`，不建立另一套主题存储。原生控件通过 `color-scheme` 跟随主题。
 
 | 用途 | Token / 约定 |
 | --- | --- |
@@ -23,7 +23,9 @@ Tech-Utility：冷灰底色、绿色强调、紧凑数据布局。使用固定�
 | 圆角 | 小控件 6px、常规容器 8px、卡片与弹窗 12px；状态标签为胶囊 |
 | 控件 | 桌面普通按钮 36px、小按钮 32px；触摸布局普通按钮、表单和分段控件至少 44px |
 
-现有 `--keeper-*`、`--text-*` 等变量由品牌层映射，页面不重复定义。`themes.scss` 提供基础尺度，品牌样式最后加载。颜色与尺寸的精确值以源码为准。
+现有 `--keeper-*`、`--text-*` 等变量由品牌层映射，页面不重复定义。Mantine 字体、间距、断点、组件默认值及语义变量映射集中在 [theme.ts](web/src/components/ui/theme.ts)。`themes.scss` 暂为未迁移组件保留基础默认值；不再新增另一套主题定义。旧 `index.css` 中的重复主题已删除。
+
+加载顺序固定为全局 reset/旧组件样式 → 品牌 Token → [Mantine 按需样式](web/src/styles/mantine.css) → Root 引入的组件 CSS Modules。新增 Mantine 控件时在该入口补充其样式及基础依赖；不要在页面导入全库样式或依赖加载顺序覆盖公共交互。
 
 ## 组件职责
 
@@ -37,9 +39,10 @@ Tech-Utility：冷灰底色、绿色强调、紧凑数据布局。使用固定�
 | `SegmentedTabs` | tabs 模式切换内容面板；`mode="group"` 用于筛选 |
 | `LoadingState` / `Notice` / `EmptyState` | 加载、错误重试、成功反馈与空态；空表使用 `layout="centered"` |
 | `TableScroll` | 带名称、可聚焦的横向滚动区；父级网格项需可收缩 |
-| `Modal` | dialog / drawer、焦点约束与恢复、滚动锁；管理详情与事件详情共用 |
+| `Modal` | Mantine Modal/Drawer 的项目契约：标题、尺寸、底部操作、关闭禁用、退出回调；管理详情、事件详情和移动导航共用 |
+| `overlays.ts` | 直接导出 Mantine Popover/Checkbox，列偏好在公共主题下使用，无需机械包装 |
 
-通用组件在 `web/src/components/ui`，不反向依赖 API 或控制面模块。公共样式由 [ConsolePrimitives.module.scss](web/src/components/ui/ConsolePrimitives.module.scss) 与 [components.scss](web/src/styles/components.scss) 管理。`features/control-plane/shared.tsx` 保留协议标签、错误展示、确认流程和业务布局；协议常量、错误归一化与格式化分别由 `lib/protocols.ts`、`admin-api/errors.ts` 和 `utils/format.ts` 提供。分层约束见 [前端架构](docs/frontend-architecture.md)。
+通用组件在 `web/src/components/ui`，不反向依赖 API 或控制面模块。浮层布局由 [Overlay.module.scss](web/src/components/ui/Overlay.module.scss) 管理，行为交给 Mantine；其余尚未迁移组件继续使用 [ConsolePrimitives.module.scss](web/src/components/ui/ConsolePrimitives.module.scss) 与 [components.scss](web/src/styles/components.scss)。`features/control-plane/shared.tsx` 保留协议标签、错误展示、确认流程和业务布局；协议常量、错误归一化与格式化分别由 `lib/protocols.ts`、`admin-api/errors.ts` 和 `utils/format.ts` 提供。分层约束见 [前端架构](docs/frontend-architecture.md)。
 
 页面 SCSS 只维护布局与领域视觉。事件虚拟列表和配置表格分别保留各自的数据与滚动逻辑。
 
@@ -60,3 +63,17 @@ Tech-Utility：冷灰底色、绿色强调、紧凑数据布局。使用固定�
 | ≤380px | KPI 单列，导航和间距进一步收缩 |
 
 遵循 `prefers-reduced-motion`。维护交互时检查键盘、浅色/深色、窄屏、长文案和 Portal；复用现有页面与组件回归测试。
+
+## Mantine 浮层契约与迁移状态
+
+本批使用 Mantine **9.6.0**（core/hooks 精确锁定，React 19.2 兼容）。基础组件负责交互，公共组合负责项目契约，业务组件负责数据与提交。完整八页清单、批次和证据见 [迁移记录](docs/mantine-migration.md)。当前为 #166 首批，FormField、Button、通知、图表、表格和全页面完整验收仍在后续范围内。
+
+- Modal/Drawer 默认层级 1000，由 Mantine stack 按打开顺序递增；Popover 1200、Tooltip 1300，统一在 theme.ts 修改。ConsoleProvider 通过 Mantine 公开的两种 StackContext 共享同一 stack，跨类型叠加时仅顶层处理 Esc 和焦点约束。条件卸载的详情会注销 stack 条目。
+- 焦点恢复使用 Mantine useFocusReturn，与 stack 的 trapFocus 切换分离；条件挂载详情先完成关闭态挂载，再打开。不要在页面添加 focus 定时器。正文单独滚动，标题和底部操作保持可见；长 ID 可换行。关闭动画中的内容通过 inert 退出交互。
+- 对话框默认 520px，各业务通过 width 表达尺寸；600px 以下 Drawer 全宽。移动侧栏用左侧 Drawer，桌面保留导航内容；920px 以下隐藏的导航从可访问树移除。
+- closeDisabled 同时保护关闭按钮、Esc 和遮罩点击，提交按钮仍由业务 busy 防重复触发。没有提交中的普通浮层允许 Esc 和外部点击关闭。
+- 非敏感编辑/确认数据使用 useOverlayState：setValue(record) 打开、setValue(undefined) 开始关闭，把 afterExit 传入 onExitTransitionEnd 才清空数据，避免关闭过程中标题/表单跳变。敏感 Key 使用原有即时清除流程。
+- 来源/实体详情切换编辑时，先关闭详情并恢复焦点，再在 onExitTransitionEnd 中打开编辑。不要直接卸载正在持有编辑按钮的详情，否则编辑关闭后无法返回有效入口。
+- 列偏好 Popover 使用 Portal、视口自动定位和 focus trap；交互内容使用 Popover，纯文本提示使用 Tooltip。当前表单选择器仍为原生实现；未来 Mantine Select 与嵌套 Popover 接入须按官方 Portal/事件规则单独验证，首批没有宣称这些组合已完成。
+
+新增页面的评审需检查：复用组件入口和主题；label/hint/error 与提交契约；首次加载/刷新/错误/空态；键盘和关闭焦点；双主题、长文案与窄屏；图表/虚拟列表测量及资源体积。专业组件继续保留 Chart.js/TanStack Virtual，主题与数据语义验收不能省略。CPA Usage Keeper 的既有 MIT License 与来源说明继续保留。

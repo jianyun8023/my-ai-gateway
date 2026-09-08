@@ -1,3 +1,4 @@
+import { useOverlayState } from '@/components/ui/useOverlayState';
 import type {
   Account,
   AccountWriteInput,
@@ -64,8 +65,8 @@ export function SourcesPage({ api, refreshRevision = 0, onBusyChange }: SourcesP
   const { t } = useTranslation('console');
   const localizeError = useLocalizedApiError();
   const [tab, setTab] = useState<SourcesTab>('sources');
-  const [editor, setEditor] = useState<Editor>();
-  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget>();
+  const { value: editor, setValue: setEditor, opened: editorOpen, afterExit: editorAfterExit } = useOverlayState<Editor>();
+  const { value: deleteTarget, setValue: setDeleteTarget, opened: deleteTargetOpen, afterExit: deleteTargetAfterExit } = useOverlayState<DeleteTarget>();
   const [selectedSourceId, setSelectedSourceId] = useState<string>();
   const [mutationBusy, setMutationBusy] = useState(false);
   const [mutationError, setMutationError] = useState<AdminErrorShape>();
@@ -255,7 +256,8 @@ export function SourcesPage({ api, refreshRevision = 0, onBusyChange }: SourcesP
       )}
 
       <Modal
-        open={Boolean(editor)}
+        open={editorOpen}
+        onExitTransitionEnd={editorAfterExit}
         title={editor?.kind === 'source'
           ? editor.record ? t('sources.modal.edit_source') : t('sources.modal.new_source')
           : editor?.record ? t('sources.modal.edit_account') : t('sources.modal.new_account')}
@@ -276,7 +278,8 @@ export function SourcesPage({ api, refreshRevision = 0, onBusyChange }: SourcesP
       </Modal>
 
       <ConfirmDialog
-        open={Boolean(deleteTarget)}
+        open={deleteTargetOpen}
+        onExitTransitionEnd={deleteTargetAfterExit}
         title={deleteTarget?.kind === 'source' ? t('sources.confirm.delete_source_title') : t('sources.confirm.delete_account_title')}
         description={deleteTarget ? <div className={styles.page}>{t(deleteTarget.kind === 'source' ? 'sources.confirm.delete_source_body' : 'sources.confirm.delete_account_body', { id: deleteTarget.record.id })}<FormError message={formErrorMessage} /></div> : null}
         confirmLabel={t('common.delete')}

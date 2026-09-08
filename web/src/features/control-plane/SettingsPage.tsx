@@ -1,3 +1,4 @@
+import { useOverlayState } from '@/components/ui/useOverlayState';
 import { downloadBlob } from '@/utils/download';
 import type {
   AdminErrorShape,
@@ -61,8 +62,8 @@ export function SettingsPage({
   const [createOpen, setCreateOpen] = useState(false);
   const [revealedKey, setRevealedKey] = useState<{ id: number; name: string; key: string }>();
   const [copyStatus, setCopyStatus] = useState<'copied' | 'pending' | 'failed'>('pending');
-  const [revokeTarget, setRevokeTarget] = useState<VirtualKey>();
-  const [rotateTarget, setRotateTarget] = useState<VirtualKey>();
+  const { value: revokeTarget, setValue: setRevokeTarget, opened: revokeTargetOpen, afterExit: revokeTargetAfterExit } = useOverlayState<VirtualKey>();
+  const { value: rotateTarget, setValue: setRotateTarget, opened: rotateTargetOpen, afterExit: rotateTargetAfterExit } = useOverlayState<VirtualKey>();
   const [now, setNow] = useState(Date.now);
   const [mutationBusy, setMutationBusy] = useState(false);
   const [mutationError, setMutationError] = useState<AdminErrorShape>();
@@ -278,7 +279,8 @@ export function SettingsPage({
       </Modal>
 
       <Modal
-        open={Boolean(rotateTarget)}
+        open={rotateTargetOpen}
+        onExitTransitionEnd={rotateTargetAfterExit}
         title={t('settings.modal.rotate_title', { name: rotateTarget?.name })}
         width={560}
         onClose={() => !mutationBusy && setRotateTarget(undefined)}
@@ -306,7 +308,8 @@ export function SettingsPage({
       </Modal>
 
       <ConfirmDialog
-        open={Boolean(revokeTarget)}
+        open={revokeTargetOpen}
+        onExitTransitionEnd={revokeTargetAfterExit}
         title={t('settings.modal.revoke_title')}
         description={revokeTarget ? <div className={styles.page}>{t('settings.modal.revoke_body', { name: revokeTarget.name })}<FormError message={mutationError ? localizedApiError(mutationError) : undefined} /></div> : null}
         confirmLabel={t('settings.modal.revoke_confirm')}

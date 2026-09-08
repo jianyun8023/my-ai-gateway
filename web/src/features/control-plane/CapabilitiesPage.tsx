@@ -21,7 +21,7 @@ import { useAdminQuery } from '@/hooks/useAdminQuery';
 import { PROTOCOL_LABELS } from '@/lib/protocols';
 import { formatDateTime } from '@/utils/format';
 import type { TFunction } from 'i18next';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import styles from './ControlPlane.module.scss';
 import { DetailItem, DetailList, DrawerSection, EmptyTable, ErrorState, FilterBar, PageActions, ProtocolPill } from './shared';
@@ -152,13 +152,8 @@ function ProtocolDetail({ cell, protocol }: { cell?: EffectiveProtocolCapability
 function CapabilityDrawer({ row, onClose }: { row: CapabilityMatrixRow; onClose: () => void }) {
   const { t } = useTranslation('console');
   const [open, setOpen] = useState(true);
-  useEffect(() => {
-    if (open) return;
-    const timer = window.setTimeout(onClose, 380);
-    return () => window.clearTimeout(timer);
-  }, [onClose, open]);
   return (
-    <Modal open={open} variant="drawer" width={620} title={t('capabilities.detail.title')} onClose={() => setOpen(false)} footer={<Button variant="secondary" onClick={() => setOpen(false)}>{t('common.close')}</Button>}>
+    <Modal open={open} variant="drawer" width={620} title={t('capabilities.detail.title')} onClose={() => setOpen(false)} onExitTransitionEnd={onClose} footer={<Button variant="secondary" onClick={() => setOpen(false)}>{t('common.close')}</Button>}>
       <DrawerSection title={t('capabilities.detail.runtime_binding')}>
         <DetailList>
           <DetailItem label={t('capabilities.detail.route')}><code>{row.route_id}</code></DetailItem>

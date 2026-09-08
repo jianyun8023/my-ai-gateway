@@ -10,11 +10,12 @@ import { GatewayUsageClient, type UsageEventViewModel } from '@/gateway-usage';
 import { useAdminQuery } from '@/hooks/useAdminQuery';
 import { useLocalizedApiError } from '@/hooks/useLocalizedApiError';
 import { formatExactInteger } from '@/utils/formatCompact';
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 export function EventDetails({ event, onClose, client }: { event: UsageEventViewModel; onClose: () => void; client: GatewayUsageClient }) {
   const { t } = useTranslation('console');
+  const [open, setOpen] = useState(true);
   const localizeError = useLocalizedApiError();
   const load = useCallback((signal: AbortSignal) => client.eventDetail(event.requestId, signal), [client, event.requestId]);
   const query = useAdminQuery({ load });
@@ -22,7 +23,7 @@ export function EventDetails({ event, onClose, client }: { event: UsageEventView
   const displayAttempts = query.data ?? event.attempts;
 
   return (
-    <Modal open variant="drawer" width={520} title={event.requestId} onClose={onClose} footer={<Button variant="secondary" onClick={onClose}>{t('common.close')}</Button>}>
+    <Modal open={open} variant="drawer" width={520} title={event.requestId} onClose={() => setOpen(false)} onExitTransitionEnd={onClose} footer={<Button variant="secondary" onClick={() => setOpen(false)}>{t('common.close')}</Button>}>
       <div className={styles.stack} data-od-id="event-drawer">
         <section className={styles.detailGrid}>
           <div><span>{t('usage.field.time')}</span><strong>{formatTime(event.createdAt)}</strong></div>

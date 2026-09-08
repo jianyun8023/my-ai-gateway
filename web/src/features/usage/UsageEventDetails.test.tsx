@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { act } from 'react';
-import { createRoot } from 'react-dom/client';
+import { createRoot } from '@/test/render';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AdminClient } from '@/admin-api/client';
 import { GatewayUsageClient } from '@/gateway-usage/client';
@@ -44,7 +44,8 @@ describe('usage event details', () => {
     expect(dialog.textContent).toContain('account-b');
     expect(dialog.textContent).toContain('source-b');
     expect(dialog.textContent).not.toContain('暂时不可用');
-    act(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    act(() => dialog.querySelector('button')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 250)); });
     expect(onClose).toHaveBeenCalledOnce();
   });
 
