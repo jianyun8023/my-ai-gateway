@@ -22,11 +22,12 @@ import { useTranslation } from 'react-i18next';
 interface GatewayUsagePageProps {
   activeTab: GatewayUsageTab;
   getAdminKey: () => string;
+  authGeneration: number;
   refreshRevision: number;
   onLoadingChange?: (loading: boolean) => void;
 }
 
-export function GatewayUsagePage({ activeTab, getAdminKey, refreshRevision, onLoadingChange }: GatewayUsagePageProps) {
+export function GatewayUsagePage({ activeTab, getAdminKey, authGeneration, refreshRevision, onLoadingChange }: GatewayUsagePageProps) {
   const { t } = useTranslation('console');
   const localizeError = useLocalizedApiError();
   const client = useMemo(() => new GatewayUsageClient(new AdminClient({ getAdminKey })), [getAdminKey]);
@@ -34,7 +35,7 @@ export function GatewayUsagePage({ activeTab, getAdminKey, refreshRevision, onLo
   const [visibleColumns, setVisibleColumns] = useState<EventColumn[]>(loadVisibleColumns);
   const [trendMetric, setTrendMetric] = useState<TrendMetric>('composition');
   const [granularity, setGranularity] = useState<'auto' | 'hour' | 'day'>('auto');
-  const data = useUsageData({ client, filters: filterState.filters, activeTab, granularity, refreshRevision, onLoadingChange });
+  const data = useUsageData({ client, filters: filterState.filters, activeTab, granularity, authGeneration, refreshRevision, onLoadingChange });
   const { loading, overview, analysisSummary } = data;
   const localizeUsageError = (entry?: { cause: unknown; messageKey: string }) => {
     if (!entry) return undefined;

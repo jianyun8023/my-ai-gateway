@@ -17,11 +17,12 @@ import { EventDetails } from '@/features/usage/UsageEventDetails';
 import { GatewayUsageClient, type UsageEventViewModel } from '@/gateway-usage';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { TFunction } from 'i18next';
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 
 // Keep the sticky header out of the virtual body coordinates.
 const EVENT_HEADER_HEIGHT = 44;
+const eventIdentity = (event: UsageEventViewModel) => `${event.id}:${event.createdAt}`;
 
 const renderEventCell = (event: UsageEventViewModel, column: EventColumn, t: TFunction) => {
   switch (column) {
@@ -68,9 +69,14 @@ export function EventsTable({ events, hasMore, loadingMore, loadMoreError, onLoa
   visibleColumns, onVisibleColumnsChange, onExport, exportingFormat, exportError, onRetryExport, client }: EventsTableProps) {
   const { t } = useTranslation('console');
   const parentRef = useRef<HTMLDivElement>(null);
+  const emptyStateRef = useRef<HTMLDivElement>(null);
+  const moveFocusWhenRowsReturn = useRef(false);
   const [columnsOpen, setColumnsOpen] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<UsageEventViewModel>();
-  const getItemKey = useCallback((index: number) => `${events[index].id}:${events[index].createdAt}`, [events]);
+  const selectedEventInRows = useMemo(() => selectedEvent
+    ? events.find((event) => eventIdentity(event) === eventIdentity(selectedEvent))
+    : undefined, [events, selectedEvent]);
+  const getItemKey = useCallback((index: number) => eventIdentity(events[index]), [events]);
   // TanStack Virtual intentionally exposes imperative measurement helpers.
   // eslint-disable-next-line react-hooks/incompatible-library
   const virtualizer = useVirtualizer<HTMLDivElement, HTMLTableRowElement>({
@@ -86,8 +92,22 @@ export function EventsTable({ events, hasMore, loadingMore, loadMoreError, onLoa
   useEffect(() => {
     if (hasMore && !loadingMore && !loadMoreError && lastIndex >= events.length - 5) onLoadMore();
   }, [events.length, hasMore, lastIndex, loadMoreError, loadingMore, onLoadMore]);
+  useEffect(() => {
+    if (!selectedEvent || selectedEventInRows) return;
+    setSelectedEvent(undefined);
+    const target = parentRef.current ?? emptyStateRef.current;
+    target?.focus({ preventScroll: true });
+    moveFocusWhenRowsReturn.current = parentRef.current === null;
+  }, [selectedEvent, selectedEventInRows]);
+  useEffect(() => {
+    if (events.length === 0 || !moveFocusWhenRowsReturn.current || !parentRef.current) return;
+    parentRef.current.focus({ preventScroll: true });
+    moveFocusWhenRowsReturn.current = false;
+  }, [events.length]);
 
-  if (events.length === 0) return <EmptyState title={t('usage.events.empty_title')} description={t('usage.events.empty_desc')} />;
+  if (events.length === 0) return <div ref={emptyStateRef} tabIndex={-1} data-od-id="events-empty-focus">
+    <EmptyState title={t('usage.events.empty_title')} description={t('usage.events.empty_desc')} />
+  </div>;
 
   return (
     <Card variant="flush" title={t('usage.events.title')} data-od-id="events-table" extra={<div className={styles.eventActions}><Popover opened={columnsOpen} onChange={setColumnsOpen} position="bottom-end" width={240} trapFocus>
@@ -125,7 +145,7 @@ export function EventsTable({ events, hasMore, loadingMore, loadMoreError, onLoa
         {loadMoreError ? <div className={styles.loadingMore}><Notice action={onRetryLoadMore && <Button size="sm" variant="secondary" onClick={onRetryLoadMore}>{t('common.retry')}</Button>}>{loadMoreError}</Notice></div>
           : loadingMore && <div className={styles.loadingMore}><LoadingState layout="inline" label={t('common.load_more')} /></div>}
       </div>
-      {selectedEvent && <EventDetails key={selectedEvent.requestId} event={selectedEvent} onClose={() => setSelectedEvent(undefined)} client={client} />}
+      {selectedEventInRows && <EventDetails key={selectedEventInRows.requestId} event={selectedEventInRows} onClose={() => setSelectedEvent(undefined)} client={client} />}
     </Card>
   );
 }

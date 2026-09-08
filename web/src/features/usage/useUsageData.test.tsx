@@ -35,8 +35,8 @@ describe('usage query sessions', () => {
     exportEvents: vi.fn<GatewayUsageClient['exportEvents']>(),
   };
   const onLoadingChange = vi.fn();
-  function Probe({ filters, revision }: { filters: GatewayUsageFilters; revision: number }) {
-    const query = useUsageData({ client, filters, activeTab: 'events', granularity: 'auto', refreshRevision: revision, onLoadingChange });
+  function Probe({ filters, revision, authGeneration }: { filters: GatewayUsageFilters; revision: number; authGeneration: number }) {
+    const query = useUsageData({ client, filters, activeTab: 'events', granularity: 'auto', authGeneration, refreshRevision: revision, onLoadingChange });
     return <>
       <output>{query.eventPage?.events.map(item => item.id).join(',')}</output>
       <span role="status">{query.loading ? 'loading' : query.refreshing ? 'refreshing' : query.loadingMore ? 'more' : 'idle'}</span>
@@ -51,8 +51,8 @@ describe('usage query sessions', () => {
       <button onClick={query.retryExport}>Retry Export</button>
     </>;
   }
-  const render = async (filters = baseFilters, revision = 0) => {
-    await act(async () => root.render(<Probe filters={filters} revision={revision} />));
+  const render = async (filters = baseFilters, revision = 0, authGeneration = 0) => {
+    await act(async () => root.render(<Probe filters={filters} revision={revision} authGeneration={authGeneration} />));
   };
   const click = async (label: string) => {
     await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent === label)!.click());
@@ -118,6 +118,44 @@ describe('usage query sessions', () => {
     await act(async () => retry.resolve(page('retried')));
     expect(displayed()).toBe('retried');
     expect(container.querySelector('[role="alert"]')).toBeNull();
+  });
+
+  it('clears the previous identity immediately when the authentication generation changes', async () => {
+    const changedIdentity = deferred<UsageEventPageViewModel>();
+    client.events.mockResolvedValueOnce(page('key-a')).mockReturnValueOnce(changedIdentity.promise);
+    await render();
+    await render(baseFilters, 1, 1);
+    expect(displayed()).toBe('');
+    expect(container.querySelector('[role="status"]')?.textContent).toBe('loading');
+    await act(async () => changedIdentity.reject(new Error('Unauthorized')));
+    expect(displayed()).toBe('');
+    expect(container.querySelector('[data-error="load"]')?.textContent).toBe('usage.error.load_failed');
+  });
+
+  it('keeps the published window and cursor after refresh failure while pausing old pagination', async () => {
+    const refresh = deferred<UsageEventPageViewModel>();
+    client.events.mockResolvedValueOnce(page('current', 'published-cursor'))
+      .mockReturnValueOnce(refresh.promise)
+      .mockResolvedValueOnce(page('next'));
+    client.exportEvents.mockRejectedValueOnce(new Error('Synthetic export failure'));
+    await render();
+    const publishedFilters = client.events.mock.calls[0][0].filters;
+    vi.setSystemTime(new Date('2026-09-08T10:00:00Z'));
+    await render(baseFilters, 1);
+    const pendingFilters = client.events.mock.calls[1][0].filters;
+    expect(pendingFilters).not.toEqual(publishedFilters);
+    await click('More');
+    expect(client.events).toHaveBeenCalledTimes(2);
+    await act(async () => refresh.reject(new Error('Refresh failed')));
+    expect(displayed()).toBe('current');
+    await click('Export');
+    expect(client.exportEvents.mock.calls[0][0]).toEqual(publishedFilters);
+    await click('More');
+    expect(client.events.mock.calls[2][0]).toMatchObject({
+      filters: publishedFilters,
+      cursor: 'published-cursor',
+    });
+    expect(displayed()).toBe('current,next');
   });
 
   it('clears an old query scope immediately and refuses its cursor until the new first page succeeds', async () => {
@@ -253,7 +291,7 @@ describe('summary source query sessions', () => {
     const root = createRoot(host);
     globalThis.IS_REACT_ACT_ENVIRONMENT = true;
     function SummaryProbe({ filters, revision }: { filters: GatewayUsageFilters; revision: number }) {
-      const query = useUsageData({ client: realClient, filters, activeTab, granularity: 'auto', refreshRevision: revision });
+      const query = useUsageData({ client: realClient, filters, activeTab, granularity: 'auto', authGeneration: 0, refreshRevision: revision });
       return <output>{JSON.stringify(query.overview?.summary.usageSources ?? query.analysisSummary?.usageSources)}</output>;
     }
     try {

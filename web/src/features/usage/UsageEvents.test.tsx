@@ -113,6 +113,28 @@ describe('virtual event table', () => {
     expect(fetchImpl).toHaveBeenCalledOnce();
   });
 
+  it('closes a detail whose row disappears and does not reopen it when rows return', async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({ items: [] })));
+    const client = new GatewayUsageClient(new AdminClient({ fetchImpl }));
+    const render = (items: typeof events) => root.render(<EventsTable events={items} hasMore={false}
+      loadingMore={false} onLoadMore={() => {}} visibleColumns={['time']} onVisibleColumnsChange={() => {}}
+      onExport={() => {}} client={client} />);
+    await act(async () => render(events));
+    const view = container.querySelector<HTMLButtonElement>('tbody button')!;
+    await act(async () => { view.focus(); view.click(); });
+    expect(container.querySelector('[role="dialog"]')?.textContent).toContain('request-0');
+
+    await act(async () => render([]));
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+    const emptyFocus = container.querySelector<HTMLElement>('[data-od-id="events-empty-focus"]')!;
+    expect(document.activeElement).toBe(emptyFocus);
+
+    await act(async () => render(events));
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.activeElement).toBe(container.querySelector('[role="region"]'));
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
   it('loads the next page near the end and keeps existing rows while loading', async () => {
     const onLoadMore = vi.fn();
     const client = new GatewayUsageClient(new AdminClient({ fetchImpl: vi.fn<typeof fetch>() }));

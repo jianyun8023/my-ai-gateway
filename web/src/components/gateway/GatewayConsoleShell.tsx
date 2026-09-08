@@ -37,6 +37,7 @@ export interface GatewayConsoleNavItem {
 export interface GatewayConsoleContentContext {
   getAdminKey: () => string;
   adminKeyConfigured: boolean;
+  authGeneration: number;
   clearAdminKey: () => void;
   refreshRevision: number;
   setRefreshing: (refreshing: boolean) => void;
@@ -81,6 +82,8 @@ export function GatewayConsoleShell({
   const appliedAdminKeyRef = useRef(safeSessionRead());
   const [adminKeyDraft, setAdminKeyDraft] = useState('');
   const [adminKeyConfigured, setAdminKeyConfigured] = useState(() => Boolean(safeSessionRead()));
+  // Cache identity changes without exposing the session-only secret to query keys.
+  const [authGeneration, setAuthGeneration] = useState(0);
   const [refreshRevision, setRefreshRevision] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -100,6 +103,7 @@ export function GatewayConsoleShell({
     setAdminKeyDraft('');
     setAdminKeyConfigured(false);
     persistAdminKey('');
+    setAuthGeneration((generation) => generation + 1);
     setRefreshRevision((c) => c + 1);
   }, []);
   useEffect(() => { setMobileNavOpen(false); }, [activePage]);
@@ -111,6 +115,7 @@ export function GatewayConsoleShell({
     setAdminKeyDraft('');
     setAdminKeyConfigured(Boolean(k));
     persistAdminKey(k);
+    setAuthGeneration((generation) => generation + 1);
     setRefreshRevision((c) => c + 1);
   };
 
@@ -128,10 +133,11 @@ export function GatewayConsoleShell({
   const contentContext = useMemo<GatewayConsoleContentContext>(() => ({
     getAdminKey,
     adminKeyConfigured,
+    authGeneration,
     clearAdminKey,
     refreshRevision,
     setRefreshing,
-  }), [adminKeyConfigured, clearAdminKey, getAdminKey, refreshRevision]);
+  }), [adminKeyConfigured, authGeneration, clearAdminKey, getAdminKey, refreshRevision]);
 
   const connectionControls = <div className={styles.connectionControls} role="group" aria-label={t('shell.connection_aria')}>
     <Text component="div" className={styles.endpointDisplay} title={gatewayEndpoint}>{gatewayEndpoint}</Text>
