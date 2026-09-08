@@ -15,6 +15,13 @@ const jsonResponse = (value: unknown, status = 200) => new Response(JSON.stringi
   headers: { 'Content-Type': 'application/json' },
 });
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: Error) => void;
+  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+}
+
 const source = {
   id: 'source-a',
   display_name: 'Source A',
@@ -444,6 +451,82 @@ describe('production control-plane pages', () => {
     expect(alert.textContent).toContain('upstream_timeout');
     expect(alert.textContent).toContain('Catalog request timed out');
     expect(container.querySelector('tbody')?.textContent).toContain('upstream-a');
+  });
+
+  it('does not present a failed initial discovery query as an empty catalog', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === '/admin/sources/source-a/discoveries/latest') {
+        return jsonResponse({ error: { code: 'catalog_unavailable', message: 'Synthetic catalog failure' } }, 503);
+      }
+      return baseHandler(input);
+    }));
+    await renderPage('discovery');
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('catalog_unavailable');
+    expect(container.textContent).not.toContain('当前筛选没有来源模型');
+    expect(container.textContent).not.toContain('该来源不支持自动发现');
+  });
+
+  it('isolates a slow Source switch and ignores the old Source response even when fetch ignores abort', async () => {
+    const sourceB = { ...source, id: 'source-b', display_name: 'Source B' };
+    const accountB = { ...account, id: 'account-b', source_id: 'source-b', display_name: 'Account B' };
+    const modelB = { ...sourceModel, source_id: 'source-b', upstream_model_id: 'upstream-b' };
+    const oldLatest = deferred<Response>();
+    const newLatest = deferred<Response>();
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/admin/sources') return jsonResponse({ data: [source, sourceB] });
+      if (url === '/admin/accounts') return jsonResponse({ data: [account, accountB] });
+      if (url === '/admin/sources/source-a/discoveries/latest') return oldLatest.promise;
+      if (url === '/admin/sources/source-b/discoveries/latest') return newLatest.promise;
+      if (url.startsWith('/admin/sources/source-b/models')) return jsonResponse({ data: [modelB] });
+      return baseHandler(input);
+    }));
+    await renderPage('discovery');
+    const sourceLabel = [...container.querySelectorAll('label')].find((label) => label.textContent === '来源')!;
+    const sourceSelect = document.getElementById(sourceLabel.htmlFor) as HTMLSelectElement;
+    act(() => {
+      sourceSelect.value = 'source-b';
+      sourceSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect(container.textContent).not.toContain('upstream-a');
+    expect(container.textContent).not.toContain('当前筛选没有来源模型');
+    expect(container.textContent).toContain('正在加载来源模型');
+    const latestB = await (await baseHandler('/admin/sources/source-a/discoveries/latest')).json();
+    latestB.data.source_id = 'source-b';
+    latestB.data.account_id = 'account-b';
+    await act(async () => newLatest.resolve(jsonResponse(latestB)));
+    expect(container.querySelector('tbody')?.textContent).toContain('upstream-b');
+    await act(async () => oldLatest.resolve(await baseHandler('/admin/sources/source-a/discoveries/latest')));
+    expect(container.querySelector('tbody')?.textContent).toContain('upstream-b');
+    expect(container.textContent).not.toContain('upstream-a');
+  });
+
+  it('keeps a confirmed no-Source state visible when its background refresh fails', async () => {
+    let failRefresh = false;
+    const fetchRequest = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === '/admin/sources') {
+        return failRefresh
+          ? jsonResponse({ error: { code: 'source_refresh_failed', message: 'Synthetic Source refresh failure' } }, 503)
+          : jsonResponse({ data: [] });
+      }
+      if (String(input) === '/admin/accounts') return jsonResponse({ data: [] });
+      return baseHandler(input);
+    });
+    vi.stubGlobal('fetch', fetchRequest);
+    const render = async (refreshRevision: number) => {
+      await act(async () => {
+        root.render(<GatewayManagementPage page="discovery" getAdminKey={() => ''} adminKeyConfigured={false}
+          clearAdminKey={() => {}} refreshRevision={refreshRevision} onLoadingChange={() => {}} />);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+    };
+    await render(0);
+    expect(container.textContent).toContain('没有可用于模型发现的来源');
+    failRefresh = true;
+    await render(1);
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('source_refresh_failed');
+    expect(container.textContent).toContain('没有可用于模型发现的来源');
+    expect([...container.querySelectorAll('button')].some((button) => button.textContent?.includes('重试'))).toBe(true);
   });
 
   it.each(['failed', 'unsupported'])('reports a %s discovery once with its code and existing catalog', async (status) => {

@@ -44,4 +44,36 @@ describe('GatewayUsagePage empty state', () => {
     expect(container.textContent).toContain('调整时间范围或筛选条件后重试');
     expect(container.textContent).not.toMatch(/Ranking|Auth Files|充值|配额/);
   });
+
+  it('shows an initial event failure without also claiming the query succeeded empty', async () => {
+    window.location.hash = '#events';
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      error: { code: 'events_unavailable', message: 'Synthetic event failure' },
+    }), { status: 503, headers: { 'Content-Type': 'application/json' } })));
+    await act(async () => {
+      root.render(<App />);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    });
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('服务暂时不可用');
+    expect(container.textContent).not.toContain('当前范围没有请求事件');
+  });
+
+  it('treats an invalid custom range as validation and offers no stale-query retry', async () => {
+    await act(async () => {
+      root.render(<App />);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    });
+    const requestCount = vi.mocked(fetch).mock.calls.length;
+    act(() => [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === '自定义')!.click());
+    const input = container.querySelector<HTMLInputElement>('input[type="datetime-local"]')!;
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, '');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === '应用筛选')!.click();
+    });
+    const alert = container.querySelector<HTMLElement>('[role="alert"]')!;
+    expect(alert.textContent).toContain('开始时间必须早于结束时间');
+    expect(alert.querySelector('button')).toBeNull();
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(requestCount);
+  });
 });

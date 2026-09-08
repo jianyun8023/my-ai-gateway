@@ -3,6 +3,7 @@ import { isAbortError, normalizeAdminError } from '@/admin-api';
 import { useCallback, useEffect, useState } from 'react';
 
 interface AdminQueryState<T> {
+  queryKey: string;
   data?: T;
   loading: boolean;
   refreshing: boolean;
@@ -11,33 +12,37 @@ interface AdminQueryState<T> {
 
 interface UseAdminQueryOptions<T> {
   load: (signal: AbortSignal) => Promise<T>;
+  queryKey?: string;
   refreshRevision?: number;
   onBusyChange?: (busy: boolean) => void;
 }
 
 export function useAdminQuery<T>({
   load,
+  queryKey = '',
   refreshRevision = 0,
   onBusyChange,
 }: UseAdminQueryOptions<T>) {
   const [reloadRevision, setReloadRevision] = useState(0);
   const [state, setState] = useState<AdminQueryState<T>>({
+    queryKey,
     loading: true,
     refreshing: false,
   });
 
-  const execute = useCallback(async (signal: AbortSignal) => {
+  const execute = useCallback(async (signal: AbortSignal, requestKey: string) => {
     setState((current) => ({
-      ...current,
-      loading: current.data === undefined,
-      refreshing: current.data !== undefined,
+      ...(current.queryKey === requestKey ? current : { data: undefined }),
+      queryKey: requestKey,
+      loading: current.queryKey !== requestKey || current.data === undefined,
+      refreshing: current.queryKey === requestKey && current.data !== undefined,
       error: undefined,
     }));
     onBusyChange?.(true);
     try {
       const data = await load(signal);
       if (!signal.aborted) {
-        setState({ data, loading: false, refreshing: false });
+        setState({ queryKey: requestKey, data, loading: false, refreshing: false });
       }
     } catch (error) {
       if (!signal.aborted && !isAbortError(error)) {
@@ -55,15 +60,19 @@ export function useAdminQuery<T>({
 
   useEffect(() => {
     const controller = new AbortController();
-    void execute(controller.signal);
+    void execute(controller.signal, queryKey);
     return () => {
       controller.abort();
       onBusyChange?.(false);
     };
-  }, [execute, onBusyChange, refreshRevision, reloadRevision]);
+  }, [execute, onBusyChange, queryKey, refreshRevision, reloadRevision]);
+
+  const visibleState = state.queryKey === queryKey
+    ? state
+    : { queryKey, loading: true, refreshing: false };
 
   return {
-    ...state,
+    ...visibleState,
     reload: () => setReloadRevision((current) => current + 1),
   };
 }

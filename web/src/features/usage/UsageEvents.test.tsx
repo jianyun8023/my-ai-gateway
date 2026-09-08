@@ -100,6 +100,10 @@ describe('virtual event table', () => {
     expect(fetchImpl).toHaveBeenCalledOnce();
     expect(String(fetchImpl.mock.calls[0][0])).toContain('/events/request-0');
     expect(container.querySelector('[role="dialog"]')?.textContent).toContain('request-0');
+    await act(async () => root.render(<EventsTable events={[events[1], events[0], ...events.slice(2)]} hasMore={false} loadingMore={false} onLoadMore={() => {}}
+      visibleColumns={['logicalModel', 'status']} onVisibleColumnsChange={() => {}} onExport={onExport} client={client} />));
+    expect(container.querySelector('[role="dialog"]')?.textContent).toContain('request-0');
+    expect(fetchImpl).toHaveBeenCalledOnce();
     act(() => container.querySelector('[role="dialog"] button')?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)); });
     expect(container.querySelector('[role="dialog"]')).toBeNull();
@@ -128,6 +132,35 @@ describe('virtual event table', () => {
     await act(async () => render(false, 1000));
     expect(container.querySelector('tr[data-index="29"]')).toBe(row);
     expect(onLoadMore).toHaveBeenCalledOnce();
+  });
+
+  it('holds the failed page in place and retries it explicitly without restarting exports', async () => {
+    const onLoadMore = vi.fn();
+    const onRetryLoadMore = vi.fn();
+    const onRetryExport = vi.fn();
+    const onExport = vi.fn();
+    const client = new GatewayUsageClient(new AdminClient({ fetchImpl: vi.fn<typeof fetch>() }));
+    await act(async () => root.render(<EventsTable events={events.slice(0, 30)} hasMore loadingMore={false}
+      loadMoreError="加载更多事件失败" onLoadMore={onLoadMore} onRetryLoadMore={onRetryLoadMore}
+      visibleColumns={['time']} onVisibleColumnsChange={() => {}} onExport={onExport}
+      exportError="用量导出失败" onRetryExport={onRetryExport} client={client} />));
+    const region = container.querySelector<HTMLElement>('[role="region"]')!;
+    act(() => { region.scrollTop = 2000; region.dispatchEvent(new Event('scroll')); });
+    expect(onLoadMore).not.toHaveBeenCalled();
+    const scrollTop = region.scrollTop;
+    const alerts = [...container.querySelectorAll<HTMLElement>('[role="alert"]')];
+    expect(alerts.map((alert) => alert.textContent)).toEqual(expect.arrayContaining([
+      expect.stringContaining('加载更多事件失败'),
+      expect.stringContaining('用量导出失败'),
+    ]));
+    const retryButtons = [...container.querySelectorAll<HTMLButtonElement>('button')].filter((button) => button.textContent === '重试');
+    expect(retryButtons).toHaveLength(2);
+    act(() => retryButtons[0].click());
+    act(() => retryButtons[1].click());
+    expect(onRetryExport).toHaveBeenCalledOnce();
+    expect(onRetryLoadMore).toHaveBeenCalledOnce();
+    expect(onExport).not.toHaveBeenCalled();
+    expect(region.scrollTop).toBe(scrollTop);
   });
 
 });

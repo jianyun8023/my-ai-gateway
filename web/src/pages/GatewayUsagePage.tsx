@@ -36,10 +36,19 @@ export function GatewayUsagePage({ activeTab, getAdminKey, refreshRevision, onLo
   const [granularity, setGranularity] = useState<'auto' | 'hour' | 'day'>('auto');
   const data = useUsageData({ client, filters: filterState.filters, activeTab, granularity, refreshRevision, onLoadingChange });
   const { loading, overview, analysisSummary } = data;
-  const mappedError = data.error && localizeError(data.error.cause);
-  const error = filterState.invalidRange ? t('usage.error.invalid_range') : data.error
-    ? mappedError === t('errors.unknown') ? t(data.error.messageKey) : mappedError
-    : undefined;
+  const localizeUsageError = (entry?: { cause: unknown; messageKey: string }) => {
+    if (!entry) return undefined;
+    const mapped = localizeError(entry.cause);
+    return mapped === t('errors.unknown') ? t(entry.messageKey) : mapped;
+  };
+  const error = filterState.invalidRange ? t('usage.error.invalid_range') : localizeUsageError(data.error);
+  const loadMoreError = localizeUsageError(data.loadMoreError);
+  const exportError = localizeUsageError(data.exportError);
+  const hasData = activeTab === 'overview'
+    ? overview !== undefined
+    : activeTab === 'analysis'
+      ? analysisSummary !== undefined
+      : data.eventPage !== undefined;
   const changeVisibleColumns = (columns: EventColumn[]) => {
     const normalized = normalizeVisibleEventColumns(columns);
     writeLocalPreference(COLUMNS_STORAGE_KEY, normalized);
@@ -54,7 +63,7 @@ export function GatewayUsagePage({ activeTab, getAdminKey, refreshRevision, onLo
         onApply={filterState.apply}
         onPresetSelect={filterState.selectPreset}
         onReset={filterState.reset}
-        loading={loading}
+        loading={loading || data.refreshing}
       />
       {activeTab === 'overview' && (
         <div className={styles.granularityBar}>
@@ -66,14 +75,19 @@ export function GatewayUsagePage({ activeTab, getAdminKey, refreshRevision, onLo
           ]} />
         </div>
       )}
-      {error && <Notice action={<Button size="sm" variant="secondary" onClick={data.reload}>{t('common.retry')}</Button>}>{error}</Notice>}
-      {loading && !error ? <LoadingState label={t('usage.page.loading')} /> : (
+      {error && <Notice action={!filterState.invalidRange && data.error ? <Button size="sm" variant="secondary" onClick={data.reload}>{t('common.retry')}</Button> : undefined}>{error}</Notice>}
+      {data.refreshing && <LoadingState layout="inline" label={t('usage.page.refreshing')} />}
+      {loading && !hasData ? <LoadingState label={t('usage.page.loading')} /> : hasData ? (
         activeTab === 'overview'
           ? overview && <Overview data={overview} metric={trendMetric} onMetricChange={setTrendMetric} />
           : activeTab === 'analysis'
             ? analysisSummary && <Analysis breakdowns={data.breakdowns ?? {}} summary={analysisSummary} />
-            : <EventsTable events={data.eventPage?.events ?? []} hasMore={data.eventPage?.hasMore ?? false} loadingMore={data.loadingMore} onLoadMore={data.loadMore} visibleColumns={visibleColumns} onVisibleColumnsChange={changeVisibleColumns} onExport={data.exportEvents} client={client} />
-      )}
+            : <EventsTable events={data.eventPage?.events ?? []} hasMore={data.eventPage?.hasMore ?? false}
+              loadingMore={data.loadingMore} loadMoreError={loadMoreError} onLoadMore={data.loadMore} onRetryLoadMore={data.retryLoadMore}
+              visibleColumns={visibleColumns} onVisibleColumnsChange={changeVisibleColumns}
+              onExport={data.exportEvents} exportingFormat={data.exportingFormat} exportError={exportError} onRetryExport={data.retryExport}
+              client={client} />
+      ) : null}
     </section>
   );
 }

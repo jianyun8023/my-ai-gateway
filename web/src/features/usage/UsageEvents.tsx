@@ -6,6 +6,7 @@ import { Checkbox, Popover } from '@/components/ui/overlays';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { Notice } from '@/components/ui/Notice';
 import { UsageStatus } from './UsageStatus';
 import { isUnreportedUsage } from './usageQuality';
 import { EVENT_COLUMNS, EVENT_COLUMN_LABELS, type EventColumn } from '@/features/usage/eventColumns';
@@ -51,14 +52,20 @@ interface EventsTableProps {
   events: UsageEventViewModel[];
   hasMore: boolean;
   loadingMore: boolean;
+  loadMoreError?: string;
   onLoadMore: () => void;
+  onRetryLoadMore?: () => void;
   visibleColumns: EventColumn[];
   onVisibleColumnsChange: (columns: EventColumn[]) => void;
   onExport: (format: 'csv' | 'json') => void;
+  exportingFormat?: 'csv' | 'json';
+  exportError?: string;
+  onRetryExport?: () => void;
   client: GatewayUsageClient;
 }
 
-export function EventsTable({ events, hasMore, loadingMore, onLoadMore, visibleColumns, onVisibleColumnsChange, onExport, client }: EventsTableProps) {
+export function EventsTable({ events, hasMore, loadingMore, loadMoreError, onLoadMore, onRetryLoadMore,
+  visibleColumns, onVisibleColumnsChange, onExport, exportingFormat, exportError, onRetryExport, client }: EventsTableProps) {
   const { t } = useTranslation('console');
   const parentRef = useRef<HTMLDivElement>(null);
   const [columnsOpen, setColumnsOpen] = useState(false);
@@ -77,8 +84,8 @@ export function EventsTable({ events, hasMore, loadingMore, onLoadMore, visibleC
   const virtualItems = virtualizer.getVirtualItems();
   const lastIndex = virtualItems.at(-1)?.index ?? -1;
   useEffect(() => {
-    if (hasMore && !loadingMore && lastIndex >= events.length - 5) onLoadMore();
-  }, [events.length, hasMore, lastIndex, loadingMore, onLoadMore]);
+    if (hasMore && !loadingMore && !loadMoreError && lastIndex >= events.length - 5) onLoadMore();
+  }, [events.length, hasMore, lastIndex, loadMoreError, loadingMore, onLoadMore]);
 
   if (events.length === 0) return <EmptyState title={t('usage.events.empty_title')} description={t('usage.events.empty_desc')} />;
 
@@ -88,7 +95,8 @@ export function EventsTable({ events, hasMore, loadingMore, onLoadMore, visibleC
         <Popover.Dropdown aria-label={t('common.column_prefs')} inert={!columnsOpen}>
           <div className={styles.columnMenu}>{EVENT_COLUMNS.map((column) => <Checkbox key={column} label={t(EVENT_COLUMN_LABELS[column])} checked={visibleColumns.includes(column)} onChange={() => onVisibleColumnsChange(visibleColumns.includes(column) ? visibleColumns.filter((item) => item !== column) : EVENT_COLUMNS.filter((item) => visibleColumns.includes(item) || item === column))} />)}</div>
         </Popover.Dropdown>
-      </Popover><Button size="sm" variant="secondary" onClick={() => onExport('csv')}>{t('common.export_csv')}</Button><Button size="sm" variant="secondary" onClick={() => onExport('json')}>{t('common.export_json')}</Button></div>}>
+      </Popover><Button size="sm" variant="secondary" loading={exportingFormat === 'csv'} disabled={exportingFormat !== undefined} onClick={() => onExport('csv')}>{t('common.export_csv')}</Button><Button size="sm" variant="secondary" loading={exportingFormat === 'json'} disabled={exportingFormat !== undefined} onClick={() => onExport('json')}>{t('common.export_json')}</Button></div>}>
+      {exportError && <Notice action={onRetryExport && <Button size="sm" variant="secondary" onClick={onRetryExport}>{t('common.retry')}</Button>}>{exportError}</Notice>}
       <div ref={parentRef} className={styles.eventScroll} role="region" aria-label={t('usage.events.title')} tabIndex={0}>
         <Table className={styles.eventTable} aria-label={t('usage.events.title')} aria-rowcount={hasMore ? -1 : events.length + 1}
           style={{ '--event-columns': visibleColumns.length, '--event-header-height': `${EVENT_HEADER_HEIGHT}px` } as CSSProperties}>
@@ -114,7 +122,8 @@ export function EventsTable({ events, hasMore, loadingMore, onLoadMore, visibleC
             })}
           </Table.Tbody>
         </Table>
-        {loadingMore && <div className={styles.loadingMore}><LoadingState layout="inline" label={t('common.load_more')} /></div>}
+        {loadMoreError ? <div className={styles.loadingMore}><Notice action={onRetryLoadMore && <Button size="sm" variant="secondary" onClick={onRetryLoadMore}>{t('common.retry')}</Button>}>{loadMoreError}</Notice></div>
+          : loadingMore && <div className={styles.loadingMore}><LoadingState layout="inline" label={t('common.load_more')} /></div>}
       </div>
       {selectedEvent && <EventDetails key={selectedEvent.requestId} event={selectedEvent} onClose={() => setSelectedEvent(undefined)} client={client} />}
     </Card>
