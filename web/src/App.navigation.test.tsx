@@ -81,5 +81,8 @@ describe('App console routing', () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
     expect(window.location.hash).toBe('#sources');
+    expect(container.querySelectorAll('nav button[aria-current="page"]')).toHaveLength(1);
+    expect(container.querySelector('nav button[aria-current="page"]')?.textContent).toBe('来源管理');
+    expect(container.querySelector('h1')?.textContent).toBe('来源管理');
   });
 });

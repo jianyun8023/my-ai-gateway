@@ -40,6 +40,7 @@ Tech-Utility：冷灰底色、绿色强调、紧凑数据布局。使用固定�
 | `SegmentedTabs` | Mantine Tabs 负责内容面板键盘导航；`mode="group"` 使用 Mantine Button 保留 `aria-pressed` 筛选语义 |
 | `LanguageSwitcher` / `Toggle` | 语言使用按压按钮并沿用既有持久化；启用状态使用 Mantine Switch，布尔值回调与禁用状态由页面控制 |
 | `LoadingState` / `Notice` / `EmptyState` | Mantine Loader/Alert/Paper 组合；错误使用 alert，成功/警告使用 status；Loader 装饰化并由外层提供一次加载播报，局部加载用 inline；空表使用 centered 并保留下一步操作 |
+| Mantine `NavLink` | Shell 使用 button 语义保留 hash 导航，选中态对应 `aria-current=page`；视觉与触摸尺寸由 UI 主题统一 |
 | Mantine `Table` / `TableScroll` | 原生表格语义与带名称、可聚焦的横向滚动区；主题统一单元格密度、表头与分隔线，页面负责列宽和行操作 |
 | `Modal` | Mantine Modal/Drawer 的项目契约：标题、尺寸、底部操作、关闭禁用、退出回调；管理详情、事件详情和移动导航共用 |
 | `overlays.ts` | 直接导出 Mantine Popover/Checkbox，列偏好在公共主题下使用，无需机械包装 |
@@ -83,3 +84,10 @@ Tech-Utility：冷灰底色、绿色强调、紧凑数据布局。使用固定�
 新增页面的评审需检查：复用组件入口和主题；label/hint/error 与提交契约；首次加载/刷新/错误/空态；键盘和关闭焦点；双主题、长文案与窄屏；图表/虚拟列表测量及资源体积。专业组件继续保留 Chart.js/TanStack Virtual，主题与数据语义验收不能省略。CPA Usage Keeper 的既有 MIT License 与来源说明继续保留。
 
 用量图表使用 [UsageTrend](web/src/features/usage/UsageTrend.tsx) 保留 Chart.js 的时间序列绘制；默认 Input/Output 堆叠，其他指标使用有名称的独立双轴，并提供精确数值表。Canvas 配色由 [useChartTheme](web/src/features/usage/useChartTheme.ts) 读取品牌 Token，响应已有主题状态；分布采用 Mantine Progress，来源延迟与趋势数据采用 Mantine Table。Token 构成使用一张 Progress 分段图展示 Input/Output 占两者合计的比例，推理和缓存放在数值明细中，不参与图中归一化；上报 Total 独立保留，合计不一致时明确说明。原型差距、数据依据和本批取舍见[图表核对记录](docs/chart-prototype-review.md)。
+
+
+### 应用壳与导航
+
+`GatewayConsoleShell` 统一八页导航、标题和顶栏。NavLink 的排版、选中态、焦点和减少动画规则维护于 `components/ui/Navigation.module.scss`，桌面导航至少 40px，移动导航至少 44px；页面不复制导航按钮样式。菜单、主题、刷新使用公共 IconButton，刷新中由 Mantine ActionIcon 禁用重复点击。页面一级标题采用 Mantine Title。
+
+Shell 保留原生 CSS Grid/Flex 布局与现有 hash 导航、刷新版本及 session-only Admin Key 契约。大于 1280px 顶栏单行，921–1280px 将连接信息放到第二行；不挤掉标题或隐藏操作。920px 及以下由公共 Drawer 承载导航、语言和连接信息，只有一份连接字段被渲染。草稿受同一 state 控制，切换布局/开关导航不自动应用，显式应用或 Enter 后才清空草稿并触发刷新。桌面侧栏可独立纵向滚动，移动侧栏沿用公共 Drawer 的内容滚动和焦点规则。主题按钮根据 resolvedTheme 决定文案及切换目标，兼容跟随系统深色。

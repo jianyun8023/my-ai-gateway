@@ -1,3 +1,5 @@
+import { NavLink, Paper, Text, Title } from '@mantine/core';
+import { StatusPill } from '@/components/ui/StatusPill';
 import { TextField } from '@/components/ui/FormField';
 import { useMediaQuery } from '@mantine/hooks';
 import { Modal } from '@/components/ui/Modal';
@@ -83,7 +85,7 @@ export function GatewayConsoleShell({
   const [refreshing, setRefreshing] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const mobile = useMediaQuery('(max-width: 920px)');
-  const theme = useThemeStore((state) => state.theme);
+  const resolvedTheme = useThemeStore((state) => state.resolvedTheme);
   const setTheme = useThemeStore((state) => state.setTheme);
   const { t } = useTranslation('console');
 
@@ -131,6 +133,18 @@ export function GatewayConsoleShell({
     setRefreshing,
   }), [adminKeyConfigured, clearAdminKey, getAdminKey, refreshRevision]);
 
+  const connectionControls = <div className={styles.connectionControls} role="group" aria-label={t('shell.connection_aria')}>
+    <Text component="div" className={styles.endpointDisplay} title={gatewayEndpoint}>{gatewayEndpoint}</Text>
+    <div className={styles.keyInput}>
+      <TextField className={styles.keyField} label={t('shell.admin_key_label')} aria-label={t('shell.admin_key_label')}
+        autoComplete="off" spellCheck={false} type="password" required value={adminKeyDraft}
+        onChange={(event) => setAdminKeyDraft(event.target.value)}
+        onKeyDown={(event) => { if (event.key === 'Enter') applyAdminKey(); }}
+        placeholder={t('shell.admin_key_placeholder')} />
+      <Button size="sm" variant="secondary" onClick={applyAdminKey}>{t('common.apply')}</Button>
+    </div>
+  </div>;
+
   const navigation = <div id="gateway-navigation" className={styles.navigationContent}>
         {/* Brand — matches prototype: AG icon + AI Gateway + version */}
         <div className={styles.brand}>
@@ -143,47 +157,26 @@ export function GatewayConsoleShell({
         <nav className={styles.sidebarNav} aria-label={t('shell.nav_aria')}>
           {navigationSections.map((section) => (
             <div key={section.label}>
-              <span className={styles.navSection}>{section.label}</span>
+              <Text component="div" className={styles.navSection}>{section.label}</Text>
               {section.pages.map((pageId) => {
                 const item = navItemsById.get(pageId);
                 if (!item) return null;
                 const isActive = activePage === pageId;
                 return (
-                  <button
-                    key={pageId}
-                    type="button"
-                    className={`${styles.navItem} ${isActive ? styles.navItemActive : ''}`}
-                    aria-current={isActive ? 'page' : undefined}
-                    onClick={() => navigate(pageId)}
-                  >
-                    {item.icon}
-                    <span>{item.label}</span>
-                    {item.badge && <span className={styles.navBadge}>{item.badge}</span>}
-                  </button>
+                  <NavLink component="button" key={pageId} type="button" active={isActive}
+                    aria-current={isActive ? 'page' : undefined} onClick={() => navigate(pageId)}
+                    label={item.label} leftSection={item.icon}
+                    rightSection={item.badge ? <StatusPill tone="danger">{item.badge}</StatusPill> : undefined} />
                 );
               })}
             </div>
           ))}
         </nav>
 
-        {/* Drawer language switch (≤920px topbar copy hidden) — visible inside the mobile sidebar */}
-        <div className={styles.sidebarLanguageArea}>
+        {mobile && <div className={styles.mobileSettings}>
           <LanguageSwitcher />
-        </div>
-
-        {/* Mobile-only admin key — visible in sidebar when topbar input is hidden */}
-        <div className={styles.mobileKeySection}>
-          <TextField className={styles.mobileKeyLabel} label={t('shell.mobile_key_label')}
-              autoComplete="off"
-              spellCheck={false}
-              type="password"
-              value={adminKeyDraft}
-              onChange={(e) => setAdminKeyDraft(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') applyAdminKey(); }}
-              placeholder={t('shell.admin_key_placeholder')}
-            />
-          <Button size="sm" variant="secondary" onClick={applyAdminKey}>{t('shell.mobile_key_apply')}</Button>
-        </div>
+          {connectionControls}
+        </div>}
 
   </div>;
 
@@ -195,50 +188,30 @@ export function GatewayConsoleShell({
         </Modal>
       ) : <aside className={styles.sidebar} data-od-id="sidebar" aria-label={t('shell.sidebar_aria')}>{navigation}</aside>}
 
-
-
       <div className={styles.mainArea}>
         {/* Topbar — matches prototype: title + endpoint + admin key */}
-        <header className={styles.topbar} data-od-id="topbar">
-          <button type="button" className={styles.mobileMenuBtn} aria-label={t('shell.open_nav')} aria-controls="gateway-navigation" aria-expanded={mobileNavOpen} onClick={() => setMobileNavOpen(true)}>
+        <Paper component="header" radius={0} className={styles.topbar} data-od-id="topbar">
+          {mobile && <IconButton label={t('shell.open_nav')} aria-controls="gateway-navigation" aria-expanded={mobileNavOpen} onClick={() => setMobileNavOpen(true)}>
             <IconMenu size={20} />
-          </button>
-          <span className={styles.topbarTitle}>{title}</span>
+          </IconButton>}
+          <Text component="span" className={styles.topbarTitle}>{title}</Text>
+          {!mobile && connectionControls}
           <div className={styles.topbarRight}>
-            <div className={styles.endpointDisplay}>
-              <span>{gatewayEndpoint}</span>
-            </div>
-            <div className={styles.keyInput}>
-              <TextField className={styles.desktopKeyField} label={t('shell.admin_key_label')}
-                aria-label={t('shell.admin_key_label')}
-                autoComplete="off"
-                spellCheck={false}
-                type="password"
-                required
-                value={adminKeyDraft}
-                onChange={(e) => setAdminKeyDraft(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') applyAdminKey(); }}
-                placeholder={t('shell.admin_key_placeholder')}
-              />
-              <Button size="sm" variant="secondary" onClick={applyAdminKey}>{t('common.apply')}</Button>
-            </div>
-            <IconButton label={t(theme === 'dark' ? 'shell.switch_to_light' : 'shell.switch_to_dark')} onClick={() => setTheme(theme === 'dark' ? 'white' : 'dark')}>
+            <IconButton label={t(resolvedTheme === 'dark' ? 'shell.switch_to_light' : 'shell.switch_to_dark')} onClick={() => setTheme(resolvedTheme === 'dark' ? 'white' : 'dark')}>
               <IconSunAsterisk size={18} />
             </IconButton>
-            <div className={styles.topbarLanguage}>
-              <LanguageSwitcher />
-            </div>
+            {!mobile && <LanguageSwitcher />}
             {refreshable && (
-              <Button size="sm" variant="secondary" aria-label={t('common.refresh')} title={t('common.refresh')} onClick={() => setRefreshRevision((c) => c + 1)} loading={refreshing}>
-                <IconRefreshCw size={14} />
-              </Button>
+              <IconButton label={t('common.refresh')} onClick={() => setRefreshRevision((c) => c + 1)} loading={refreshing}>
+                <IconRefreshCw size={18} />
+              </IconButton>
             )}
           </div>
-        </header>
+        </Paper>
 
         <div className={styles.content}>
           <div className={styles.pageHeader}>
-            <h1>{title}</h1>
+            <Title order={1}>{title}</Title>
           </div>
           {/* eslint-disable-next-line react-hooks/refs -- render prop pattern; ref callbacks are memoized */}
           {children(contentContext)}

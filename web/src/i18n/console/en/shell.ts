@@ -9,8 +9,6 @@ export const shell = {
   close_nav: 'Close navigation',
   close_overlay: 'Close navigation overlay',
   open_nav: 'Open navigation',
-  mobile_key_label: 'Admin Key',
-  mobile_key_apply: 'Apply',
 
   // 导航分组
   section: {
@@ -30,6 +28,8 @@ export const shell = {
     capabilities: 'Capabilities',
     settings: 'Settings',
   },
+
+  connection_aria: "Gateway connection",
 
   // 顶栏
   admin_key_label: 'Admin Key',

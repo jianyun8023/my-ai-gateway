@@ -1,0 +1,22 @@
+.link {
+  min-height: 40px;
+  padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  transition: background-color 100ms, color 100ms;
+
+  &:hover { background: var(--bg-hover); color: var(--fg); }
+  &[data-active] { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  &[data-active]:hover { background: var(--accent-soft); }
+  &:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+}
+.label { font-size: var(--fs-body); overflow-wrap: anywhere; }
+.section { flex-shrink: 0; }
+.section svg { width: 18px; height: 18px; }
+
+@media (max-width: 920px) {
+  .link { min-height: 44px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .link { transition: none; }
+}
