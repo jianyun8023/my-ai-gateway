@@ -124,25 +124,7 @@
   gap: 8px;
   align-items: flex-end;
 }
-.mobileKeyLabel {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--text-secondary);
-  > input {
-    padding: 6px 10px;
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius);
-    background: var(--bg);
-    font-size: 13px;
-    color: var(--text-primary);
-    font-family: var(--font-mono);
-    width: 100%;
-  }
-}
+.mobileKeyLabel { flex: 1; min-width: 0; }
 
 .mobileMenuBtn { display: none; }
 .navigationContent { min-height: 100%; display: flex; flex-direction: column; }
@@ -212,27 +194,11 @@
   color: var(--text-secondary);
 }
 
-.keyInput {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--text-secondary);
-  font-size: var(--fs-small);
-
-  > span { overflow-wrap: anywhere; }
-  input {
-    width: 140px;
-    height: 30px;
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius);
-    padding: 0 9px;
-    color: var(--text-primary);
-    background: var(--bg);
-    font-family: var(--font-mono);
-    font-size: var(--fs-meta);
-    outline: none;
-  }
-  input:focus-visible { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.keyInput { display: flex; align-items: center; gap: 6px; }
+.desktopKeyField {
+  display: flex; align-items: center; gap: 6px;
+  > label { margin: 0; white-space: nowrap; }
+  input { width: 140px; font-family: var(--font-mono); }
 }
 
 /* ─── content ───────────────────────────────────────────────── */

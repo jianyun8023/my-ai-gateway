@@ -1,3 +1,4 @@
+import { Checkbox } from '@mantine/core';
 import { useOverlayState } from '@/components/ui/useOverlayState';
 import type {
   AdminErrorShape,
@@ -205,8 +206,8 @@ export function ModelDiscoveryPage({ api, refreshRevision = 0, onBusyChange }: M
       </Card>
 
       <FilterBar>
-        <label>{t('discovery.confirmation_filter')}<select value={confirmationFilter} onChange={(event) => { setConfirmationFilter(event.target.value as CatalogStatus | ''); setSelectedModels(new Set()); }}><option value="">{t('common.all')}</option><option value="pending">{t('discovery.confirm_state.pending')}</option><option value="confirmed">{t('discovery.confirm_state.confirmed')}</option><option value="unavailable">{t('discovery.confirm_state.unavailable')}</option></select></label>
-        <label>{t('discovery.availability_filter')}<select value={availabilityFilter} onChange={(event) => { setAvailabilityFilter(event.target.value as CatalogAvailability | ''); setSelectedModels(new Set()); }}><option value="">{t('common.all')}</option><option value="unknown">{t('discovery.availability_state.unknown')}</option><option value="available">{t('discovery.availability_state.available')}</option><option value="unavailable">{t('discovery.availability_state.unavailable')}</option></select></label>
+        <SelectField label={t('discovery.confirmation_filter')} value={confirmationFilter} onChange={(event) => { setConfirmationFilter(event.target.value as CatalogStatus | ''); setSelectedModels(new Set()); }}><option value="">{t('common.all')}</option><option value="pending">{t('discovery.confirm_state.pending')}</option><option value="confirmed">{t('discovery.confirm_state.confirmed')}</option><option value="unavailable">{t('discovery.confirm_state.unavailable')}</option></SelectField>
+        <SelectField label={t('discovery.availability_filter')} value={availabilityFilter} onChange={(event) => { setAvailabilityFilter(event.target.value as CatalogAvailability | ''); setSelectedModels(new Set()); }}><option value="">{t('common.all')}</option><option value="unknown">{t('discovery.availability_state.unknown')}</option><option value="available">{t('discovery.availability_state.available')}</option><option value="unavailable">{t('discovery.availability_state.unavailable')}</option></SelectField>
         <span className={styles.filterMeta}>{t('discovery.source_model_count', { count: visibleModels.length })}</span>
       </FilterBar>
 
@@ -224,12 +225,12 @@ export function ModelDiscoveryPage({ api, refreshRevision = 0, onBusyChange }: M
         )}>
           <TableScroll label={t('discovery.table_aria')}>
             <table className={styles.table}>
-              <thead><tr><th><label className={styles.tableCheckbox}><input aria-label={t('discovery.select_all_aria')} type="checkbox" checked={eligibleModels.length > 0 && eligibleModels.every((model) => selectedModels.has(model.upstream_model_id))} onChange={(event) => toggleAll(event.target.checked)} /><span aria-hidden="true" /></label></th><th>{t('discovery.column.upstream_model')}</th><th>{t('discovery.column.confirmation')}</th><th>{t('discovery.column.availability')}</th><th>{t('discovery.column.metadata')}</th><th>{t('discovery.column.field_source')}</th><th>{t('discovery.column.preset_match')}</th><th>{t('discovery.column.last_discovered')}</th><th>{t('common.actions')}</th></tr></thead>
+              <thead><tr><th><Checkbox className={styles.tableCheckbox} label=" " classNames={{ label: styles.tableCheckboxLabel }} aria-label={t('discovery.select_all_aria')} checked={eligibleModels.length > 0 && eligibleModels.every((model) => selectedModels.has(model.upstream_model_id))} onChange={(event) => toggleAll(event.target.checked)} /></th><th>{t('discovery.column.upstream_model')}</th><th>{t('discovery.column.confirmation')}</th><th>{t('discovery.column.availability')}</th><th>{t('discovery.column.metadata')}</th><th>{t('discovery.column.field_source')}</th><th>{t('discovery.column.preset_match')}</th><th>{t('discovery.column.last_discovered')}</th><th>{t('common.actions')}</th></tr></thead>
               <tbody>{visibleModels.map((model) => {
                 const eligible = model.confirmation_status === 'pending' && model.availability_status === 'available';
                 return (
                   <tr key={`${model.source_id}:${model.upstream_model_id}`}>
-                    <td><label className={styles.tableCheckbox}><input aria-label={t('discovery.select_row_aria', { model: model.upstream_model_id })} type="checkbox" disabled={!eligible} checked={selectedModels.has(model.upstream_model_id)} onChange={(event) => setSelectedModels((current) => { const next = new Set(current); if (event.target.checked) next.add(model.upstream_model_id); else next.delete(model.upstream_model_id); return next; })} /><span aria-hidden="true" /></label></td>
+                    <td><Checkbox className={styles.tableCheckbox} label=" " classNames={{ label: styles.tableCheckboxLabel }} aria-label={t('discovery.select_row_aria', { model: model.upstream_model_id })} disabled={!eligible} checked={selectedModels.has(model.upstream_model_id)} onChange={(event) => setSelectedModels((current) => { const next = new Set(current); if (event.target.checked) next.add(model.upstream_model_id); else next.delete(model.upstream_model_id); return next; })} /></td>
                     <td><code>{model.upstream_model_id}</code></td>
                     <td><StatusPill tone={statusTone(model.confirmation_status)}>{t(`discovery.confirm_state.${model.confirmation_status}`)}</StatusPill></td>
                     <td><StatusPill tone={statusTone(model.availability_status)}>{t(`discovery.availability_state.${model.availability_status}`)}</StatusPill></td>

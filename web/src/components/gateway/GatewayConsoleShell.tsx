@@ -1,3 +1,4 @@
+import { TextField } from '@/components/ui/FormField';
 import { useMediaQuery } from '@mantine/hooks';
 import { Modal } from '@/components/ui/Modal';
 import {
@@ -172,9 +173,7 @@ export function GatewayConsoleShell({
 
         {/* Mobile-only admin key — visible in sidebar when topbar input is hidden */}
         <div className={styles.mobileKeySection}>
-          <label className={styles.mobileKeyLabel}>
-            <span>{t('shell.mobile_key_label')}</span>
-            <input
+          <TextField className={styles.mobileKeyLabel} label={t('shell.mobile_key_label')}
               autoComplete="off"
               spellCheck={false}
               type="password"
@@ -183,7 +182,6 @@ export function GatewayConsoleShell({
               onKeyDown={(e) => { if (e.key === 'Enter') applyAdminKey(); }}
               placeholder={t('shell.admin_key_placeholder')}
             />
-          </label>
           <Button size="sm" variant="secondary" onClick={applyAdminKey}>{t('shell.mobile_key_apply')}</Button>
         </div>
 
@@ -210,9 +208,8 @@ export function GatewayConsoleShell({
             <div className={styles.endpointDisplay}>
               <span>{gatewayEndpoint}</span>
             </div>
-            <label className={styles.keyInput}>
-              <span>{t('shell.admin_key_label')}</span>
-              <input
+            <div className={styles.keyInput}>
+              <TextField className={styles.desktopKeyField} label={t('shell.admin_key_label')}
                 aria-label={t('shell.admin_key_label')}
                 autoComplete="off"
                 spellCheck={false}
@@ -224,7 +221,7 @@ export function GatewayConsoleShell({
                 placeholder={t('shell.admin_key_placeholder')}
               />
               <Button size="sm" variant="secondary" onClick={applyAdminKey}>{t('common.apply')}</Button>
-            </label>
+            </div>
             <IconButton label={t(theme === 'dark' ? 'shell.switch_to_light' : 'shell.switch_to_dark')} onClick={() => setTheme(theme === 'dark' ? 'white' : 'dark')}>
               <IconSunAsterisk size={18} />
             </IconButton>

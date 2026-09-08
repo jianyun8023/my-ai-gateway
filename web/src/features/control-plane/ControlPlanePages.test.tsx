@@ -2,6 +2,7 @@
 import type { GatewayManagementPage as PageId } from '@/lib/consoleNavigation';
 import { GatewayManagementPage } from '@/pages/GatewayManagementPage';
 import { SourceForm } from './sources/SourceForm';
+import { Toggle } from './shared';
 import { Button } from '@/components/ui/Button';
 import type { Source } from '@/admin-api';
 import { setTestLanguage } from '@/test/setup';
@@ -271,6 +272,43 @@ describe('production control-plane pages', () => {
     expect(container.textContent).toContain('Account A');
     expect(container.textContent).toContain('已配置');
     expect(container.textContent).not.toContain('PROVIDER_REFERENCE_ENV');
+  });
+
+  it('only selects available pending discoveries and clears selection after filtering', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).startsWith('/admin/sources/source-a/models')) {
+        const models = [sourceModel, { ...sourceModel, upstream_model_id: 'unknown-model', availability_status: 'unknown' }];
+        const availability = new URL(String(input), 'http://localhost').searchParams.get('availability_status');
+        return jsonResponse({ data: models.filter(model => !availability || model.availability_status === availability) });
+      }
+      return baseHandler(input);
+    }));
+    await renderPage('discovery');
+    const checkbox = (name: string) => container.querySelector<HTMLInputElement>(`input[aria-label="${name}"]`)!;
+    expect(checkbox('选择 unknown-model').disabled).toBe(true);
+    act(() => checkbox('选择全部可确认模型').click());
+    expect(checkbox('选择 upstream-a').checked).toBe(true);
+    expect(checkbox('选择 unknown-model').checked).toBe(false);
+    const filterId = [...container.querySelectorAll('label')].find(label => label.textContent === '可用状态')!.htmlFor;
+    const filter = document.getElementById(filterId) as HTMLSelectElement;
+    await act(async () => {
+      filter.value = 'unknown';
+      filter.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect(checkbox('选择 upstream-a')).toBeNull();
+    expect(checkbox('选择全部可确认模型').checked).toBe(false);
+    expect([...container.querySelectorAll('button')].find(button => button.textContent?.includes('批量确认'))!.disabled).toBe(true);
+  });
+
+  it('reports boolean toggle changes and ignores disabled activation', () => {
+    const onChange = vi.fn();
+    act(() => root.render(<Toggle label="来源启用" checked onChange={onChange} />));
+    act(() => container.querySelector<HTMLInputElement>('input')!.click());
+    expect(onChange).toHaveBeenCalledExactlyOnceWith(false);
+    expect(container.querySelector('input')!.getAttribute('aria-label')).toBe('来源启用');
+    act(() => root.render(<Toggle label="来源启用" checked={false} disabled onChange={onChange} />));
+    act(() => container.querySelector<HTMLInputElement>('input')!.click());
+    expect(onChange).toHaveBeenCalledTimes(1);
   });
 
   it('returns focus to the source row after switching from details to editing', async () => {

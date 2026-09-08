@@ -1,3 +1,4 @@
+import { Button } from './Button';
 import { useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import i18n, { isSupportedLanguage, persistLanguage, type SupportedLanguage } from '@/i18n';
@@ -25,17 +26,17 @@ export function LanguageSwitcher({ className = '' }: { className?: string }) {
   return (
     <div className={switcherClassName} role="group" aria-label={switchAria}>
       {LANGUAGE_OPTIONS.map((option) => (
-        <button
+        <Button variant={currentLanguage === option.value ? 'secondary' : 'ghost'} size="sm"
           key={option.value}
           type="button"
-          className={`${styles.languagePill} ${currentLanguage === option.value ? styles.languagePillActive : ''}`.trim()}
+          className={styles.languagePill}
           onClick={() => void handleLanguageChange(option.value)}
           aria-label={`${switchAria} ${option.label}`}
           aria-pressed={currentLanguage === option.value}
           title={switchAria}
         >
           {option.label}
-        </button>
+        </Button>
       ))}
     </div>
   );

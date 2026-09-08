@@ -27,30 +27,7 @@
   background: var(--floating-surface);
 }
 
-.filterBar > label {
-  min-width: 160px;
-  display: grid;
-  gap: 4px;
-  color: var(--text-secondary);
-  font-size: var(--fs-small);
-}
-
-.filterBar input,
-.filterBar select,
-.searchInput {
-  min-width: 0;
-  min-height: var(--keeper-control-height-md, 36px);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius);
-  padding: 8px 10px;
-  color: var(--text-primary);
-  background: var(--bg-secondary);
-  outline: none;
-}
-
-.searchInput {
-  width: min(280px, 100%);
-}
+.filterBar > div { min-width: 160px; }
 
 .table {
   width: 100%;
@@ -95,10 +72,6 @@
   line-height: 1.2;
 }
 
-.table .toggle {
-  min-height: 36px;
-}
-
 .table th {
   color: var(--text-secondary);
   font-family: var(--font-mono);
@@ -126,30 +99,10 @@
   overflow-wrap: anywhere;
 }
 
-.tableCheckbox {
-  width: 44px;
-  height: 44px;
-  display: grid;
-  place-items: center;
-  margin: -11px;
-  cursor: pointer;
-}
-
-.tableCheckbox input {
-  width: 19px;
-  height: 19px;
-  accent-color: var(--accent);
-}
-
-.tableCheckbox:has(input:focus-visible) {
-  outline: 2px solid var(--accent);
-  outline-offset: -2px;
-}
-
-.tableCheckbox:has(input:disabled) {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
+.tableCheckbox { position: relative; width: 44px; height: 44px; display: grid; place-items: center; margin: -11px; }
+// The associated label covers the cell target while Mantine keeps the icon compact.
+.tableCheckboxLabel { position: absolute; inset: 0; padding: 0; cursor: pointer; }
+.tableCheckboxLabel[data-disabled] { cursor: not-allowed; }
 
 .primaryText {
   display: grid;
@@ -173,58 +126,7 @@
   background: var(--danger-soft);
 }
 
-.toggle {
-  min-height: 44px;
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-}
-
-.toggle input {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  width: 100%;
-  height: 100%;
-  margin: 0;
-  opacity: 0;
-  cursor: inherit;
-}
-
-.toggle > span {
-  width: 38px;
-  height: 22px;
-  position: relative;
-  display: block;
-  border-radius: 99px;
-  background: var(--border-primary);
-  transition: background-color 120ms ease;
-}
-
-.toggle i {
-  position: absolute;
-  top: 3px;
-  left: 3px;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: var(--surface);
-  box-shadow: 0 1px 3px rgb(0 0 0 / 18%);
-  transition: transform 120ms ease;
-}
-
-.toggle input:checked + span { background: var(--accent); }
-.toggle input:checked + span i { transform: translateX(16px); }
-.toggle input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
-.toggle input:disabled + span { opacity: 0.5; }
-
-.toggle em {
-  color: var(--text-secondary);
-  font-size: var(--fs-small);
-  font-style: normal;
-}
+.toggle { min-height: 44px; display: flex; align-items: center; }
 
 .formGrid {
   display: grid;
@@ -889,17 +791,13 @@
   .routesTable { min-width: 1120px; }
   .diffGrid { grid-template-columns: minmax(0, 1fr); }
   .settingsGrid { grid-template-columns: minmax(0, 1fr); }
-  .filterBar input,
-  .filterBar select,
-  .searchInput { min-height: 44px; }
 }
 
 @media (max-width: 600px) {
   .pageActions { align-items: stretch; }
   .pageActions > * { max-width: 100%; }
   .filterBar { align-items: stretch; flex-direction: column; }
-  .filterBar > label { width: 100%; min-width: 0; }
-  .searchInput { width: 100%; min-height: 44px; }
+  .filterBar > div { width: 100%; min-width: 0; }
   .formGrid { grid-template-columns: minmax(0, 1fr); }
   .fullWidth { grid-column: auto; }
   .detailList > div { grid-template-columns: minmax(0, 1fr); gap: 2px; }
@@ -920,17 +818,11 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .toggle > span,
-  .toggle i { transition: none; }
   .refreshingBar[data-visible='true'] { animation: none; transform: scaleX(1); }
 }
 
 .field { min-width: 0; display: grid; align-content: start; gap: 6px; }
 .field > label { color: var(--text-primary); font-size: 12px; font-weight: 650; }
-
-.filterBar input:focus-visible,
-.filterBar select:focus-visible,
-.searchInput:focus-visible { border-color: var(--accent); outline: 2px solid var(--accent-soft); }
 
 // Grid items must shrink before the table's own horizontal scroll takes over.
 .page > [role='tabpanel'] { min-width: 0; }

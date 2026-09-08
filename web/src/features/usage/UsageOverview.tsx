@@ -1,3 +1,4 @@
+import { NativeSelect } from '@mantine/core';
 import { Card } from '@/components/ui/Card';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { TokenComposition } from '@/features/usage/TokenComposition';
@@ -89,9 +90,9 @@ export function Overview({ data, metric, onMetricChange }: { data: UsageOverview
       </div>
       <div className={styles.chartGrid}>
         <Card title={t('usage.trend.title')} subtitle={t('usage.trend.subtitle')} data-od-id="token-trend" extra={
-          <select value={metric} onChange={(e) => onMetricChange(e.target.value as TrendMetric)} className={styles.metricSelect}>
+          <NativeSelect aria-label={t('usage.trend.title')} value={metric} onChange={(e) => onMetricChange(e.target.value as TrendMetric)} className={styles.metricSelect}>
             {TREND_METRICS.map((m) => <option key={m.value} value={m.value}>{t(m.labelKey)}</option>)}
-          </select>
+          </NativeSelect>
         }>
           <div className={styles.chartLarge}><Line data={trendData} options={lineChartOptions} /></div>
         </Card>

@@ -1,3 +1,4 @@
+import { TextField, SelectField } from '@/components/ui/FormField';
 import { Button } from '@/components/ui/Button';
 import styles from '@/features/usage/Usage.module.scss';
 import { type GatewayUsageFilters } from '@/gateway-usage';
@@ -60,7 +61,7 @@ export function FilterBar({ draft, onChange, onApply, onPresetSelect, onReset, l
       <div className={styles.commonFilters}>
         <div className={styles.filterPresets}>
           {TIME_PRESETS.map((preset) => (
-            <button
+            <Button variant={draft.relativePreset === preset.key && draft.timeMode === 'relative' ? 'primary' : 'secondary'}
               key={preset.key}
               type="button"
               aria-pressed={draft.relativePreset === preset.key && draft.timeMode === 'relative'}
@@ -68,26 +69,26 @@ export function FilterBar({ draft, onChange, onApply, onPresetSelect, onReset, l
               onClick={() => onPresetSelect(preset.key)}
             >
               {t(preset.labelKey)}
-            </button>
+            </Button>
           ))}
-          <button
+          <Button variant={draft.timeMode === 'absolute' ? 'primary' : 'secondary'}
             type="button"
             aria-pressed={draft.timeMode === 'absolute'}
             data-active={draft.timeMode === 'absolute'}
             onClick={selectCustom}
           >
             {t('usage.filter.preset_custom')}
-          </button>
+          </Button>
         </div>
         {draft.timeMode === 'absolute' && (
           <div className={styles.timeRange}>
-            <label>{t('usage.filter.from')}<input type="datetime-local" value={toLocalInputValue(draft.from)} onChange={(event) => updateAbsoluteTime('from', event.target.value)} /></label>
-            <label>{t('usage.filter.to')}<input type="datetime-local" value={toLocalInputValue(draft.to)} onChange={(event) => updateAbsoluteTime('to', event.target.value)} /></label>
+            <TextField className={styles.filterField} label={t('usage.filter.from')} type="datetime-local" value={toLocalInputValue(draft.from)} onChange={(event) => updateAbsoluteTime('from', event.target.value)} />
+            <TextField className={styles.filterField} label={t('usage.filter.to')} type="datetime-local" value={toLocalInputValue(draft.to)} onChange={(event) => updateAbsoluteTime('to', event.target.value)} />
           </div>
         )}
-        <label>{t('usage.field.logical_model')}<input value={draft.logicalModel ?? ''} onChange={(event) => update('logicalModel', event.target.value)} placeholder={t('common.all')} /></label>
-        <label>{t('usage.field.provider')}<input value={draft.provider ?? ''} onChange={(event) => update('provider', event.target.value)} placeholder={t('common.all')} /></label>
-        <label>{t('usage.field.status')}<select value={draft.status ?? ''} onChange={(event) => update('status', event.target.value)}><option value="">{t('common.all')}</option><option value="success">{t('usage.filter.status_success')}</option><option value="failure">{t('usage.filter.status_failure')}</option></select></label>
+        <TextField className={styles.filterField} label={t('usage.field.logical_model')} value={draft.logicalModel ?? ''} onChange={(event) => update('logicalModel', event.target.value)} placeholder={t('common.all')} />
+        <TextField className={styles.filterField} label={t('usage.field.provider')} value={draft.provider ?? ''} onChange={(event) => update('provider', event.target.value)} placeholder={t('common.all')} />
+        <SelectField className={styles.filterField} label={t('usage.field.status')} value={draft.status ?? ''} onChange={(event) => update('status', event.target.value)}><option value="">{t('common.all')}</option><option value="success">{t('usage.filter.status_success')}</option><option value="failure">{t('usage.filter.status_failure')}</option></SelectField>
         <Button variant="ghost" aria-expanded={showAdvanced} onClick={() => setShowAdvanced(!showAdvanced)}>
           {t('usage.filter.advanced')}{advancedCount > 0 ? ` (${advancedCount})` : ''}
         </Button>
@@ -96,14 +97,14 @@ export function FilterBar({ draft, onChange, onApply, onPresetSelect, onReset, l
       </div>
       {showAdvanced && (
         <div className={styles.advancedFilters}>
-          <label>{t('usage.field.upstream_model')}<input value={draft.upstreamModel ?? ''} onChange={(event) => update('upstreamModel', event.target.value)} placeholder={t('common.all')} /></label>
-          <label>{t('usage.field.source_id')}<input value={draft.sourceId ?? ''} onChange={(event) => update('sourceId', event.target.value)} placeholder={t('common.all')} /></label>
-          <label>{t('usage.field.account')}<input value={draft.account ?? ''} onChange={(event) => update('account', event.target.value)} placeholder={t('common.all')} /></label>
-          <label>{t('usage.field.client_source')}<input value={draft.clientSource ?? ''} onChange={(event) => update('clientSource', event.target.value)} placeholder={t('common.all')} /></label>
-          <label>{t('usage.field.protocol_in')}<input value={draft.protocolIn ?? ''} onChange={(event) => update('protocolIn', event.target.value)} placeholder={t('common.all')} /></label>
-          <label>{t('usage.field.protocol_upstream')}<input value={draft.protocolUpstream ?? ''} onChange={(event) => update('protocolUpstream', event.target.value)} placeholder={t('common.all')} /></label>
-          <label>{t('usage.field.virtual_key_id')}<input inputMode="numeric" value={draft.virtualKey ?? ''} onChange={(event) => update('virtualKey', event.target.value)} placeholder={t('common.all')} /></label>
-          <label>{t('usage.field.usage_source')}<select value={draft.usageSource ?? ''} onChange={(event) => update('usageSource', event.target.value)}><option value="">{t('common.all')}</option><option value="upstream">{t('usage.usage_source.upstream')}</option><option value="parsed">{t('usage.usage_source.parsed')}</option><option value="estimated">{t('usage.usage_source.estimated')}</option><option value="missing">{t('usage.usage_source.missing')}</option></select></label>
+          <TextField className={styles.filterField} label={t('usage.field.upstream_model')} value={draft.upstreamModel ?? ''} onChange={(event) => update('upstreamModel', event.target.value)} placeholder={t('common.all')} />
+          <TextField className={styles.filterField} label={t('usage.field.source_id')} value={draft.sourceId ?? ''} onChange={(event) => update('sourceId', event.target.value)} placeholder={t('common.all')} />
+          <TextField className={styles.filterField} label={t('usage.field.account')} value={draft.account ?? ''} onChange={(event) => update('account', event.target.value)} placeholder={t('common.all')} />
+          <TextField className={styles.filterField} label={t('usage.field.client_source')} value={draft.clientSource ?? ''} onChange={(event) => update('clientSource', event.target.value)} placeholder={t('common.all')} />
+          <TextField className={styles.filterField} label={t('usage.field.protocol_in')} value={draft.protocolIn ?? ''} onChange={(event) => update('protocolIn', event.target.value)} placeholder={t('common.all')} />
+          <TextField className={styles.filterField} label={t('usage.field.protocol_upstream')} value={draft.protocolUpstream ?? ''} onChange={(event) => update('protocolUpstream', event.target.value)} placeholder={t('common.all')} />
+          <TextField className={styles.filterField} label={t('usage.field.virtual_key_id')} inputMode="numeric" value={draft.virtualKey ?? ''} onChange={(event) => update('virtualKey', event.target.value)} placeholder={t('common.all')} />
+          <SelectField className={styles.filterField} label={t('usage.field.usage_source')} value={draft.usageSource ?? ''} onChange={(event) => update('usageSource', event.target.value)}><option value="">{t('common.all')}</option><option value="upstream">{t('usage.usage_source.upstream')}</option><option value="parsed">{t('usage.usage_source.parsed')}</option><option value="estimated">{t('usage.usage_source.estimated')}</option><option value="missing">{t('usage.usage_source.missing')}</option></SelectField>
         </div>
       )}
     </section>

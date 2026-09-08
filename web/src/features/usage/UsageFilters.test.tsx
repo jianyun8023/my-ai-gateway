@@ -64,4 +64,26 @@ describe('usage time presets', () => {
     expect(container.querySelector('[role="alert"]')?.textContent).toBe('Invalid range');
     expect(JSON.parse(container.querySelector('output')!.textContent!).relativePreset).toBe('today');
   });
+
+  it('keeps common and advanced edits as drafts until apply, including missing usage', () => {
+    const control = (label: string) => {
+      const id = [...container.querySelectorAll('label')].find(element => element.textContent === label)!.htmlFor;
+      return document.getElementById(id) as HTMLInputElement | HTMLSelectElement;
+    };
+    const change = (label: string, value: string) => act(() => {
+      const input = control(label);
+      const prototype = input.tagName === 'SELECT' ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
+      Object.getOwnPropertyDescriptor(prototype, 'value')!.set!.call(input, value);
+      input.dispatchEvent(new Event(input.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true }));
+    });
+    change('逻辑模型', 'synthetic-model');
+    click('高级筛选');
+    change('用量来源', 'missing');
+    expect(JSON.parse(container.querySelector('output')!.textContent!).logicalModel).toBeUndefined();
+    click('应用筛选');
+    expect(JSON.parse(container.querySelector('output')!.textContent!)).toMatchObject({ logicalModel: 'synthetic-model', usageSource: 'missing' });
+    click('重置');
+    expect(control('逻辑模型').value).toBe('');
+    expect(control('用量来源').value).toBe('');
+  });
 });
