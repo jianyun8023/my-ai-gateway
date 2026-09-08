@@ -70,7 +70,7 @@ describe('Virtual Key rotation', () => {
     });
   };
   const submit = async () => {
-    await act(async () => document.querySelector('#virtual-key-rotation-form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    await act(async () => button('轮换密钥').click());
   };
 
   it('prefills the allowlist, rotates with edited models, reveals the new key and refreshes old-key state', async () => {

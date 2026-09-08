@@ -3,7 +3,7 @@ import type { GatewayManagementPage as PageId } from '@/lib/consoleNavigation';
 import { GatewayManagementPage } from '@/pages/GatewayManagementPage';
 import { SourceForm } from './sources/SourceForm';
 import { Toggle } from './shared';
-import { Button } from '@/components/ui/Button';
+import { FormActions } from '@/components/ui/FormActions';
 import type { Source } from '@/admin-api';
 import { setTestLanguage } from '@/test/setup';
 import { act } from 'react';
@@ -284,6 +284,7 @@ describe('production control-plane pages', () => {
       return baseHandler(input);
     }));
     await renderPage('discovery');
+    expect(container.querySelector('section[aria-label="模型发现筛选"]')).not.toBeNull();
     const checkbox = (name: string) => container.querySelector<HTMLInputElement>(`input[aria-label="${name}"]`)!;
     expect(checkbox('选择 unknown-model').disabled).toBe(true);
     act(() => checkbox('选择全部可确认模型').click());
@@ -352,7 +353,7 @@ describe('production control-plane pages', () => {
     const record = { ...source, auth_config: { credential_header: { header: 'authorization', prefix: 'Bearer' } } } as Source;
     const presets = [{ id: 'preset-a', version: 1, display_name: 'Preset A', definition: record.provider_preset_snapshot, created_at: source.created_at }];
     const render = (busy = false) => root.render(<><SourceForm record={record} presets={presets} busy={busy} onSubmit={onSubmit} />
-      <Button form="source-editor-form" type="submit" loading={busy}>Save source</Button></>);
+      <FormActions form="source-editor-form" cancelLabel="Cancel" submitLabel="Save source" busy={busy} onCancel={() => {}} /></>);
     act(() => render());
     const input = (label: string) => {
       const id = [...container.querySelectorAll('label')].find(element => element.textContent === label)!.htmlFor;
@@ -415,7 +416,7 @@ describe('production control-plane pages', () => {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(name, 'Edited source');
       name.dispatchEvent(new Event('input', { bubbles: true }));
     });
-    const submit = () => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    const submit = () => container.querySelector<HTMLButtonElement>('button[form="source-editor-form"]')!.click();
     await act(async () => { submit(); });
     expect(form.querySelector('[role="alert"]')).not.toBeNull();
     expect(name.value).toBe('Edited source');
@@ -540,6 +541,48 @@ describe('production control-plane pages', () => {
     await act(async () => tabs().find((button) => button.textContent?.includes('路由规则'))?.click());
     expect(container.textContent).toContain('固定主选 → 加权回退');
     expect(container.textContent).not.toMatch(/Random|Round-Robin/);
+  });
+
+
+  it.each([
+    { tab: '逻辑模型', edit: '编辑 logical-a', path: '/admin/logical-models/logical-a', expected: { id: 'logical-a', public_name: 'model-public' } },
+    { tab: '绑定', edit: '编辑 1', path: '/admin/model-bindings/1', expected: { logical_model_id: 'logical-a', source_id: 'source-a', account_id: 'account-a', upstream_model_id: 'upstream-a' } },
+    { tab: '路由规则', edit: '编辑 route-a', path: '/admin/routes/route-a', expected: { id: 'route-a', logical_model_id: 'logical-a', strategy: 'primary_then_weighted_fallback' } },
+  ])('submits the $tab editor through its footer and retains values while saving', async ({ tab, edit, path, expected }) => {
+    let finish!: () => void;
+    const save = vi.fn(() => new Promise<Response>(resolve => { finish = () => resolve(jsonResponse({ data: {} })); }));
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === path && init?.method === 'PUT') { expect(JSON.parse(String(init.body))).toMatchObject(expected); return save(); }
+      return baseHandler(input);
+    }));
+    await renderPage('models');
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(button => button.textContent?.includes(tab))!.click());
+    await act(async () => container.querySelector<HTMLButtonElement>(`button[aria-label="${edit}"]`)!.click());
+    const submit = container.querySelector<HTMLButtonElement>('[role="dialog"] button[type="submit"]')!;
+    await act(async () => submit.click());
+    expect(save).toHaveBeenCalledOnce();
+    expect(submit.disabled).toBe(true);
+    const cancel = [...container.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find(button => button.textContent === '取消')!;
+    expect(cancel.disabled).toBe(true);
+    await act(async () => { submit.click(); cancel.click(); });
+    expect(save).toHaveBeenCalledOnce();
+    expect(container.querySelector('[role="dialog"]')).not.toBeNull();
+    await act(async () => finish());
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it('filters capabilities and exposes the selected protocol chain as labeled details', async () => {
+    await renderPage('capabilities');
+    const region = container.querySelector('section[aria-label="能力矩阵筛选"]')!;
+    const protocol = [...region.querySelectorAll('select')].find(select => [...select.options].some(option => option.value === 'degraded'))!;
+    await act(async () => { protocol.value = 'degraded'; protocol.dispatchEvent(new Event('change', { bubbles: true })); });
+    const view = [...container.querySelectorAll<HTMLButtonElement>('tbody button')].find(button => button.getAttribute('aria-label')?.includes('查看'))!;
+    await act(async () => view.click());
+    const terms = [...container.querySelectorAll('[role="dialog"] dt')];
+    expect(terms.length).toBeGreaterThan(0);
+    expect(terms.every(term => term.nextElementSibling?.tagName === 'DD')).toBe(true);
+    expect(container.querySelector('[role="dialog"]')?.textContent).toContain('adapter-a');
+    expect(container.querySelector('[role="dialog"]')?.textContent).toContain('Messages');
   });
 
   it('shows and copies a newly created recoverable Virtual Key', async () => {

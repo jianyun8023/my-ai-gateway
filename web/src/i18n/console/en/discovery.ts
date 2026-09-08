@@ -1,5 +1,6 @@
 // 模型发现页文案(英文)——命名空间 console.discovery
 export const discovery = {
+  filters_aria: 'Model discovery filters',
   // 字段来源/状态值(值保持枚举原形)
   field_source: {
     user: 'User',

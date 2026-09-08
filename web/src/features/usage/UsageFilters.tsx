@@ -1,3 +1,4 @@
+import { FilterPanel } from '@/components/ui/FilterPanel';
 import { TextField, SelectField } from '@/components/ui/FormField';
 import { Button } from '@/components/ui/Button';
 import styles from '@/features/usage/Usage.module.scss';
@@ -57,7 +58,7 @@ export function FilterBar({ draft, onChange, onApply, onPresetSelect, onReset, l
   });
 
   return (
-    <section className={styles.filters} aria-label={t('usage.filter.aria')}>
+    <FilterPanel className={styles.filters} label={t('usage.filter.aria')}>
       <div className={styles.commonFilters}>
         <div className={styles.filterPresets}>
           {TIME_PRESETS.map((preset) => (
@@ -107,6 +108,6 @@ export function FilterBar({ draft, onChange, onApply, onPresetSelect, onReset, l
           <SelectField className={styles.filterField} label={t('usage.field.usage_source')} value={draft.usageSource ?? ''} onChange={(event) => update('usageSource', event.target.value)}><option value="">{t('common.all')}</option><option value="upstream">{t('usage.usage_source.upstream')}</option><option value="parsed">{t('usage.usage_source.parsed')}</option><option value="estimated">{t('usage.usage_source.estimated')}</option><option value="missing">{t('usage.usage_source.missing')}</option></SelectField>
         </div>
       )}
-    </section>
+    </FilterPanel>
   );
 }

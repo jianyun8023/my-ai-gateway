@@ -1,3 +1,4 @@
+import { FormActions } from '@/components/ui/FormActions';
 import { clearOperationNotification, notifySuccess } from '@/components/ui/notifications';
 import { Table } from '@mantine/core';
 import { useOverlayState } from '@/components/ui/useOverlayState';
@@ -262,7 +263,7 @@ export function ModelsRoutesPage({ api, refreshRevision = 0, onBusyChange }: Mod
         width={editor?.kind === 'logical-model' ? 780 : 700}
         onClose={() => !mutationBusy && setEditor(undefined)}
         closeDisabled={mutationBusy}
-        footer={editor && <><Button variant="secondary" onClick={() => setEditor(undefined)} disabled={mutationBusy}>{t('common.cancel')}</Button><Button type="submit" form={editor.kind === 'logical-model' ? 'logical-model-editor-form' : editor.kind === 'binding' ? 'binding-editor-form' : 'route-editor-form'} loading={mutationBusy}>{t('common.save')}</Button></>}
+        footer={editor && <FormActions form={editor.kind === 'logical-model' ? 'logical-model-editor-form' : editor.kind === 'binding' ? 'binding-editor-form' : 'route-editor-form'} cancelLabel={t('common.cancel')} submitLabel={t('common.save')} busy={mutationBusy} onCancel={() => setEditor(undefined)} />}
       >
         {editor?.kind === 'logical-model' && <LogicalModelForm key={editor.record?.id ?? 'new-logical-model'} record={editor.record} busy={mutationBusy} error={mutationErrorMessage} onSubmit={submitLogicalModel} />}
         {editor?.kind === 'binding' && <BindingForm key={editor.record?.id ?? 'new-binding'} record={editor.record} logicalModels={data.logicalModels} sources={data.sources} accounts={data.accounts} api={api} busy={mutationBusy} error={mutationErrorMessage} onSubmit={submitBinding} />}

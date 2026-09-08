@@ -1,3 +1,5 @@
+import { FormActions } from '@/components/ui/FormActions';
+import { DetailItem, DetailList } from '@/components/ui/DetailList';
 import { clearOperationNotification, notifySuccess } from '@/components/ui/notifications';
 import { Table } from '@mantine/core';
 import { useOverlayState } from '@/components/ui/useOverlayState';
@@ -30,7 +32,7 @@ import { Modal } from '@/components/ui/Modal';
 import { StatusPill } from '@/components/ui/StatusPill';
 import { TableScroll } from '@/components/ui/TableScroll';
 import styles from '@/features/control-plane/ControlPlane.module.scss';
-import { ConfirmDialog, DetailItem, DetailList, EmptyTable, ErrorState, FormError, PageActions } from '@/features/control-plane/shared';
+import { ConfirmDialog, EmptyTable, ErrorState, FormError, PageActions } from '@/features/control-plane/shared';
 import { VirtualKeyForm } from '@/features/control-plane/VirtualKeyForm';
 import { VirtualKeyRotationForm } from '@/features/control-plane/VirtualKeyRotationForm';
 import { useAdminQuery } from '@/hooks/useAdminQuery';
@@ -274,7 +276,7 @@ export function SettingsPage({
         width={560}
         onClose={() => !mutationBusy && setCreateOpen(false)}
         closeDisabled={mutationBusy}
-        footer={<><Button variant="secondary" onClick={() => setCreateOpen(false)} disabled={mutationBusy}>{t('common.cancel')}</Button><Button type="submit" form="virtual-key-editor-form" loading={mutationBusy}><IconKey size={14} />{t('settings.modal.create_key')}</Button></>}
+        footer={<FormActions form="virtual-key-editor-form" cancelLabel={t('common.cancel')} submitLabel={t('settings.modal.create_key')} submitIcon={<IconKey size={14} />} busy={mutationBusy} onCancel={() => setCreateOpen(false)} />}
       >
         <VirtualKeyForm busy={mutationBusy} error={mutationError ? localizedApiError(mutationError) : undefined} onSubmit={createKey} />
       </Modal>
@@ -286,7 +288,7 @@ export function SettingsPage({
         width={560}
         onClose={() => !mutationBusy && setRotateTarget(undefined)}
         closeDisabled={mutationBusy}
-        footer={<><Button variant="secondary" disabled={mutationBusy} onClick={() => setRotateTarget(undefined)}>{t('common.cancel')}</Button><Button type="submit" form="virtual-key-rotation-form" loading={mutationBusy}><IconRefreshCw size={14} />{t('settings.modal.rotate_confirm')}</Button></>}
+        footer={<FormActions form="virtual-key-rotation-form" cancelLabel={t('common.cancel')} submitLabel={t('settings.modal.rotate_confirm')} submitIcon={<IconRefreshCw size={14} />} busy={mutationBusy} onCancel={() => setRotateTarget(undefined)} />}
       >
         {rotateTarget && <VirtualKeyRotationForm key={rotateTarget.id} target={rotateTarget} busy={mutationBusy} error={mutationError ? localizedApiError(mutationError) : undefined} onSubmit={rotateKey} />}
       </Modal>

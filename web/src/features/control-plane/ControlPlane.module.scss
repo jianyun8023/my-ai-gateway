@@ -20,13 +20,6 @@
   min-height: 48px;
 }
 
-.filterBar {
-  padding: 12px;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius);
-  background: var(--floating-surface);
-}
-
 .filterBar > div { min-width: 160px; }
 
 .table {
@@ -128,39 +121,6 @@
 
 .metadataField > label {
   display: none;
-}
-
-.detailList {
-  margin: 0;
-}
-
-.detailList > div {
-  display: grid;
-  grid-template-columns: minmax(110px, 0.45fr) minmax(0, 1fr);
-  gap: 16px;
-  padding: 9px 0;
-  border-bottom: 1px solid var(--border-color);
-}
-
-.detailList dt {
-  color: var(--text-secondary);
-  font-size: 12px;
-}
-
-.detailList dd {
-  min-width: 0;
-  margin: 0;
-  color: var(--text-primary);
-  overflow-wrap: anywhere;
-}
-
-.detailList .inlineActions {
-  gap: 6px;
-  align-items: center;
-}
-
-.detailList .inlineActions [data-ui="status-pill"] {
-  flex-shrink: 0;
 }
 
 .drawerSection + .drawerSection {
@@ -718,7 +678,6 @@
   .filterBar > div { width: 100%; min-width: 0; }
   .formGrid { grid-template-columns: minmax(0, 1fr); }
   .fullWidth { grid-column: auto; }
-  .detailList > div { grid-template-columns: minmax(0, 1fr); gap: 2px; }
   .protocolTestRow { grid-template-columns: minmax(0, 1fr); align-items: stretch; }
   .protocolTestRow > [data-ui="button"] { width: 100%; min-height: 44px; }
   .runHeader { grid-template-columns: minmax(0, 1fr); }

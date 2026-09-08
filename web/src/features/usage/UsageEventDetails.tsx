@@ -1,3 +1,4 @@
+import { DetailItem, DetailList } from '@/components/ui/DetailList';
 import { LoadingState } from '@/components/ui/LoadingState';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
@@ -27,23 +28,23 @@ export function EventDetails({ event, onClose, client }: { event: UsageEventView
   return (
     <Modal open={open} variant="drawer" width={520} title={event.requestId} onClose={() => setOpen(false)} onExitTransitionEnd={onClose} footer={<Button variant="secondary" onClick={() => setOpen(false)}>{t('common.close')}</Button>}>
       <div className={styles.stack} data-od-id="event-drawer">
-        <section className={styles.detailGrid}>
-          <div><span>{t('usage.field.time')}</span><strong>{formatTime(event.createdAt)}</strong></div>
-          <div><span>{t('usage.field.status')}</span><UsageStatus success={event.success} statusCode={event.statusCode} /></div>
-          <div><span>{t('usage.field.logical_model')}</span><strong>{event.logicalModel}</strong></div>
-          <div><span>{t('usage.field.upstream_model')}</span><strong>{event.upstreamModel}</strong></div>
-          <div><span>{t('usage.field.provider')}</span><strong>{event.provider}</strong></div>
-          <div><span>{t('usage.field.source_id')}</span><strong>{event.sourceId}</strong></div>
-          <div><span>{t('usage.field.client_source')}</span><strong>{event.clientSource}</strong></div>
-          <div><span>{t('usage.field.account')}</span><strong>{event.account}</strong></div>
-          <div><span>{t('usage.field.protocol')}</span><strong>{event.protocolIn} → {event.protocolUpstream}</strong></div>
-          <div><span>{t('usage.field.usage_source')}</span><strong><UsageBadge source={event.usageSource} /></strong></div>
-          <div><span>{t('usage.field.latency')}</span><strong>{formatDuration(event.latencyMs, true)}</strong></div>
-          <div><span>{t('usage.field.retries')}</span><strong>{event.fallback ? (event.retryCount > 0 ? t('usage.event.retries_fallback', { count: event.retryCount }) : t('usage.event.fallback_only')) : String(event.retryCount)}</strong></div>
+        <DetailList layout="grid">
+          <DetailItem label={t('usage.field.time')}><strong>{formatTime(event.createdAt)}</strong></DetailItem>
+          <DetailItem label={t('usage.field.status')}><UsageStatus success={event.success} statusCode={event.statusCode} /></DetailItem>
+          <DetailItem label={t('usage.field.logical_model')}><strong>{event.logicalModel}</strong></DetailItem>
+          <DetailItem label={t('usage.field.upstream_model')}><strong>{event.upstreamModel}</strong></DetailItem>
+          <DetailItem label={t('usage.field.provider')}><strong>{event.provider}</strong></DetailItem>
+          <DetailItem label={t('usage.field.source_id')}><strong>{event.sourceId}</strong></DetailItem>
+          <DetailItem label={t('usage.field.client_source')}><strong>{event.clientSource}</strong></DetailItem>
+          <DetailItem label={t('usage.field.account')}><strong>{event.account}</strong></DetailItem>
+          <DetailItem label={t('usage.field.protocol')}><strong>{event.protocolIn} → {event.protocolUpstream}</strong></DetailItem>
+          <DetailItem label={t('usage.field.usage_source')}><strong><UsageBadge source={event.usageSource} /></strong></DetailItem>
+          <DetailItem label={t('usage.field.latency')}><strong>{formatDuration(event.latencyMs, true)}</strong></DetailItem>
+          <DetailItem label={t('usage.field.retries')}><strong>{event.fallback ? (event.retryCount > 0 ? t('usage.event.retries_fallback', { count: event.retryCount }) : t('usage.event.fallback_only')) : String(event.retryCount)}</strong></DetailItem>
           {event.fallbackReason && (
-            <div><span>{t('usage.field.fallback_reason')}</span><strong title={event.fallbackReason}>{formatFallbackReason(t, event.fallbackReason)}</strong></div>
+            <DetailItem label={t('usage.field.fallback_reason')}><strong title={event.fallbackReason}>{formatFallbackReason(t, event.fallbackReason)}</strong></DetailItem>
           )}
-        </section>
+        </DetailList>
         <Card title={t('usage.detail.token_title')} subtitle={t('usage.detail.token_subtitle')}>
           {isUnreportedUsage(event.usageSource) && <p className={styles.cacheNote}>{t(event.usageSource === 'missing' ? 'usage.composition.unreported' : 'usage.composition.unknown', { count: 1 })}</p>}
           <div className={styles.tokenDetails}><span>{t('usage.legend.input')} <strong>{formatUsageTokens(event.tokens.input, event.usageSource, true)}</strong></span><span>{t('usage.legend.output')} <strong>{formatUsageTokens(event.tokens.output, event.usageSource, true)}</strong></span><span>{t('usage.legend.reasoning')} <strong>{formatUsageTokens(event.tokens.reasoning, event.usageSource, true)}</strong></span><span>{t('usage.legend.cache_read')} <strong>{formatUsageTokens(event.tokens.cacheRead, event.usageSource, true)}</strong></span><span>{t('usage.legend.cache_creation')} <strong>{formatUsageTokens(event.tokens.cacheCreation, event.usageSource, true)}</strong></span><span>{t('usage.legend.total')} <strong>{formatUsageTokens(event.tokens.total, event.usageSource, true)}</strong></span></div>

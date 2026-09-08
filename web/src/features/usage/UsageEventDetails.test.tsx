@@ -54,6 +54,9 @@ describe('usage event details', () => {
     fetchImpl.mockResolvedValue(new Response(JSON.stringify({ attempts: gatewayUsageEventsFixture.items[0].attempts })));
     await render({ ...event, latencyMs: 0, tokens: { ...event.tokens, total: 1234567890123 } });
     const dialog = document.querySelector('[role="dialog"]')!;
+    const values = Object.fromEntries([...dialog.querySelectorAll('dt')].map(term => [term.textContent, term.nextElementSibling?.textContent]));
+    expect(values).toMatchObject({ '逻辑模型': event.logicalModel, '上游模型': event.upstreamModel, '来源 ID': event.sourceId });
+    expect(values['协议']).toBe(`${event.protocolIn} → ${event.protocolUpstream}`);
     expect(dialog.textContent).toContain('1,234,567,890,123');
     expect(dialog.textContent).toContain('0 ms');
     expect(dialog.textContent).toContain('429 · 失败');

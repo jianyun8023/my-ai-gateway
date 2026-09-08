@@ -1,3 +1,4 @@
+import { DetailItem, DetailList } from '@/components/ui/DetailList';
 import { Table } from '@mantine/core';
 import type {
   Account,
@@ -21,7 +22,7 @@ import { Modal } from '@/components/ui/Modal';
 import { StatusPill } from '@/components/ui/StatusPill';
 import { TableScroll } from '@/components/ui/TableScroll';
 import styles from '@/features/control-plane/ControlPlane.module.scss';
-import { DetailItem, DetailList, DrawerSection, EmptyTable, ErrorState, FormGrid, ProtocolPill } from '@/features/control-plane/shared';
+import { DrawerSection, EmptyTable, ErrorState, FormGrid, ProtocolPill } from '@/features/control-plane/shared';
 import { protocolModeKey, protocolModeTone } from '@/features/control-plane/sources/presentation';
 import { PROTOCOL_LABELS } from '@/lib/protocols';
 import { useAdminQuery } from '@/hooks/useAdminQuery';

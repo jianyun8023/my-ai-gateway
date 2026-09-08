@@ -1,3 +1,4 @@
+import { DetailItem, DetailList } from '@/components/ui/DetailList';
 import { Button } from '@/components/ui/Button';
 import {
   IconPencil
@@ -7,7 +8,7 @@ import { StatusPill } from '@/components/ui/StatusPill';
 import styles from '@/features/control-plane/ControlPlane.module.scss';
 import { resolvedCellsForBinding, statusTone, type CatalogData, type DetailTarget } from '@/features/control-plane/models/catalog';
 import { RuntimeBindingSummary } from '@/features/control-plane/models/RuntimeBindingSummary';
-import { DetailItem, DetailList, DrawerSection, EmptyTable, ProtocolPill } from '@/features/control-plane/shared';
+import { DrawerSection, EmptyTable, ProtocolPill } from '@/features/control-plane/shared';
 import { PROTOCOL_LABELS } from '@/lib/protocols';
 import { formatDateTime } from '@/utils/format';
 import { useState } from 'react';

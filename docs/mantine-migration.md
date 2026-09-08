@@ -301,3 +301,31 @@ Web ESLint/Knip、TypeScript、测试（30 个文件、149 项）和构建通过
 交付中附带最小 CI 恢复：PR #178 两轮运行在 mise 自动选择 `2026.9.3` 后因下载 404 失败，未进入源码检查。两个 PR job 固定 mise 安装器为已发布的 `2026.9.2`；Rust/Node 版本、所有检查及权限保持原状，详见 [CI 说明](ci.md)。恢复后的最终 head 检查结果以 PR 为准。
 
 未覆盖：屏幕阅读器实际朗读、全八页核心流程及加载/空态/错误/刷新组合、全部嵌套浮层/系统减少动画实测、真实配置和 Provider 验收、性能基准。日期显示沿用现状，本批不治理日期。无后端改动，本地未运行 Rust/PostgreSQL/live 测试；最终 head 的 PR CI 另在 Issue/PR 记录。#166 保持开放，只有指标/状态/格式条目可据本批完成；八页整体验收和其他复合条目继续留空。
+
+## 第十一批：筛选容器、编辑操作与详情字段组合
+
+基线 main `9e5e1ed`（PR #178 已合并），分支 `codex/166-shared-compositions`。仅提炼源码中实际重复的组合，无新依赖、接口或后端变化；保留既有 FormGrid、DrawerSection、PageActions。
+
+- UI `FilterPanel` 基于 Mantine Paper，集中品牌表面、边框、12px 内边距/圆角、命名 section 和收缩边界。发现/能力 `FilterBar` 与用量 `FilterBar` 接入，字段排列、预设、高级区域和 draft/apply 仍在功能层；两套业务 props 未合并。
+- UI `FormActions` 以 Fragment 输出取消和原生 submit 按钮，集中标签、可选图标、外部 form ID、busy 与取消回调。覆盖来源/账号、三类模型实体、发现字段编辑、设置创建与轮换共五个操作区；没有增加 footer 包装。页面保留防重复、closeDisabled、退出清理及详情转编辑焦点管理，Key 结果与即时清理没有重构。
+- 将 `DetailList` / `DetailItem` 提升到 UI 层，控制面与事件共享 `dl/dt/dd`、标签/值样式、长字段换行和窄屏单列。行式用于来源/模型/能力/设置，网格式用于事件基本字段。Token 精确明细、来源质量、完整协议链和 attempt 列表继续由功能层提供；移除被替代的 filter 表面和 detail 样式/JSX。
+
+Web 验证通过：`mise exec -- npm --prefix web run lint`（ESLint、Knip 两种门禁）、`typecheck`、`test`（32 文件 **180 项**）、`build`、`git diff --check`。新增四项行为测试：三类模型实体通过 footer 正确提交到各自 API、busy 禁用并防重复；能力筛选后读取有标签的协议详情。扩充既有回归：普通/高级筛选收起后仍保留草稿、显式应用与重置；事件标签/值与精确数值；来源失败重试和 Key 轮换改用真实外部 submit 按钮。原有日期校验、发现选择清空、来源输入/校验、Key 创建/敏感清理回归均通过。
+
+独立只读审查覆盖公共组合职责、form ID/busy、详情语义与样式删除影响，未发现阻断问题。浏览器使用真实 GatewayManagementPage / GatewayUsagePage 与本地合成 API，无生产配置写入或真实 Provider 调用：
+
+| 实测范围 | 结果 |
+| --- | --- |
+| 390px 中文浅色来源 | 查看详情→编辑→非法 JSON 校验失败→模拟 409 保存失败保留显示名→重试成功；footer 直接双按钮纵向布局，关闭后焦点返回原查看入口 |
+| 390px 英文深色用量 | 普通/高级字段编辑不查询，应用后请求包含模型、Source、missing；重置清空条件。预设和日期校验另由现有行为测试覆盖 |
+| 390px 英文深色发现 | 全选仅选 available + pending，unknown 禁用；切换 availability 为 unknown 后清空选择、禁用批量确认 |
+| 375px 英文深色能力 | 筛选 degraded→详情，保留三协议、adapter、conversion chain、降级与不可路由错误解释；详情字段无横向溢出 |
+| 375px 中文浅色模型 | LogicalModel、Binding、Route 分别通过 footer 保存，Binding 保留 Source/Account/模型归因，Route 修改协议准确进入提交内容 |
+| 375px 英文深色设置 | Key 创建与轮换通过 footer 提交并显示独立结果；保留轮换时限，Done 后合成 Key 立即不再出现 |
+| 375px 浅色来源及事件、390px 深色事件 | 长 URL/模型、协议链与精确 `1,234,567,890,123` 可读；详情内部滚动，页面无横向溢出；事件关闭后焦点回列表查看按钮 |
+
+截图均为合成数据：[来源长字段](evidence/166/b11-source-375-light.png)、[用量筛选](evidence/166/b11-filters-390-dark.png)、[事件浅色](evidence/166/b11-event-375-light.png)、[事件深色](evidence/166/b11-event-390-dark.png)、[能力详情](evidence/166/b11-capability-375-dark.png)、[Route 编辑](evidence/166/b11-route-375-light.png)、[Key 操作区](evidence/166/b11-key-actions-375-dark.png)。临时验证入口已移出仓库，浏览器视口已恢复。合成大数夹具更新后重启开发服务并重验，未将旧缓存显示计为新数据验证。
+
+Vite 资源合计：JS **938.46 kB / gzip 287.94 kB**，CSS **159.86 kB / gzip 29.05 kB**；相对第十批分别 **−0.08/+0.24 kB**、**−0.48/−0.03 kB**（原始/gzip）。主入口 **533.64 kB / gzip 166.13 kB**，保留默认 500kB warning，构建通过；未做无关分包优化。第十批 mise 安装器修复保持不变。
+
+未覆盖：全八页所有状态/核心流程、全部浮层组合及减少动画浏览器实测、真实屏幕阅读器、生产配置/Provider 验收、帧耗时基准。本地未跑 Rust/PostgreSQL/live，最终 head 的 PR CI 另在 Issue/PR 记录。#166 保持开放；本批和已有 FormGrid/DrawerSection/PageActions 可共同支撑“提炼实际重复的筛选栏、编辑表单、详情分区和操作区”，不据此勾选全局 SCSS、宽度治理或整页完整验收。

@@ -1,3 +1,4 @@
+import { FormActions } from '@/components/ui/FormActions';
 import { clearOperationNotification, notifySuccess } from '@/components/ui/notifications';
 import { Notice } from '@/components/ui/Notice';
 import { Checkbox, Table } from '@mantine/core';
@@ -197,7 +198,7 @@ export function ModelDiscoveryPage({ api, refreshRevision = 0, onBusyChange }: M
         {discoveryQuery.loading && !discovery ? <LoadingState label={t('discovery.loading_run')} /> : discoveryQuery.error ? <ErrorState error={discoveryQuery.error} onRetry={discoveryQuery.reload} /> : <LatestRunPanel latest={discovery?.latest?.run.source_id === effectiveSourceId ? discovery.latest : null} />}
       </Card>
 
-      <FilterBar>
+      <FilterBar label={t('discovery.filters_aria')}>
         <SelectField label={t('discovery.confirmation_filter')} value={confirmationFilter} onChange={(event) => { setConfirmationFilter(event.target.value as CatalogStatus | ''); setSelectedModels(new Set()); }}><option value="">{t('common.all')}</option><option value="pending">{t('discovery.confirm_state.pending')}</option><option value="confirmed">{t('discovery.confirm_state.confirmed')}</option><option value="unavailable">{t('discovery.confirm_state.unavailable')}</option></SelectField>
         <SelectField label={t('discovery.availability_filter')} value={availabilityFilter} onChange={(event) => { setAvailabilityFilter(event.target.value as CatalogAvailability | ''); setSelectedModels(new Set()); }}><option value="">{t('common.all')}</option><option value="unknown">{t('discovery.availability_state.unknown')}</option><option value="available">{t('discovery.availability_state.available')}</option><option value="unavailable">{t('discovery.availability_state.unavailable')}</option></SelectField>
         <span className={styles.filterMeta}>{t('discovery.source_model_count', { count: visibleModels.length })}</span>
@@ -252,10 +253,8 @@ export function ModelDiscoveryPage({ api, refreshRevision = 0, onBusyChange }: M
         onClose={() => !mutationBusy && setEditingModel(undefined)}
         closeDisabled={mutationBusy}
         footer={(
-          <>
-            <Button variant="secondary" onClick={() => setEditingModel(undefined)} disabled={mutationBusy}>{t('common.cancel')}</Button>
-            <Button type="submit" form="source-model-editor-form" loading={mutationBusy}><IconPencil size={14} />{t('discovery.save_user_fields')}</Button>
-          </>
+          <FormActions form="source-model-editor-form" cancelLabel={t('common.cancel')} submitLabel={t('discovery.save_user_fields')}
+            submitIcon={<IconPencil size={14} />} busy={mutationBusy} onCancel={() => setEditingModel(undefined)} />
         )}
       >
         {editingModel && <SourceModelEditor key={`${editingModel.source_id}:${editingModel.upstream_model_id}`} model={editingModel} busy={mutationBusy} error={mutationError ? localize(mutationError) : undefined} onSubmit={saveModel} />}
