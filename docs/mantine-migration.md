@@ -1,6 +1,6 @@
 # Mantine 控制台迁移清单（#166）
 
-初始基线：2026-09-08，`main c99455e`（PR #168 已合并）。当前第十三批基线为 `main 8eef98f`（PR #180 已合并），分支 `codex/166-ui-closure`。关联 [Issue #166](https://github.com/jianyun8023/my-ai-gateway/issues/166)，本清单随每批实现更新；Issue/PR、代码合并和生产验收分别记录，不互相推断。
+初始基线：2026-09-08，`main c99455e`（PR #168 已合并）。当前第十三批基线为 `main 8eef98f`（PR #180 已合并），分支 `codex/166-ui-closure`、PR #181。关联 [Issue #166](https://github.com/jianyun8023/my-ai-gateway/issues/166)，本清单随每批实现更新；Issue/PR、代码合并和生产验收分别记录，不互相推断。
 
 Issue 中 `de708e8` 的链接是历史调查依据。当前事件详情已位于 `features/usage/UsageEventDetails.tsx` 并复用公共 Modal；旧 Select、PortalTooltip、QuestionMarkHelp 等无调用实现已在 #168 删除，不再列为线上迁移对象。
 
@@ -360,7 +360,7 @@ Vite 资源合计：JS **942.77 kB / gzip 289.04 kB**，CSS **159.86 kB / gzip 2
 
 ## 第十三批：最终组件审计与适用交互收尾
 
-基线为 PR #180 合并后的 main `8eef98f`，分支 `codex/166-ui-closure`。本批不改变 Rust、Admin API、数据库、核算规则、导航入口或业务 schema，只收敛前端组件、遗留样式和第十二批之后仍适用的真实浏览器交互。
+基线为 PR #180 合并后的 main `8eef98f`，分支 `codex/166-ui-closure`、PR #181。本批不改变 Rust、Admin API、数据库、核算规则、导航入口或业务 schema，只收敛前端组件、遗留样式和第十二批之后仍适用的真实浏览器交互。
 
 ### 组件与样式审计
 
