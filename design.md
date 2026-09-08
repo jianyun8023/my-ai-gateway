@@ -92,7 +92,7 @@ Tech-Utility：冷灰底色、绿色强调、紧凑数据布局。使用固定�
 
 `GatewayConsoleShell` 统一八页导航、标题和顶栏。NavLink 的排版、选中态、焦点和减少动画规则维护于 `components/ui/Navigation.module.scss`，桌面导航至少 40px，移动导航至少 44px；页面不复制导航按钮样式。菜单、主题、刷新使用公共 IconButton，刷新中由 Mantine ActionIcon 禁用重复点击。页面一级标题采用 Mantine Title。
 
-Shell 保留原生 CSS Grid/Flex 布局与现有 hash 导航、刷新版本及 session-only Admin Key 契约。大于 1280px 顶栏单行，921–1280px 将连接信息放到第二行；不挤掉标题或隐藏操作。920px 及以下由公共 Drawer 承载导航、语言和连接信息，只有一份连接字段被渲染。草稿受同一 state 控制，切换布局/开关导航不自动应用，显式应用或 Enter 后才清空草稿并触发刷新。桌面侧栏可独立纵向滚动，移动侧栏沿用公共 Drawer 的内容滚动和焦点规则。主题按钮根据 resolvedTheme 决定文案及切换目标，兼容跟随系统深色。
+Shell 保留原生 CSS Grid/Flex 布局与现有 hash 导航、刷新版本及 session-only Admin Key 契约。Admin Key 应用或清空会递增只含数字的认证代次，供用量查询隔离身份；查询键不得包含密钥正文，普通刷新不改变认证代次。大于 1280px 顶栏单行，921–1280px 将连接信息放到第二行；不挤掉标题或隐藏操作。920px 及以下由公共 Drawer 承载导航、语言和连接信息，只有一份连接字段被渲染。草稿受同一 state 控制，切换布局/开关导航不自动应用，显式应用或 Enter 后才清空草稿并触发刷新。桌面侧栏可独立纵向滚动，移动侧栏沿用公共 Drawer 的内容滚动和焦点规则。主题按钮根据 resolvedTheme 决定文案及切换目标，兼容跟随系统深色。
 
 ### 通知与持久反馈
 
@@ -108,7 +108,7 @@ Shell 保留原生 CSS Grid/Flex 布局与现有 hash 导航、刷新版本及 s
 
 请求结果由 `UsageStatus` 映射公共 `StatusPill`，成功/失败必须有文字，不能只靠颜色点。`UsageBadge` 单独表达 upstream / parsed / estimated / missing / unknown；成功请求也可能 missing，不能用来源推导请求成功率。事件 missing/unknown 的零 Token 显示 `—` 或来源标签并提供说明，上游真实上报的零仍显示 0，unknown 的非零读数保留并标注来源不确定。
 
-`GatewayUsageClient.summary` 每次并行读取 summary 与一条 `breakdown=usage_source`，共享完整 filters 和 AbortSignal，经 adapter 用 `key/logical_requests` 组装来源计数。两项都成功才发布 summary，任一失败进入既有错误/重试流程；组件、分页和导出不额外查询来源。`useUsageData` 继续丢弃已取消会话的迟到响应。前端同筛选、同轮发布不等于后端数据库事务快照一致。
+`GatewayUsageClient.summary` 每次并行读取 summary 与一条 `breakdown=usage_source`，共享完整 filters 和 AbortSignal，经 adapter 用 `key/logical_requests` 组装来源计数。两项都成功才发布 summary，任一失败进入既有错误/重试流程；组件、分页和导出不额外查询来源。`useUsageData` 将待完成的首屏加载与已发布快照分开：同查询刷新保留旧展示，暂停旧 cursor，失败后恢复旧筛选窗口的分页/导出；成功后才原子替换窗口和第一页。筛选、页面或认证代次变化立即隐藏旧快照，已取消或失去当前身份的迟到响应不得发布。前端同筛选、同轮发布不等于后端数据库事务快照一致。
 
 总览和分析的构成区域显示真实来源请求计数及 missing/estimated 解释。全部计数来源均缺失/未知且汇总为记账零时，KPI、构成和分布显示不可用说明与 `—`；混合来源保留已有汇总值，明确估算已计入、missing 未计入。独立 Total、Input/Output、推理和缓存语义不变，趋势仍展示原有记账数据，不依据来源重算 Token。
 

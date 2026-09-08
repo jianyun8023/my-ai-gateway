@@ -109,13 +109,14 @@ function App() {
           title={t(`shell.nav.${page}`)}
           refreshable
         >
-          {({ getAdminKey, adminKeyConfigured, clearAdminKey, refreshRevision, setRefreshing }) => (
+          {({ getAdminKey, adminKeyConfigured, authGeneration, clearAdminKey, refreshRevision, setRefreshing }) => (
             <Suspense fallback={<LoadingState label={t('shell.page_loading')} />}>
               {isUsagePage(page)
                 ? (
                     <GatewayUsagePage
                       activeTab={page}
                       getAdminKey={getAdminKey}
+                      authGeneration={authGeneration}
                       refreshRevision={refreshRevision}
                       onLoadingChange={setRefreshing}
                     />

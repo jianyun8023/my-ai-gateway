@@ -1,6 +1,6 @@
 # Mantine 控制台迁移清单（#166）
 
-初始基线：2026-09-08，`main c99455e`（PR #168 已合并）。当前第十批基线为 `main b0e433c`（PR #177 已合并），分支 `codex/166-usage-metrics`。关联 [Issue #166](https://github.com/jianyun8023/my-ai-gateway/issues/166)，本清单随每批实现更新；未完成全部验收前不关闭总任务。
+初始基线：2026-09-08，`main c99455e`（PR #168 已合并）。当前第十二批基线为 `main 95ad077`（PR #179 已合并），分支 `codex/166-page-state-acceptance`、PR #180。关联 [Issue #166](https://github.com/jianyun8023/my-ai-gateway/issues/166)，本清单随每批实现更新；未完成全部验收前不关闭总任务。
 
 Issue 中 `de708e8` 的链接是历史调查依据。当前事件详情已位于 `features/usage/UsageEventDetails.tsx` 并复用公共 Modal；旧 Select、PortalTooltip、QuestionMarkHelp 等无调用实现已在 #168 删除，不再列为线上迁移对象。
 
@@ -14,19 +14,19 @@ Issue 中 `de708e8` 的链接是历史调查依据。当前事件详情已位于
 
 ## 页面与流程覆盖
 
-路径相对于 `web/src/`。前九批 PR #169–#177 均已合并且 CI 通过；第十批指标/格式/状态证据见文末。接入和代表性验证不等于该页完成全部验收。
+路径相对于 `web/src/`。前十一批 PR #169–#179 均已合并；第十二批查询状态与逐页证据见文末。接入和代表性验证不等于该页完成全部验收。
 
 | 页面/流程 | 当前组件与实际入口 | 目标与保留项 | 迁移批次/PR | 验证证据与剩余工作 |
 | --- | --- | --- | --- | --- |
-| 应用壳 | `GatewayConsoleShell`：桌面侧栏、移动导航、连接、主题、语言、刷新 | 保留 hash 与状态契约；公共 Drawer/字段/按钮 | #169–#171，第八批应用壳 | 八页导航/标题/选中态、临界宽度顶栏、移动语言/连接区、详情与确认焦点隔离已验证；全部页面状态组合仍待验收 |
-| 总览 | `UsageOverview`、`UsageFilters`、`UsageTrend` | Mantine 筛选/反馈/构成图；保留 Chart.js 与独立 Total | #169–#173 | 双主题趋势/精确表/单图构成、390px 已验证；第十批 KPI/来源/数值完成，完整刷新/空错状态待收敛 |
-| 用量分析 | `UsageAnalysis`、`TokenDistribution`、`TokenComposition` | Progress 分布、Source 平均/P95 Table；完整值与 missing 保留 | #169–#173，第六批共享 Table 主题 | 代表性中英文、长字段、真实零值与缺失已验证；导出及全状态组合待验收 |
-| 请求事件 | `UsageEvents`、`UsageEventDetails` | Mantine Table/Popover/Drawer；TanStack Virtual 测量与单一滚动区 | #169–#172，第七批虚拟表 | DOM 覆盖千行测量、重排与分页；浏览器覆盖 390px 指针、列切换、连续追加、万行刷新和真实详情只读；全状态组合待验收 |
+| 应用壳 | `GatewayConsoleShell`：桌面侧栏、移动导航、连接、主题、语言、刷新 | 保留 hash 与状态契约；公共 Drawer/字段/按钮 | #169–#171，第八/十二批 | 八页导航/标题/选中态、临界宽度顶栏、移动语言/连接区、详情与确认焦点隔离已验证；第十二批增加不含密钥的认证代次，普通刷新不改变认证身份 |
+| 总览 | `UsageOverview`、`UsageFilters`、`UsageTrend` | Mantine 筛选/反馈/构成图；保留 Chart.js 与独立 Total | #169–#173，第十/十二批 | 双主题趋势/精确表/单图构成、390px 已验证；第十二批验证同范围刷新保留已发布数据、切换范围立即隐藏旧数据及错误/空态 |
+| 用量分析 | `UsageAnalysis`、`TokenDistribution`、`TokenComposition` | Progress 分布、Source 平均/P95 Table；完整值与 missing 保留 | #169–#173，第六/十/十二批 | 代表性中英文、长字段、真实零值与缺失已验证；共享查询生命周期覆盖加载/刷新/错误，页面没有导出功能（N/A），未逐一浏览器重放全部组合 |
+| 请求事件 | `UsageEvents`、`UsageEventDetails` | Mantine Table/Popover/Drawer；TanStack Virtual 测量与单一滚动区 | #169–#172，第七/十/十二批 | 千行测量、重排、分页、窄屏详情已验证；第十二批增加分页/导出独立失败重试、认证身份隔离，以及数据集变空时关闭失效详情并恢复合理焦点 |
 | 来源 | `SourcesPage`、`SourceForm`、`AccountForm`、`SourceDetailDrawer` | 公共表单/浮层、Table 来源/账号/预设差异 | #169–#172，第六批表格 | 编辑隔离、键盘详情与返回焦点、窄屏预设差异滚动已验证；真实提交/连接测试待验收 |
-| 模型发现 | `ModelDiscoveryPage`、`discovery/*` | 公共过滤/Checkbox/反馈与 Mantine Table | #169–#172，第六批表格 | 可选范围、筛选清空、部分失败、批量选择已验证；发现/确认完整流程待验收 |
+| 模型发现 | `ModelDiscoveryPage`、`discovery/*` | 公共过滤/Checkbox/反馈与 Mantine Table | #169–#172，第六/十一/十二批 | 可选范围、筛选清空、部分失败、批量选择已验证；第十二批以来源和筛选组成查询身份，切换范围不显示旧目录，空来源可重试 |
 | 模型与路由 | `ModelsRoutesPage`、`models/*` | 三实体 Mantine Table；保留 Binding/Route/逻辑模型与运行时链 | #169–#172，第六批表格 | 详情转编辑、宽表键盘滚动/访问操作列已验证；三实体真实提交与全部状态待验收 |
 | 能力矩阵 | `CapabilitiesPage` | 公共筛选、Mantine Table/Drawer；保留能力状态 | #169–#172，第六批表格 | 原生/降级/不可路由、筛选和长详情代表性验证；全部协议/主题/窄屏组合待验收 |
-| 设置 | `SettingsPage`、`VirtualKeyForm`、`VirtualKeyRotationForm` | 公共表单/确认、Mantine Key Table；保留敏感值边界 | #169–#172，第六批表格 | 原有 Key DOM 回归、英文窄屏列表与缺失时间已验证；真实密钥读写与导入导出完整验收待完成 |
+| 设置 | `SettingsPage`、`VirtualKeyForm`、`VirtualKeyRotationForm` | 公共表单/确认、Mantine Key Table；保留敏感值边界 | #169–#172，第六/九/十一/十二批 | Key 结果关闭即清理、列表缺失时间和导出脱敏已有回归；第十二批补桌面页面证据。当前没有 UI 导入入口（N/A）；生产密钥写入不在本 PR 验证范围 |
 
 ## 组件处置清单
 
@@ -329,3 +329,31 @@ Web 验证通过：`mise exec -- npm --prefix web run lint`（ESLint、Knip 两�
 Vite 资源合计：JS **938.46 kB / gzip 287.94 kB**，CSS **159.86 kB / gzip 29.05 kB**；相对第十批分别 **−0.08/+0.24 kB**、**−0.48/−0.03 kB**（原始/gzip）。主入口 **533.64 kB / gzip 166.13 kB**，保留默认 500kB warning，构建通过；未做无关分包优化。第十批 mise 安装器修复保持不变。
 
 未覆盖：全八页所有状态/核心流程、全部浮层组合及减少动画浏览器实测、真实屏幕阅读器、生产配置/Provider 验收、帧耗时基准。本地未跑 Rust/PostgreSQL/live，最终 head 的 PR CI 另在 Issue/PR 记录。#166 保持开放；本批和已有 FormGrid/DrawerSection/PageActions 可共同支撑“提炼实际重复的筛选栏、编辑表单、详情分区和操作区”，不据此勾选全局 SCSS、宽度治理或整页完整验收。
+
+## 第十二批：页面状态与查询生命周期验收
+
+基线 main `95ad077`（PR #179 已合并），分支 `codex/166-page-state-acceptance`、PR #180。本批只收敛前端查询身份、刷新失败保留、事件分页/导出反馈和逐页验收证据，不改变 Rust、Admin API、数据库、核算规则或生产配置。
+
+- `useAdminQuery` 增加显式查询身份；模型发现以来源、确认状态和可用状态组成 scope。跨 scope 加载立即隐藏旧目录，同 scope 刷新继续展示已发布快照并在失败后提供重试；没有来源时也保留刷新/错误入口。
+- 用量查询将“正在加载的首屏请求”和“已经发布、供分页/导出的快照”拆开。相同查询刷新期间保留旧数据并暂停旧 cursor，成功后原子替换筛选窗口与第一页；刷新失败后继续使用旧窗口/cursor，并恢复分页与导出。切换筛选、页面或认证身份时立即隐藏旧快照，迟到响应不能回写。
+- Shell 使用递增 `authGeneration` 标识 Admin Key 应用/清空；查询键只包含数字代次，不包含 session-only 密钥。普通刷新不改变认证代次。实际 App 合成验证中，被拒绝的新 Key 提交后旧事件行立即消失，401 后仍不回显；清空 Key 后重新取得当前身份的数据。
+- 事件首屏、追加页和导出分别保留错误与重试状态；失败 cursor 只允许显式重试，CSV/JSON 重试保持原格式与已发布筛选窗口。详情选择绑定当前行身份；已选行在刷新后消失时关闭 Drawer，将焦点移到空状态，数据恢复后移到事件区域且不重新读取/打开旧详情。
+
+本批最终 Web 验证通过：`mise exec -- npm --prefix web run lint`（ESLint、Knip 两种门禁）、`typecheck`、`test`（32 文件 **194 项**）、`build` 与 `git diff --check`。另以 `TZ=America/New_York` 运行 `filterState.test.ts` 和 `useUsageData.test.tsx`，2 文件 **26 项**通过，覆盖滚动时间窗跨时区稳定性。新增回归覆盖查询 scope、迟到响应、同范围刷新失败、旧 cursor 暂停/恢复、发布窗口导出、认证代次、分页/导出失败重试，以及事件 nonempty → empty → nonempty 的详情和焦点生命周期。
+
+逐页证据按“本批实际覆盖”和“未在本批重放”分开记录；以前批次证据仅作为回归背景，不把四张第十二批截图扩写成八页全状态完成：
+
+| 页面 | 本批实际验证与证据 | 未验证或不适用边界 |
+| --- | --- | --- |
+| 总览 | 实际 App + 本地合成 API 在 390px 英文深色下慢刷新，旧 KPI/图表保持且显示刷新状态；DOM 覆盖首次加载失败、刷新失败保留、空结果和筛选无匹配。[截图](evidence/166/b12-overview-refresh-390-dark-en.png) | 未在浏览器逐一重放浅/深色 × 桌面/窄屏 × 全部空错组合 |
+| 用量分析 | 与总览共用首屏/刷新/认证查询生命周期；既有第十/十一批覆盖 375px 深色分析、长字段、筛选应用与重置 | 本批无独立分析页截图；分析页没有导出功能，导出验收为 N/A |
+| 请求事件 | 实际 App + 本地合成 API 覆盖保留行的追加页失败/重试；DOM 精确覆盖 CSV/JSON Blob、文件名、失败格式重试和 cursor。最终代码另在实际 App 复核详情打开后刷新为空：Drawer 关闭、焦点进入空状态；恢复行后不重开详情，焦点进入事件区域。认证代次拒绝/恢复同样通过实际 App 合成复核。[截图](evidence/166/b12-events-page-retry-375-dark-en.png) | 内置浏览器未把下载落盘作为证据；文件内容、Blob 和下载名以 DOM 回归为准，不声称完成文件系统下载验收 |
+| 来源 | `useAdminQuery` 同 scope 刷新保留和失败重试由控制面行为测试覆盖；既有第六/十一批覆盖来源表、详情、编辑失败重试 | 本批未重新浏览器执行空来源、账号、连接测试、删除和生产提交的全部组合 |
+| 模型发现 | 实际 App + 合成 API 在 390px 英文深色切换第二个 Source，加载期间只显示新 scope，不泄露前一来源目录；DOM 覆盖首次失败、空来源刷新及同 scope 失败保留。[截图](evidence/166/b12-discovery-scope-switch-390-dark-en.png) | 本批未在浏览器完整串行执行发现 → diff → 确认写流程 |
+| 模型与路由 | 共用控制面刷新保留；既有第十一批分别提交 LogicalModel、Binding、Route 合成表单并核对归因/协议 | 本批无独立截图，未重放三实体全部空态、错误和生产写入 |
+| 能力矩阵 | 共用控制面刷新保留；既有第六/十一批覆盖 native/degraded/不可路由、筛选和窄屏详情 | 本批无独立截图，未重放所有协议 × 主题 × 宽度组合 |
+| 设置 | 实际 App + 合成 API 桌面浅色覆盖运行时快照、Key 列表和配置导出页面；响应与截图不含密钥正文。[截图](evidence/166/b12-settings-redaction-desktop-light.png) | 当前产品没有 UI 导入入口，导入验收为 N/A；本批不执行生产 Key 创建/读取/轮换/撤销，敏感结果关闭清理由第九/十一批 DOM/浏览器合成证据覆盖 |
+
+Vite 资源合计：JS **942.77 kB / gzip 289.04 kB**，CSS **159.86 kB / gzip 29.05 kB**；相对第十一批分别 **+4.31/+1.10 kB**、**0/0 kB**（原始/gzip）。主入口 **533.82 kB / gzip 166.18 kB**，默认 500kB warning 保留且构建通过；本批没有新增依赖或进行无关分包优化。
+
+生产配置写入、真实 Provider 调用、屏幕阅读器人工朗读和帧耗时基准是本批未执行的环境/人工验证披露，不是 PR #180 新增的关闭条件。该 PR 只以本文列明的查询生命周期、状态恢复和代表性逐页证据为验收边界；#166 仍保持开放，后续是否关闭由 Issue 中原有未完成项和独立证据决定。

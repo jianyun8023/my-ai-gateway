@@ -93,7 +93,8 @@ export function ModelDiscoveryPage({ api, refreshRevision = 0, onBusyChange }: M
     ]);
     return { latest, models };
   }, [api, availabilityFilter, confirmationFilter, effectiveSourceId]);
-  const discoveryQuery = useAdminQuery({ load: loadDiscovery, refreshRevision });
+  const discoveryQueryKey = `${effectiveSourceId}\u0000${confirmationFilter}\u0000${availabilityFilter}`;
+  const discoveryQuery = useAdminQuery({ load: loadDiscovery, queryKey: discoveryQueryKey, refreshRevision });
   const discovery = discoveryQuery.data;
   const visibleModels = (discovery?.models ?? []).filter((model) => model.source_id === effectiveSourceId);
   const eligibleModels = visibleModels.filter((model) => model.confirmation_status === 'pending' && model.availability_status === 'available');
@@ -165,7 +166,15 @@ export function ModelDiscoveryPage({ api, refreshRevision = 0, onBusyChange }: M
   if (contextQuery.loading && !context) return <LoadingState label={t('discovery.loading')} />;
   if (contextQuery.error && !context) return <ErrorState error={contextQuery.error} onRetry={contextQuery.reload} />;
   if (!context) return null;
-  if (context.sources.length === 0) return <EmptyTable title={t('discovery.no_sources_title')} description={t('discovery.no_sources_desc')} />;
+  if (context.sources.length === 0) return (
+    <section className={styles.page} data-od-id="page-model-discovery">
+      <PageActions>
+        <Button variant="secondary" onClick={contextQuery.reload} loading={contextQuery.refreshing}><IconRefreshCw size={14} />{t('common.refresh')}</Button>
+      </PageActions>
+      {contextQuery.error && <ErrorState error={contextQuery.error} onRetry={contextQuery.reload} />}
+      <EmptyTable title={t('discovery.no_sources_title')} description={t('discovery.no_sources_desc')} />
+    </section>
+  );
 
   return (
     <section className={styles.page} data-od-id="page-model-discovery">
@@ -188,6 +197,7 @@ export function ModelDiscoveryPage({ api, refreshRevision = 0, onBusyChange }: M
       </PageActions>
 
       {contextQuery.error && <ErrorState error={contextQuery.error} onRetry={contextQuery.reload} />}
+      {discoveryQuery.error && discovery && <ErrorState error={discoveryQuery.error} onRetry={discoveryQuery.reload} />}
       {mutationError && !editingModel && !confirmOpen && <ErrorState error={mutationError} />}
 
       {discoveryDefinition?.support === 'unsupported' && !discovery?.latest && (
@@ -195,7 +205,9 @@ export function ModelDiscoveryPage({ api, refreshRevision = 0, onBusyChange }: M
       )}
 
       <Card title={t('discovery.latest_run_card')} extra={<StatusPill tone="accent">{source?.provider_preset_id}@{source?.provider_preset_version}</StatusPill>}>
-        {discoveryQuery.loading && !discovery ? <LoadingState label={t('discovery.loading_run')} /> : discoveryQuery.error ? <ErrorState error={discoveryQuery.error} onRetry={discoveryQuery.reload} /> : <LatestRunPanel latest={discovery?.latest?.run.source_id === effectiveSourceId ? discovery.latest : null} />}
+        {discoveryQuery.loading && !discovery ? <LoadingState label={t('discovery.loading_run')} />
+          : discoveryQuery.error && !discovery ? <ErrorState error={discoveryQuery.error} onRetry={discoveryQuery.reload} />
+            : <LatestRunPanel latest={discovery?.latest?.run.source_id === effectiveSourceId ? discovery.latest : null} />}
       </Card>
 
       <FilterBar label={t('discovery.filters_aria')}>
@@ -204,7 +216,7 @@ export function ModelDiscoveryPage({ api, refreshRevision = 0, onBusyChange }: M
         <span className={styles.filterMeta}>{t('discovery.source_model_count', { count: visibleModels.length })}</span>
       </FilterBar>
 
-      {discoveryQuery.loading && !discovery ? <LoadingState label={t('discovery.loading_models')} /> : visibleModels.length === 0 ? (
+      {discoveryQuery.loading && !discovery ? <LoadingState label={t('discovery.loading_models')} /> : discoveryQuery.error && !discovery ? null : visibleModels.length === 0 ? (
         <EmptyTable
           title={discovery?.latest?.run.status === 'unsupported' ? t('discovery.empty_no_auto') : t('discovery.empty_no_match')}
           description={discovery?.latest?.run.status === 'failed' ? t('discovery.empty_no_match_desc') : t('discovery.empty_no_auto_desc')}

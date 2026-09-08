@@ -31,7 +31,9 @@ describe('GatewayConsoleShell Admin key boundary', () => {
 
   it('keeps the applied secret out of text, URL, localStorage, and logs', () => {
     let readAdminKey = () => '';
+    let clearAdminKey = () => {};
     let refreshRevision = -1;
+    let authGeneration = -1;
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     act(() => {
       root.render(
@@ -45,7 +47,9 @@ describe('GatewayConsoleShell Admin key boundary', () => {
         >
           {(context) => {
             readAdminKey = context.getAdminKey;
+            clearAdminKey = context.clearAdminKey;
             refreshRevision = context.refreshRevision;
+            authGeneration = context.authGeneration;
             return <div>content</div>;
           }}
         </GatewayConsoleShell>,
@@ -66,12 +70,19 @@ describe('GatewayConsoleShell Admin key boundary', () => {
 
     expect(readAdminKey()).toBe('top-secret-value');
     expect(refreshRevision).toBe(1);
+    expect(authGeneration).toBe(1);
     expect(sessionStorage.getItem(GATEWAY_ADMIN_KEY_STORAGE_KEY)).toBe('top-secret-value');
     expect(input.value).toBe('');
     expect(localStorage.getItem(GATEWAY_ADMIN_KEY_STORAGE_KEY)).toBeNull();
     expect(container.textContent).not.toContain('top-secret-value');
     expect(window.location.href).not.toContain('top-secret-value');
     expect(consoleError).not.toHaveBeenCalled();
+
+    act(() => clearAdminKey());
+    expect(readAdminKey()).toBe('');
+    expect(refreshRevision).toBe(2);
+    expect(authGeneration).toBe(2);
+    expect(sessionStorage.getItem(GATEWAY_ADMIN_KEY_STORAGE_KEY)).toBeNull();
   });
 
   it('toggles the resolved system-dark theme and blocks repeated refresh while busy', async () => {
@@ -87,8 +98,10 @@ describe('GatewayConsoleShell Admin key boundary', () => {
     expect(useThemeStore.getState().resolvedTheme).toBe('light');
     expect(container.querySelector('button[aria-label="切换为深色主题"]')).not.toBeNull();
     const refresh = container.querySelector<HTMLButtonElement>('button[aria-label="刷新"]')!;
+    expect(context!.authGeneration).toBe(0);
     act(() => refresh.click());
     expect(context!.refreshRevision).toBe(1);
+    expect(context!.authGeneration).toBe(0);
     act(() => context!.setRefreshing(true));
     expect(refresh.disabled).toBe(true);
     act(() => refresh.click());
@@ -131,6 +144,7 @@ describe('GatewayConsoleShell Admin key boundary', () => {
     act(() => restored.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
     expect(context!.getAdminKey()).toBe('draft-demo-key');
     expect(context!.refreshRevision).toBe(1);
+    expect(context!.authGeneration).toBe(1);
     expect(restored.value).toBe('');
     expect(container.textContent).not.toContain('draft-demo-key');
   });

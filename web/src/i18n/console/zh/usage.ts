@@ -195,6 +195,7 @@ export const usage = {
   // —— 页面级 ——
   page: {
     loading: '正在加载网关用量…',
+    refreshing: '正在刷新网关用量…',
   },
 
   // —— 页面级错误(本地化) ——

@@ -35,19 +35,24 @@ describe('usage query sessions', () => {
     exportEvents: vi.fn<GatewayUsageClient['exportEvents']>(),
   };
   const onLoadingChange = vi.fn();
-  function Probe({ filters, revision }: { filters: GatewayUsageFilters; revision: number }) {
-    const query = useUsageData({ client, filters, activeTab: 'events', granularity: 'auto', refreshRevision: revision, onLoadingChange });
+  function Probe({ filters, revision, authGeneration }: { filters: GatewayUsageFilters; revision: number; authGeneration: number }) {
+    const query = useUsageData({ client, filters, activeTab: 'events', granularity: 'auto', authGeneration, refreshRevision: revision, onLoadingChange });
     return <>
       <output>{query.eventPage?.events.map(item => item.id).join(',')}</output>
-      <span role="status">{query.loading ? 'loading' : query.loadingMore ? 'more' : 'idle'}</span>
-      {query.error && <p role="alert">{query.error.messageKey}</p>}
+      <span role="status">{query.loading ? 'loading' : query.refreshing ? 'refreshing' : query.loadingMore ? 'more' : 'idle'}</span>
+      {query.error && <p role="alert" data-error="load">{query.error.messageKey}</p>}
+      {query.loadMoreError && <p role="alert" data-error="more">{query.loadMoreError.messageKey}</p>}
+      {query.exportError && <p role="alert" data-error="export">{query.exportError.messageKey}</p>}
       <button onClick={query.loadMore}>More</button>
+      <button onClick={query.retryLoadMore}>Retry More</button>
       <button onClick={query.reload}>Reload</button>
       <button onClick={() => query.exportEvents('csv')}>Export</button>
+      <button onClick={() => query.exportEvents('json')}>Export JSON</button>
+      <button onClick={query.retryExport}>Retry Export</button>
     </>;
   }
-  const render = async (filters = baseFilters, revision = 0) => {
-    await act(async () => root.render(<Probe filters={filters} revision={revision} />));
+  const render = async (filters = baseFilters, revision = 0, authGeneration = 0) => {
+    await act(async () => root.render(<Probe filters={filters} revision={revision} authGeneration={authGeneration} />));
   };
   const click = async (label: string) => {
     await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent === label)!.click());
@@ -96,6 +101,77 @@ describe('usage query sessions', () => {
     expect(onLoadingChange).toHaveBeenLastCalledWith(false);
   });
 
+  it('retains current rows while a same-query refresh runs or fails, then replaces them on retry', async () => {
+    const refresh = deferred<UsageEventPageViewModel>();
+    const retry = deferred<UsageEventPageViewModel>();
+    client.events.mockResolvedValueOnce(page('current')).mockReturnValueOnce(refresh.promise).mockReturnValueOnce(retry.promise);
+    await render();
+    await render(baseFilters, 1);
+    expect(displayed()).toBe('current');
+    expect(container.querySelector('[role="status"]')?.textContent).toBe('refreshing');
+    await act(async () => refresh.reject(new Error('Refresh failed')));
+    expect(displayed()).toBe('current');
+    expect(container.querySelector('[data-error="load"]')?.textContent).toBe('usage.error.load_failed');
+    await click('Reload');
+    expect(displayed()).toBe('current');
+    expect(container.querySelector('[role="status"]')?.textContent).toBe('refreshing');
+    await act(async () => retry.resolve(page('retried')));
+    expect(displayed()).toBe('retried');
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+  });
+
+  it('clears the previous identity immediately when the authentication generation changes', async () => {
+    const changedIdentity = deferred<UsageEventPageViewModel>();
+    client.events.mockResolvedValueOnce(page('key-a')).mockReturnValueOnce(changedIdentity.promise);
+    await render();
+    await render(baseFilters, 1, 1);
+    expect(displayed()).toBe('');
+    expect(container.querySelector('[role="status"]')?.textContent).toBe('loading');
+    await act(async () => changedIdentity.reject(new Error('Unauthorized')));
+    expect(displayed()).toBe('');
+    expect(container.querySelector('[data-error="load"]')?.textContent).toBe('usage.error.load_failed');
+  });
+
+  it('keeps the published window and cursor after refresh failure while pausing old pagination', async () => {
+    const refresh = deferred<UsageEventPageViewModel>();
+    client.events.mockResolvedValueOnce(page('current', 'published-cursor'))
+      .mockReturnValueOnce(refresh.promise)
+      .mockResolvedValueOnce(page('next'));
+    client.exportEvents.mockRejectedValueOnce(new Error('Synthetic export failure'));
+    await render();
+    const publishedFilters = client.events.mock.calls[0][0].filters;
+    vi.setSystemTime(new Date('2026-09-08T10:00:00Z'));
+    await render(baseFilters, 1);
+    const pendingFilters = client.events.mock.calls[1][0].filters;
+    expect(pendingFilters).not.toEqual(publishedFilters);
+    await click('More');
+    expect(client.events).toHaveBeenCalledTimes(2);
+    await act(async () => refresh.reject(new Error('Refresh failed')));
+    expect(displayed()).toBe('current');
+    await click('Export');
+    expect(client.exportEvents.mock.calls[0][0]).toEqual(publishedFilters);
+    await click('More');
+    expect(client.events.mock.calls[2][0]).toMatchObject({
+      filters: publishedFilters,
+      cursor: 'published-cursor',
+    });
+    expect(displayed()).toBe('current,next');
+  });
+
+  it('clears an old query scope immediately and refuses its cursor until the new first page succeeds', async () => {
+    const nextScope = deferred<UsageEventPageViewModel>();
+    client.events.mockResolvedValueOnce(page('old', 'old-cursor')).mockReturnValueOnce(nextScope.promise);
+    await render();
+    await render({ ...baseFilters, provider: 'new-provider' });
+    expect(displayed()).toBe('');
+    expect(container.querySelector('[role="status"]')?.textContent).toBe('loading');
+    await click('More');
+    expect(client.events).toHaveBeenCalledTimes(2);
+    expect(client.events.mock.calls[1][0]).not.toHaveProperty('cursor');
+    await act(async () => nextScope.resolve(page('new')));
+    expect(displayed()).toBe('new');
+  });
+
   it('does not append an obsolete cursor page after filters change', async () => {
     const old = deferred<UsageEventPageViewModel>();
     client.events.mockResolvedValueOnce(page('old-first', 'old-cursor')).mockReturnValueOnce(old.promise).mockResolvedValueOnce(page('new-first'));
@@ -117,6 +193,57 @@ describe('usage query sessions', () => {
     expect(client.events).toHaveBeenCalledTimes(2);
     await act(async () => next.resolve({ events: [...page('first').events, ...page('second').events], hasMore: false }));
     expect(displayed()).toBe('first,second');
+  });
+
+  it('pauses a failed cursor until an explicit retry reuses it without duplicating rows', async () => {
+    client.events.mockResolvedValueOnce(page('first', 'cursor'))
+      .mockRejectedValueOnce(new Error('Page failed'))
+      .mockResolvedValueOnce({ ...page('second'), events: [...page('first').events, ...page('second').events] });
+    await render();
+    await click('More');
+    expect(displayed()).toBe('first');
+    expect(container.querySelector('[data-error="more"]')?.textContent).toBe('usage.error.load_more_failed');
+    await click('More');
+    expect(client.events).toHaveBeenCalledTimes(2);
+    await click('Retry More');
+    expect(client.events.mock.calls[1][0].cursor).toBe('cursor');
+    expect(client.events.mock.calls[2][0].cursor).toBe('cursor');
+    expect(displayed()).toBe('first,second');
+    expect(container.querySelector('[data-error="more"]')).toBeNull();
+  });
+
+  it('retries only the failed export format without reloading the event list', async () => {
+    client.events.mockResolvedValueOnce(page('first'));
+    client.exportEvents.mockRejectedValueOnce(new Error('Export failed')).mockRejectedValueOnce(new Error('Export failed again'));
+    await render();
+    await click('Export');
+    expect(container.querySelector('[data-error="export"]')?.textContent).toBe('errors.export_failed');
+    await click('Retry Export');
+    expect(client.exportEvents).toHaveBeenCalledTimes(2);
+    expect(client.exportEvents.mock.calls.map((call) => call[1])).toEqual(['csv', 'csv']);
+    expect(client.exportEvents.mock.calls[1][0]).toEqual(client.exportEvents.mock.calls[0][0]);
+    expect(client.events).toHaveBeenCalledOnce();
+  });
+
+  it('downloads successful CSV and JSON exports without reloading the event list', async () => {
+    const downloads: string[] = [];
+    const createObjectURL = vi.spyOn(URL, 'createObjectURL')
+      .mockReturnValueOnce('blob:synthetic-csv')
+      .mockReturnValueOnce('blob:synthetic-json');
+    const revokeObjectURL = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      downloads.push(this.download);
+    });
+    client.events.mockResolvedValueOnce(page('first'));
+    client.exportEvents.mockResolvedValueOnce(new Blob(['csv'])).mockResolvedValueOnce(new Blob(['json']));
+    await render();
+    await click('Export');
+    await click('Export JSON');
+    expect(client.exportEvents.mock.calls.map((call) => call[1])).toEqual(['csv', 'json']);
+    expect(downloads).toEqual(['gateway-usage-events.csv', 'gateway-usage-events.json']);
+    expect(createObjectURL).toHaveBeenCalledTimes(2);
+    expect(revokeObjectURL.mock.calls.map((call) => call[0])).toEqual(['blob:synthetic-csv', 'blob:synthetic-json']);
+    expect(client.events).toHaveBeenCalledOnce();
   });
 
   it('starts a new cancellable session on retry and ignores failures from the old one', async () => {
@@ -164,7 +291,7 @@ describe('summary source query sessions', () => {
     const root = createRoot(host);
     globalThis.IS_REACT_ACT_ENVIRONMENT = true;
     function SummaryProbe({ filters, revision }: { filters: GatewayUsageFilters; revision: number }) {
-      const query = useUsageData({ client: realClient, filters, activeTab, granularity: 'auto', refreshRevision: revision });
+      const query = useUsageData({ client: realClient, filters, activeTab, granularity: 'auto', authGeneration: 0, refreshRevision: revision });
       return <output>{JSON.stringify(query.overview?.summary.usageSources ?? query.analysisSummary?.usageSources)}</output>;
     }
     try {

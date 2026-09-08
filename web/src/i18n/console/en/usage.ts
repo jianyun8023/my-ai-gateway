@@ -195,6 +195,7 @@ export const usage = {
   // —— 页面级 ——
   page: {
     loading: 'Loading gateway usage…',
+    refreshing: 'Refreshing gateway usage…',
   },
 
   // —— 页面级错误(本地化) ——
