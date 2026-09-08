@@ -1,5 +1,6 @@
 import { currentIntlLocale } from '@/i18n/intl';
-import { formatExactInteger } from '@/utils/formatCompact';
+import { isUnreportedUsage } from './usageQuality';
+import { formatCompact, formatExactInteger } from '@/utils/formatCompact';
 import type { TFunction } from 'i18next';
 
 const FALLBACK_REASON_KEYS: Record<string, string> = {
@@ -32,8 +33,13 @@ export const formatBucket = (value: string): string => new Intl.DateTimeFormat(c
   minute: '2-digit',
 }).format(new Date(value));
 
-export const formatDuration = (value: number): string => {
-  if (value <= 0) return '—';
-  if (value < 1000) return `${formatExactInteger(value)} ms`;
+export const formatDuration = (value?: number | null, exact = false): string => {
+  if (value == null || !Number.isFinite(value) || value < 0) return '—';
+  if (exact || value < 1000) return `${formatExactInteger(value)} ms`;
   return `${(value / 1000).toFixed(value < 10_000 ? 1 : 0)} s`;
+};
+
+export const formatUsageTokens = (value: number, source: string, exact = false): string => {
+  if (value === 0 && isUnreportedUsage(source)) return '—';
+  return exact ? formatExactInteger(value) : formatCompact(value);
 };

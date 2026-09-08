@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import type { AdminTransport } from '@/admin-api/client';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -139,5 +140,46 @@ describe('usage query sessions', () => {
     expect(onLoadingChange).toHaveBeenLastCalledWith(false);
     await act(async () => pending.resolve(page('too-late')));
     expect(container.textContent).toBe('');
+  });
+});
+
+// Exercise the actual client join through the hook, including transports that
+// ignore cancellation. A late usage_source response must never cross sessions.
+describe('summary source query sessions', () => {
+  it.each(['overview', 'analysis'] as const)('keeps %s source counts within the current filter/refresh session', async (activeTab) => {
+    const { GatewayUsageClient } = await import('@/gateway-usage/client');
+    const { gatewayUsageSummaryFixture } = await import('@/test/fixtures/usage');
+    const oldSources = deferred<unknown>();
+    let sourceCalls = 0;
+    const json = vi.fn(async (url: string) => {
+      if (url.includes('/summary')) return gatewayUsageSummaryFixture;
+      if (url.includes('breakdown=usage_source')) {
+        sourceCalls++;
+        return sourceCalls === 1 ? oldSources.promise : { data: [{ key: 'estimated', logical_requests: sourceCalls }] };
+      }
+      return { data: [] };
+    });
+    const realClient = new GatewayUsageClient({ json: json as AdminTransport['json'], blob: vi.fn() });
+    const host = document.createElement('div');
+    const root = createRoot(host);
+    globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+    function SummaryProbe({ filters, revision }: { filters: GatewayUsageFilters; revision: number }) {
+      const query = useUsageData({ client: realClient, filters, activeTab, granularity: 'auto', refreshRevision: revision });
+      return <output>{JSON.stringify(query.overview?.summary.usageSources ?? query.analysisSummary?.usageSources)}</output>;
+    }
+    try {
+      await act(async () => root.render(<SummaryProbe filters={baseFilters} revision={0} />));
+      expect(host.textContent).toBe('');
+      const changed = { ...baseFilters, sourceId: 'new-source' };
+      await act(async () => root.render(<SummaryProbe filters={changed} revision={0} />));
+      expect(host.textContent).toBe('{"estimated":2}');
+      await act(async () => root.render(<SummaryProbe filters={changed} revision={1} />));
+      expect(host.textContent).toBe('{"estimated":3}');
+      await act(async () => oldSources.resolve({ data: [{ key: 'missing', logical_requests: 99 }] }));
+      expect(host.textContent).toBe('{"estimated":3}');
+      expect(sourceCalls).toBe(3);
+      const calls = json.mock.calls as unknown as [string, { signal: AbortSignal }][];
+      expect(calls[0][1].signal.aborted).toBe(true);
+    } finally { act(() => root.unmount()); }
   });
 });

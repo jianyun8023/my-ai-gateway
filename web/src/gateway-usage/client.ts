@@ -69,7 +69,11 @@ export class GatewayUsageClient {
   }
 
   async summary(filters: GatewayUsageFilters, signal?: AbortSignal): Promise<UsageSummaryViewModel> {
-    return adaptUsageSummary(await this.json(buildGatewayUsageURL('summary', filters), signal));
+    const [payload, sources] = await Promise.all([
+      this.json(buildGatewayUsageURL('summary', filters), signal),
+      this.breakdown(filters, 'usage_source', signal),
+    ]);
+    return adaptUsageSummary(payload, sources);
   }
 
   async timeseries(

@@ -1,6 +1,6 @@
 # Mantine 控制台迁移清单（#166）
 
-初始基线：2026-09-08，`main c99455e`（PR #168 已合并）。当前第九批基线为 `main 7b0beab`（PR #176 已合并），分支 `codex/166-notification-feedback`。关联 [Issue #166](https://github.com/jianyun8023/my-ai-gateway/issues/166)，本清单随每批实现更新；未完成全部验收前不关闭总任务。
+初始基线：2026-09-08，`main c99455e`（PR #168 已合并）。当前第十批基线为 `main b0e433c`（PR #177 已合并），分支 `codex/166-usage-metrics`。关联 [Issue #166](https://github.com/jianyun8023/my-ai-gateway/issues/166)，本清单随每批实现更新；未完成全部验收前不关闭总任务。
 
 Issue 中 `de708e8` 的链接是历史调查依据。当前事件详情已位于 `features/usage/UsageEventDetails.tsx` 并复用公共 Modal；旧 Select、PortalTooltip、QuestionMarkHelp 等无调用实现已在 #168 删除，不再列为线上迁移对象。
 
@@ -14,12 +14,12 @@ Issue 中 `de708e8` 的链接是历史调查依据。当前事件详情已位于
 
 ## 页面与流程覆盖
 
-路径相对于 `web/src/`。前八批 PR #169–#176 均已合并且 CI 通过；第九批反馈证据见文末。接入和代表性验证不等于该页完成全部验收。
+路径相对于 `web/src/`。前九批 PR #169–#177 均已合并且 CI 通过；第十批指标/格式/状态证据见文末。接入和代表性验证不等于该页完成全部验收。
 
 | 页面/流程 | 当前组件与实际入口 | 目标与保留项 | 迁移批次/PR | 验证证据与剩余工作 |
 | --- | --- | --- | --- | --- |
 | 应用壳 | `GatewayConsoleShell`：桌面侧栏、移动导航、连接、主题、语言、刷新 | 保留 hash 与状态契约；公共 Drawer/字段/按钮 | #169–#171，第八批应用壳 | 八页导航/标题/选中态、临界宽度顶栏、移动语言/连接区、详情与确认焦点隔离已验证；全部页面状态组合仍待验收 |
-| 总览 | `UsageOverview`、`UsageFilters`、`UsageTrend` | Mantine 筛选/反馈/构成图；保留 Chart.js 与独立 Total | #169–#173 | 双主题趋势/精确表/单图构成、390px 已验证；KPI 与完整刷新/空错状态待收敛 |
+| 总览 | `UsageOverview`、`UsageFilters`、`UsageTrend` | Mantine 筛选/反馈/构成图；保留 Chart.js 与独立 Total | #169–#173 | 双主题趋势/精确表/单图构成、390px 已验证；第十批 KPI/来源/数值完成，完整刷新/空错状态待收敛 |
 | 用量分析 | `UsageAnalysis`、`TokenDistribution`、`TokenComposition` | Progress 分布、Source 平均/P95 Table；完整值与 missing 保留 | #169–#173，第六批共享 Table 主题 | 代表性中英文、长字段、真实零值与缺失已验证；导出及全状态组合待验收 |
 | 请求事件 | `UsageEvents`、`UsageEventDetails` | Mantine Table/Popover/Drawer；TanStack Virtual 测量与单一滚动区 | #169–#172，第七批虚拟表 | DOM 覆盖千行测量、重排与分页；浏览器覆盖 390px 指针、列切换、连续追加、万行刷新和真实详情只读；全状态组合待验收 |
 | 来源 | `SourcesPage`、`SourceForm`、`AccountForm`、`SourceDetailDrawer` | 公共表单/浮层、Table 来源/账号/预设差异 | #169–#172，第六批表格 | 编辑隔离、键盘详情与返回焦点、窄屏预设差异滚动已验证；真实提交/连接测试待验收 |
@@ -271,3 +271,33 @@ Web ESLint/Knip、TypeScript、测试（30 个文件、149 项）和构建通过
 按 Vite 输出合计：JS **935.48 kB / gzip 286.90 kB**，CSS **160.26 kB / gzip 29.10 kB**；相对第八批约增加 **26.10/8.38 kB** 与 **4.31/0.56 kB**（原始/gzip）。主入口 **532.98 kB / gzip 165.90 kB**，继续保留默认 500kB warning，构建通过；没有隐藏提示或扩展分包改造。通知新增 store/transition 依赖由锁文件记录，未升级其他直接依赖。
 
 未覆盖：系统减少动画偏好的浏览器实测、屏幕阅读器实际朗读、全部键盘关闭组合、全八页业务状态、真实配置提交/Provider/Key 验收和性能基准。系统减少动画由现有主题与 Mantine 实现继承，不能据源码或 DOM 测试记为浏览器通过。本批无后端改动，本地未运行 Rust/PostgreSQL/live Provider 测试；PR CI 结果另在关联 PR 与 Issue 记录。#166 保持开放。
+
+## 第十批：用量 KPI、数值格式与状态表达
+
+基线 main `b0e433c`（PR #177 已合并），分支 `codex/166-usage-metrics`。范围限于总览、分析和请求事件的指标、格式与来源状态，不改 Rust、Admin API、数据库或核算规则，不包含页面组合提炼、日期风格、刷新体验或虚拟化改造。
+
+- 新增薄 `MetricCard`，以 Mantine Paper/Text 和品牌变量集中指标排版、辅助信息、精确值 title/可访问名称及窄屏换行；总览保留自己的四列/两列/单列网格。移除旧 Stat 及对应页面视觉样式。
+- 百分比、ms/s、精确毫秒和事件 Token 格式集中复用；真实 `0 ms` 与缺失 `—` 分开。K/M/B/T 规则保持不变，详情显示精确带分隔符数值，大数窄屏按可用宽度布局。
+- 最近请求、事件状态和 attempt 使用有文字的 `UsageStatus`；最近请求新增 `UsageBadge`，保持五类来源差异。missing/unknown 的记账零有明确说明；真实上报零保留，unknown 非零读数不丢弃。保留模型、Provider、Source、账号、协议和 fallback 归因，attempt 同时显示上游协议。
+- 修复真实 summary 不返回 usage_sources 导致计数为空的问题：每次 summary 并行增加一条已有 `breakdown=usage_source` 查询，共享 filters/signal，用真实响应 `key/logical_requests` 组装。两项成功后统一发布，失败沿用错误/重试，不 catch 为零或空字典；分页和导出不增加来源查询。此处不承诺跨数据库查询的事务快照一致。
+- 构成区域显示来源计数及 missing/estimated/unknown 解释；全 missing/unknown 且记账总量为零时，KPI、构成与分布不宣称已确认零。独立 Total、输入/输出、推理和缓存含义保持不变。
+
+最终 Web 验证：`mise exec -- npm --prefix web run lint`（ESLint、Knip 两种门禁）、`typecheck`、`test`（32 文件 **176 项**）、`build` 通过，`git diff --check` 通过。新增 17 项测试及既有断言扩充，覆盖真实来源 API 夹具、完整筛选/signal、每轮一次来源查询、任一请求失败、筛选/刷新迟到响应隔离、零/缺失延迟、上报零/全 missing/unknown/混合来源、精确大数和无请求；保留图表独立 Total、零分布及事件 fallback 断言。独立只读审查发现最近请求列宽下限风险，修复后复核无剩余阻断；同时收窄页面颜色选择器，避免覆盖公共状态标签颜色。
+
+浏览器使用真实 Overview / Analysis / EventsTable / EventDetails 组件与公开合成数据，未连接生产或调用 Provider：
+
+| 实测范围 | 结果 |
+| --- | --- |
+| 390px 英文深色总览 | 四个 KPI 两列、0 ms/P95 缺失、1.2T 精确名称、长模型/来源、成功失败及估算/缺失标签可读；无页面横向溢出 |
+| 375px 中文浅色全 missing | KPI 单列；总量、构成、分布与最近请求保留不可用说明/缺失标签，成功率独立显示；无横向溢出 |
+| 375px 英文深色分析 | 来源计数与混合估算/缺失说明、长分布名称、Source 的 0 ms 与缺失 P95 可读；宽延迟表仅在自身容器滚动 |
+| 390px 英文深色、375px 中文浅色事件详情 | 从实际列表入口打开详情，精确 `1,234,567,890,123`、缺失 Token 说明、模型/协议/Source/fallback 和成功/失败 attempt 可读；详情内部滚动，数字未撑宽内容 |
+| 1024/1280/1281px 总览 | 桌面预留与 Shell 相同的 220px 侧栏空间；最近请求及其子元素无横向溢出，1281px 双列下成功/失败词完整显示 |
+
+公开截图：[总览桌面浅色](evidence/166/b10-overview-desktop-light.png)、[总览 390px 深色](evidence/166/b10-overview-mobile-dark.png)、[全 missing 375px 浅色](evidence/166/b10-overview-missing-375-light.png)、[分析 375px 深色](evidence/166/b10-analysis-375-dark.png)、[事件详情深色](evidence/166/b10-details-mobile-dark.png)。全部数据为合成；开发服务未自动捕获部分文件变化，重启后按最终代码重验相关布局，临时入口已移出仓库，视口已恢复。
+
+最终 Vite 资源：JS **938.54 kB / gzip 287.70 kB**，CSS **160.34 kB / gzip 29.08 kB**；相对第九批分别为 **+3.06/+0.80 kB** 与 **+0.08/−0.02 kB**（原始/gzip）。主入口 **533.49 kB / gzip 166.09 kB**，保留默认 500kB warning，构建通过。本批无新增依赖或无关分包优化。
+
+交付中附带最小 CI 恢复：PR #178 两轮运行在 mise 自动选择 `2026.9.3` 后因下载 404 失败，未进入源码检查。两个 PR job 固定 mise 安装器为已发布的 `2026.9.2`；Rust/Node 版本、所有检查及权限保持原状，详见 [CI 说明](ci.md)。恢复后的最终 head 检查结果以 PR 为准。
+
+未覆盖：屏幕阅读器实际朗读、全八页核心流程及加载/空态/错误/刷新组合、全部嵌套浮层/系统减少动画实测、真实配置和 Provider 验收、性能基准。日期显示沿用现状，本批不治理日期。无后端改动，本地未运行 Rust/PostgreSQL/live 测试；最终 head 的 PR CI 另在 Issue/PR 记录。#166 保持开放，只有指标/状态/格式条目可据本批完成；八页整体验收和其他复合条目继续留空。

@@ -69,7 +69,7 @@ const adaptTokenTotals = (payload: RawGatewayUsagePayload): TokenTotals => {
   };
 };
 
-export const adaptUsageSummary = (payload: RawGatewayUsagePayload): UsageSummaryViewModel => {
+export const adaptUsageSummary = (payload: RawGatewayUsagePayload, sourceRows: UsageBreakdownItem[] = []): UsageSummaryViewModel => {
   const root = asRecord(payload);
   const summary = Object.keys(asRecord(root.data)).length > 0
     ? asRecord(root.data)
@@ -95,11 +95,7 @@ export const adaptUsageSummary = (payload: RawGatewayUsagePayload): UsageSummary
   const retries = Object.keys(attempts).length > 0
     ? readNumber(attempts, ['retries'])
     : readNumber(summary, ['retries', 'retry_count'], Math.max(0, upstreamAttempts - logicalRequests));
-  const usageSourceRows = asArray(firstDefined(summary, ['usage_sources', 'usage_source_breakdown']));
-  const usageSources = Object.fromEntries(usageSourceRows.map((row) => {
-    const item = asRecord(row);
-    return [readString(item, ['key', 'usage_source', 'dimension'], 'unknown'), readNumber(item, ['requests', 'count'])];
-  }));
+  const usageSources = Object.fromEntries(sourceRows.map(row => [row.key, row.logicalRequests]));
 
   return {
     logicalRequests,
@@ -108,8 +104,8 @@ export const adaptUsageSummary = (payload: RawGatewayUsagePayload): UsageSummary
     successRate: logicalRequests > 0 ? successfulRequests / logicalRequests : 0,
     upstreamAttempts,
     retries,
-    averageLatencyMs: readNumber(summary, ['average_latency_ms', 'avg_latency_ms']),
-    p95LatencyMs: readNumber(summary, ['p95_latency_ms']),
+    averageLatencyMs: firstDefined(summary, ['average_latency_ms', 'avg_latency_ms']) === undefined ? undefined : readNumber(summary, ['average_latency_ms', 'avg_latency_ms']),
+    p95LatencyMs: firstDefined(summary, ['p95_latency_ms']) === undefined ? undefined : readNumber(summary, ['p95_latency_ms']),
     tokens: adaptTokenTotals(summary),
     usageSources,
   };
@@ -165,7 +161,7 @@ const adaptAttempt = (payload: unknown, fallbackIndex: number): UsageAttemptView
     protocolUpstream: readString(item, ['protocol_upstream', 'protocol_out'], '—'),
     statusCode,
     success: asBoolean(item.success, statusCode > 0 && statusCode < 400),
-    latencyMs: readNumber(item, ['latency_ms']),
+    latencyMs: firstDefined(item, ['latency_ms']) === undefined ? undefined : readNumber(item, ['latency_ms']),
   };
 };
 
@@ -195,7 +191,7 @@ const adaptUsageEvent = (payload: RawGatewayUsagePayload): UsageEventViewModel =
     retryCount,
     fallback: asBoolean(item.fallback, retryCount > 0 || attempts.length > 1 || Boolean(fallbackReason)),
     fallbackReason,
-    latencyMs: readNumber(item, ['latency_ms']),
+    latencyMs: firstDefined(item, ['latency_ms']) === undefined ? undefined : readNumber(item, ['latency_ms']),
     tokens: adaptTokenTotals(item),
     usageSource: readString(item, ['usage_source'], 'missing'),
     degraded: asBoolean(item.degraded),

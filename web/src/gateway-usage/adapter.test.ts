@@ -1,11 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import { adaptUsageBreakdown, adaptUsageEventAttempts, adaptUsageEventPage, adaptUsageSummary, adaptUsageTimeseries } from './adapter';
-import { gatewayUsageBreakdownFixture, gatewayUsageEventsFixture, gatewayUsageSummaryFixture, gatewayUsageTimeseriesFixture } from '@/test/fixtures/usage';
+import { gatewayUsageBreakdownFixture, gatewayUsageEventsFixture, gatewayUsageSummaryFixture, gatewayUsageSourcesFixture, gatewayUsageTimeseriesFixture } from '@/test/fixtures/usage';
 
 describe('gateway usage adapter', () => {
   it('preserves source P95 from the API and distinguishes absent percentiles from zero', () => {
     const items = adaptUsageBreakdown({ items: [{ key: 'slow', p95_latency_ms: 1500 }, { key: 'zero', p95_latency_ms: 0 }, { key: 'missing' }] });
     expect(items.map(item => item.p95LatencyMs)).toEqual([1500, 0, undefined]);
+  });
+  it('preserves zero and absent summary/event/attempt latency at the API boundary', () => {
+    expect(adaptUsageSummary({ data: { average_latency_ms: 0, p95_latency_ms: null } })).toMatchObject({ averageLatencyMs: 0, p95LatencyMs: undefined });
+    expect(adaptUsageSummary({ data: { logical_requests: 1 } }).averageLatencyMs).toBeUndefined();
+    expect(adaptUsageEventPage({ data: [{ latency_ms: null }, { latency_ms: 0 }] }).events.map(event => event.latencyMs)).toEqual([undefined, 0]);
+    expect(adaptUsageEventAttempts({ attempts: [{ latency_ms: null }, { latency_ms: 0 }] }).map(attempt => attempt.latencyMs)).toEqual([undefined, 0]);
+  });
+  it('joins logical request counts for parsed and unknown sources', () => {
+    const rows = adaptUsageBreakdown({ version: 'v1', timezone: 'UTC', dimension: 'usage_source', data: [{ key: 'parsed', logical_requests: 12 }, { key: null, logical_requests: 7 }] });
+    expect(adaptUsageSummary(gatewayUsageSummaryFixture, rows).usageSources).toEqual({ parsed: 12, unknown: 7 });
   });
   it('maps detail attempts at the API boundary without interpreting missing status as success', () => {
     const attempts = adaptUsageEventAttempts({ attempts: [
@@ -17,7 +27,7 @@ describe('gateway usage adapter', () => {
     expect(attempts.slice(1).map(item => item.success)).toEqual([false, false]);
   });
   it('keeps logical requests separate from upstream attempts and tokens', () => {
-    const summary = adaptUsageSummary(gatewayUsageSummaryFixture);
+    const summary = adaptUsageSummary(gatewayUsageSummaryFixture, adaptUsageBreakdown(gatewayUsageSourcesFixture));
     expect(summary.logicalRequests).toBe(3);
     expect(summary.upstreamAttempts).toBe(5);
     expect(summary.retries).toBe(2);

@@ -3,22 +3,23 @@ import { act } from 'react';
 import { createRoot } from '@/test/render';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AdminClient } from '@/admin-api/client';
+import type { UsageEventViewModel } from "@/gateway-usage";
 import { GatewayUsageClient } from '@/gateway-usage/client';
 import { adaptUsageEventPage } from '@/gateway-usage/adapter';
 import { gatewayUsageEventsFixture } from '@/test/fixtures/usage';
 import { setTestLanguage } from '@/test/setup';
 import { EventDetails } from './UsageEventDetails';
 
-const event = { ...adaptUsageEventPage(gatewayUsageEventsFixture).events[0], attempts: [] };
+const event: UsageEventViewModel = { ...adaptUsageEventPage(gatewayUsageEventsFixture).events[0], attempts: [] };
 
 describe('usage event details', () => {
   let container: HTMLDivElement;
   let root: ReturnType<typeof createRoot>;
   const fetchImpl = vi.fn<typeof fetch>();
   const onClose = vi.fn();
-  const render = async () => {
+  const render = async (selectedEvent = event) => {
     const client = new GatewayUsageClient(new AdminClient({ fetchImpl }));
-    await act(async () => root.render(<EventDetails event={event} client={client} onClose={onClose} />));
+    await act(async () => root.render(<EventDetails event={selectedEvent} client={client} onClose={onClose} />));
   };
   beforeEach(async () => {
     vi.resetAllMocks();
@@ -47,6 +48,28 @@ describe('usage event details', () => {
     act(() => dialog.querySelector('button')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 250)); });
     expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it('keeps exact token totals, zero latency, protocol attribution and text attempt statuses', async () => {
+    fetchImpl.mockResolvedValue(new Response(JSON.stringify({ attempts: gatewayUsageEventsFixture.items[0].attempts })));
+    await render({ ...event, latencyMs: 0, tokens: { ...event.tokens, total: 1234567890123 } });
+    const dialog = document.querySelector('[role="dialog"]')!;
+    expect(dialog.textContent).toContain('1,234,567,890,123');
+    expect(dialog.textContent).toContain('0 ms');
+    expect(dialog.textContent).toContain('429 · 失败');
+    expect(dialog.textContent).toContain('200 · 成功');
+    expect(dialog.textContent).toContain('anthropic_messages');
+    expect(dialog.textContent).toContain('source-singapore');
+    expect(dialog.textContent).toContain('source-tokyo');
+  });
+
+  it('explains missing token usage instead of displaying unexplained accounting zeros', async () => {
+    fetchImpl.mockResolvedValue(new Response(JSON.stringify({ attempts: [] })));
+    await render({ ...event, ...adaptUsageEventPage(gatewayUsageEventsFixture).events[1] });
+    const dialog = document.querySelector('[role="dialog"]')!;
+    expect(dialog.textContent).toContain('记账零不代表已确认零用量');
+    expect(dialog.textContent).toContain('总计 —');
+    expect(dialog.textContent).toContain('缺失');
   });
 
   it('cancels the detail request when the drawer is removed', async () => {

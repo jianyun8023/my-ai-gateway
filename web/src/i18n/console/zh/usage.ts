@@ -25,6 +25,7 @@ export const usage = {
 
   // —— 用量来源枚举展示(值保持枚举原形)——
   usage_source: {
+    unknown: '未知',
     upstream: '上游',
     parsed: '解析',
     estimated: '估算',
@@ -110,6 +111,9 @@ export const usage = {
     subtitle: '时间按本地时区显示',
   },
   composition: {
+    unreported: 'Token 用量不可用；记账零不代表已确认零用量。',
+    estimated: '{{count}} 个请求使用估算 Token，已计入总量。',
+    unknown: '{{count}} 个请求的用量来源未知，Token 依据尚未确认。',
     chart_title: '输入 / 输出占比',
     empty: '暂无已上报的输入或输出 Token',
     total_difference: '输入 + 输出为 {{combined}}，上报总量为 {{total}}；图中按输入 + 输出计算占比。',
