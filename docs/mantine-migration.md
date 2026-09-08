@@ -1,6 +1,6 @@
 # Mantine 控制台迁移清单（#166）
 
-初始基线：2026-09-08，`main c99455e`（PR #168 已合并）。当前第十四批基线为 `main c1118db`（PR #181 已合并），分支 `codex/166-page-browser-evidence`。关联 [Issue #166](https://github.com/jianyun8023/my-ai-gateway/issues/166)，本清单随每批实现更新；Issue/PR、代码合并和生产验收分别记录，不互相推断。
+初始基线：2026-09-08，`main c99455e`（PR #168 已合并）。当前第十四批基线为 `main c1118db`（PR #181 已合并），分支 `codex/166-page-browser-evidence`、PR #182。关联 [Issue #166](https://github.com/jianyun8023/my-ai-gateway/issues/166)，本清单随每批实现更新；Issue/PR、代码合并和生产验收分别记录，不互相推断。
 
 Issue 中 `de708e8` 的链接是历史调查依据。当前事件详情已位于 `features/usage/UsageEventDetails.tsx` 并复用公共 Modal；旧 Select、PortalTooltip、QuestionMarkHelp 等无调用实现已在 #168 删除，不再列为线上迁移对象。
 
@@ -408,7 +408,7 @@ Vite 资源合计：JS **960.74 kB / gzip 293.96 kB**，CSS **143.06 kB / gzip 2
 
 ## 第十四批：逐页业务状态证据闭环
 
-基线为 PR #181 合并后的 main `c1118db`，分支 `codex/166-page-browser-evidence`。本批只补评审明确指出仍缺少的真实 App 浏览器状态；没有改变前端、Rust、Admin API、数据库或业务契约。Chrome 直接运行最终源码，经本地内存合成 Admin API 在 1440×900 中文浅色和 390×844 中文深色下重放；合成服务不读取生产配置或凭据，不发送真实 Provider 请求。
+基线为 PR #181 合并后的 main `c1118db`，分支 `codex/166-page-browser-evidence`、PR #182。本批只补评审明确指出仍缺少的真实 App 浏览器状态；没有改变前端、Rust、Admin API、数据库或业务契约。Chrome 直接运行最终源码，经本地内存合成 Admin API 在 1440×900 中文浅色和 390×844 中文深色下重放；合成服务不读取生产配置或凭据，不发送真实 Provider 请求。
 
 本批的控制条件、浏览器操作、页面观察与请求日志如下。这里的“请求日志”来自合成服务按顺序记录的实际浏览器 HTTP 请求，不把直接设置夹具状态的 `GET /__control` 计作产品行为。
 
