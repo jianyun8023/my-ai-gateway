@@ -4,6 +4,8 @@
 
 本轮沿用后端治理的分层、共享能力收敛、死代码清理和门禁方式，实现位于 `codex/frontend-architecture-governance`。起点为 2026-09-08 的 `main` `de708e8`，完成后整合已合并后端治理的 `main` `efeb445`。
 
+关联任务：[前端分层、公共能力与死代码治理 #167](https://github.com/jianyun8023/my-ai-gateway/issues/167)。与 Mantine 全局 UI 治理 #166 的衔接见下文；CI 和合并状态以 GitHub 实时记录为准。
+
 ## 分层与调用链
 
 | 层 | 入口与职责 |
@@ -60,6 +62,26 @@ App → GatewayManagementPage → features/control-plane → useAdminQuery / 资
 事件详情复用 `Modal` drawer，统一关闭、Escape、焦点约束与恢复。宽表通过 `TableScroll` 或事件列表自己的滚动容器滚动；控制台 flex / grid 子项必须允许收缩，不能让表格撑宽整页。日期预设在窄屏换行。
 
 删除没有生产调用方的旧组件、图标、路由辅助函数与独占样式。测试夹具统一放在 `src/test/fixtures/`，不混入生产数据层。保留 CPA Usage Keeper 的 MIT 许可与来源说明。
+
+## 与 Mantine 全局治理 #166 的衔接
+
+[#166](https://github.com/jianyun8023/my-ai-gateway/issues/166) 负责采用 Mantine 统一八个页面的设计系统；本轮架构治理不改变这项决策，也不完成其全页面 UI 迁移与验收。该 Issue 的调查链接固定在旧提交，后续清单应按本轮的新入口更新。
+
+以下路径相对于 `web/src/`：
+
+| #166 涉及范围 | 本轮影响 | 后续接入点与剩余工作 |
+| --- | --- | --- |
+| 应用入口与主题 | 主题初始化组件从 `main.tsx` 拆到 `Root.tsx`；全局样式加载顺序保持不变 | 在新入口装配 MantineProvider；统一 `useThemeStore`、CSS 变量、Portal 与图表主题，不能假定本轮已经完成主题迁移 |
+| 事件详情 | 从 `pages/GatewayUsagePage.tsx` 移到 `features/usage/UsageEventDetails.tsx`，改为复用公共 `Modal` drawer | 与控制面一同迁移公共 Modal/Drawer；当前公共组件仍保留手写焦点、滚动锁和动画逻辑 |
+| 控制面表单与详情 | 拆入 `features/control-plane/sources/`、`models/`、`discovery/` 与 `VirtualKeyForm.tsx` | 对新文件迁移控件；来源、实体和能力详情仍有外部关闭计时器，需要随 Mantine 生命周期一并收敛 |
+| 列设置、图表与虚拟列表 | 分别位于 `features/usage/UsageEvents.tsx`、`UsageOverview.tsx`、`UsageAnalysis.tsx`、`charts.ts` | 列设置仍是原生 `details`；Popover、图表主题与虚拟列表布局验收仍由 #166 完成 |
+| 旧公共组件 | 删除无生产调用的 Input、Select、MainActionButton、PortalTooltip、QuestionMarkHelp、QuestionMarkHelpButton 及独占样式 | 从“待迁移”清单移除这些遗留实现；活跃 FormField、Button、IconButton 等仍需接入体系 |
+| 应用壳与时间筛选 | 修正主内容收缩约束；八个实际 hash 入口不变；新增今天/昨天并固定同轮查询窗口 | 保留表格内部滚动、自然日/滚动时间与查询取消契约；移动侧栏的手写浮层行为仍需迁移和组合验收 |
+| 门禁与依赖 | 新增开发依赖及分层、Fast Refresh、测试类型和 Knip 检查；没有引入运行时 UI 库 | Mantine 外部导入不被分层规则禁止；共享主题与组合组件应放在公共层，新增示例须有实际入口，移除被替代实现后通过门禁 |
+
+两个任务会共同修改 `main.tsx`、`Root.tsx`、`components/ui/`、页面样式、`package.json` / 锁文件和 `design.md`。建议 #166 从本轮 PR 合并后的主线开始实现；已开始的分支先整合本轮提交，再按新路径迁移，避免重新建立旧页面内实现。依赖合并应保留两边所需的依赖与检查脚本，并通过 npm 重新生成一致的锁文件。
+
+本轮的桌面/窄屏局部检查不能替代 #166 要求的八页面、双主题、嵌套浮层、滚动与性能验收；本轮 PR 只关联 #166，不关闭它。
 
 ## 持续检查
 
