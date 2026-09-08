@@ -1,8 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { adaptUsageBreakdown, adaptUsageEventPage, adaptUsageSummary, adaptUsageTimeseries } from './adapter';
-import { gatewayUsageBreakdownFixture, gatewayUsageEventsFixture, gatewayUsageSummaryFixture, gatewayUsageTimeseriesFixture } from './fixtures';
+import { adaptUsageBreakdown, adaptUsageEventAttempts, adaptUsageEventPage, adaptUsageSummary, adaptUsageTimeseries } from './adapter';
+import { gatewayUsageBreakdownFixture, gatewayUsageEventsFixture, gatewayUsageSummaryFixture, gatewayUsageTimeseriesFixture } from '@/test/fixtures/usage';
 
 describe('gateway usage adapter', () => {
+  it('maps detail attempts at the API boundary without interpreting missing status as success', () => {
+    const attempts = adaptUsageEventAttempts({ attempts: [
+      { attempt_no: 2, provider_id: 'provider-b', source_id: 'source-b', account_id: 'account-b', upstream_model_id: 'model-b', status_code: 200, latency_ms: 30 },
+      { attempt_no: 3, status_code: 503 },
+      { attempt_no: 4 },
+    ] });
+    expect(attempts[0]).toMatchObject({ attemptIndex: 2, provider: 'provider-b', sourceId: 'source-b', account: 'account-b', upstreamModel: 'model-b', statusCode: 200, success: true, latencyMs: 30 });
+    expect(attempts.slice(1).map(item => item.success)).toEqual([false, false]);
+  });
   it('keeps logical requests separate from upstream attempts and tokens', () => {
     const summary = adaptUsageSummary(gatewayUsageSummaryFixture);
     expect(summary.logicalRequests).toBe(3);

@@ -172,6 +172,7 @@
 
 /* ─── main area ─────────────────────────────────────────────── */
 .mainArea {
+  min-width: 0;
   margin-left: var(--gateway-sidebar-width);
   flex: 1;
   display: flex;
@@ -255,6 +256,7 @@
 
 /* ─── content ───────────────────────────────────────────────── */
 .content {
+  min-width: 0;
   padding: 24px;
   flex: 1;
 }

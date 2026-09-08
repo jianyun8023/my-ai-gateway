@@ -145,66 +145,6 @@
   font-size: 12px;
 }
 
-// 页面级主操作复用排名头像入口：主题表面保持不变，悬停只做轻微上浮。
-.main-action-button-shell {
-  display: inline-flex;
-  align-items: stretch;
-  min-height: 42px;
-  padding: 4px;
-  border: 1px solid var(--border-color);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--bg-secondary) 78%, transparent);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
-}
-
-.btn.btn-action.main-action-button {
-  min-height: 32px;
-  min-width: 0;
-  max-width: 100%;
-  border: 0;
-  background: var(--bg-primary);
-  color: var(--text-primary);
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1);
-  transition: background-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease,
-    transform 0.2s ease;
-
-  > .loading-spinner {
-    width: 12px;
-    height: 12px;
-    border-width: 2px;
-  }
-
-  > span:not(.loading-spinner) {
-    min-width: 0;
-    max-width: 100%;
-  }
-
-  &:hover:not(:disabled) {
-    background: var(--bg-primary);
-    color: var(--text-primary);
-    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1);
-    transform: translateY(-1px);
-  }
-
-  &:active:not(:disabled) {
-    background: var(--bg-primary);
-    color: var(--text-primary);
-    transform: translateY(0);
-  }
-
-  &:focus-visible {
-    outline: 2px solid var(--primary-color);
-    outline-offset: 2px;
-  }
-
-  &:disabled {
-    background: var(--bg-primary);
-    color: var(--text-secondary);
-    box-shadow: none;
-    transform: none;
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
   .btn-action {
     transition: none;
@@ -215,14 +155,6 @@
     }
   }
 
-  .btn.btn-action.main-action-button {
-    transition: none;
-
-    &:hover:not(:disabled),
-    &:active:not(:disabled) {
-      transform: none;
-    }
-  }
 }
 
 [data-theme='dark'] {

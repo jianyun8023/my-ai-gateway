@@ -1,3 +1,4 @@
+import { AdminClient } from '@/admin-api/client';
 import { describe, expect, it, vi } from 'vitest';
 import { buildGatewayUsageURL, GatewayUsageClient } from './client';
 import type { GatewayUsageFilters } from './types';
@@ -38,7 +39,7 @@ describe('GatewayUsageClient', () => {
       if (url.includes('/export')) return new Response('request_id\n', { status: 200 });
       return new Response(JSON.stringify({ items: [], has_more: false }), { status: 200 });
     });
-    const client = new GatewayUsageClient({ fetchImpl: fetchImpl as typeof fetch, getAdminKey: () => 'secret' });
+    const client = new GatewayUsageClient(new AdminClient({ fetchImpl: fetchImpl as typeof fetch, getAdminKey: () => 'secret' }));
 
     await client.overview(filters);
     await client.breakdown(filters, 'provider');
@@ -52,6 +53,9 @@ describe('GatewayUsageClient', () => {
     }
     expect(urls.some((url) => url.includes('/breakdown?') && url.includes('breakdown=provider'))).toBe(true);
     expect(urls.some((url) => url.includes('/export?') && url.includes('format=csv'))).toBe(true);
-    expect(fetchImpl).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ headers: { Authorization: 'Bearer secret' } }));
+    for (const [, init] of fetchImpl.mock.calls as unknown as [string, RequestInit][]) {
+      expect(new Headers(init.headers).get('Authorization')).toBe('Bearer secret');
+      expect(init.redirect).toBe('error');
+    }
   });
 });

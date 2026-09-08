@@ -19,6 +19,7 @@ import {
 } from './components/ui/icons';
 import {
   consolePageHash,
+  isUsagePage,
   resolveConsolePage,
   type ConsoleNavSection,
   type ConsolePage,
@@ -43,19 +44,6 @@ const PAGE_ICONS: Record<ConsolePage, React.ReactNode> = {
   models: <IconSunAsterisk size={18} />,
   capabilities: <IconSlidersHorizontal size={18} />,
   settings: <IconSettings size={18} />,
-};
-
-const USAGE_PAGES = new Set<ConsolePage>(['overview', 'analysis', 'events']);
-
-// 侧栏 hash 页（ConsolePage）到管理端内部页面（GatewayManagementPage）的映射。
-type ManagementConsolePage = 'sources' | 'discovery' | 'models' | 'capabilities' | 'settings';
-
-const MANAGEMENT_PAGE_BY_CONSOLE_PAGE: Record<ManagementConsolePage, 'sources' | 'model-discovery' | 'models-routes' | 'capabilities' | 'settings'> = {
-  sources: 'sources',
-  discovery: 'model-discovery',
-  models: 'models-routes',
-  capabilities: 'capabilities',
-  settings: 'settings',
 };
 
 function App() {
@@ -124,10 +112,10 @@ function App() {
         >
           {({ getAdminKey, adminKeyConfigured, clearAdminKey, refreshRevision, setRefreshing }) => (
             <Suspense fallback={<LoadingState label={t('shell.page_loading')} />}>
-              {USAGE_PAGES.has(page)
+              {isUsagePage(page)
                 ? (
                     <GatewayUsagePage
-                      activeTab={page as 'overview' | 'analysis' | 'events'}
+                      activeTab={page}
                       getAdminKey={getAdminKey}
                       refreshRevision={refreshRevision}
                       onLoadingChange={setRefreshing}
@@ -135,7 +123,7 @@ function App() {
                   )
                 : (
                     <GatewayManagementPage
-                      page={MANAGEMENT_PAGE_BY_CONSOLE_PAGE[page as ManagementConsolePage]}
+                      page={page}
                       getAdminKey={getAdminKey}
                       adminKeyConfigured={adminKeyConfigured}
                       clearAdminKey={clearAdminKey}

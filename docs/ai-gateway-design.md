@@ -530,7 +530,7 @@ Provider 与 Source 已使用独立运行时身份：Provider 按 Source 固化�
 
 控制台提供总览、用量分析、请求事件、来源管理、模型发现、模型与路由、能力矩阵、系统设置八个入口。用量页面通过 `/admin/usage/*` 查询统计与请求明细；管理页面通过对应 `/admin/*` 资源完成接入、模型确认、路由和 Virtual Key 管理。
 
-`GatewayConsoleShell` 统一导航与 Admin Key 连接。用量视图与管理视图分别由 `GatewayUsagePage`、`GatewayManagementPage` 接入，公共组件位于 `web/src/components/ui`。视觉与交互规范见 [design.md](../design.md)，目录与开发命令见 [前端 README](../web/README.md)。
+`GatewayConsoleShell` 统一导航与 Admin Key 连接。用量视图与管理视图分别由 `GatewayUsagePage`、`GatewayManagementPage` 接入，公共组件位于 `web/src/components/ui`。视觉与交互规范见 [design.md](../design.md)，目录与开发命令见 [前端 README](../web/README.md)，分层、共享 Admin 传输与时间窗口规则见 [前端架构](frontend-architecture.md)。
 
 ### 7.5 账号健康和生产化
 

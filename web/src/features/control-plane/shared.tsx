@@ -1,41 +1,19 @@
-import { Notice } from '@/components/ui/Notice';
-import { EmptyState } from '@/components/ui/EmptyState';
-import { StatusPill } from '@/components/ui/StatusPill';
+import type { AdminErrorShape, GatewayProtocol } from '@/admin-api';
 import { Button } from '@/components/ui/Button';
+import { EmptyState } from '@/components/ui/EmptyState';
+import {
+  IconRefreshCw,
+} from '@/components/ui/icons';
 import { Modal } from '@/components/ui/Modal';
+import { Notice } from '@/components/ui/Notice';
+import { StatusPill } from '@/components/ui/StatusPill';
+import styles from '@/features/control-plane/ControlPlane.module.scss';
+import { PROTOCOL_LABELS } from '@/lib/protocols';
 import {
   type PropsWithChildren,
   type ReactNode,
 } from 'react';
-import type { AdminErrorShape, GatewayProtocol } from '@/admin-api';
 import { useTranslation } from 'react-i18next';
-import { currentIntlLocale } from '@/i18n/intl';
-import {
-  IconRefreshCw,
-} from '@/components/ui/icons';
-import styles from './ControlPlane.module.scss';
-
-export const PROTOCOL_LABELS: Record<GatewayProtocol, string> = {
-  openai_chat_completions: 'Chat Completions',
-  openai_responses: 'Responses',
-  anthropic_messages: 'Messages',
-};
-
-export const formatDateTime = (value?: string | null): string => {
-  if (!value) return '—';
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return new Intl.DateTimeFormat(currentIntlLocale(), {
-    dateStyle: 'medium',
-    timeStyle: 'medium',
-  }).format(parsed);
-};
-
-export const formatJsonValue = (value: unknown): string => {
-  if (value === undefined || value === null) return '—';
-  if (typeof value === 'string') return value;
-  return JSON.stringify(value);
-};
 
 export function ProtocolPill({ protocol }: { protocol: GatewayProtocol }) {
   return <StatusPill>{PROTOCOL_LABELS[protocol]}</StatusPill>;
@@ -181,8 +159,4 @@ export function ConfirmDialog({
       <div className={styles.confirmBody}>{description}</div>
     </Modal>
   );
-}
-
-export function RefreshingBar({ visible }: { visible: boolean }) {
-  return <div className={styles.refreshingBar} data-visible={visible} aria-hidden={!visible} />;
 }

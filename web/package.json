@@ -6,10 +6,11 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "lint": "eslint .",
+    "lint": "eslint . --max-warnings 0 && npm run check:dead-code",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit",
-    "preview": "vite preview"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
+    "preview": "vite preview",
+    "check:dead-code": "knip && knip --production --include files,dependencies,unlisted,unresolved"
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3.14.5",
@@ -23,6 +24,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
+    "@types/node": "24.13.3",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",
@@ -31,6 +33,7 @@
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.4.0",
     "happy-dom": "^20.10.6",
+    "knip": "6.34.0",
     "sass": "^1.99.0",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.59.0",

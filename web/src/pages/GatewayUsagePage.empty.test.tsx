@@ -1,9 +1,9 @@
 // @vitest-environment happy-dom
+import App from '@/App';
+import { setTestLanguage } from '@/test/setup';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import App from '@/App';
-import { setTestLanguage } from '@/test/setup';
 
 describe('GatewayUsagePage empty state', () => {
   let container: HTMLDivElement;

@@ -1,13 +1,3 @@
-import { IconButton } from '@/components/ui/IconButton';
-import { LoadingState } from '@/components/ui/LoadingState';
-import { StatusPill } from '@/components/ui/StatusPill';
-import { TableScroll } from '@/components/ui/TableScroll';
-import { Button } from '@/components/ui/Button';
-import { Card } from '@/components/ui/Card';
-import { Modal } from '@/components/ui/Modal';
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useTranslation } from 'react-i18next';
-import type { TFunction } from 'i18next';
 import type {
   CapabilityMatrixResponse,
   CapabilityMatrixRow,
@@ -16,24 +6,25 @@ import type {
   GatewayProtocol,
 } from '@/admin-api';
 import { GATEWAY_PROTOCOLS } from '@/admin-api';
+import { Button } from '@/components/ui/Button';
+import { Card } from '@/components/ui/Card';
+import { IconButton } from '@/components/ui/IconButton';
 import {
   IconEye,
   IconRefreshCw,
 } from '@/components/ui/icons';
-import {
-  DetailItem,
-  DetailList,
-  DrawerSection,
-  EmptyTable,
-  ErrorState,
-  FilterBar,
-  PROTOCOL_LABELS,
-  PageActions,
-  ProtocolPill,
-  formatDateTime,
-} from './shared';
-import { useAdminQuery } from './useAdminQuery';
+import { LoadingState } from '@/components/ui/LoadingState';
+import { Modal } from '@/components/ui/Modal';
+import { StatusPill } from '@/components/ui/StatusPill';
+import { TableScroll } from '@/components/ui/TableScroll';
+import { useAdminQuery } from '@/hooks/useAdminQuery';
+import { PROTOCOL_LABELS } from '@/lib/protocols';
+import { formatDateTime } from '@/utils/format';
+import type { TFunction } from 'i18next';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import styles from './ControlPlane.module.scss';
+import { DetailItem, DetailList, DrawerSection, EmptyTable, ErrorState, FilterBar, PageActions, ProtocolPill } from './shared';
 
 interface CapabilitiesPageProps {
   api: GatewayAdminResources;

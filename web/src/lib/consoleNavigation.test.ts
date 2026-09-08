@@ -1,33 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import {
-  consoleRouteHash,
-  GATEWAY_MANAGEMENT_PAGES,
-  GATEWAY_USAGE_TABS,
-  resolveConsoleRoute,
-} from './consoleNavigation';
+import { CONSOLE_PAGES, consolePageHash, isUsagePage, resolveConsolePage } from './consoleNavigation';
 
 describe('console navigation', () => {
-  it('preserves the three first-release Usage hashes', () => {
-    expect(GATEWAY_USAGE_TABS).toEqual(['overview', 'analysis', 'events']);
-    expect(resolveConsoleRoute('#overview')).toEqual({ space: 'usage', page: 'overview' });
-    expect(resolveConsoleRoute('#/events')).toEqual({ space: 'usage', page: 'events' });
-    expect(consoleRouteHash({ space: 'usage', page: 'analysis' })).toBe('#analysis');
+  it('resolves the eight production navigation hashes', () => {
+    expect(CONSOLE_PAGES).toEqual(['overview', 'analysis', 'events', 'sources', 'discovery', 'models', 'capabilities', 'settings']);
+    for (const page of CONSOLE_PAGES) expect(resolveConsolePage(consolePageHash(page))).toBe(page);
+    expect(resolveConsolePage('#/events/')).toBe('events');
   });
-
-  it('provides an independent Management namespace', () => {
-    expect(GATEWAY_MANAGEMENT_PAGES).toEqual(['sources', 'model-discovery', 'capabilities', 'models-routes', 'settings']);
-    expect(resolveConsoleRoute('#management/model-discovery')).toEqual({
-      space: 'management',
-      page: 'model-discovery',
-    });
-    expect(consoleRouteHash({ space: 'management', page: 'capabilities' })).toBe('#management/capabilities');
-    expect(resolveConsoleRoute('#management/models-routes')).toEqual({ space: 'management', page: 'models-routes' });
-    expect(resolveConsoleRoute('#management/settings')).toEqual({ space: 'management', page: 'settings' });
+  it('separates usage and management pages using the same route model', () => {
+    expect(CONSOLE_PAGES.filter(isUsagePage)).toEqual(['overview', 'analysis', 'events']);
+    expect(CONSOLE_PAGES.filter(page => !isUsagePage(page))).toEqual(['sources', 'discovery', 'models', 'capabilities', 'settings']);
   });
-
-  it('falls unknown and legacy CPA routes back to Usage Overview', () => {
-    for (const hash of ['', '#ranking', '#auth-files', '#management', '#management/unknown', '#/api/v1']) {
-      expect(resolveConsoleRoute(hash)).toEqual({ space: 'usage', page: 'overview' });
-    }
+  it('canonicalizes unknown and removed routes to overview', () => {
+    for (const hash of ['', '#ranking', '#management/sources', '#unknown', '#/api/v1']) expect(resolveConsolePage(hash)).toBe('overview');
   });
 });

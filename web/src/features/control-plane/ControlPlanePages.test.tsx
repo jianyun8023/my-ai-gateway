@@ -1,10 +1,10 @@
 // @vitest-environment happy-dom
+import type { GatewayManagementPage as PageId } from '@/lib/consoleNavigation';
+import { GatewayManagementPage } from '@/pages/GatewayManagementPage';
+import { setTestLanguage } from '@/test/setup';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { setTestLanguage } from '@/test/setup';
-import type { GatewayManagementPage as PageId } from '@/lib/consoleNavigation';
-import { GatewayManagementPage } from '@/pages/GatewayManagementPage';
 
 const jsonResponse = (value: unknown, status = 200) => new Response(JSON.stringify(value), {
   status,
@@ -271,7 +271,7 @@ describe('production control-plane pages', () => {
   });
 
   it('shows unsupported discovery and pending SourceModel field provenance', async () => {
-    await renderPage('model-discovery');
+    await renderPage('discovery');
 
     expect(container.textContent).toContain('unsupported');
     expect(container.textContent).toContain('discovery_unsupported');
@@ -294,7 +294,7 @@ describe('production control-plane pages', () => {
   });
 
   it('keeps LogicalModel, ModelBinding, and Route as separate CRUD views', async () => {
-    await renderPage('models-routes');
+    await renderPage('models');
     expect(container.textContent).toContain('Model A');
 
     const tabs = () => Array.from(container.querySelectorAll<HTMLButtonElement>('[role="tab"]'));

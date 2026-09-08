@@ -87,7 +87,8 @@
 | `src/infra/`、`src/infra/db/` | PostgreSQL、健康、Secret、审计、运维、指标/trace |
 | `migrations/` | SQLx 前进式数据库迁移；按现有最大编号新增 |
 | `web/src/App.tsx`、`web/src/lib/consoleNavigation.ts` | 控制台导航与页面接入 |
-| `web/src/pages/`、`web/src/features/control-plane/` | 用量页面和控制面功能；API client 在 `web/src/admin-api/` 等目录 |
+| `web/src/pages/`、`web/src/features/` | 页面组合、用量与控制面功能；表单和详情放在所属功能目录 |
+| `web/src/admin-api/`、`web/src/gateway-usage/`、`web/src/hooks/` | 共享 Admin 传输、用量适配与查询生命周期；分层和门禁见 [前端架构](docs/frontend-architecture.md) |
 | `tests/`、`scripts/`、`examples/conformance_target.rs` | Mock、Contract、覆盖矩阵、外部扫描、SDK、差分和 live smoke |
 | `deploy/`、`Dockerfile`、`.github/workflows/` | 部署配置、镜像构建、PR CI |
 

@@ -1,9 +1,9 @@
-export type UsageSource = 'upstream' | 'parsed' | 'estimated' | 'missing' | string;
+type UsageSource = 'upstream' | 'parsed' | 'estimated' | 'missing' | string;
 
-export type UsageStatus = 'success' | 'failure';
+type UsageStatus = 'success' | 'failure';
 
-export type UsageRelativePreset = '24h' | '7d' | '30d';
-export type UsageTimeMode = 'relative' | 'absolute';
+export type UsageRelativePreset = 'today' | 'yesterday' | '24h' | '7d' | '30d';
+type UsageTimeMode = 'relative' | 'absolute';
 
 export interface GatewayUsageFilters {
   from: string;

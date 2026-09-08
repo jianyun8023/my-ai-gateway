@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 const pageSource = readFileSync(new URL('./GatewayUsagePage.tsx', import.meta.url), 'utf8');
-const styles = readFileSync(new URL('./GatewayUsagePage.module.scss', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+const styles = readFileSync(new URL('../features/usage/Usage.module.scss', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 const appSource = readFileSync(new URL('../App.tsx', import.meta.url), 'utf8');
 const shellSource = readFileSync(new URL('../components/gateway/GatewayConsoleShell.tsx', import.meta.url), 'utf8');
 const shellStyles = readFileSync(new URL('../components/gateway/GatewayConsoleShell.module.scss', import.meta.url), 'utf8').replace(/\r\n/g, '\n');

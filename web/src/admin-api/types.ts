@@ -8,12 +8,12 @@ export type GatewayProtocol = typeof GATEWAY_PROTOCOLS[number];
 export type CatalogStatus = 'pending' | 'confirmed' | 'unavailable';
 export type CatalogAvailability = 'unknown' | 'available' | 'unavailable';
 export type MetadataSource = 'upstream' | 'preset' | 'user' | 'unknown';
-export type CapabilitySupport = 'supported' | 'unsupported' | 'unknown';
+type CapabilitySupport = 'supported' | 'unsupported' | 'unknown';
 export type SourceProtocolMode = 'unknown' | 'native' | 'adapter' | 'unsupported';
-export type RuntimeProtocolMode = 'native' | 'adapter';
-export type EffectiveCapabilityMode = 'native' | 'translated' | 'unsupported';
+type RuntimeProtocolMode = 'native' | 'adapter';
+type EffectiveCapabilityMode = 'native' | 'translated' | 'unsupported';
 
-export type JsonObject = Record<string, unknown>;
+type JsonObject = Record<string, unknown>;
 
 export interface AdminErrorShape {
   status?: number;
@@ -30,18 +30,18 @@ export interface AdminMutationEnvelope<T> extends AdminDataEnvelope<T> {
   snapshot_generated_at: string;
 }
 
-export interface CredentialHeaderTemplate {
+interface CredentialHeaderTemplate {
   header: string;
   prefix: string;
 }
 
-export interface ConnectionTestTemplate {
+interface ConnectionTestTemplate {
   method: 'get' | 'post';
   default_model: string;
   body: JsonObject;
 }
 
-export interface ProviderProtocolPreset {
+interface ProviderProtocolPreset {
   endpoint: string;
   mode: SourceProtocolMode;
   source_protocol?: GatewayProtocol;
@@ -51,7 +51,7 @@ export interface ProviderProtocolPreset {
   connection_test: ConnectionTestTemplate;
 }
 
-export type ProviderDiscoveryDefinition =
+type ProviderDiscoveryDefinition =
   | {
       support: 'supported';
       method: 'get' | 'post';
@@ -84,7 +84,7 @@ export interface ProviderPreset {
   created_at: string;
 }
 
-export interface SourceProtocolCapability {
+interface SourceProtocolCapability {
   mode: SourceProtocolMode;
   source_protocol?: GatewayProtocol;
   adapter?: string;
@@ -155,7 +155,7 @@ export interface AccountWriteInput {
   weight: number;
 }
 
-export interface PresetDiffEntry {
+interface PresetDiffEntry {
   path: string;
   kind: 'added' | 'changed' | 'missing';
   before?: unknown;
@@ -231,7 +231,7 @@ export interface SourceModel {
   updated_at: string;
 }
 
-export interface DiscoveryDiffEntry {
+interface DiscoveryDiffEntry {
   upstream_model_id: string;
   changed_fields: string[];
 }
@@ -242,7 +242,7 @@ export interface DiscoveryDiff {
   missing: DiscoveryDiffEntry[];
 }
 
-export interface DiscoveryRun {
+interface DiscoveryRun {
   id: number;
   source_id: string;
   account_id?: string | null;
@@ -384,7 +384,7 @@ export interface RouteWriteInput {
   enabled: boolean;
 }
 
-export interface EffectiveCapabilities {
+interface EffectiveCapabilities {
   streaming: EffectiveCapabilityMode;
   tools: EffectiveCapabilityMode;
   tool_streaming: EffectiveCapabilityMode;
@@ -395,13 +395,13 @@ export interface EffectiveCapabilities {
   usage: EffectiveCapabilityMode;
 }
 
-export interface RouteResolutionError {
+interface RouteResolutionError {
   code: string;
   message: string;
   route_id?: string | null;
 }
 
-export interface ProtocolConversionHop {
+interface ProtocolConversionHop {
   protocol_from: GatewayProtocol;
   protocol_to: GatewayProtocol;
   mode: RuntimeProtocolMode;

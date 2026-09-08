@@ -1,4 +1,4 @@
-import React, { type PropsWithChildren, type ReactNode, type HTMLAttributes } from 'react';
+import { type PropsWithChildren, type ReactNode, type HTMLAttributes } from 'react';
 
 interface CardProps extends Omit<HTMLAttributes<HTMLDivElement>, 'title'> {
   title?: ReactNode;

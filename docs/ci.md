@@ -16,7 +16,7 @@ PR workflow 使用 `mise.toml` 中锁定的 Rust 和 Node.js 版本，并把静�
 | 阶段 | 命令 | 内容 |
 | --- | --- | --- |
 | 配置检查 | `mise run config-check` | 解析仓库中的 JSON 示例与测试 case |
-| 静态检查 | `mise run lint` | Rust fmt/check/Clippy，以及 Web ESLint/typecheck |
+| 静态检查 | `mise run lint` | Rust fmt/check/Clippy；Web ESLint 分层与网络边界、Knip 全量与生产入口检查、应用与测试 TypeScript 检查 |
 | 构建 | `mise run build` | 构建 Web 生产资源和 Rust workspace |
 
 ### Unit and PostgreSQL tests
