@@ -19,7 +19,7 @@ use futures_util::TryStreamExt;
 use serde_json::Value;
 
 #[derive(Debug)]
-pub enum TransportError {
+pub(crate) enum TransportError {
     MissingEndpoint,
     SourceUrlBlocked,
     Request,
@@ -27,7 +27,7 @@ pub enum TransportError {
 }
 
 impl TransportError {
-    pub fn message(&self) -> &str {
+    pub(crate) fn message(&self) -> &str {
         match self {
             Self::MissingEndpoint => "provider endpoint is not configured",
             Self::SourceUrlBlocked => "upstream source URL is blocked by server policy",
@@ -36,7 +36,7 @@ impl TransportError {
         }
     }
 
-    pub fn status_code(&self) -> i32 {
+    pub(crate) fn status_code(&self) -> i32 {
         match self {
             Self::Timeout(termination) => termination.status_code(),
             Self::MissingEndpoint | Self::SourceUrlBlocked | Self::Request => 599,
@@ -51,9 +51,9 @@ impl From<SourceUrlPolicyError> for TransportError {
 }
 
 #[derive(Clone, Debug)]
-pub struct PreparedModelRequest {
-    pub body: Bytes,
-    pub upstream_model_id: String,
+pub(crate) struct PreparedModelRequest {
+    pub(crate) body: Bytes,
+    pub(crate) upstream_model_id: String,
 }
 
 /// Prepare the JSON body for one concrete upstream attempt.
@@ -62,7 +62,7 @@ pub struct PreparedModelRequest {
 /// `model` field. Unmapped requests retain their original bytes exactly, and a
 /// malformed or non-object body is left untouched so the recorded model always
 /// matches what was actually sent.
-pub fn prepare_model_request(
+pub(crate) fn prepare_model_request(
     body: &Bytes,
     requested_model: &str,
     upstream_model_id: &str,
@@ -125,7 +125,7 @@ const CHAT_REASONING_FIELDS: &[&str] =
 /// Works for both Chat Completions and OpenAI Responses protocol shapes.
 ///
 /// Returns `true` if any parameters were removed (caller should log).
-pub fn sanitize_thinking_params(body: &mut Bytes, protocol: Protocol) -> bool {
+pub(crate) fn sanitize_thinking_params(body: &mut Bytes, protocol: Protocol) -> bool {
     match protocol {
         Protocol::OpenAiChatCompletions => sanitize_chat_thinking(body),
         Protocol::OpenAiResponses => sanitize_responses_reasoning(body),
@@ -282,34 +282,8 @@ fn sanitize_responses_reasoning(body: &mut Bytes) -> bool {
     removed
 }
 
-#[allow(dead_code)]
-pub async fn forward(
-    client: &SourceHttpClient,
-    provider: &ProviderConfig,
-    account: &AccountConfig,
-    credential: Option<&str>,
-    protocol: Protocol,
-    request_headers: &HeaderMap,
-    body: Bytes,
-) -> Result<Response<Body>, TransportError> {
-    let config = StreamConfig::from_env();
-    let request_started = std::time::Instant::now();
-    forward_with_config(
-        client,
-        provider,
-        account,
-        credential,
-        protocol,
-        request_headers,
-        body,
-        &config,
-        request_started,
-    )
-    .await
-}
-
 #[allow(clippy::too_many_arguments)]
-pub async fn forward_with_config(
+pub(crate) async fn forward_with_config(
     client: &SourceHttpClient,
     provider: &ProviderConfig,
     account: &AccountConfig,
@@ -339,8 +313,8 @@ pub async fn forward_with_config(
     .await
 }
 
-#[allow(dead_code)]
-pub async fn forward_url(
+#[cfg(test)]
+pub(crate) async fn forward_url(
     client: &SourceHttpClient,
     url: &str,
     account: &AccountConfig,
@@ -366,7 +340,7 @@ pub async fn forward_url(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub async fn forward_url_with_config(
+pub(crate) async fn forward_url_with_config(
     client: &SourceHttpClient,
     url: &str,
     account: &AccountConfig,
@@ -505,7 +479,7 @@ fn earliest_send_timeout(
 }
 
 /// Retrieve usage metadata attached by [`forward_url`].
-pub fn usage_from_response(response: &Response<Body>) -> Option<UsageReport> {
+pub(crate) fn usage_from_response(response: &Response<Body>) -> Option<UsageReport> {
     response.extensions().get::<UsageReport>().cloned()
 }
 

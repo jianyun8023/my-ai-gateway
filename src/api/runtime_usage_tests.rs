@@ -1,4 +1,5 @@
 use crate::{
+    auth::AdminAuth,
     control_plane,
     domain::{
         config::{self, GatewayConfig},
@@ -8,11 +9,13 @@ use crate::{
     http,
     infra::{db, health, observability, secrets},
     proxy::{
-        service::{finalize_stream_usage, proxy as proxy_fn, try_fallback_error},
+        accounting::finalize_stream_usage,
+        fallback::try_fallback_error,
+        service::proxy as proxy_fn,
         stream::{StreamConfig, StreamTermination},
         transport, usage,
     },
-    state::{AdminAuth, AppState, LiveConfig},
+    state::{AppState, LiveConfig},
 };
 use axum::{
     body::{to_bytes, Body, Bytes},

@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use crate::domain::protocol::Protocol;
 use crate::proxy::service as proxy_service;
-use crate::state::{authorized_with_db, data_plane_error_response, AppState};
+use crate::{auth::authorized_with_db, http::response::data_plane_error_response, state::AppState};
 
 pub(crate) async fn healthz(State(state): State<AppState>) -> Json<Value> {
     let live = state.snapshot();
@@ -28,7 +28,10 @@ pub(crate) async fn metrics_handler(State(state): State<AppState>) -> impl IntoR
 
 pub(crate) async fn models(State(state): State<AppState>, headers: HeaderMap) -> Response<Body> {
     let request_id = Uuid::new_v4().to_string();
-    if authorized_with_db(&state, &headers, None).await.is_none() {
+    if authorized_with_db(state.db.as_ref(), &headers, None)
+        .await
+        .is_none()
+    {
         // Mirror the OpenAI Chat Completions data-plane envelope so clients
         // see a uniform 401 shape across all `/v1/*` endpoints.  `None` for
         // model skips the virtual-key `allowed_models` whitelist because the

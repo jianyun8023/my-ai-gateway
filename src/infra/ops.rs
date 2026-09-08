@@ -20,18 +20,18 @@ use std::{
 };
 use uuid::Uuid;
 
-pub const CURRENT_SCHEMA_VERSION: i32 = 23;
-pub const CURRENT_MIGRATION_VERSION: i32 = 23;
-pub const DEFAULT_BATCH_SIZE: i32 = 500;
-pub const DEFAULT_MAX_BATCHES: i32 = 1_000;
-pub const MAX_BATCH_SIZE: i32 = 10_000;
-pub const MAX_MAX_BATCHES: i32 = 100_000;
-pub const MAX_EXPORT_ROWS: usize = 100_000;
+pub(crate) const CURRENT_SCHEMA_VERSION: i32 = 23;
+pub(crate) const CURRENT_MIGRATION_VERSION: i32 = 23;
+pub(crate) const DEFAULT_BATCH_SIZE: i32 = 500;
+pub(crate) const DEFAULT_MAX_BATCHES: i32 = 1_000;
+pub(crate) const MAX_BATCH_SIZE: i32 = 10_000;
+pub(crate) const MAX_MAX_BATCHES: i32 = 100_000;
+pub(crate) const MAX_EXPORT_ROWS: usize = 100_000;
 
 const RETENTION_KEYS: [&str; 4] = ["usage_events", "usage_attempts", "audit", "discovery"];
 
 #[derive(Debug)]
-pub enum OpsError {
+pub(crate) enum OpsError {
     Database(sqlx::Error),
     Json(serde_json::Error),
     Validation(String),
@@ -92,25 +92,29 @@ impl From<ControlPlaneError> for OpsError {
             ControlPlaneError::Validation(errors) => Self::Validation(errors.join("; ")),
             ControlPlaneError::Json(error) => Self::Json(error),
             ControlPlaneError::Database(error) => Self::Database(error),
+            ControlPlaneError::Credential(error) => Self::Validation(error.public_message().into()),
+            ControlPlaneError::NoCiphertext => {
+                Self::Validation("account does not have an encrypted credential".into())
+            }
         }
     }
 }
 
 #[derive(Clone)]
-pub struct OpsRepository {
+pub(crate) struct OpsRepository {
     pool: PgPool,
 }
 
 impl OpsRepository {
-    pub fn new(pool: PgPool) -> Self {
+    pub(crate) fn new(pool: PgPool) -> Self {
         Self { pool }
     }
 
-    pub fn from_database(database: &Database) -> Self {
+    pub(crate) fn from_database(database: &Database) -> Self {
         Self::new(database.pool().clone())
     }
 
-    pub async fn schema_metadata(&self) -> Result<SchemaMetadata, OpsError> {
+    pub(crate) async fn schema_metadata(&self) -> Result<SchemaMetadata, OpsError> {
         let metadata = sqlx::query_as::<_, SchemaMetadata>(
             "SELECT schema_version,migration_version,application_version,updated_at FROM gateway_schema_metadata WHERE singleton=TRUE",
         )
@@ -127,7 +131,7 @@ impl OpsRepository {
         Ok(metadata)
     }
 
-    pub async fn list_retention_policies(&self) -> Result<Vec<RetentionPolicy>, OpsError> {
+    pub(crate) async fn list_retention_policies(&self) -> Result<Vec<RetentionPolicy>, OpsError> {
         Ok(sqlx::query_as::<_, RetentionPolicy>(
             "SELECT policy_key,retention_days,enabled,updated_at FROM retention_policies ORDER BY policy_key",
         )
@@ -135,7 +139,7 @@ impl OpsRepository {
         .await?)
     }
 
-    pub async fn update_retention_policies(
+    pub(crate) async fn update_retention_policies(
         &self,
         policies: &[RetentionPolicyWrite],
         actor: &str,
@@ -192,7 +196,10 @@ impl OpsRepository {
         self.list_retention_policies().await
     }
 
-    pub async fn start_cleanup(&self, request: &CleanupRequest) -> Result<CleanupRun, OpsError> {
+    pub(crate) async fn start_cleanup(
+        &self,
+        request: &CleanupRequest,
+    ) -> Result<CleanupRun, OpsError> {
         validate_cleanup_request(request)?;
         let operation_id = request
             .operation_id
@@ -277,7 +284,7 @@ impl OpsRepository {
         self.run_cleanup(&operation_id).await
     }
 
-    pub async fn get_cleanup(&self, id: &str) -> Result<Option<CleanupRun>, OpsError> {
+    pub(crate) async fn get_cleanup(&self, id: &str) -> Result<Option<CleanupRun>, OpsError> {
         Ok(
             sqlx::query_as::<_, CleanupRun>(cleanup_select(Some("WHERE id=$1")))
                 .bind(id)
@@ -286,7 +293,7 @@ impl OpsRepository {
         )
     }
 
-    pub async fn list_cleanups(&self, limit: i64) -> Result<Vec<CleanupRun>, OpsError> {
+    pub(crate) async fn list_cleanups(&self, limit: i64) -> Result<Vec<CleanupRun>, OpsError> {
         let limit = limit.clamp(1, 500);
         Ok(sqlx::query_as::<_, CleanupRun>(cleanup_select(None))
             .bind(limit)
@@ -294,7 +301,7 @@ impl OpsRepository {
             .await?)
     }
 
-    pub async fn get_backup_run(&self, id: &str) -> Result<Option<BackupRun>, OpsError> {
+    pub(crate) async fn get_backup_run(&self, id: &str) -> Result<Option<BackupRun>, OpsError> {
         Ok(sqlx::query_as::<_, BackupRun>(
             "SELECT id,operation,status,requested_by,schema_version,migration_version,format,checksum,metadata,error_code,error_message,started_at,completed_at FROM backup_runs WHERE id=$1",
         )
@@ -303,7 +310,7 @@ impl OpsRepository {
         .await?)
     }
 
-    pub async fn list_backup_runs(&self, limit: i64) -> Result<Vec<BackupRun>, OpsError> {
+    pub(crate) async fn list_backup_runs(&self, limit: i64) -> Result<Vec<BackupRun>, OpsError> {
         let limit = limit.clamp(1, 500);
         Ok(sqlx::query_as::<_, BackupRun>(
             "SELECT id,operation,status,requested_by,schema_version,migration_version,format,checksum,metadata,error_code,error_message,started_at,completed_at FROM backup_runs ORDER BY started_at DESC,id DESC LIMIT $1",
@@ -313,7 +320,7 @@ impl OpsRepository {
         .await?)
     }
 
-    pub async fn list_audit_logs(
+    pub(crate) async fn list_audit_logs(
         &self,
         operation_id: Option<&str>,
         limit: i64,
@@ -337,7 +344,11 @@ impl OpsRepository {
         }
     }
 
-    pub async fn cancel_cleanup(&self, id: &str, actor: &str) -> Result<CleanupRun, OpsError> {
+    pub(crate) async fn cancel_cleanup(
+        &self,
+        id: &str,
+        actor: &str,
+    ) -> Result<CleanupRun, OpsError> {
         let actor = sanitize_actor(actor);
         let mut tx = self.pool.begin().await?;
         let status: Option<String> =
@@ -380,7 +391,11 @@ impl OpsRepository {
             .ok_or_else(|| OpsError::NotFound(format!("cleanup operation '{id}' not found")))
     }
 
-    pub async fn retry_cleanup(&self, id: &str, actor: &str) -> Result<CleanupRun, OpsError> {
+    pub(crate) async fn retry_cleanup(
+        &self,
+        id: &str,
+        actor: &str,
+    ) -> Result<CleanupRun, OpsError> {
         let actor = sanitize_actor(actor);
         let current = self
             .get_cleanup(id)
@@ -760,7 +775,7 @@ impl OpsRepository {
         Ok(counts)
     }
 
-    pub async fn export_control_plane(
+    pub(crate) async fn export_control_plane(
         &self,
         control_plane: &ControlPlane,
         requested_by: &str,
@@ -935,7 +950,7 @@ impl OpsRepository {
         .await;
     }
 
-    pub async fn restore_control_plane(
+    pub(crate) async fn restore_control_plane(
         &self,
         control_plane: &ControlPlane,
         export: &ControlPlaneExport,
@@ -1052,43 +1067,43 @@ impl OpsRepository {
 }
 
 #[derive(Clone, Debug, Serialize, sqlx::FromRow)]
-pub struct SchemaMetadata {
-    pub schema_version: i32,
-    pub migration_version: i32,
-    pub application_version: String,
-    pub updated_at: DateTime<Utc>,
+pub(crate) struct SchemaMetadata {
+    pub(crate) schema_version: i32,
+    pub(crate) migration_version: i32,
+    pub(crate) application_version: String,
+    pub(crate) updated_at: DateTime<Utc>,
 }
 
 #[derive(Clone, Debug, Serialize, sqlx::FromRow, PartialEq)]
-pub struct RetentionPolicy {
-    pub policy_key: String,
-    pub retention_days: i32,
-    pub enabled: bool,
-    pub updated_at: DateTime<Utc>,
+pub(crate) struct RetentionPolicy {
+    pub(crate) policy_key: String,
+    pub(crate) retention_days: i32,
+    pub(crate) enabled: bool,
+    pub(crate) updated_at: DateTime<Utc>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
-pub struct RetentionPolicyWrite {
-    pub policy_key: String,
-    pub retention_days: i32,
+pub(crate) struct RetentionPolicyWrite {
+    pub(crate) policy_key: String,
+    pub(crate) retention_days: i32,
     #[serde(default = "default_true")]
-    pub enabled: bool,
+    pub(crate) enabled: bool,
 }
 
 #[derive(Clone, Debug, Deserialize)]
-pub struct CleanupRequest {
+pub(crate) struct CleanupRequest {
     #[serde(default)]
-    pub dry_run: bool,
+    pub(crate) dry_run: bool,
     #[serde(default = "default_batch_size")]
-    pub batch_size: i32,
+    pub(crate) batch_size: i32,
     #[serde(default = "default_max_batches")]
-    pub max_batches: i32,
+    pub(crate) max_batches: i32,
     #[serde(default)]
-    pub operation_id: Option<String>,
+    pub(crate) operation_id: Option<String>,
     #[serde(default)]
-    pub requested_by: Option<String>,
+    pub(crate) requested_by: Option<String>,
     #[serde(default)]
-    pub policy_keys: Option<Vec<String>>,
+    pub(crate) policy_keys: Option<Vec<String>>,
 }
 
 impl Default for CleanupRequest {
@@ -1105,124 +1120,126 @@ impl Default for CleanupRequest {
 }
 
 #[derive(Clone, Debug, Serialize, sqlx::FromRow)]
-pub struct CleanupRun {
-    pub id: String,
-    pub status: String,
-    pub dry_run: bool,
-    pub batch_size: i32,
-    pub max_batches: i32,
-    pub requested_by: String,
-    pub policy_snapshot: Value,
-    pub cutoff_snapshot: Value,
-    pub scanned_usage_events: i64,
-    pub deleted_usage_events: i64,
-    pub scanned_usage_attempts: i64,
-    pub deleted_usage_attempts: i64,
-    pub scanned_audit: i64,
-    pub deleted_audit: i64,
-    pub scanned_discovery: i64,
-    pub deleted_discovery: i64,
-    pub batches_completed: i32,
-    pub progress: Value,
-    pub last_error_code: Option<String>,
-    pub last_error_message: Option<String>,
-    pub cancel_requested: bool,
-    pub created_at: DateTime<Utc>,
-    pub started_at: DateTime<Utc>,
-    pub finished_at: Option<DateTime<Utc>>,
-    pub updated_at: DateTime<Utc>,
+pub(crate) struct CleanupRun {
+    pub(crate) id: String,
+    pub(crate) status: String,
+    pub(crate) dry_run: bool,
+    pub(crate) batch_size: i32,
+    pub(crate) max_batches: i32,
+    pub(crate) requested_by: String,
+    pub(crate) policy_snapshot: Value,
+    pub(crate) cutoff_snapshot: Value,
+    pub(crate) scanned_usage_events: i64,
+    pub(crate) deleted_usage_events: i64,
+    pub(crate) scanned_usage_attempts: i64,
+    pub(crate) deleted_usage_attempts: i64,
+    pub(crate) scanned_audit: i64,
+    pub(crate) deleted_audit: i64,
+    pub(crate) scanned_discovery: i64,
+    pub(crate) deleted_discovery: i64,
+    pub(crate) batches_completed: i32,
+    pub(crate) progress: Value,
+    pub(crate) last_error_code: Option<String>,
+    pub(crate) last_error_message: Option<String>,
+    pub(crate) cancel_requested: bool,
+    pub(crate) created_at: DateTime<Utc>,
+    pub(crate) started_at: DateTime<Utc>,
+    pub(crate) finished_at: Option<DateTime<Utc>>,
+    pub(crate) updated_at: DateTime<Utc>,
 }
 
 #[derive(Clone, Debug, Serialize, sqlx::FromRow)]
-pub struct AuditLog {
-    pub id: i64,
-    pub operation_id: String,
-    pub action: String,
-    pub status: String,
-    pub actor: String,
-    pub details: Value,
-    pub error_code: Option<String>,
-    pub error_message: Option<String>,
-    pub created_at: DateTime<Utc>,
-    pub completed_at: Option<DateTime<Utc>>,
+pub(crate) struct AuditLog {
+    pub(crate) id: i64,
+    pub(crate) operation_id: String,
+    pub(crate) action: String,
+    pub(crate) status: String,
+    pub(crate) actor: String,
+    pub(crate) details: Value,
+    pub(crate) error_code: Option<String>,
+    pub(crate) error_message: Option<String>,
+    pub(crate) created_at: DateTime<Utc>,
+    pub(crate) completed_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Clone, Debug, Serialize, sqlx::FromRow)]
-pub struct BackupRun {
-    pub id: String,
-    pub operation: String,
-    pub status: String,
-    pub requested_by: String,
-    pub schema_version: i32,
-    pub migration_version: i32,
-    pub format: String,
-    pub checksum: Option<String>,
-    pub metadata: Value,
-    pub error_code: Option<String>,
-    pub error_message: Option<String>,
-    pub started_at: DateTime<Utc>,
-    pub completed_at: Option<DateTime<Utc>>,
+pub(crate) struct BackupRun {
+    pub(crate) id: String,
+    pub(crate) operation: String,
+    pub(crate) status: String,
+    pub(crate) requested_by: String,
+    pub(crate) schema_version: i32,
+    pub(crate) migration_version: i32,
+    pub(crate) format: String,
+    pub(crate) checksum: Option<String>,
+    pub(crate) metadata: Value,
+    pub(crate) error_code: Option<String>,
+    pub(crate) error_message: Option<String>,
+    pub(crate) started_at: DateTime<Utc>,
+    pub(crate) completed_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct RuntimeSnapshotMetadata {
-    pub revision: i64,
-    pub generated_at: DateTime<Utc>,
-    pub fingerprint: String,
+pub(crate) struct RuntimeSnapshotMetadata {
+    pub(crate) revision: i64,
+    pub(crate) generated_at: DateTime<Utc>,
+    pub(crate) fingerprint: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ControlPlaneExport {
-    pub format: String,
-    pub version: i32,
-    pub exported_at: DateTime<Utc>,
-    pub timezone: String,
-    pub schema_version: i32,
-    pub migration_version: i32,
-    pub credentials: Value,
-    pub runtime_snapshot: RuntimeSnapshotMetadata,
-    pub row_counts: Value,
+pub(crate) struct ControlPlaneExport {
+    pub(crate) format: String,
+    pub(crate) version: i32,
+    pub(crate) exported_at: DateTime<Utc>,
+    pub(crate) timezone: String,
+    pub(crate) schema_version: i32,
+    pub(crate) migration_version: i32,
+    pub(crate) credentials: Value,
+    pub(crate) runtime_snapshot: RuntimeSnapshotMetadata,
+    pub(crate) row_counts: Value,
     #[serde(default)]
-    pub provider_presets: Vec<Value>,
+    pub(crate) provider_presets: Vec<Value>,
     #[serde(default)]
-    pub model_presets: Vec<Value>,
+    pub(crate) model_presets: Vec<Value>,
     #[serde(default)]
-    pub sources: Vec<Value>,
+    pub(crate) sources: Vec<Value>,
     #[serde(default)]
-    pub accounts: Vec<Value>,
+    pub(crate) accounts: Vec<Value>,
     #[serde(default)]
-    pub source_models: Vec<Value>,
+    pub(crate) source_models: Vec<Value>,
     #[serde(default)]
-    pub source_model_capabilities: Vec<Value>,
+    pub(crate) source_model_capabilities: Vec<Value>,
     #[serde(default)]
-    pub logical_models: Vec<Value>,
+    pub(crate) logical_models: Vec<Value>,
     #[serde(default)]
-    pub model_bindings: Vec<Value>,
+    pub(crate) model_bindings: Vec<Value>,
     #[serde(default)]
-    pub routes: Vec<Value>,
+    pub(crate) routes: Vec<Value>,
     #[serde(default)]
-    pub providers: Vec<Value>,
+    pub(crate) providers: Vec<Value>,
     #[serde(default)]
-    pub virtual_keys: Vec<Value>,
+    pub(crate) virtual_keys: Vec<Value>,
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct ControlPlaneExportResult {
-    pub backup_id: String,
-    pub checksum: String,
-    pub export: ControlPlaneExport,
+pub(crate) struct ControlPlaneExportResult {
+    pub(crate) backup_id: String,
+    pub(crate) checksum: String,
+    pub(crate) export: ControlPlaneExport,
 }
 
-pub fn control_plane_export_checksum(export: &ControlPlaneExport) -> Result<String, OpsError> {
+pub(crate) fn control_plane_export_checksum(
+    export: &ControlPlaneExport,
+) -> Result<String, OpsError> {
     sha256_json(export)
 }
 
 #[derive(Clone)]
-pub struct RestoreResult {
-    pub backup_id: String,
-    pub verified: bool,
-    pub snapshot: RuntimeSnapshot,
-    pub skipped_virtual_keys: i64,
+pub(crate) struct RestoreResult {
+    pub(crate) backup_id: String,
+    pub(crate) verified: bool,
+    pub(crate) snapshot: RuntimeSnapshot,
+    pub(crate) skipped_virtual_keys: i64,
 }
 
 #[derive(Clone, Copy, Debug, Default, Serialize)]

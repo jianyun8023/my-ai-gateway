@@ -15,18 +15,18 @@ use opentelemetry_sdk::{trace::SdkTracerProvider, Resource};
 use tracing_opentelemetry::OpenTelemetryLayer;
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Registry};
 
-pub const METRIC_REQUESTS_TOTAL: &str = "gateway_requests_total";
-pub const METRIC_ATTEMPTS_TOTAL: &str = "gateway_upstream_attempts_total";
-pub const METRIC_TOKENS_TOTAL: &str = "gateway_tokens_total";
-pub const METRIC_REQUEST_DURATION: &str = "gateway_request_duration_seconds";
-pub const METRIC_TTFT: &str = "gateway_time_to_first_token_seconds";
-pub const METRIC_HEALTH_COOLDOWNS: &str = "gateway_health_cooldowns_total";
-pub const METRIC_SNAPSHOT_REVISION: &str = "gateway_snapshot_revision";
-pub const METRIC_ACTIVE_STREAMS: &str = "gateway_active_streams";
+pub(crate) const METRIC_REQUESTS_TOTAL: &str = "gateway_requests_total";
+pub(crate) const METRIC_ATTEMPTS_TOTAL: &str = "gateway_upstream_attempts_total";
+pub(crate) const METRIC_TOKENS_TOTAL: &str = "gateway_tokens_total";
+pub(crate) const METRIC_REQUEST_DURATION: &str = "gateway_request_duration_seconds";
+pub(crate) const METRIC_TTFT: &str = "gateway_time_to_first_token_seconds";
+pub(crate) const METRIC_HEALTH_COOLDOWNS: &str = "gateway_health_cooldowns_total";
+pub(crate) const METRIC_SNAPSHOT_REVISION: &str = "gateway_snapshot_revision";
+pub(crate) const METRIC_ACTIVE_STREAMS: &str = "gateway_active_streams";
 
 static ACTIVE_STREAMS: AtomicI64 = AtomicI64::new(0);
 
-pub fn prometheus_handle() -> PrometheusHandle {
+pub(crate) fn prometheus_handle() -> PrometheusHandle {
     static HANDLE: OnceLock<PrometheusHandle> = OnceLock::new();
     HANDLE
         .get_or_init(|| {
@@ -37,7 +37,7 @@ pub fn prometheus_handle() -> PrometheusHandle {
         .clone()
 }
 
-pub fn spawn_upkeep(handle: PrometheusHandle) {
+pub(crate) fn spawn_upkeep(handle: PrometheusHandle) {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(5));
         loop {
@@ -55,7 +55,7 @@ pub fn spawn_upkeep(handle: PrometheusHandle) {
 ///
 /// Returns `Option<SdkTracerProvider>` — caller should call `shutdown()` on
 /// graceful exit when `Some`.
-pub fn init_tracing() -> Option<SdkTracerProvider> {
+pub(crate) fn init_tracing() -> Option<SdkTracerProvider> {
     let fmt_layer = fmt::layer();
     let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
 
@@ -120,7 +120,7 @@ fn init_otel_provider(
 
 // ── Prometheus metrics (unchanged) ──────────────────────────────────────
 
-pub fn record_request(
+pub(crate) fn record_request(
     protocol: &str,
     model: &str,
     status: u16,
@@ -146,7 +146,7 @@ pub fn record_request(
     .record(duration.as_secs_f64());
 }
 
-pub fn record_attempt(
+pub(crate) fn record_attempt(
     protocol: &str,
     source_id: &str,
     account_id: &str,
@@ -164,7 +164,7 @@ pub fn record_attempt(
     .increment(1);
 }
 
-pub fn record_tokens(model: &str, direction: &str, count: u64) {
+pub(crate) fn record_tokens(model: &str, direction: &str, count: u64) {
     counter!(
         METRIC_TOKENS_TOTAL,
         "model" => model.to_owned(),
@@ -173,7 +173,7 @@ pub fn record_tokens(model: &str, direction: &str, count: u64) {
     .increment(count);
 }
 
-pub fn record_ttft(protocol: &str, model: &str, duration: Duration) {
+pub(crate) fn record_ttft(protocol: &str, model: &str, duration: Duration) {
     histogram!(
         METRIC_TTFT,
         "protocol" => protocol.to_owned(),
@@ -182,7 +182,7 @@ pub fn record_ttft(protocol: &str, model: &str, duration: Duration) {
     .record(duration.as_secs_f64());
 }
 
-pub fn record_cooldown(source_id: &str, account_id: &str) {
+pub(crate) fn record_cooldown(source_id: &str, account_id: &str) {
     counter!(
         METRIC_HEALTH_COOLDOWNS,
         "source" => source_id.to_owned(),
@@ -191,19 +191,19 @@ pub fn record_cooldown(source_id: &str, account_id: &str) {
     .increment(1);
 }
 
-pub fn set_snapshot_revision(revision: i64) {
+pub(crate) fn set_snapshot_revision(revision: i64) {
     gauge!(METRIC_SNAPSHOT_REVISION).set(revision as f64);
 }
 
-pub fn set_active_streams(count: i64) {
+pub(crate) fn set_active_streams(count: i64) {
     gauge!(METRIC_ACTIVE_STREAMS).set(count as f64);
 }
 
-pub fn track_stream_start() {
+pub(crate) fn track_stream_start() {
     set_active_streams(ACTIVE_STREAMS.fetch_add(1, Ordering::Relaxed) + 1);
 }
 
-pub fn track_stream_end() {
+pub(crate) fn track_stream_end() {
     set_active_streams(
         ACTIVE_STREAMS
             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
@@ -213,7 +213,7 @@ pub fn track_stream_end() {
     );
 }
 
-pub fn record_proxy_request(
+pub(crate) fn record_proxy_request(
     protocol: &str,
     model: &str,
     status: u16,

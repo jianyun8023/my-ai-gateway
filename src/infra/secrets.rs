@@ -17,13 +17,13 @@ use std::{collections::BTreeMap, env, fmt, str, sync::Arc};
 use zeroize::{Zeroize, Zeroizing};
 
 /// Primary environment variable containing the active credential master key.
-pub const MASTER_KEY_ENV: &str = "GATEWAY_CREDENTIAL_MASTER_KEY";
+pub(crate) const MASTER_KEY_ENV: &str = "GATEWAY_CREDENTIAL_MASTER_KEY";
 /// Optional keyring in `version=value,version2=value2` or JSON-object form.
-pub const MASTER_KEYS_ENV: &str = "GATEWAY_CREDENTIAL_MASTER_KEYS";
+pub(crate) const MASTER_KEYS_ENV: &str = "GATEWAY_CREDENTIAL_MASTER_KEYS";
 /// Version used when `MASTER_KEY_ENV` is set without a keyring.
-pub const MASTER_KEY_VERSION_ENV: &str = "GATEWAY_CREDENTIAL_MASTER_KEY_VERSION";
+pub(crate) const MASTER_KEY_VERSION_ENV: &str = "GATEWAY_CREDENTIAL_MASTER_KEY_VERSION";
 /// Version selected for newly encrypted envelopes.
-pub const ACTIVE_KEY_VERSION_ENV: &str = "GATEWAY_CREDENTIAL_ACTIVE_KEY_VERSION";
+pub(crate) const ACTIVE_KEY_VERSION_ENV: &str = "GATEWAY_CREDENTIAL_ACTIVE_KEY_VERSION";
 
 const ENVELOPE_PREFIX: &str = "gwenc";
 const ENVELOPE_VERSION: &str = "v1";
@@ -35,7 +35,7 @@ const VIRTUAL_KEY_AAD_PREFIX: &str = "my-ai-gateway/virtual-key/v1";
 
 /// A stable, non-secret error returned by the resolver.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum SecretResolverError {
+pub(crate) enum SecretResolverError {
     /// No usable credential reference was configured.
     CredentialUnavailable,
     /// Both supported references were configured, which is ambiguous.
@@ -53,7 +53,7 @@ pub enum SecretResolverError {
 }
 
 impl SecretResolverError {
-    pub fn code(&self) -> &'static str {
+    pub(crate) fn code(&self) -> &'static str {
         match self {
             Self::CredentialUnavailable => "credential_unavailable",
             Self::AmbiguousCredential => "credential_ambiguous",
@@ -67,7 +67,7 @@ impl SecretResolverError {
 
     /// A public message suitable for an API error or an audit row.  It never
     /// includes a key, ciphertext, account value, or environment value.
-    pub fn public_message(&self) -> &'static str {
+    pub(crate) fn public_message(&self) -> &'static str {
         match self {
             Self::CredentialUnavailable => "account credential is unavailable",
             Self::AmbiguousCredential => "account credential configuration is ambiguous",
@@ -90,8 +90,7 @@ impl std::error::Error for SecretResolverError {}
 
 /// A short-lived credential value.  Its backing bytes are zeroized on drop.
 /// The type intentionally has no `Serialize` implementation.
-#[allow(dead_code)]
-pub struct SecretLease(Zeroizing<Vec<u8>>);
+pub(crate) struct SecretLease(Zeroizing<Vec<u8>>);
 
 impl SecretLease {
     fn new(value: Vec<u8>) -> Result<Self, SecretResolverError> {
@@ -101,14 +100,9 @@ impl SecretLease {
         Ok(Self(Zeroizing::new(value)))
     }
 
-    pub fn as_str(&self) -> &str {
+    pub(crate) fn as_str(&self) -> &str {
         // `new` validates UTF-8 and the bytes are never mutated afterwards.
         str::from_utf8(&self.0).expect("validated secret lease is UTF-8")
-    }
-
-    #[allow(dead_code)]
-    pub fn as_bytes(&self) -> &[u8] {
-        &self.0
     }
 }
 
@@ -145,7 +139,7 @@ struct KeyRing {
 /// changing the key environment therefore requires an explicit reload or
 /// process restart rather than silently changing the active key mid-request.
 #[derive(Clone)]
-pub struct SecretResolver {
+pub(crate) struct SecretResolver {
     keyring: Arc<KeyRing>,
 }
 
@@ -167,11 +161,10 @@ impl Default for SecretResolver {
     }
 }
 
-#[allow(dead_code)]
 impl SecretResolver {
     /// Construct a resolver with no master key.  Environment references still
     /// work; ciphertext references fail closed with `MasterKeyUnavailable`.
-    pub fn empty() -> Self {
+    pub(crate) fn empty() -> Self {
         Self {
             keyring: Arc::new(KeyRing {
                 active_version: "v1".to_owned(),
@@ -182,14 +175,15 @@ impl SecretResolver {
 
     /// Construct a resolver from one master key.  The key is hashed to a
     /// fixed 256-bit AES key unless it is already exactly 32 bytes.
-    pub fn from_master_key(master_key: impl AsRef<[u8]>) -> Self {
+    #[cfg(test)]
+    pub(crate) fn from_master_key(master_key: impl AsRef<[u8]>) -> Self {
         Self::from_keyring("v1", [("v1".to_owned(), master_key.as_ref().to_vec())])
             .expect("fixed v1 key version is valid")
     }
 
     /// Construct a resolver from a keyring.  `active_version` is used for new
     /// envelopes; all supplied versions remain available for decryption.
-    pub fn from_keyring<I, V>(
+    pub(crate) fn from_keyring<I, V>(
         active_version: impl Into<String>,
         keys: I,
     ) -> Result<Self, SecretResolverError>
@@ -220,7 +214,7 @@ impl SecretResolver {
     /// Load the resolver from process environment.  The following aliases are
     /// accepted to ease deployment migration: `GATEWAY_SECRET_MASTER_KEY`,
     /// `GATEWAY_ENCRYPTION_KEY`, and `GATEWAY_SECRET_MASTER_KEYS`.
-    pub fn from_env() -> Result<Self, SecretResolverError> {
+    pub(crate) fn from_env() -> Result<Self, SecretResolverError> {
         let keyring_raw = first_nonempty_env(&[
             MASTER_KEYS_ENV,
             "GATEWAY_SECRET_MASTER_KEYS",
@@ -257,25 +251,25 @@ impl SecretResolver {
         Self::from_keyring(active, keys)
     }
 
-    pub fn active_key_version(&self) -> &str {
+    pub(crate) fn active_key_version(&self) -> &str {
         &self.keyring.active_version
     }
 
-    pub fn has_master_key(&self) -> bool {
+    pub(crate) fn has_master_key(&self) -> bool {
         !self.keyring.keys.is_empty()
     }
 
     /// Bind an envelope to a source/account identity.  The identity is public
     /// metadata, but binding it prevents ciphertext replay across accounts.
-    pub fn account_aad(source_id: &str, account_id: &str) -> String {
+    pub(crate) fn account_aad(source_id: &str, account_id: &str) -> String {
         format!("{ACCOUNT_AAD_PREFIX}/{source_id}/{account_id}")
     }
 
-    pub fn virtual_key_aad(key_prefix: &str) -> String {
+    pub(crate) fn virtual_key_aad(key_prefix: &str) -> String {
         format!("{VIRTUAL_KEY_AAD_PREFIX}/{key_prefix}")
     }
 
-    pub fn resolve_virtual_key(
+    pub(crate) fn resolve_virtual_key(
         &self,
         key_prefix: &str,
         ciphertext: &str,
@@ -286,7 +280,7 @@ impl SecretResolver {
 
     /// Resolve an Account's references.  Exactly one of `credential_env`,
     /// `credential_ciphertext`, or the test-only inline value may be present.
-    pub fn resolve_account(
+    pub(crate) fn resolve_account(
         &self,
         source_id: &str,
         account_id: &str,
@@ -305,7 +299,7 @@ impl SecretResolver {
 
     /// Resolve references with explicit AAD.  This is useful for non-account
     /// callers and keeps the cryptographic primitive independently testable.
-    pub fn resolve_refs(
+    pub(crate) fn resolve_refs(
         &self,
         credential_env: Option<&str>,
         credential_ciphertext: Option<&str>,
@@ -340,7 +334,11 @@ impl SecretResolver {
     /// Encrypt a value into the canonical `gwenc:v1:key:nonce:ciphertext`
     /// envelope.  This method is intended for provisioning/rotation tooling;
     /// request handlers should only call `resolve_*`.
-    pub fn encrypt(&self, plaintext: &str, aad: &[u8]) -> Result<String, SecretResolverError> {
+    pub(crate) fn encrypt(
+        &self,
+        plaintext: &str,
+        aad: &[u8],
+    ) -> Result<String, SecretResolverError> {
         if plaintext.is_empty() {
             return Err(SecretResolverError::InvalidPlaintext);
         }
@@ -369,7 +367,7 @@ impl SecretResolver {
     }
 
     /// Encrypt with account-bound AAD.
-    pub fn encrypt_for_account(
+    pub(crate) fn encrypt_for_account(
         &self,
         source_id: &str,
         account_id: &str,
@@ -381,12 +379,16 @@ impl SecretResolver {
 
     /// Re-encrypt an envelope with the current active key version.  Existing
     /// key versions remain valid for decryption, so rotation can be gradual.
-    pub fn rotate(&self, ciphertext: &str, aad: &[u8]) -> Result<String, SecretResolverError> {
+    pub(crate) fn rotate(
+        &self,
+        ciphertext: &str,
+        aad: &[u8],
+    ) -> Result<String, SecretResolverError> {
         let plaintext = self.decrypt(ciphertext, aad)?;
         self.encrypt(plaintext.as_str(), aad)
     }
 
-    pub fn rotate_for_account(
+    pub(crate) fn rotate_for_account(
         &self,
         source_id: &str,
         account_id: &str,
@@ -396,7 +398,8 @@ impl SecretResolver {
         self.rotate(ciphertext, aad.as_bytes())
     }
 
-    pub fn needs_rotation(&self, ciphertext: &str) -> Result<bool, SecretResolverError> {
+    #[cfg(test)]
+    pub(crate) fn needs_rotation(&self, ciphertext: &str) -> Result<bool, SecretResolverError> {
         let envelope = parse_envelope(ciphertext)?;
         Ok(envelope.key_version != self.keyring.active_version)
     }
@@ -404,36 +407,9 @@ impl SecretResolver {
     /// Validate envelope structure without attempting decryption.  Control
     /// plane writes use this to reject accidental plaintext while still
     /// allowing ciphertext encrypted by a previous key version.
-    pub fn validate_ciphertext(ciphertext: &str) -> Result<(), SecretResolverError> {
+    #[cfg(test)]
+    pub(crate) fn validate_ciphertext(ciphertext: &str) -> Result<(), SecretResolverError> {
         parse_envelope(ciphertext).map(|_| ())
-    }
-
-    /// Validate all encrypted references in a runtime config.  Environment
-    /// values are intentionally not required at snapshot publication time:
-    /// absence is handled immediately before a request and can be repaired
-    /// without rewriting the control plane.  Ciphertexts, however, are
-    /// decrypted once before publication so a wrong master key cannot replace
-    /// an already-valid in-memory snapshot.
-    pub fn validate_config(
-        &self,
-        config: &crate::domain::config::GatewayConfig,
-    ) -> Result<(), SecretResolverError> {
-        for account in &config.accounts {
-            if account
-                .credential_ciphertext
-                .as_deref()
-                .is_some_and(|value| !value.trim().is_empty())
-            {
-                self.resolve_account(
-                    &account.provider_id,
-                    &account.id,
-                    account.credential_env.as_deref(),
-                    account.credential_ciphertext.as_deref(),
-                    None,
-                )?;
-            }
-        }
-        Ok(())
     }
 
     fn decrypt(&self, ciphertext: &str, aad: &[u8]) -> Result<SecretLease, SecretResolverError> {
@@ -637,6 +613,32 @@ fn decode_b64(value: &str) -> Result<Vec<u8>, SecretResolverError> {
         .decode(value)
         .or_else(|_| general_purpose::STANDARD.decode(value))
         .map_err(|_| SecretResolverError::InvalidCiphertext)
+}
+
+impl SecretResolver {
+    pub(crate) fn resolve_account_credential(
+        &self,
+        account: &crate::domain::config::AccountConfig,
+    ) -> Option<String> {
+        match self.resolve_account(
+            &account.provider_id,
+            &account.id,
+            account.credential_env.as_deref(),
+            account.credential_ciphertext.as_deref(),
+            account.credential.as_deref(),
+        ) {
+            Ok(lease) => Some(lease.as_str().to_owned()),
+            Err(SecretResolverError::CredentialUnavailable) => None,
+            Err(err) => {
+                tracing::warn!(
+                    account_id = %account.id,
+                    error = %err,
+                    "credential resolution failed"
+                );
+                None
+            }
+        }
+    }
 }
 
 #[cfg(test)]

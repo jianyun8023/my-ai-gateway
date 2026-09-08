@@ -26,7 +26,10 @@ use super::helpers::{
     admin_control_plane, admin_result, control_plane_error, delete_result, json_payload,
     mutation_result,
 };
-use crate::state::{error_response, AppState, LiveConfig};
+use crate::{
+    http::response::error_response,
+    state::{AppState, LiveConfig},
+};
 
 pub(crate) async fn list_sources(
     State(state): State<AppState>,
@@ -366,14 +369,14 @@ pub(crate) async fn create_model_binding(
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct SourceModelCapabilityWrite {
-    pub status: CatalogStatus,
-    pub mode: SourceProtocolMode,
+    pub(crate) status: CatalogStatus,
+    pub(crate) mode: SourceProtocolMode,
     #[serde(default)]
-    pub source_protocol: Option<Protocol>,
+    pub(crate) source_protocol: Option<Protocol>,
     #[serde(default)]
-    pub adapter: Option<String>,
+    pub(crate) adapter: Option<String>,
     #[serde(default)]
-    pub feature_capabilities: BTreeMap<String, CapabilitySupport>,
+    pub(crate) feature_capabilities: BTreeMap<String, CapabilitySupport>,
 }
 
 pub(crate) async fn list_source_model_capabilities(

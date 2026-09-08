@@ -12,8 +12,7 @@ use serde_json::Value;
 use tower::ServiceExt;
 
 use my_ai_gateway::test_support::{
-    AccountConfig, Capabilities, GatewayConfig, Protocol, ProtocolCapability, ProviderConfig,
-    RouteConfig,
+    AccountConfig, Capabilities, GatewayConfig, Protocol, ProviderConfig, RouteConfig,
 };
 
 use crate::support::fixtures::{catalog, CaseFixture};
@@ -210,10 +209,7 @@ impl SseEvent {
     /// Parse the `data` field as JSON.
     pub fn json(&self) -> Value {
         serde_json::from_str(&self.data).unwrap_or_else(|e| {
-            panic!(
-                "failed to parse SSE data as JSON: {e}\ndata: {}",
-                &self.data
-            )
+            panic!("failed to parse SSE data as JSON: {e}\ndata: {}", self.data)
         })
     }
 
@@ -249,12 +245,12 @@ pub fn parse_sse_events(text: &str) -> Vec<SseEvent> {
         }
         if let Some(rest) = line.strip_prefix("event: ") {
             current_event_type = Some(rest.to_string());
-        } else if line.starts_with("event:") {
-            current_event_type = Some(line[6..].trim().to_string());
+        } else if let Some(event) = line.strip_prefix("event:") {
+            current_event_type = Some(event.trim().to_string());
         } else if let Some(rest) = line.strip_prefix("data: ") {
             current_data.push(rest.to_string());
-        } else if line.starts_with("data:") {
-            current_data.push(line[5..].trim().to_string());
+        } else if let Some(data) = line.strip_prefix("data:") {
+            current_data.push(data.trim().to_string());
         }
     }
     if !current_data.is_empty() {

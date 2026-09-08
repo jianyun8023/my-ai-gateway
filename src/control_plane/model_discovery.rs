@@ -31,7 +31,7 @@ use std::{
 const MAX_DISCOVERY_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 
 #[derive(Debug)]
-pub enum DiscoveryServiceError {
+pub(crate) enum DiscoveryServiceError {
     Catalog(CatalogError),
     InvalidPreset,
     InvalidSourceUrl,
@@ -41,7 +41,7 @@ pub enum DiscoveryServiceError {
 }
 
 impl DiscoveryServiceError {
-    pub fn code(&self) -> &'static str {
+    pub(crate) fn code(&self) -> &'static str {
         match self {
             Self::Catalog(CatalogError::NotFound(_)) => "not_found",
             Self::Catalog(CatalogError::InvalidMetadata(_) | CatalogError::InvalidState(_)) => {
@@ -56,7 +56,7 @@ impl DiscoveryServiceError {
         }
     }
 
-    pub fn public_message(&self) -> &str {
+    pub(crate) fn public_message(&self) -> &str {
         match self {
             Self::Catalog(CatalogError::NotFound(message))
             | Self::Catalog(CatalogError::InvalidMetadata(message))
@@ -105,10 +105,10 @@ impl From<CatalogError> for DiscoveryServiceError {
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct DiscoveryExecution {
-    pub run: DiscoveryRunRecord,
-    pub diff: DiscoveryDiff,
-    pub models: Vec<SourceModelRecord>,
+pub(crate) struct DiscoveryExecution {
+    pub(crate) run: DiscoveryRunRecord,
+    pub(crate) diff: DiscoveryDiff,
+    pub(crate) models: Vec<SourceModelRecord>,
 }
 
 impl From<DiscoveryApplyResult> for DiscoveryExecution {
@@ -167,17 +167,17 @@ impl SafeFailure {
 }
 
 #[derive(Clone)]
-pub struct ModelDiscoveryService {
+pub(crate) struct ModelDiscoveryService {
     repository: ModelCatalogRepository,
     http: SourceHttpClient,
 }
 
 impl ModelDiscoveryService {
-    pub fn new(repository: ModelCatalogRepository, http: SourceHttpClient) -> Self {
+    pub(crate) fn new(repository: ModelCatalogRepository, http: SourceHttpClient) -> Self {
         Self { repository, http }
     }
 
-    pub async fn test_connection(
+    pub(crate) async fn test_connection(
         &self,
         source_id: &str,
         account_id: &str,
@@ -332,7 +332,7 @@ impl ModelDiscoveryService {
         Ok(record)
     }
 
-    pub async fn discover(
+    pub(crate) async fn discover(
         &self,
         source_id: &str,
         account_id: &str,

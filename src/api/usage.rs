@@ -14,7 +14,7 @@ use serde_json::{json, Value};
 
 use crate::infra::db;
 
-use crate::state::{error_response, AppState};
+use crate::{http::response::error_response, state::AppState};
 
 #[derive(Debug)]
 pub(crate) struct UsageQuery {

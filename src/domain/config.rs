@@ -2,20 +2,6 @@ use super::protocol::Protocol;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-/// Features whose preservation can be declared by an adapter.
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum AdapterFeature {
-    Streaming,
-    Tools,
-    ToolStreaming,
-    Thinking,
-    WebSearch,
-    FileSearch,
-    Vision,
-    Usage,
-}
-
 /// A strongly typed declaration for a protocol adapter.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AdapterDefinition {
@@ -25,26 +11,7 @@ pub struct AdapterDefinition {
     pub features: Capabilities,
 }
 
-#[allow(dead_code)]
-pub type AdapterSpec = AdapterDefinition;
-#[allow(dead_code)]
 pub type AdapterRegistry = HashMap<&'static str, AdapterDefinition>;
-
-impl AdapterDefinition {
-    #[allow(dead_code)]
-    pub fn feature(&self, feature: AdapterFeature) -> CapabilityMode {
-        match feature {
-            AdapterFeature::Streaming => self.features.streaming,
-            AdapterFeature::Tools => self.features.tools,
-            AdapterFeature::ToolStreaming => self.features.tool_streaming,
-            AdapterFeature::Thinking => self.features.thinking,
-            AdapterFeature::WebSearch => self.features.web_search,
-            AdapterFeature::FileSearch => self.features.file_search,
-            AdapterFeature::Vision => self.features.vision,
-            AdapterFeature::Usage => self.features.usage,
-        }
-    }
-}
 
 /// Return the built-in adapter registry. A fresh map keeps the registry
 /// immutable to callers while retaining a simple, strongly typed declaration.
@@ -81,11 +48,6 @@ pub fn adapter_registry() -> AdapterRegistry {
     {
         HashMap::new()
     }
-}
-
-#[allow(dead_code)]
-pub fn registered_adapters() -> AdapterRegistry {
-    adapter_registry()
 }
 
 pub fn adapter_definition(name: &str) -> Option<AdapterDefinition> {
@@ -149,7 +111,6 @@ impl<'de> Deserialize<'de> for ProtocolCapability {
 }
 
 impl ProtocolCapability {
-    #[allow(dead_code)]
     pub fn native() -> Self {
         Self {
             mode: ProtocolMode::Native,
@@ -157,7 +118,7 @@ impl ProtocolCapability {
             adapter: None,
         }
     }
-    #[allow(dead_code)]
+
     pub fn unsupported() -> Self {
         Self {
             mode: ProtocolMode::Unsupported,
@@ -165,7 +126,8 @@ impl ProtocolCapability {
             adapter: None,
         }
     }
-    #[allow(dead_code)]
+
+    #[cfg(any(test, feature = "test-support"))]
     pub fn adapter(source_protocol: Protocol, adapter: impl Into<String>) -> Self {
         Self {
             mode: ProtocolMode::Adapter,
@@ -176,7 +138,6 @@ impl ProtocolCapability {
 
     /// Validate local invariants. Source resolution is checked by
     /// `ProtocolCapabilityMatrix::validate`.
-    #[allow(dead_code)]
     pub fn validate(&self, target: Protocol) -> Result<(), String> {
         match self.mode {
             ProtocolMode::Native => {
@@ -213,8 +174,6 @@ impl ProtocolCapability {
 }
 
 pub type ProtocolCapabilityMatrix = HashMap<Protocol, ProtocolCapability>;
-#[allow(dead_code)]
-pub type ProtocolCapabilities = ProtocolCapabilityMatrix;
 
 /// Feature support mode. `true`/`false` are accepted while reading legacy
 /// configurations and map to native/unsupported respectively.
@@ -226,23 +185,6 @@ pub enum CapabilityMode {
     #[default]
     Unsupported,
 }
-
-#[allow(dead_code)]
-pub type FeatureCapability = CapabilityMode;
-#[allow(dead_code)]
-pub type FeatureCapabilities = Capabilities;
-#[allow(dead_code)]
-pub type CapabilityMatrix = Capabilities;
-#[allow(dead_code)]
-pub type CapabilitySupport = CapabilityMode;
-#[allow(dead_code)]
-pub type ProtocolCapabilityMode = ProtocolMode;
-#[allow(dead_code)]
-pub type ProtocolSupportMode = ProtocolMode;
-#[allow(dead_code)]
-pub type ModelConfig = ModelCapabilityOverride;
-#[allow(dead_code)]
-pub type SourceConfig = ProviderConfig;
 
 impl<'de> Deserialize<'de> for CapabilityMode {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
@@ -295,7 +237,7 @@ pub struct Capabilities {
 }
 
 impl Capabilities {
-    #[allow(dead_code)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn native() -> Self {
         Self {
             streaming: CapabilityMode::Native,
@@ -567,7 +509,6 @@ impl GatewayConfig {
 
     /// Resolve the effective protocol declaration with precedence:
     /// account+model, provider+model, account, provider, legacy defaults.
-    #[allow(dead_code)]
     pub fn protocol_capability(
         &self,
         provider_id: &str,
@@ -609,7 +550,7 @@ impl GatewayConfig {
         ProtocolCapability::unsupported()
     }
 
-    #[allow(dead_code)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn effective_protocol_capabilities(
         &self,
         provider_id: &str,
@@ -627,7 +568,6 @@ impl GatewayConfig {
             .collect()
     }
 
-    #[allow(dead_code)]
     pub fn capabilities(
         &self,
         provider_id: &str,
@@ -825,7 +765,6 @@ fn validate_override_matrix(
     Ok(())
 }
 
-#[allow(dead_code)]
 fn find_model_override<'a>(
     overrides: &'a HashMap<String, ModelCapabilityOverride>,
     model: &str,
@@ -850,14 +789,8 @@ mod tests {
         let adapter = adapter_definition("kimi_responses_adapter").unwrap();
         assert_eq!(adapter.from_protocol, Protocol::OpenAiResponses);
         assert_eq!(adapter.to_protocol, Protocol::AnthropicMessages);
-        assert_eq!(
-            adapter.feature(AdapterFeature::Thinking),
-            CapabilityMode::Translated
-        );
-        assert_eq!(
-            adapter.feature(AdapterFeature::FileSearch),
-            CapabilityMode::Unsupported
-        );
+        assert_eq!(adapter.features.thinking, CapabilityMode::Translated);
+        assert_eq!(adapter.features.file_search, CapabilityMode::Unsupported);
     }
 
     #[test]

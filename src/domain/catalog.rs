@@ -6,7 +6,7 @@ use std::{collections::BTreeMap, error::Error, fmt, str::FromStr};
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum CatalogStatus {
+pub(crate) enum CatalogStatus {
     #[default]
     Pending,
     Confirmed,
@@ -14,7 +14,7 @@ pub enum CatalogStatus {
 }
 
 impl CatalogStatus {
-    pub fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Pending => "pending",
             Self::Confirmed => "confirmed",
@@ -22,7 +22,7 @@ impl CatalogStatus {
         }
     }
 
-    pub fn can_transition_to(self, next: Self) -> bool {
+    pub(crate) fn can_transition_to(self, next: Self) -> bool {
         self == next
             || matches!(
                 (self, next),
@@ -54,14 +54,14 @@ impl FromStr for CatalogStatus {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum CatalogAvailability {
+pub(crate) enum CatalogAvailability {
     Unknown,
     Available,
     Unavailable,
 }
 
 impl CatalogAvailability {
-    pub fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Unknown => "unknown",
             Self::Available => "available",
@@ -91,7 +91,7 @@ impl FromStr for CatalogAvailability {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum SourceProtocolMode {
+pub(crate) enum SourceProtocolMode {
     Unknown,
     Native,
     Adapter,
@@ -99,7 +99,7 @@ pub enum SourceProtocolMode {
 }
 
 impl SourceProtocolMode {
-    pub fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Unknown => "unknown",
             Self::Native => "native",
@@ -108,8 +108,7 @@ impl SourceProtocolMode {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn is_routable(self) -> bool {
+    pub(crate) fn is_routable(self) -> bool {
         matches!(self, Self::Native | Self::Adapter)
     }
 }
@@ -136,7 +135,7 @@ impl FromStr for SourceProtocolMode {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum MetadataSource {
+pub(crate) enum MetadataSource {
     Upstream,
     Preset,
     User,
@@ -172,7 +171,7 @@ impl FromStr for MetadataSource {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum MetadataField {
+pub(crate) enum MetadataField {
     LogicalModelName,
     DisplayName,
     ContextWindow,
@@ -189,7 +188,7 @@ pub enum MetadataField {
 }
 
 impl MetadataField {
-    pub const ALL: [Self; 13] = [
+    pub(crate) const ALL: [Self; 13] = [
         Self::LogicalModelName,
         Self::DisplayName,
         Self::ContextWindow,
@@ -235,7 +234,7 @@ impl fmt::Display for MetadataField {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum CapabilitySupport {
+pub(crate) enum CapabilitySupport {
     Supported,
     Unsupported,
     Unknown,
@@ -243,11 +242,10 @@ pub enum CapabilitySupport {
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 #[serde(transparent)]
-pub struct MetadataValues(pub BTreeMap<MetadataField, Value>);
+pub(crate) struct MetadataValues(pub BTreeMap<MetadataField, Value>);
 
 impl MetadataValues {
-    #[allow(dead_code)]
-    pub fn from_fields(
+    pub(crate) fn from_fields(
         fields: impl IntoIterator<Item = (MetadataField, Value)>,
     ) -> Result<Self, CatalogError> {
         let values = Self(fields.into_iter().collect());
@@ -255,7 +253,7 @@ impl MetadataValues {
         Ok(values)
     }
 
-    pub fn validate(&self) -> Result<(), CatalogError> {
+    pub(crate) fn validate(&self) -> Result<(), CatalogError> {
         for (field, value) in &self.0 {
             let valid = match field {
                 MetadataField::LogicalModelName | MetadataField::DisplayName => {
@@ -290,13 +288,13 @@ impl MetadataValues {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct CatalogMetadata {
-    pub values: MetadataValues,
-    pub field_sources: BTreeMap<MetadataField, MetadataSource>,
+pub(crate) struct CatalogMetadata {
+    pub(crate) values: MetadataValues,
+    pub(crate) field_sources: BTreeMap<MetadataField, MetadataSource>,
 }
 
 impl CatalogMetadata {
-    pub fn resolve(
+    pub(crate) fn resolve(
         upstream: &MetadataValues,
         preset: Option<&MetadataValues>,
     ) -> Result<Self, CatalogError> {
@@ -312,7 +310,7 @@ impl CatalogMetadata {
         Ok(result)
     }
 
-    pub fn unknown() -> Self {
+    pub(crate) fn unknown() -> Self {
         let values = MetadataField::ALL
             .into_iter()
             .map(|field| (field, field.unknown_value()))
@@ -327,13 +325,16 @@ impl CatalogMetadata {
         }
     }
 
-    pub fn apply_user_overrides(&mut self, overrides: &MetadataValues) -> Result<(), CatalogError> {
+    pub(crate) fn apply_user_overrides(
+        &mut self,
+        overrides: &MetadataValues,
+    ) -> Result<(), CatalogError> {
         overrides.validate()?;
         self.apply_values(overrides, MetadataSource::User);
         Ok(())
     }
 
-    pub fn refreshed_preserving_user_fields(
+    pub(crate) fn refreshed_preserving_user_fields(
         &self,
         confirmed: bool,
         upstream: &MetadataValues,
@@ -354,14 +355,14 @@ impl CatalogMetadata {
         Ok(refreshed)
     }
 
-    pub fn to_json(&self) -> Result<(Value, Value), CatalogError> {
+    pub(crate) fn to_json(&self) -> Result<(Value, Value), CatalogError> {
         Ok((
             serde_json::to_value(&self.values)?,
             serde_json::to_value(&self.field_sources)?,
         ))
     }
 
-    pub fn from_json(values: Value, field_sources: Value) -> Result<Self, CatalogError> {
+    pub(crate) fn from_json(values: Value, field_sources: Value) -> Result<Self, CatalogError> {
         let metadata = Self {
             values: serde_json::from_value(values)?,
             field_sources: serde_json::from_value(field_sources)?,
@@ -394,7 +395,7 @@ impl CatalogMetadata {
 }
 
 #[derive(Debug)]
-pub enum CatalogError {
+pub(crate) enum CatalogError {
     Json(serde_json::Error),
     InvalidMetadata(String),
     InvalidState(String),
@@ -425,139 +426,141 @@ impl From<serde_json::Error> for CatalogError {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct ModelPresetRef {
-    pub id: String,
-    pub version: i32,
+pub(crate) struct ModelPresetRef {
+    pub(crate) id: String,
+    pub(crate) version: i32,
 }
 
 #[derive(Clone, Debug)]
-pub struct ProviderPresetInput {
-    pub id: String,
-    pub version: i32,
-    pub display_name: String,
-    pub definition: Value,
+pub(crate) struct ProviderPresetInput {
+    pub(crate) id: String,
+    pub(crate) version: i32,
+    pub(crate) display_name: String,
+    pub(crate) definition: Value,
 }
 
 #[derive(Clone, Debug)]
-pub struct SourceInput {
-    pub id: String,
-    pub display_name: String,
-    pub provider_preset_id: String,
-    pub provider_preset_version: i32,
-    pub base_url: String,
-    pub endpoints: Value,
-    pub auth_config: Value,
-    pub protocol_capabilities: Value,
+#[cfg(test)]
+pub(crate) struct SourceInput {
+    pub(crate) id: String,
+    pub(crate) display_name: String,
+    pub(crate) provider_preset_id: String,
+    pub(crate) provider_preset_version: i32,
+    pub(crate) base_url: String,
+    pub(crate) endpoints: Value,
+    pub(crate) auth_config: Value,
+    pub(crate) protocol_capabilities: Value,
 }
 
 #[derive(Clone, Debug)]
-pub struct ModelPresetInput {
-    pub id: String,
-    pub version: i32,
-    pub canonical_model_id: String,
-    pub aliases: Vec<String>,
-    pub metadata: CatalogMetadata,
+pub(crate) struct ModelPresetInput {
+    pub(crate) id: String,
+    pub(crate) version: i32,
+    pub(crate) canonical_model_id: String,
+    pub(crate) aliases: Vec<String>,
+    pub(crate) metadata: CatalogMetadata,
 }
 
 #[derive(Clone, Debug)]
-pub struct SourceModelRefresh {
-    pub source_id: String,
-    pub upstream_model_id: String,
-    pub raw_snapshot: Value,
-    pub upstream_metadata: MetadataValues,
-    pub matched_preset: Option<ModelPresetRef>,
-    pub preset_metadata: Option<MetadataValues>,
-    pub discovered_at: DateTime<Utc>,
+pub(crate) struct SourceModelRefresh {
+    pub(crate) source_id: String,
+    pub(crate) upstream_model_id: String,
+    pub(crate) raw_snapshot: Value,
+    pub(crate) upstream_metadata: MetadataValues,
+    pub(crate) matched_preset: Option<ModelPresetRef>,
+    pub(crate) preset_metadata: Option<MetadataValues>,
+    pub(crate) discovered_at: DateTime<Utc>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct DiscoveryDiffEntry {
-    pub upstream_model_id: String,
-    pub changed_fields: Vec<String>,
+pub(crate) struct DiscoveryDiffEntry {
+    pub(crate) upstream_model_id: String,
+    pub(crate) changed_fields: Vec<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
-pub struct DiscoveryDiff {
-    pub added: Vec<DiscoveryDiffEntry>,
-    pub changed: Vec<DiscoveryDiffEntry>,
-    pub missing: Vec<DiscoveryDiffEntry>,
+pub(crate) struct DiscoveryDiff {
+    pub(crate) added: Vec<DiscoveryDiffEntry>,
+    pub(crate) changed: Vec<DiscoveryDiffEntry>,
+    pub(crate) missing: Vec<DiscoveryDiffEntry>,
 }
 
 #[derive(Clone, Debug)]
-pub struct DiscoveryApplyInput {
-    pub source_id: String,
-    pub account_id: Option<String>,
-    pub raw_snapshot: Value,
-    pub models: Vec<SourceModelRefresh>,
-    pub http_status: i32,
-    pub latency_ms: i64,
-    pub requested_by: String,
-    pub started_at: DateTime<Utc>,
-    pub completed_at: DateTime<Utc>,
+pub(crate) struct DiscoveryApplyInput {
+    pub(crate) source_id: String,
+    pub(crate) account_id: Option<String>,
+    pub(crate) raw_snapshot: Value,
+    pub(crate) models: Vec<SourceModelRefresh>,
+    pub(crate) http_status: i32,
+    pub(crate) latency_ms: i64,
+    pub(crate) requested_by: String,
+    pub(crate) started_at: DateTime<Utc>,
+    pub(crate) completed_at: DateTime<Utc>,
 }
 
 #[derive(Clone, Debug)]
-pub struct DiscoveryFailureInput {
-    pub source_id: String,
-    pub account_id: Option<String>,
-    pub status: String,
-    pub http_status: Option<i32>,
-    pub latency_ms: i64,
-    pub error_code: String,
-    pub error_message: String,
-    pub requested_by: String,
-    pub started_at: DateTime<Utc>,
-    pub completed_at: DateTime<Utc>,
+pub(crate) struct DiscoveryFailureInput {
+    pub(crate) source_id: String,
+    pub(crate) account_id: Option<String>,
+    pub(crate) status: String,
+    pub(crate) http_status: Option<i32>,
+    pub(crate) latency_ms: i64,
+    pub(crate) error_code: String,
+    pub(crate) error_message: String,
+    pub(crate) requested_by: String,
+    pub(crate) started_at: DateTime<Utc>,
+    pub(crate) completed_at: DateTime<Utc>,
 }
 
 #[derive(Clone, Debug)]
-pub struct ConnectionTestInput {
-    pub source_id: String,
-    pub account_id: Option<String>,
-    pub protocol: Protocol,
-    pub upstream_protocol: Protocol,
-    pub mode: SourceProtocolMode,
-    pub status: String,
-    pub http_status: Option<i32>,
-    pub latency_ms: i64,
-    pub error_code: Option<String>,
-    pub error_message: Option<String>,
-    pub requested_by: String,
-    pub tested_at: DateTime<Utc>,
+pub(crate) struct ConnectionTestInput {
+    pub(crate) source_id: String,
+    pub(crate) account_id: Option<String>,
+    pub(crate) protocol: Protocol,
+    pub(crate) upstream_protocol: Protocol,
+    pub(crate) mode: SourceProtocolMode,
+    pub(crate) status: String,
+    pub(crate) http_status: Option<i32>,
+    pub(crate) latency_ms: i64,
+    pub(crate) error_code: Option<String>,
+    pub(crate) error_message: Option<String>,
+    pub(crate) requested_by: String,
+    pub(crate) tested_at: DateTime<Utc>,
 }
 
 #[derive(Clone, Debug)]
-pub struct SourceModelConfirmation {
-    pub upstream_model_id: String,
-    pub user_overrides: MetadataValues,
+pub(crate) struct SourceModelConfirmation {
+    pub(crate) upstream_model_id: String,
+    pub(crate) user_overrides: MetadataValues,
 }
 
 #[derive(Clone, Debug)]
-pub struct LogicalModelInput {
-    pub id: String,
-    pub public_name: String,
-    pub display_name: String,
-    pub status: CatalogStatus,
-    pub model_preset: Option<ModelPresetRef>,
-    pub metadata: CatalogMetadata,
+#[cfg(test)]
+pub(crate) struct LogicalModelInput {
+    pub(crate) id: String,
+    pub(crate) public_name: String,
+    pub(crate) display_name: String,
+    pub(crate) status: CatalogStatus,
+    pub(crate) model_preset: Option<ModelPresetRef>,
+    pub(crate) metadata: CatalogMetadata,
 }
 
 #[derive(Clone, Debug)]
-pub struct SourceModelCapabilityInput {
-    pub source_id: String,
-    pub upstream_model_id: String,
-    pub protocol: Protocol,
-    pub status: CatalogStatus,
-    pub mode: SourceProtocolMode,
-    pub source_protocol: Option<Protocol>,
-    pub adapter: Option<String>,
-    pub feature_capabilities: BTreeMap<String, CapabilitySupport>,
-    pub field_source: MetadataSource,
-    pub observed_at: DateTime<Utc>,
+pub(crate) struct SourceModelCapabilityInput {
+    pub(crate) source_id: String,
+    pub(crate) upstream_model_id: String,
+    pub(crate) protocol: Protocol,
+    pub(crate) status: CatalogStatus,
+    pub(crate) mode: SourceProtocolMode,
+    pub(crate) source_protocol: Option<Protocol>,
+    pub(crate) adapter: Option<String>,
+    pub(crate) feature_capabilities: BTreeMap<String, CapabilitySupport>,
+    pub(crate) field_source: MetadataSource,
+    pub(crate) observed_at: DateTime<Utc>,
 }
 
 impl SourceModelCapabilityInput {
-    pub fn validate(&self) -> Result<(), CatalogError> {
+    pub(crate) fn validate(&self) -> Result<(), CatalogError> {
         if self.status == CatalogStatus::Confirmed && self.mode == SourceProtocolMode::Unknown {
             return Err(CatalogError::InvalidState(
                 "unknown protocol capability cannot be confirmed".to_owned(),
@@ -604,19 +607,20 @@ impl SourceModelCapabilityInput {
 }
 
 #[derive(Clone, Debug)]
-pub struct ModelBindingInput {
-    pub logical_model_id: String,
-    pub source_id: String,
-    pub account_id: String,
-    pub upstream_model_id: String,
-    pub protocol: Protocol,
-    pub priority: i32,
+#[cfg(test)]
+pub(crate) struct ModelBindingInput {
+    pub(crate) logical_model_id: String,
+    pub(crate) source_id: String,
+    pub(crate) account_id: String,
+    pub(crate) upstream_model_id: String,
+    pub(crate) protocol: Protocol,
+    pub(crate) priority: i32,
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct PublishedModel {
-    pub id: String,
-    pub display_name: String,
+pub(crate) struct PublishedModel {
+    pub(crate) id: String,
+    pub(crate) display_name: String,
     #[serde(skip)]
-    pub account_ids: Vec<String>,
+    pub(crate) account_ids: Vec<String>,
 }

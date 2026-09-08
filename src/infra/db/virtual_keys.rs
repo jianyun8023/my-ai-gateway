@@ -2,10 +2,10 @@ use super::*;
 use sha2::{Digest, Sha256};
 
 impl Database {
-    /// Compatibility helper that creates a hash-only, unrecoverable key. The
-    /// Admin API uses encrypted recovery material instead.
-    #[allow(dead_code)]
-    pub async fn create_virtual_key(
+    /// Test fixture for hash-only keys. Production creation requires the
+    /// caller to supply encrypted recovery material.
+    #[cfg(test)]
+    pub(crate) async fn create_virtual_key(
         &self,
         name: &str,
         allowed_models: &[String],
@@ -21,8 +21,8 @@ impl Database {
         .await
     }
 
-    #[allow(dead_code)]
-    pub async fn create_virtual_key_with_options(
+    #[cfg(test)]
+    pub(crate) async fn create_virtual_key_with_options(
         &self,
         name: &str,
         allowed_models: &[String],
@@ -45,7 +45,7 @@ impl Database {
         .await
     }
 
-    pub fn generate_virtual_key_material() -> VirtualKeyMaterial {
+    pub(crate) fn generate_virtual_key_material() -> VirtualKeyMaterial {
         let raw = format!("gw_{}", uuid::Uuid::new_v4().simple());
         let prefix = raw.chars().take(11).collect::<String>();
         let hash = hash_key(&raw);
@@ -53,7 +53,7 @@ impl Database {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub async fn create_virtual_key_with_material(
+    pub(crate) async fn create_virtual_key_with_material(
         &self,
         name: &str,
         allowed_models: &[String],
@@ -86,14 +86,17 @@ impl Database {
         Ok((row.0, material.raw.clone()))
     }
 
-    pub async fn list_virtual_keys(&self) -> Result<Vec<VirtualKeyRecord>, sqlx::Error> {
+    pub(crate) async fn list_virtual_keys(&self) -> Result<Vec<VirtualKeyRecord>, sqlx::Error> {
         let query = virtual_key_select("FROM virtual_keys ORDER BY id DESC");
         sqlx::query_as::<_, VirtualKeyRecord>(&query)
             .fetch_all(&self.pool)
             .await
     }
 
-    pub async fn get_virtual_key(&self, id: i64) -> Result<Option<VirtualKeyRecord>, sqlx::Error> {
+    pub(crate) async fn get_virtual_key(
+        &self,
+        id: i64,
+    ) -> Result<Option<VirtualKeyRecord>, sqlx::Error> {
         let query = virtual_key_select("FROM virtual_keys WHERE id=$1");
         sqlx::query_as::<_, VirtualKeyRecord>(&query)
             .bind(id)
@@ -101,7 +104,7 @@ impl Database {
             .await
     }
 
-    pub async fn get_virtual_key_ciphertext(
+    pub(crate) async fn get_virtual_key_ciphertext(
         &self,
         id: i64,
     ) -> Result<Option<(String, Option<String>)>, sqlx::Error> {
@@ -111,7 +114,7 @@ impl Database {
             .await
     }
 
-    pub async fn revoke_virtual_key(&self, id: i64) -> Result<bool, sqlx::Error> {
+    pub(crate) async fn revoke_virtual_key(&self, id: i64) -> Result<bool, sqlx::Error> {
         let result = sqlx::query(
             "UPDATE virtual_keys
              SET enabled=FALSE, revoked_at=COALESCE(revoked_at,NOW()), updated_at=NOW()
@@ -123,71 +126,7 @@ impl Database {
         Ok(result.rows_affected() > 0)
     }
 
-    /// Update mutable metadata and permissions in one atomic statement. The
-    /// `CASE` flags preserve the distinction between an omitted field and an
-    /// explicit null used to clear expiry/group metadata.
-    #[allow(dead_code)]
-    pub async fn update_virtual_key(
-        &self,
-        id: i64,
-        update: &VirtualKeyUpdate,
-    ) -> Result<VirtualKeyRecord, VirtualKeyError> {
-        let name_set = update.name.is_some();
-        let models_set = update.allowed_models.is_some();
-        let scopes_set = update.scopes.is_some();
-        let expiry_set = update.expires_at.is_some();
-        let group_set = update.key_group.is_some();
-        let models = update
-            .allowed_models
-            .as_ref()
-            .map(|values| serde_json::to_value(values).unwrap_or_else(|_| Value::Array(vec![])));
-        let scopes = update.scopes.as_ref().map(|values| scopes_json(values));
-        let expiry = update.expires_at.as_ref().and_then(|value| *value);
-        let group = update.key_group.as_ref().and_then(|value| value.as_deref());
-        let query = format!(
-            "UPDATE virtual_keys
-             SET name=CASE WHEN $2 THEN $3 ELSE name END,
-                 allowed_models=CASE WHEN $4 THEN $5 ELSE allowed_models END,
-                 scopes=CASE WHEN $6 THEN $7 ELSE scopes END,
-                 expires_at=CASE WHEN $8 THEN $9 ELSE expires_at END,
-                 key_group=CASE WHEN $10 THEN $11 ELSE key_group END,
-                 updated_at=NOW()
-             WHERE id=$1 AND revoked_at IS NULL
-             RETURNING {}",
-            VIRTUAL_KEY_COLUMNS
-        );
-        let record = sqlx::query_as::<_, VirtualKeyRecord>(&query)
-            .bind(id)
-            .bind(name_set)
-            .bind(update.name.as_deref())
-            .bind(models_set)
-            .bind(models)
-            .bind(scopes_set)
-            .bind(scopes)
-            .bind(expiry_set)
-            .bind(expiry)
-            .bind(group_set)
-            .bind(group)
-            .fetch_optional(&self.pool)
-            .await?
-            .ok_or(VirtualKeyError::NotFound)?;
-        Ok(record)
-    }
-
-    /// Rotate one key generation under a row lock. Concurrent rotations of the
-    /// same generation are serialized; the second caller receives Conflict.
-    #[allow(dead_code)]
-    pub async fn rotate_virtual_key(
-        &self,
-        id: i64,
-        options: &VirtualKeyRotationOptions,
-    ) -> Result<VirtualKeyRotation, VirtualKeyError> {
-        let material = Self::generate_virtual_key_material();
-        self.rotate_virtual_key_with_material(id, options, &material, None)
-            .await
-    }
-
-    pub async fn rotate_virtual_key_with_material(
+    pub(crate) async fn rotate_virtual_key_with_material(
         &self,
         id: i64,
         options: &VirtualKeyRotationOptions,
@@ -286,64 +225,8 @@ impl Database {
         })
     }
 
-    /// Import the configured legacy static key as a normal database-backed
-    /// credential. This operation is idempotent and never returns the raw key.
-    #[allow(dead_code)]
-    pub async fn migrate_static_virtual_key(
-        &self,
-        raw: &str,
-        name: &str,
-        allowed_models: &[String],
-        scopes: &[String],
-        expires_at: Option<DateTime<Utc>>,
-        key_group: Option<&str>,
-    ) -> Result<StaticVirtualKeyMigration, VirtualKeyError> {
-        let hash = hash_key(raw);
-        let prefix = raw.chars().take(11).collect::<String>();
-        let mut tx = self.pool.begin().await?;
-        if let Some(row) = sqlx::query_as::<_, (i64, bool, Option<DateTime<Utc>>, Option<DateTime<Utc>>)>(
-            "SELECT id,enabled,expires_at,revoked_at FROM virtual_keys WHERE key_hash=$1 FOR UPDATE",
-        )
-        .bind(&hash)
-        .fetch_optional(&mut *tx)
-        .await?
-        {
-            tx.commit().await?;
-            let active = row.1
-                && row.3.is_none()
-                && row.2.is_none_or(|expires| expires > Utc::now());
-            return Ok(StaticVirtualKeyMigration {
-                id: row.0,
-                key_prefix: prefix,
-                created: false,
-                active,
-            });
-        }
-        let row = sqlx::query_as::<_, (i64,)>(
-            "INSERT INTO virtual_keys
-             (name,key_prefix,key_hash,allowed_models,scopes,key_group,expires_at,origin)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,'static_migration') RETURNING id",
-        )
-        .bind(name)
-        .bind(&prefix)
-        .bind(&hash)
-        .bind(serde_json::to_value(allowed_models).unwrap_or_else(|_| Value::Array(vec![])))
-        .bind(scopes_json(scopes))
-        .bind(key_group)
-        .bind(expires_at)
-        .fetch_one(&mut *tx)
-        .await?;
-        tx.commit().await?;
-        Ok(StaticVirtualKeyMigration {
-            id: row.0,
-            key_prefix: prefix,
-            created: true,
-            active: true,
-        })
-    }
-
-    #[allow(dead_code)]
-    pub async fn authenticate_virtual_key(
+    #[cfg(test)]
+    pub(crate) async fn authenticate_virtual_key(
         &self,
         raw: &str,
         model: Option<&str>,
@@ -354,7 +237,7 @@ impl Database {
             .map(|(id, _, _)| id))
     }
 
-    pub async fn authenticate_virtual_key_with_identity(
+    pub(crate) async fn authenticate_virtual_key_with_identity(
         &self,
         raw: &str,
         model: Option<&str>,
@@ -449,7 +332,7 @@ fn scope_allow(value: &Value, required: &str) -> bool {
     })
 }
 
-pub fn validate_virtual_key_scopes(scopes: &[String]) -> Result<(), String> {
+pub(crate) fn validate_virtual_key_scopes(scopes: &[String]) -> Result<(), String> {
     let allowed = [VIRTUAL_KEY_INVOKE_SCOPE, VIRTUAL_KEY_MODELS_SCOPE, "*"];
     for scope in scopes {
         if !allowed.contains(&scope.as_str()) {

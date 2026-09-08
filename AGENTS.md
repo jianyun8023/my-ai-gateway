@@ -79,11 +79,11 @@
 | --- | --- |
 | `src/main.rs` → `src/lib.rs` → `src/runtime.rs` | 启动、DB-first 初始化、探测循环、ops CLI |
 | `src/app.rs`、`src/api/` | HTTP 路由、Admin 鉴权/审计中间件、协议与管理处理器 |
-| `src/state.rs` | 运行快照、鉴权身份、凭据及错误响应辅助 |
+| `src/state.rs`、`src/auth.rs` | 共享运行状态与快照发布；独立鉴权身份解析 |
 | `src/domain/` | 配置、协议、preset、模型目录、路由及能力矩阵 |
-| `src/control_plane/` | 事务 CRUD、snapshot 构建、模型发现/确认 |
-| `src/proxy/` | 请求编排、上游 transport、SSE 生命周期、usage 提取 |
-| `src/http.rs`、`src/source_url.rs` | 共享上游 HTTP client 与 URL/SSRF 边界 |
+| `src/control_plane/` | 资源用例、事务生命周期、校验、导入、snapshot 构建、模型发现/确认 |
+| `src/proxy/` | 请求编排、fallback、转发、客户端归因、重试策略、流式结算及 transport/SSE/usage |
+| `src/http.rs`、`src/http/response.rs`、`src/source_url.rs` | 共享上游 HTTP client、HTTP 错误封装与 URL/SSRF 边界 |
 | `src/infra/`、`src/infra/db/` | PostgreSQL、健康、Secret、审计、运维、指标/trace |
 | `migrations/` | SQLx 前进式数据库迁移；按现有最大编号新增 |
 | `web/src/App.tsx`、`web/src/lib/consoleNavigation.ts` | 控制台导航与页面接入 |
@@ -122,7 +122,7 @@
 | 外部协议 / SDK / 差分 | `test-conformance`、`test-sdk-smoke`、`test-differential`；先读 `docs/testing.md` 中目标服务与 opt-in 要求 |
 | 真实 Provider / Codex E2E | `test-live` / `test-codex-e2e`；按 `docs/live-provider-smoke.md` / `docs/codex-e2e.md` 使用独立测试库与显式 opt-in，普通 CI 不发送真实模型请求 |
 
-默认 Cargo 缓存不可写时，对上述命令设置 `CARGO_HOME=/tmp/my-ai-gateway-cargo`。单独验证 Rust 可用 `cargo fmt --all -- --check`、`cargo check --workspace`、`cargo clippy --all-targets -- -D warnings`、`cargo test --workspace --features test-support -- --test-threads=1`；需要修复本次格式问题才运行 `cargo fmt --all`，不格式化无关文件。
+默认 Cargo 缓存不可写时，对上述命令设置 `CARGO_HOME=/tmp/my-ai-gateway-cargo`。单独验证 Rust 可用 `cargo fmt --all -- --check`、`cargo check --workspace`、`cargo clippy --all-targets --features test-support -- -D warnings`、`cargo test --workspace --features test-support -- --test-threads=1`；需要修复本次格式问题才运行 `cargo fmt --all`，不格式化无关文件。
 
 PR CI 定义在 `.github/workflows/pull-request.yml`，包含静态检查/构建和单元/Contract/PostgreSQL 测试。镜像发布工作流为 `main` 与版本 tag 构建 Linux amd64/arm64 镜像；镜像发布成功不等于已部署或生产复验通过。
 

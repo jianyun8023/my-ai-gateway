@@ -14,7 +14,6 @@ use serde_json::json;
 
 use crate::assert_case;
 use crate::common::*;
-use crate::support::fixtures::CaseFixture;
 
 const MODEL: &str = "test-model";
 const URI: &str = "/v1/responses";

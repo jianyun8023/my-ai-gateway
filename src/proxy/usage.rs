@@ -12,23 +12,23 @@ use std::time::Instant;
 use super::stream::{is_gateway_heartbeat, SseEventTracker, StreamTermination, HEARTBEAT_MARKER};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct UsageReport {
-    pub input_tokens: i64,
-    pub output_tokens: i64,
-    pub reasoning_tokens: i64,
-    pub cached_tokens: i64,
-    pub cache_read_tokens: i64,
-    pub cache_creation_tokens: i64,
-    pub total_tokens: i64,
-    pub source: String,
+pub(crate) struct UsageReport {
+    pub(crate) input_tokens: i64,
+    pub(crate) output_tokens: i64,
+    pub(crate) reasoning_tokens: i64,
+    pub(crate) cached_tokens: i64,
+    pub(crate) cache_read_tokens: i64,
+    pub(crate) cache_creation_tokens: i64,
+    pub(crate) total_tokens: i64,
+    pub(crate) source: String,
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub struct StreamObservation {
-    pub captured: Vec<u8>,
-    pub ttft_ms: Option<i64>,
-    pub failed: bool,
-    pub termination: StreamTermination,
+pub(crate) struct StreamObservation {
+    pub(crate) captured: Vec<u8>,
+    pub(crate) ttft_ms: Option<i64>,
+    pub(crate) failed: bool,
+    pub(crate) termination: StreamTermination,
 }
 
 struct ObservationGuard<F>
@@ -158,7 +158,7 @@ where
 /// the same order. The upstream is polled once per downstream demand, so this
 /// does not prefetch the response or alter backpressure. Completion is reported
 /// on clean EOF or immediately on a body-stream error.
-pub fn observe_stream_body<F>(body: Body, request_started: Instant, on_complete: F) -> Body
+pub(crate) fn observe_stream_body<F>(body: Body, request_started: Instant, on_complete: F) -> Body
 where
     F: FnOnce(StreamObservation) + Send + 'static,
 {
@@ -202,7 +202,7 @@ where
 
 /// Conservative fallback estimate used when an upstream omits usage.
 /// This is intentionally marked as estimated; it is not a billing value.
-pub fn estimate(input: &[u8], output: &[u8]) -> UsageReport {
+pub(crate) fn estimate(input: &[u8], output: &[u8]) -> UsageReport {
     let tokenizer = tiktoken_rs::cl100k_base().expect("cl100k tokenizer initialization");
     let input_text = String::from_utf8_lossy(input);
     let output_text = String::from_utf8_lossy(output);
@@ -226,7 +226,7 @@ pub fn estimate(input: &[u8], output: &[u8]) -> UsageReport {
 /// The scanner is byte-oriented so it stays allocation-light on large
 /// streams; it only materialises the concatenated text between the matching
 /// tags and tokenises that substring once.
-pub fn minimax_chat_thinking_tokens(captured: &[u8]) -> i64 {
+pub(crate) fn minimax_chat_thinking_tokens(captured: &[u8]) -> i64 {
     let tokenizer = match tiktoken_rs::cl100k_base() {
         Ok(t) => t,
         Err(_) => return 0,
@@ -262,14 +262,14 @@ fn merge_thinking_into_report(report: &mut UsageReport, captured: &[u8]) {
 }
 
 impl UsageReport {
-    pub fn missing() -> Self {
+    pub(crate) fn missing() -> Self {
         Self {
             source: "missing".into(),
             ..Default::default()
         }
     }
 
-    pub fn is_present(&self) -> bool {
+    pub(crate) fn is_present(&self) -> bool {
         self.input_tokens > 0
             || self.output_tokens > 0
             || self.reasoning_tokens > 0
@@ -285,7 +285,7 @@ fn i64_at(value: &Value, key: &str) -> i64 {
 }
 
 /// Extract usage from a complete JSON response.
-pub fn extract_json(value: &Value) -> Option<UsageReport> {
+pub(crate) fn extract_json(value: &Value) -> Option<UsageReport> {
     // OpenAI Chat/Responses put usage at the top level.  Some adapters wrap
     // the actual response under `response`, so inspect that as a fallback.
     let usage = value
@@ -341,7 +341,7 @@ pub fn extract_json(value: &Value) -> Option<UsageReport> {
     report.is_present().then_some(report)
 }
 
-pub fn extract_json_bytes(bytes: &[u8]) -> Option<UsageReport> {
+pub(crate) fn extract_json_bytes(bytes: &[u8]) -> Option<UsageReport> {
     serde_json::from_slice::<Value>(bytes)
         .ok()
         .and_then(|value| extract_json(&value))
@@ -349,7 +349,11 @@ pub fn extract_json_bytes(bytes: &[u8]) -> Option<UsageReport> {
 
 /// Resolve usage for a completed JSON response. Failed responses without
 /// provider-confirmed usage remain explicitly missing and are never estimated.
-pub fn usage_for_json_response(success: bool, request: &[u8], response: &[u8]) -> UsageReport {
+pub(crate) fn usage_for_json_response(
+    success: bool,
+    request: &[u8],
+    response: &[u8],
+) -> UsageReport {
     extract_json_bytes(response).unwrap_or_else(|| {
         if success {
             estimate(request, response)
@@ -361,8 +365,7 @@ pub fn usage_for_json_response(success: bool, request: &[u8], response: &[u8]) -
 
 /// Extract the last usage-bearing event from an SSE payload.  This handles
 /// `data: {...}` and ignores comments/keep-alives and `[DONE]`.
-#[allow(dead_code)]
-pub fn extract_sse(text: &str) -> Option<UsageReport> {
+pub(crate) fn extract_sse(text: &str) -> Option<UsageReport> {
     let mut latest: Option<UsageReport> = None;
     for line in text.lines() {
         let Some(data) = line.strip_prefix("data:").map(str::trim) else {
@@ -413,7 +416,7 @@ pub fn extract_sse(text: &str) -> Option<UsageReport> {
 /// When `extract_sse` returns `None` and we have to fall back to the
 /// tiktoken-based `estimate`, log metadata-only diagnostics for issue #98.
 /// Never emit response bytes, reversible previews, or body fingerprints.
-pub fn usage_for_sse_response(
+pub(crate) fn usage_for_sse_response(
     request_id: &str,
     success: bool,
     request: &[u8],

@@ -1,3 +1,30 @@
+use crate::*;
+
+use app::{application, should_audit_admin_request};
+
+use api::{
+    health_admin::admin_health,
+    proxy::responses,
+    usage::{csv_field, parse_usage_query, usage_events_csv},
+};
+use axum::{
+    body::{Body, Bytes},
+    extract::State,
+    http::{header::CONTENT_TYPE, HeaderMap, HeaderValue, Method, Request, Response, StatusCode},
+};
+use domain::{config, config::GatewayConfig, protocol::Protocol};
+use infra::{db, health, observability, secrets};
+use proxy::service::proxy as proxy_fn;
+use serde_json::{json, Value};
+use std::sync::Arc;
+use tower::ServiceExt;
+use uuid::Uuid;
+use {
+    auth::{key_digest, key_matches_digest, supplied_key, AdminAuth},
+    state::{AppState, LiveConfig},
+    test_helpers::{EnvRestore, ENV_LOCK, TEST_ADMIN_KEY},
+};
+
 #[cfg(test)]
 mod admin_auth_tests {
     use super::*;
@@ -48,7 +75,10 @@ mod admin_auth_tests {
         ("PUT", "/admin/sources/source-id"),
         ("DELETE", "/admin/sources/source-id"),
         ("PUT", "/admin/sources/source-id/enabled"),
-        ("GET", "/admin/sources/source-id/models/model-id/capabilities"),
+        (
+            "GET",
+            "/admin/sources/source-id/models/model-id/capabilities",
+        ),
         (
             "PUT",
             "/admin/sources/source-id/models/model-id/capabilities/openai_chat_completions",

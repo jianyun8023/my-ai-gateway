@@ -134,11 +134,7 @@ async fn responses_stream_text_delta() {
 
     let mut text = String::new();
     for event in &events {
-        if event
-            .event_type
-            .as_deref()
-            .map_or(false, |t| t == "response.output_text.delta")
-        {
+        if event.event_type.as_deref() == Some("response.output_text.delta") {
             let data = event.json();
             if let Some(delta) = data["delta"].as_str() {
                 text.push_str(delta);
@@ -149,11 +145,7 @@ async fn responses_stream_text_delta() {
 
     let done_event = events
         .iter()
-        .find(|e| {
-            e.event_type
-                .as_deref()
-                .map_or(false, |t| t == "response.output_text.done")
-        })
+        .find(|e| e.event_type.as_deref() == Some("response.output_text.done"))
         .expect("must have output_text.done event");
     let done_data = done_event.json();
     assert_eq!(done_data["text"], "Hello world");
@@ -178,11 +170,7 @@ async fn responses_stream_usage() {
 
     let completed = events
         .iter()
-        .find(|e| {
-            e.event_type
-                .as_deref()
-                .map_or(false, |t| t == "response.completed")
-        })
+        .find(|e| e.event_type.as_deref() == Some("response.completed"))
         .expect("must have response.completed event");
 
     let data = completed.json();
@@ -213,11 +201,7 @@ async fn responses_stream_completed() {
 
     let completed = events
         .iter()
-        .find(|e| {
-            e.event_type
-                .as_deref()
-                .map_or(false, |t| t == "response.completed")
-        })
+        .find(|e| e.event_type.as_deref() == Some("response.completed"))
         .expect("must have response.completed event");
 
     let data = completed.json();
@@ -289,18 +273,16 @@ async fn responses_stream_incomplete() {
     let body = text_body(response).await;
     let events = parse_sse_events(&body);
 
-    let has_completed = events.iter().any(|e| {
-        e.event_type
-            .as_deref()
-            .map_or(false, |t| t == "response.completed")
-    });
+    let has_completed = events
+        .iter()
+        .any(|e| e.event_type.as_deref() == Some("response.completed"));
     assert!(
         !has_completed,
         "incomplete stream must NOT have response.completed from upstream data"
     );
 
     let has_error_or_gateway = events.iter().any(|e| {
-        let is_error_type = e.event_type.as_deref().map_or(false, |t| t == "error");
+        let is_error_type = e.event_type.as_deref() == Some("error");
         let data_has_error = e.data.contains("gateway_upstream_error")
             || e.data.contains("gateway_empty_stream")
             || e.data.contains("gateway_");

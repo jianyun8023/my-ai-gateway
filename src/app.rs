@@ -10,11 +10,7 @@ use axum::{
 use serde_json::Value;
 use tower_http::{services::ServeDir, trace::TraceLayer};
 
-use crate::{
-    api,
-    infra::audit,
-    state::{error_response, AdminAuth, AppState},
-};
+use crate::{api, auth::AdminAuth, http::response::error_response, infra::audit, state::AppState};
 
 pub(crate) fn application(state: AppState) -> Router {
     use api::{admin, discovery, health_admin, keys, ops, proxy, usage};

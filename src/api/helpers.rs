@@ -9,8 +9,9 @@ use serde_json::json;
 
 use crate::{
     control_plane,
+    http::response::error_response,
     infra::{db, health, ops},
-    state::{error_response, AppState},
+    state::AppState,
 };
 
 #[allow(clippy::result_large_err)]
@@ -105,7 +106,9 @@ pub(crate) fn control_plane_error(error: control_plane::ControlPlaneError) -> Re
         control_plane::ControlPlaneError::NotFound(_) => StatusCode::NOT_FOUND,
         control_plane::ControlPlaneError::Conflict(_) => StatusCode::CONFLICT,
         control_plane::ControlPlaneError::Validation(_)
-        | control_plane::ControlPlaneError::Json(_) => StatusCode::UNPROCESSABLE_ENTITY,
+        | control_plane::ControlPlaneError::Json(_)
+        | control_plane::ControlPlaneError::Credential(_)
+        | control_plane::ControlPlaneError::NoCiphertext => StatusCode::UNPROCESSABLE_ENTITY,
         control_plane::ControlPlaneError::Database(_) => StatusCode::INTERNAL_SERVER_ERROR,
     };
     error_response(status, error.code(), &error.message())

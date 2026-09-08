@@ -11,7 +11,7 @@ use serde_json::{json, Value};
 use crate::{control_plane, domain::protocol::Protocol, infra::health};
 
 use super::helpers::{control_plane_error, json_payload, probe_error_response};
-use crate::state::{error_response, AppState};
+use crate::{http::response::error_response, state::AppState};
 
 pub(crate) async fn admin_health(
     State(state): State<AppState>,
@@ -42,13 +42,18 @@ pub(crate) async fn admin_health(
             Err(error) => return control_plane_error(error),
         }
     } else if let Some(database) = &state.db {
-        match sqlx::query_as::<_, (String, String, String, bool)>(
-            "SELECT id,source_id,display_name,enabled FROM accounts ORDER BY id",
-        )
-        .fetch_all(database.pool())
-        .await
-        {
-            Ok(accounts) => accounts,
+        match database.health_accounts_metadata().await {
+            Ok(accounts) => accounts
+                .into_iter()
+                .map(|account| {
+                    (
+                        account.id,
+                        account.source_id,
+                        account.display_name,
+                        account.enabled,
+                    )
+                })
+                .collect(),
             Err(error) => {
                 tracing::warn!(%error, "failed to list accounts for health API");
                 return error_response(
@@ -150,18 +155,12 @@ pub(crate) async fn admin_account_health(
             Err(error) => return control_plane_error(error),
         }
     } else if let Some(database) = &state.db {
-        match sqlx::query_as::<_, (String, String, String, bool)>(
-            "SELECT id,source_id,display_name,enabled FROM accounts WHERE id=$1",
-        )
-        .bind(&account_id)
-        .fetch_optional(database.pool())
-        .await
-        {
-            Ok(Some((id, source_id, display_name, enabled))) => json!({
-                "account_id": id,
-                "source_id": source_id,
-                "display_name": display_name,
-                "enabled": enabled,
+        match database.health_account_metadata(&account_id).await {
+            Ok(Some(account)) => json!({
+                "account_id": account.id,
+                "source_id": account.source_id,
+                "display_name": account.display_name,
+                "enabled": account.enabled,
             }),
             Ok(None) => {
                 return error_response(StatusCode::NOT_FOUND, "not_found", "account not found")
