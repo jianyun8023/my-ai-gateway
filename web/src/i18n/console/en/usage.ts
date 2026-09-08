@@ -110,10 +110,13 @@ export const usage = {
     subtitle: 'Times shown in your local timezone',
   },
   composition: {
-    overlap: 'Reasoning and cache may overlap input or output; do not add these measures.',
+    chart_title: 'Input / output split',
+    empty: 'No input or output tokens reported',
+    total_difference: 'Input + output: {{combined}}; reported total: {{total}}. The split uses input + output.',
+    overlap: 'Reasoning and cache are separate reported measures, excluded from this split.',
     missing: 'Usage is missing for {{count}} requests and is not included in token totals.',
     title: 'Token Composition',
-    cache_rate: 'Cache hit rate: {{rate}}',
+    cache_rate: 'Cache read / input: {{rate}}',
   },
   distribution: {
     requests: '{{count}} requests',

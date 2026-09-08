@@ -70,16 +70,22 @@ describe('usage charts and accessible data', () => {
     expect(container.textContent).not.toContain('Infinity');
   });
 
-  it('keeps overlapping token categories independent, includes zero and explains missing usage', () => {
+  it('uses one input/output composition chart and keeps overlapping measures out of the split', () => {
     act(() => root.render(<TokenComposition summary={summary} />));
     expect(container.textContent).toContain('1,780');
-    expect(container.textContent).toContain('50.6%');
-    expect(container.textContent).toContain('0.0%');
+    expect(container.querySelectorAll('[role="img"]')).toHaveLength(1);
+    expect(container.querySelector('[role="img"]')?.getAttribute('aria-label')).toBe('Input 1,200 Token (74.1%) · Output 420 Token (25.9%)');
+    expect(container.textContent).toContain('Input + output: 1,620; reported total: 1,780');
+    expect(container.textContent).toContain('Cache Read900');
+    expect(container.textContent).toContain('Cache Creation0');
     expect(container.textContent).toContain('2 requests');
-    expect(container.querySelectorAll('[role="progressbar"]')).toHaveLength(5);
+    expect(container.querySelectorAll('[role="progressbar"]:not([aria-hidden="true"])')).toHaveLength(0);
     act(() => root.render(<TokenComposition summary={{ ...summary, tokens: { ...tokens, input: 0, total: 0 } }} />));
     expect(container.textContent).toContain('—');
     expect(container.textContent).not.toMatch(/NaN|Infinity/);
+    act(() => root.render(<TokenComposition summary={{ ...summary, tokens: { ...tokens, input: 0, output: 0, total: 0, cacheRead: 150000 } }} />));
+    expect(container.querySelector('[role="img"]')?.getAttribute('aria-label')).toBe('No input or output tokens reported');
+    expect(container.textContent).toContain('150K');
   });
 
   it('compares latency only within sources, distinguishes zero from missing and retains every source', () => {

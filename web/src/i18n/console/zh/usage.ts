@@ -110,10 +110,13 @@ export const usage = {
     subtitle: '时间按本地时区显示',
   },
   composition: {
-    overlap: '推理、缓存可能包含在输入或输出中，各项不应相加。',
+    chart_title: '输入 / 输出占比',
+    empty: '暂无已上报的输入或输出 Token',
+    total_difference: '输入 + 输出为 {{combined}}，上报总量为 {{total}}；图中按输入 + 输出计算占比。',
+    overlap: '推理、缓存为独立上报指标，不参与此图相加。',
     missing: '{{count}} 次请求缺失用量，未计入 Token 汇总。',
     title: 'Token 构成',
-    cache_rate: '缓存命中率: {{rate}}',
+    cache_rate: '缓存读取 / 输入: {{rate}}',
   },
   distribution: {
     requests: '{{count}} 次请求',

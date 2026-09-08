@@ -39,7 +39,7 @@ Issue 中 `de708e8` 的链接是历史调查依据。当前事件详情已位于
 | SegmentedTabs、LanguageSwitcher、Toggle | 第三批迁移到 Mantine Tabs、Button、Switch，保留面板/筛选语义和布尔值回调 |
 | Notice、LoadingState、LoadingSpinner、EmptyState、StatusPill | 第四批采用 Alert、Loader、Paper、ThemeIcon、Text、Badge，保留持久错误、部分失败与重试信息 |
 | Card、TableScroll、FormGrid、FilterBar、PageActions、DrawerSection | 第四批 Card 使用 Paper/Title/Text，样式归入 UI 层；其他领域组合继续保留，表格后续收敛 |
-| Chart.js、TanStack Virtual、格式工具 | 保留专业实现；第五批统一趋势主题、数值表和缺失值，分布改用 Progress；浏览器与性能验证仍待完成 |
+| Chart.js、TanStack Virtual、格式工具 | 保留专业实现；第五批统一趋势主题、数值表和缺失值，分布改用 Progress；代表性浏览器验收完成，运行时性能验证仍待完成 |
 | 已删除无调用组件 | #168 已清理旧 Input、Select、MainActionButton、PortalTooltip、QuestionMarkHelp、QuestionMarkHelpButton，不重新引入 |
 
 ## 基线与验证记录
@@ -135,13 +135,25 @@ DOM 回归覆盖错误重试到成功与关闭、单次加载播报转空态、�
 
 - 总览增加默认 Input/Output 堆叠趋势；保留原有六类指标切换和独立 Total，双轴有明确名称。Canvas 图例、轴、网格、tooltip 和序列使用品牌 Token；提供可展开的精确数值表。
 - 总览模型分布与分析八个维度共享 Mantine Progress 行，显示 Token、占同一筛选范围比例、请求数及前 N/总组数。移除固定高度横条 canvas 与类别索引 tooltip 路径；零值不画人为最小进度。
-- Token 构成迁移 Progress，保留零值和五个独立类别，说明 Reasoning/缓存重叠及 missing；不按原型拼成相加的 100% 图。
+- Token 构成使用 Progress.Root/Section 合并为一张 Input/Output 分段图，按两者合计计算占比。推理、缓存读取和缓存创建改为紧凑数值明细；保留零值、missing 和独立上报 Total，合计不一致时说明。缓存/推理不参与归一化，简单缓存比值明确命名为“缓存读取 / 输入”。
 - 来源延迟采用 Mantine Table，只比较 Source；接入已有后端 P95，显示平均值、P95 与请求数，缺失和真实零值分开。后端/数据库契约未变。
 
-验证通过：`mise exec -- npm --prefix web run lint`（ESLint/Knip）、`typecheck`、`test`（30 个文件、145 项）、`build`、`git diff --check`。新增六项回归覆盖趋势切换/独立 Total/精确表、分布排序/零值/分母/截取、重叠与 missing、来源延迟/P95、空趋势及 API P95 映射。未运行后端/live Provider 测试；本批没有真实管理端读写或模型请求。
+验证通过：`mise exec -- npm --prefix web run lint`（ESLint/Knip）、`typecheck`、`test`（30 个文件、145 项）、`build`、`git diff --check`。新增六项回归覆盖趋势切换/独立 Total/精确表、分布排序/零值/分母/截取、重叠与 missing、来源延迟/P95、空趋势及 API P95 映射。未运行后端/live Provider 测试；本批只通过本地生产构建读取授权管理端，未执行管理写操作或模型请求。
 
-本批浏览器工具两次报告 Mac 锁屏，自动解锁失败。已请求用户解锁；尚未完成原型与新实现的浏览器并排检查、canvas 实际配色/hover、浅深色切换、390px 尺寸和截图验收。临时合成验收页面已移出仓库；不提交未经视觉检查的截图。本批 PR 应保持草稿，待解锁后补充这些结果再标为可评审。
+浏览器锁屏解除后，使用直接挂载实际 Shell、Overview、Analysis 的合成页面完成以下验收：
+
+| 范围 | 结果 |
+| --- | --- |
+| 原型对照 | 实际打开归档总览/分析页，核对趋势柱、构成条、分布密度与来源延迟表；差距与取舍记录在图表核对文档 |
+| 桌面浅/深色 | Input/Output 堆叠、Total/请求数双轴切换及展开/收起精确表正确；图例、轴、网格与 tooltip 可读。数据点提示 153,900 Token / 559 请求与同时间桶表格一致；堆叠提示 95,000 输入 / 58,900 输出与测试数据一致 |
+| 单图构成 | 一个可访问图像展示输入/输出占比，推理/缓存仅作数值明细；浅色桌面与深色窄屏可读，中英切换后标签完整 |
+| 390px | 趋势 canvas 为 324×230px；页面 scrollWidth 382px，没有横向溢出。查看/收起数据按钮 44px；420px 表格在局部容器滚动，可聚焦并通过方向键横向滚动 |
+| 来源与分布 | 长来源 ID 可换行；平均/P95 2.1s/3.6s、真实 0ms、缺失 `—` 区分正确。Source 表只显示 Source；零 Token 分布没有假进度 |
+
+公开截图：[总览浅色](evidence/166/b5-overview-light.png)、[暗色折线与精确表](evidence/166/b5-trend-dark.png)、[窄屏总览](evidence/166/b5-overview-mobile-dark.png)、[分析浅色](evidence/166/b5-analysis-light.png)、[单图构成浅色](evidence/166/b5-composition-light.png)、[单图构成窄屏深色](evidence/166/b5-composition-mobile-dark.png)。全部为合成数据，原型截图也是仓库静态示意内容。临时页面已移出仓库；本批浏览器验收不等于全八页或生产验收。
 
 控制面表格、全八页状态组合、虚拟事件列表指针命中与滚动、先前记录的真实写流程和性能验收仍未完成。总任务 #166 保持开放。
 
-本批构建 JS 合计 900.40 kB（gzip 275.74 kB）、CSS 合计 153.89 kB（gzip 28.24 kB）；相对第四批增加 10.48/3.42 kB 与 7.35/1.21 kB（原始/gzip）。主入口 JS 为 495.51 kB（gzip 154.13 kB）；新增 Progress/Table 按需样式，无新增依赖包。该记录是构建体积，不是运行时性能基准。
+本批构建 JS 合计 901.50 kB（gzip 276.08 kB）、CSS 合计 154.22 kB（gzip 28.28 kB）；相对第四批增加 11.58/3.76 kB 与 7.68/1.25 kB（原始/gzip）。主入口 JS 为 495.91 kB（gzip 154.24 kB）；新增 Progress/Table 按需样式，无新增依赖包。该记录是构建体积，不是运行时性能基准。
+
+另通过本地生产构建复验授权管理端的总览与分析：既有用量已使用同一张输入/输出构成图，缓存/推理明细保留，未重算或写回用量。真实数据只用于当前浏览器检查，未保存为公开截图。

@@ -121,18 +121,18 @@
   strong { font-family: var(--font-mono); font-size: 28px; font-variant-numeric: tabular-nums; }
 }
 
-.tokenBreakdown { display: grid; gap: 8px; }
-
-.tokenRow {
-  display: grid;
-  grid-template-columns: 100px minmax(0, 1fr) auto auto;
-  align-items: center;
-  gap: 10px;
-
-  span { color: var(--text-secondary); font-size: var(--fs-small); }
-  strong { font-family: var(--font-mono); font-size: var(--fs-meta); font-variant-numeric: tabular-nums; min-width: 60px; text-align: right; }
-  small { color: var(--text-secondary); font-family: var(--font-mono); font-size: var(--fs-small); min-width: 45px; text-align: right; }
-}
+.compositionChart { display: grid; gap: 10px; }
+.compositionLegend, .compositionDetails { margin: 0; display: grid; gap: 12px; min-width: 0; }
+.compositionLegend { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.compositionLegend dt { display: flex; align-items: center; gap: 6px; }
+.compositionLegend i { width: 8px; height: 8px; flex: 0 0 8px; border-radius: 2px; }
+.compositionLegend dd { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
+.compositionLegend strong { font-size: 18px; }
+.compositionLegend span { color: var(--muted); font-size: var(--fs-small); }
+.compositionDetails { grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid var(--border); padding-top: 14px; }
+.compositionLegend dt, .compositionDetails dt { color: var(--muted); font-size: var(--fs-small); overflow-wrap: anywhere; }
+.compositionLegend dd, .compositionDetails dd { margin: 4px 0 0; font-family: var(--font-mono); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.compositionDetails dd { font-size: var(--fs-meta); font-weight: 600; }
 
 .cacheNote { color: var(--text-secondary); font-size: var(--fs-small); }
 
@@ -268,11 +268,6 @@
   .stat { min-height: 98px; padding: 14px 15px; }
   .stat strong { font-size: 25px; }
   .chartLarge { height: 230px; }
-  .tokenRow { grid-template-columns: minmax(0, 1fr) auto auto; }
-  .tokenRow > span { grid-column: 1; grid-row: 1; }
-  .tokenRow > strong { grid-column: 2; grid-row: 1; }
-  .tokenRow > small { grid-column: 3; grid-row: 1; }
-  .tokenRow .tokenProgress { grid-column: 1 / -1; grid-row: 2; }
 
   .recentList > div { grid-template-columns: 8px minmax(0, 1fr) auto; }
   .recentList time,
