@@ -71,31 +71,7 @@ export function SuccessNotice({ message, onDismiss }: { message?: string; onDism
   return <Notice tone="success" action={onDismiss && <Button variant="ghost" size="sm" onClick={onDismiss} aria-label={t('common.close_notice_aria')}>{t('common.close')}</Button>}>{message}</Notice>;
 }
 
-export function CheckboxField({
-  checked,
-  onChange,
-  label,
-  hint,
-  disabled = false,
-}: {
-  checked: boolean;
-  onChange: (checked: boolean) => void;
-  label: string;
-  hint?: string;
-  disabled?: boolean;
-}) {
-  return (
-    <label className={styles.checkboxField}>
-      <input
-        type="checkbox"
-        checked={checked}
-        disabled={disabled}
-        onChange={(event) => onChange(event.target.checked)}
-      />
-      <span><strong>{label}</strong>{hint && <small>{hint}</small>}</span>
-    </label>
-  );
-}
+export { CheckboxField } from '@/components/ui/CheckboxField';
 
 export function FormGrid({ children }: PropsWithChildren) {
   return <div className={styles.formGrid}>{children}</div>;

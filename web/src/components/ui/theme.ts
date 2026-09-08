@@ -1,4 +1,5 @@
 import { createTheme, type CSSVariablesResolver } from '@mantine/core';
+import controls from './Controls.module.scss';
 
 // Colors and font families resolve from gateway-brand.scss on :root, including Portals.
 export const consoleTheme = createTheme({
@@ -13,6 +14,14 @@ export const consoleTheme = createTheme({
   radius: { xs: '4px', sm: '6px', md: '8px', lg: '12px', xl: '16px' },
   breakpoints: { xs: '23.75em', sm: '37.5em', md: '57.5em', lg: '75em', xl: '90em' },
   components: {
+    Input: {
+      defaultProps: { size: 'sm' },
+      classNames: { input: controls.input },
+    },
+    InputWrapper: {
+      defaultProps: { inputWrapperOrder: ['label', 'input', 'description', 'error'] },
+      classNames: { root: controls.field, label: controls.label, description: controls.description, error: controls.error },
+    },
     Modal: { defaultProps: { radius: 'lg', padding: 'md', shadow: 'lg' } },
     Drawer: { defaultProps: { padding: 'md', shadow: 'lg' } },
     Popover: {

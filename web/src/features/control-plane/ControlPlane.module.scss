@@ -269,31 +269,6 @@
   display: none;
 }
 
-.checkboxField {
-  min-height: 44px;
-  display: flex;
-  align-items: flex-start;
-  gap: 9px;
-  padding: 8px 0;
-  cursor: pointer;
-}
-
-.checkboxField input {
-  width: 18px;
-  height: 18px;
-  margin-top: 1px;
-  accent-color: var(--accent);
-}
-
-.checkboxField span {
-  min-width: 0;
-  display: grid;
-  gap: 2px;
-}
-
-.checkboxField strong { font-size: 12px; }
-.checkboxField small { color: var(--text-secondary); font-size: var(--fs-small); }
-
 .formError {
   color: var(--danger);
   font-size: var(--fs-small);
@@ -706,7 +681,7 @@
   gap: 8px;
 }
 
-.protocolChecks > label {
+.protocolChecks > div {
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
   padding: 8px 10px;
@@ -863,7 +838,7 @@
   font-size: 12px;
 }
 
-.secretResult > :global(.btn) {
+.secretResult > [data-ui="button"] {
   grid-column: 1 / -1;
   justify-self: start;
 }
@@ -929,7 +904,7 @@
   .fullWidth { grid-column: auto; }
   .detailList > div { grid-template-columns: minmax(0, 1fr); gap: 2px; }
   .protocolTestRow { grid-template-columns: minmax(0, 1fr); align-items: stretch; }
-  .protocolTestRow > :global(.btn) { width: 100%; min-height: 44px; }
+  .protocolTestRow > [data-ui="button"] { width: 100%; min-height: 44px; }
   .runHeader { grid-template-columns: minmax(0, 1fr); }
   .modelIdentity { align-items: flex-start; flex-direction: column; }
   .featureMatrix { grid-template-columns: minmax(0, 1fr); }
@@ -937,7 +912,7 @@
   .protocolCapabilityEditor > div { grid-template-columns: minmax(0, 1fr); }
   .runtimeList > div { grid-template-columns: minmax(0, 1fr); }
   .runtimeList > div > div { justify-content: flex-start; }
-  .secretResult > :global(.btn) { width: 100%; }
+  .secretResult > [data-ui="button"] { width: 100%; }
 }
 
 @media (max-width: 380px) {

@@ -1,6 +1,9 @@
 // @vitest-environment happy-dom
 import type { GatewayManagementPage as PageId } from '@/lib/consoleNavigation';
 import { GatewayManagementPage } from '@/pages/GatewayManagementPage';
+import { SourceForm } from './sources/SourceForm';
+import { Button } from '@/components/ui/Button';
+import type { Source } from '@/admin-api';
 import { setTestLanguage } from '@/test/setup';
 import { act } from 'react';
 import { createRoot } from '@/test/render';
@@ -282,6 +285,45 @@ describe('production control-plane pages', () => {
     act(() => { close.focus(); close.click(); });
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)); });
     expect(document.activeElement).toBe(trigger);
+  });
+
+  it('keeps source field validation, native selection, checkbox state and external submit behavior', async () => {
+    const onSubmit = vi.fn();
+    const record = { ...source, auth_config: { credential_header: { header: 'authorization', prefix: 'Bearer' } } } as Source;
+    const presets = [{ id: 'preset-a', version: 1, display_name: 'Preset A', definition: record.provider_preset_snapshot, created_at: source.created_at }];
+    const render = (busy = false) => root.render(<><SourceForm record={record} presets={presets} busy={busy} onSubmit={onSubmit} />
+      <Button form="source-editor-form" type="submit" loading={busy}>Save source</Button></>);
+    act(() => render());
+    const input = (label: string) => {
+      const id = [...container.querySelectorAll('label')].find(element => element.textContent === label)!.htmlFor;
+      return document.getElementById(id) as HTMLInputElement;
+    };
+    const name = input('显示名称');
+    const setValue = (element: HTMLInputElement | HTMLTextAreaElement, value: string) => {
+      const prototype = element.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      Object.getOwnPropertyDescriptor(prototype, 'value')!.set!.call(element, value);
+      element.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+    const headers = input('默认请求头(JSON)') as unknown as HTMLTextAreaElement;
+    act(() => { setValue(name, 'Updated source'); setValue(headers, '{'); });
+    const submit = container.querySelector<HTMLButtonElement>('button[form="source-editor-form"]')!;
+    act(() => submit.click());
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(container.querySelector('[role="alert"]')).not.toBeNull();
+    expect(name.value).toBe('Updated source');
+    const mode = container.querySelector<HTMLSelectElement>('select:not(:disabled)')!;
+    act(() => { setValue(headers, '{}'); mode.value = 'unsupported'; mode.dispatchEvent(new Event('change', { bubbles: true }));
+      container.querySelector<HTMLInputElement>('input[type="checkbox"]')!.click(); });
+    act(() => submit.click());
+    expect(onSubmit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      display_name: 'Updated source', enabled: false,
+      protocol_capabilities: expect.objectContaining({ openai_chat_completions: expect.objectContaining({ mode: 'unsupported' }) }),
+    }));
+    act(() => render(true));
+    expect(name.disabled).toBe(true);
+    expect(mode.disabled).toBe(true);
+    act(() => submit.click());
+    expect(onSubmit).toHaveBeenCalledTimes(1);
   });
 
   it('shows unsupported discovery and pending SourceModel field provenance', async () => {
