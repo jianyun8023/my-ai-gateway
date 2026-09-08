@@ -172,45 +172,42 @@
 
 .eventActions { display: flex; align-items: center; gap: 6px; }
 
-.eventTable { overflow-x: auto; }
-.eventHeader,
-.eventRow {
-  width: max(100%, calc(var(--event-columns) * 138px));
+.eventScroll {
+  position: relative;
+  height: min(64vh, 720px);
+  min-height: 420px;
+  max-width: 100%;
+  overflow: auto;
+  overscroll-behavior-inline: contain;
+  overflow-anchor: none;
+  &:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+}
+.eventTable {
   display: grid;
-  grid-template-columns: repeat(var(--event-columns), minmax(128px, 1fr));
-  gap: 10px;
-  padding: 0 15px;
+  min-width: calc(80px + var(--event-columns) * 154px);
+}
+.eventGrid {
+  display: grid;
+  grid-template-columns: 80px repeat(var(--event-columns), minmax(154px, 1fr));
+  align-items: center;
 }
 .eventHeader {
-  height: 39px;
-  align-items: center;
-  border-block: 1px solid var(--border-color);
-  color: var(--text-secondary);
-  background: var(--bg-primary);
-  font-family: var(--font-mono);
-  font-size: var(--fs-small);
-  font-weight: 700;
-  letter-spacing: .04em;
-  text-transform: uppercase;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  height: var(--event-header-height);
+  .eventGrid { height: 100%; }
+  th { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 }
-.eventScroll { position: relative; height: min(64vh, 720px); min-height: 420px; overflow: auto; }
+.eventBody { display: block; position: relative; }
 .eventRow {
   position: absolute;
   top: 0;
   left: 0;
+  width: 100%;
   min-height: 58px;
-  align-items: center;
-  border: 0;
-  border-bottom: 1px solid var(--border-color);
-  color: var(--text-primary);
-  background: transparent;
-  text-align: left;
-  cursor: pointer;
-
-  &:hover { background: var(--bg-hover); }
-  &:focus-visible { outline: 2px solid var(--gateway-accent); outline-offset: -2px; }
-  > span { min-width: 0; overflow: hidden; font-family: var(--font-mono); text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-small); }
-  > span > small { display: block; overflow: hidden; color: var(--text-secondary); text-overflow: ellipsis; }
+  td { min-width: 0; overflow: hidden; font-family: var(--font-mono); text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-small); }
+  td small { display: block; overflow: hidden; color: var(--text-secondary); text-overflow: ellipsis; }
 }
 .loadingMore { position: sticky; bottom: 0; padding: 9px; text-align: center; color: var(--text-secondary); background: var(--floating-surface); font-size: var(--fs-small); }
 

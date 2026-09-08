@@ -182,6 +182,7 @@ export const usage = {
 
   // —— 事件表 ——
   events: {
+    view_aria: 'View request {{id}} details',
     empty_title: 'No request events in the selected range',
     empty_desc: 'Try a different time range or filters.',
     title: 'Request Events',

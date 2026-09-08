@@ -1,3 +1,7 @@
+import { Table } from '@mantine/core';
+import { IconButton } from '@/components/ui/IconButton';
+import { IconEye } from '@/components/ui/icons';
+import { LoadingState } from '@/components/ui/LoadingState';
 import { Checkbox, Popover } from '@/components/ui/overlays';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -12,8 +16,11 @@ import { GatewayUsageClient, type UsageEventViewModel } from '@/gateway-usage';
 import { formatCompact, formatExactInteger } from '@/utils/formatCompact';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { TFunction } from 'i18next';
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
+
+// Keep the sticky header out of the virtual body coordinates.
+const EVENT_HEADER_HEIGHT = 44;
 
 const renderEventCell = (event: UsageEventViewModel, column: EventColumn, t: TFunction) => {
   switch (column) {
@@ -56,10 +63,13 @@ export function EventsTable({ events, hasMore, loadingMore, onLoadMore, visibleC
   const parentRef = useRef<HTMLDivElement>(null);
   const [columnsOpen, setColumnsOpen] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<UsageEventViewModel>();
+  const getItemKey = useCallback((index: number) => `${events[index].id}:${events[index].createdAt}`, [events]);
   // TanStack Virtual intentionally exposes imperative measurement helpers.
   // eslint-disable-next-line react-hooks/incompatible-library
-  const virtualizer = useVirtualizer({
+  const virtualizer = useVirtualizer<HTMLDivElement, HTMLTableRowElement>({
     count: events.length,
+    getItemKey,
+    scrollMargin: EVENT_HEADER_HEIGHT,
     getScrollElement: () => parentRef.current,
     estimateSize: () => 58,
     overscan: 10,
@@ -79,21 +89,32 @@ export function EventsTable({ events, hasMore, loadingMore, onLoadMore, visibleC
           <div className={styles.columnMenu}>{EVENT_COLUMNS.map((column) => <Checkbox key={column} label={t(EVENT_COLUMN_LABELS[column])} checked={visibleColumns.includes(column)} onChange={() => onVisibleColumnsChange(visibleColumns.includes(column) ? visibleColumns.filter((item) => item !== column) : EVENT_COLUMNS.filter((item) => visibleColumns.includes(item) || item === column))} />)}</div>
         </Popover.Dropdown>
       </Popover><Button size="sm" variant="secondary" onClick={() => onExport('csv')}>{t('common.export_csv')}</Button><Button size="sm" variant="secondary" onClick={() => onExport('json')}>{t('common.export_json')}</Button></div>}>
-      <div className={styles.eventTable} style={{ '--event-columns': visibleColumns.length } as CSSProperties}>
-        <div className={styles.eventHeader}>{visibleColumns.map((column) => <span key={column}>{t(EVENT_COLUMN_LABELS[column])}</span>)}</div>
-        <div ref={parentRef} className={styles.eventScroll}>
-          <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
+      <div ref={parentRef} className={styles.eventScroll} role="region" aria-label={t('usage.events.title')} tabIndex={0}>
+        <Table className={styles.eventTable} aria-label={t('usage.events.title')} aria-rowcount={hasMore ? -1 : events.length + 1}
+          style={{ '--event-columns': visibleColumns.length, '--event-header-height': `${EVENT_HEADER_HEIGHT}px` } as CSSProperties}>
+          <Table.Thead className={styles.eventHeader}>
+            <Table.Tr aria-rowindex={1} className={styles.eventGrid}>
+              <Table.Th scope="col">{t('common.actions')}</Table.Th>
+              {visibleColumns.map((column) => <Table.Th scope="col" key={column}>{t(EVENT_COLUMN_LABELS[column])}</Table.Th>)}
+            </Table.Tr>
+          </Table.Thead>
+          <Table.Tbody className={styles.eventBody} style={{ height: virtualizer.getTotalSize() }}>
             {virtualItems.map((virtualRow) => {
               const event = events[virtualRow.index];
               return (
-                <button key={`${event.id}:${event.createdAt}`} className={styles.eventRow} style={{ transform: `translateY(${virtualRow.start}px)` }} onClick={() => setSelectedEvent(event)}>
-                  {visibleColumns.map((column) => <span key={column}>{renderEventCell(event, column, t)}</span>)}
-                </button>
+                <Table.Tr key={virtualRow.key} ref={virtualizer.measureElement} data-index={virtualRow.index} aria-rowindex={virtualRow.index + 2}
+                  data-clickable="true" className={`${styles.eventGrid} ${styles.eventRow}`}
+                  style={{ transform: `translateY(${virtualRow.start - EVENT_HEADER_HEIGHT}px)` }} onClick={(click) => { click.currentTarget.querySelector('button')?.focus({ preventScroll: true }); setSelectedEvent(event); }}>
+                  <Table.Td onClick={(click) => click.stopPropagation()}>
+                    <IconButton label={t('usage.events.view_aria', { id: event.requestId })} onClick={() => setSelectedEvent(event)}><IconEye size={16} /></IconButton>
+                  </Table.Td>
+                  {visibleColumns.map((column) => <Table.Td key={column}>{renderEventCell(event, column, t)}</Table.Td>)}
+                </Table.Tr>
               );
             })}
-          </div>
-          {loadingMore && <div className={styles.loadingMore}>{t('common.load_more')}</div>}
-        </div>
+          </Table.Tbody>
+        </Table>
+        {loadingMore && <div className={styles.loadingMore}><LoadingState layout="inline" label={t('common.load_more')} /></div>}
       </div>
       {selectedEvent && <EventDetails key={selectedEvent.requestId} event={selectedEvent} onClose={() => setSelectedEvent(undefined)} client={client} />}
     </Card>
