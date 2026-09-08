@@ -114,7 +114,7 @@ pub(crate) async fn rotate_account_credential(
         .await
     {
         Ok(snapshot) => {
-            state.reload_snapshot(snapshot);
+            state.reload_snapshot(snapshot).await;
             Json(json!({
                 "data": {
                     "account_id": account_id,
@@ -125,6 +125,7 @@ pub(crate) async fn rotate_account_credential(
         }
         Err(crate::control_plane::ControlPlaneError::Database(error)) => {
             tracing::warn!(%error, "account credential rotation failed");
+            state.events.database_failed("credential.rotation").await;
             error_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "database_error",

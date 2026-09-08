@@ -5,6 +5,7 @@ import { ModelDiscoveryPage } from '@/features/control-plane/ModelDiscoveryPage'
 import { ModelsRoutesPage } from '@/features/control-plane/ModelsRoutesPage';
 import { SettingsPage } from '@/features/control-plane/SettingsPage';
 import { SourcesPage } from '@/features/control-plane/SourcesPage';
+import { RuntimeEventsPage } from '@/features/events/RuntimeEventsPage';
 import type { GatewayManagementPage as GatewayManagementPageType } from '@/lib/consoleNavigation';
 import { useMemo } from 'react';
 
@@ -31,6 +32,7 @@ export function GatewayManagementPage({
   const shared = { api, refreshRevision, onBusyChange: onLoadingChange };
 
   if (page === 'sources') return <SourcesPage {...shared} />;
+  if (page === 'runtime-events') return <RuntimeEventsPage {...shared} />;
   if (page === 'discovery') return <ModelDiscoveryPage {...shared} />;
   if (page === 'capabilities') return <CapabilitiesPage {...shared} />;
   if (page === 'models') return <ModelsRoutesPage {...shared} />;

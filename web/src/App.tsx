@@ -9,6 +9,7 @@ import {
 import {
   IconBarChart,
   IconDashboardGrid,
+  IconDatabase,
   IconFileText,
   IconLayers,
   IconSearch,
@@ -38,6 +39,7 @@ const PAGE_ICONS: Record<ConsolePage, React.ReactNode> = {
   overview: <IconDashboardGrid size={18} />,
   analysis: <IconBarChart size={18} />,
   events: <IconFileText size={18} />,
+  'runtime-events': <IconDatabase size={18} />,
   sources: <IconLayers size={18} />,
   discovery: <IconSearch size={18} />,
   models: <IconSunAsterisk size={18} />,
@@ -77,7 +79,7 @@ function App() {
   // Navigation copy is derived from the console namespace so sidebar labels,
   // page headers and <title> follow the active language.
   const navigationSections: readonly ConsoleNavSection[] = [
-    { label: t('shell.section.monitor'), pages: ['overview', 'analysis', 'events'] },
+    { label: t('shell.section.monitor'), pages: ['overview', 'analysis', 'events', 'runtime-events'] },
     { label: t('shell.section.config'), pages: ['sources', 'discovery', 'models', 'capabilities'] },
     { label: t('shell.section.system'), pages: ['settings'] },
   ];
@@ -86,6 +88,7 @@ function App() {
     { id: 'overview', label: t('shell.nav.overview'), icon: PAGE_ICONS.overview },
     { id: 'analysis', label: t('shell.nav.analysis'), icon: PAGE_ICONS.analysis },
     { id: 'events', label: t('shell.nav.events'), icon: PAGE_ICONS.events },
+    { id: 'runtime-events', label: t('shell.nav.runtime-events'), icon: PAGE_ICONS['runtime-events'] },
     { id: 'sources', label: t('shell.nav.sources'), icon: PAGE_ICONS.sources },
     { id: 'discovery', label: t('shell.nav.discovery'), icon: PAGE_ICONS.discovery },
     { id: 'models', label: t('shell.nav.models'), icon: PAGE_ICONS.models },

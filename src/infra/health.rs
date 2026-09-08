@@ -1300,6 +1300,7 @@ mod tests {
             http: http::test_client().expect("probe HTTP client"),
             db: Some(database.clone()),
             control_plane: None,
+            events: crate::infra::events::EventRepository::new(database.pool().clone()),
             health: registry.clone(),
             admin_auth: crate::auth::AdminAuth::test(),
             secrets: crate::infra::secrets::SecretResolver::empty(),

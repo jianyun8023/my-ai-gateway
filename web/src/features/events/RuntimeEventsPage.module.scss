@@ -1,0 +1,136 @@
+.page {
+  min-width: 0;
+  display: grid;
+  gap: 16px;
+}
+
+.pageActions,
+.feedMeta,
+.filterActions,
+.loadMore {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pageActions {
+  min-height: 48px;
+  justify-content: space-between;
+}
+
+.feedMeta {
+  color: var(--text-secondary);
+  font-size: var(--fs-small);
+}
+
+.filters {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  align-items: end;
+}
+
+.filterActions {
+  justify-content: flex-end;
+}
+
+.table {
+  min-width: 1120px;
+}
+
+.table td {
+  vertical-align: middle;
+}
+
+.table time,
+.table code {
+  font-size: 11px;
+}
+
+.eventCell,
+.stack {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.eventCell strong,
+.eventCell small,
+.stack small,
+.breakable {
+  overflow-wrap: anywhere;
+}
+
+.eventCell small,
+.stack small {
+  color: var(--text-secondary);
+  font-size: var(--fs-small);
+}
+
+.eventCell [data-ui='status-pill'] {
+  width: fit-content;
+}
+
+.loadMore {
+  justify-content: center;
+  border-top: 1px solid var(--border-color);
+  padding: 14px;
+}
+
+.loadMore > div {
+  flex: 1 1 360px;
+}
+
+.detailsSection {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border-color);
+}
+
+.detailsSection h3 {
+  margin: 0 0 10px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.detailsSection pre {
+  max-height: 420px;
+  margin: 0;
+  overflow: auto;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font: 12px/1.55 var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 980px) {
+  .filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 600px) {
+  .pageActions {
+    align-items: stretch;
+  }
+
+  .pageActions > button {
+    width: 100%;
+  }
+
+  .filters {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .filterActions > button {
+    flex: 1 1 0;
+  }
+}

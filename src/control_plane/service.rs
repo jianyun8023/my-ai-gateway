@@ -6,8 +6,13 @@ use super::validation::{
     source_url_validation_message, validate_capability_chains, validate_persisted_source_urls,
 };
 use crate::domain::config::GatewayConfig;
+use crate::infra::{
+    audit,
+    events::{EventRepository, SystemEvent},
+};
 use crate::source_url::SourceUrlPolicy;
 use chrono::{DateTime, Utc};
+use serde_json::json;
 use sqlx::{PgPool, Postgres, Transaction};
 use std::sync::Arc;
 
@@ -16,6 +21,7 @@ pub(crate) struct ControlPlane {
     pub(super) pool: PgPool,
     pub(super) listen_addr: String,
     pub(super) source_url_policy: Arc<SourceUrlPolicy>,
+    pub(super) events: EventRepository,
 }
 
 impl ControlPlane {
@@ -29,11 +35,17 @@ impl ControlPlane {
         listen_addr: impl Into<String>,
         source_url_policy: Arc<SourceUrlPolicy>,
     ) -> Self {
+        let events = EventRepository::new(pool.clone());
         Self {
             pool,
             listen_addr: listen_addr.into(),
             source_url_policy,
+            events,
         }
+    }
+
+    pub(crate) fn event_repository(&self) -> EventRepository {
+        self.events.clone()
     }
 
     pub(super) async fn begin_write(&self) -> Result<Transaction<'_, Postgres>, ControlPlaneError> {
@@ -48,16 +60,72 @@ impl ControlPlane {
         &self,
         mut tx: Transaction<'_, Postgres>,
     ) -> Result<RuntimeSnapshot, ControlPlaneError> {
-        validate_persisted_source_urls(&mut tx, &self.source_url_policy).await?;
-        validate_capability_chains(&mut tx).await?;
-        let (revision, generated_at): (i64, DateTime<Utc>) = sqlx::query_as(
-            "UPDATE runtime_snapshot_state SET revision=revision+1,updated_at=clock_timestamp() WHERE singleton=TRUE RETURNING revision,updated_at",
-        )
-        .fetch_one(&mut *tx)
-        .await?;
-        let snapshot = build_snapshot(&mut tx, &self.listen_addr, revision, generated_at).await?;
-        tx.commit().await?;
+        let candidate = async {
+            validate_persisted_source_urls(&mut tx, &self.source_url_policy).await?;
+            validate_capability_chains(&mut tx).await?;
+            let (revision, generated_at): (i64, DateTime<Utc>) = sqlx::query_as(
+                "UPDATE runtime_snapshot_state SET revision=revision+1,updated_at=clock_timestamp() WHERE singleton=TRUE RETURNING revision,updated_at",
+            )
+            .fetch_one(&mut *tx)
+            .await?;
+            build_snapshot(&mut tx, &self.listen_addr, revision, generated_at).await
+        }
+        .await;
+        let snapshot = match candidate {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                if tx.rollback().await.is_err() {
+                    tracing::warn!("failed to roll back rejected runtime snapshot candidate");
+                }
+                self.record_snapshot_failure(
+                    "runtime.snapshot_build_failed",
+                    "Runtime snapshot build failed",
+                    &error,
+                )
+                .await;
+                return Err(error);
+            }
+        };
+        if let Err(error) = tx.commit().await {
+            let error = ControlPlaneError::from(error);
+            self.record_snapshot_failure(
+                "runtime.snapshot_commit_failed",
+                "Runtime snapshot transaction commit failed",
+                &error,
+            )
+            .await;
+            return Err(error);
+        }
         Ok(snapshot)
+    }
+
+    async fn record_snapshot_failure(
+        &self,
+        event_type: &str,
+        message: &str,
+        error: &ControlPlaneError,
+    ) {
+        let database_failure = matches!(error, ControlPlaneError::Database(_));
+        if database_failure {
+            self.events.database_failed("runtime.snapshot").await;
+        }
+        let mut event = SystemEvent::new(
+            "configuration",
+            event_type,
+            "error",
+            "runtime_snapshot",
+            message,
+        )
+        .subject_id("candidate")
+        .details(json!({"error_code": error.code()}));
+        if let Some(context) = audit::current_context() {
+            event = event.correlation_id(context.request_id);
+        }
+        if database_failure {
+            self.events.record_during_database_incident(event).await;
+        } else {
+            self.events.record(event).await;
+        }
     }
 
     pub(super) async fn finish_mutation<T>(

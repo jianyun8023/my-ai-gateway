@@ -17,6 +17,8 @@ import type {
   ProviderPresetDiff,
   Route,
   RouteWriteInput,
+  RuntimeEventFilters,
+  RuntimeEventResponse,
   RuntimeReloadResult,
   SanitizedConfigurationExport,
   Source,
@@ -312,6 +314,15 @@ export class GatewayAdminResources {
 
   capabilities(signal?: AbortSignal): Promise<CapabilityMatrixResponse> {
     return this.transport.json('/admin/capabilities', { signal });
+  }
+
+  runtimeEvents(filters: RuntimeEventFilters = {}, signal?: AbortSignal): Promise<RuntimeEventResponse> {
+    const search = new URLSearchParams();
+    for (const [name, value] of Object.entries(filters)) {
+      if (value !== undefined && value !== null && value !== '') search.set(name, String(value));
+    }
+    const query = search.toString();
+    return this.transport.json(`/admin/events${query ? `?${query}` : ''}`, { signal });
   }
 
   async virtualKeys(signal?: AbortSignal): Promise<VirtualKey[]> {

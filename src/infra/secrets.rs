@@ -616,10 +616,26 @@ fn decode_b64(value: &str) -> Result<Vec<u8>, SecretResolverError> {
 }
 
 impl SecretResolver {
-    pub(crate) fn resolve_account_credential(
+    /// Resolve an account credential without collapsing resolver failures.
+    /// A genuinely unconfigured credential remains `Ok(None)` because some
+    /// upstreams do not require authentication; malformed or undecryptable
+    /// configured credentials are returned to callers for safe eventing.
+    pub(crate) fn resolve_account_credential_result(
         &self,
         account: &crate::domain::config::AccountConfig,
-    ) -> Option<String> {
+    ) -> Result<Option<String>, SecretResolverError> {
+        let credential_configured = account
+            .credential_env
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty())
+            || account
+                .credential_ciphertext
+                .as_deref()
+                .is_some_and(|value| !value.trim().is_empty())
+            || account
+                .credential
+                .as_deref()
+                .is_some_and(|value| !value.is_empty());
         match self.resolve_account(
             &account.provider_id,
             &account.id,
@@ -627,12 +643,23 @@ impl SecretResolver {
             account.credential_ciphertext.as_deref(),
             account.credential.as_deref(),
         ) {
-            Ok(lease) => Some(lease.as_str().to_owned()),
-            Err(SecretResolverError::CredentialUnavailable) => None,
+            Ok(lease) => Ok(Some(lease.as_str().to_owned())),
+            Err(SecretResolverError::CredentialUnavailable) if !credential_configured => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn resolve_account_credential(
+        &self,
+        account: &crate::domain::config::AccountConfig,
+    ) -> Option<String> {
+        match self.resolve_account_credential_result(account) {
+            Ok(credential) => credential,
             Err(err) => {
                 tracing::warn!(
                     account_id = %account.id,
-                    error = %err,
+                    error_code = err.code(),
                     "credential resolution failed"
                 );
                 None
@@ -644,6 +671,7 @@ impl SecretResolver {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::config::AccountConfig;
     use std::sync::Mutex;
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -751,6 +779,38 @@ mod tests {
         assert_eq!(
             SecretResolver::validate_ciphertext("plain-secret").unwrap_err(),
             SecretResolverError::InvalidCiphertext
+        );
+    }
+
+    #[test]
+    fn configured_but_missing_environment_credential_remains_an_error() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let name = "SECRET_RESOLVER_MISSING_ACCOUNT_ENV_TEST";
+        std::env::remove_var(name);
+        let resolver = SecretResolver::empty();
+        let mut account = AccountConfig {
+            id: "account-a".into(),
+            provider_id: "source-a".into(),
+            display_name: "Account A".into(),
+            credential_env: Some(name.into()),
+            credential_ciphertext: None,
+            credential: None,
+            enabled: true,
+            weight: 1,
+            protocol_capabilities: Default::default(),
+            capabilities: None,
+            model_overrides: Default::default(),
+            model_map: Default::default(),
+        };
+
+        assert_eq!(
+            resolver.resolve_account_credential_result(&account),
+            Err(SecretResolverError::CredentialUnavailable)
+        );
+        account.credential_env = None;
+        assert_eq!(
+            resolver.resolve_account_credential_result(&account),
+            Ok(None)
         );
     }
 

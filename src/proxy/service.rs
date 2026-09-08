@@ -244,9 +244,12 @@ pub(crate) async fn proxy(
         let attempt_started = Instant::now();
         let (response, attempt_status, attempt_success) = match forward_fallback(
             &state.secrets,
+            &state.events,
             &state.http,
             candidate.provider,
             candidate.account,
+            &candidate.source_id,
+            &request_id,
             candidate.protocol_upstream,
             &candidate.mode,
             candidate.upstream_endpoint.as_deref(),
@@ -406,9 +409,11 @@ pub(crate) async fn proxy(
     let result_started = Instant::now();
     let result = forward_account(
         &state.secrets,
+        &state.events,
         &state.http,
         &route,
         account,
+        &request_id,
         &headers,
         primary_request.body,
         &stream_config,
@@ -450,9 +455,11 @@ pub(crate) async fn proxy(
                     transport::prepare_model_request(&body, model, &primary_upstream_model);
                 match forward_account(
                     &state.secrets,
+                    &state.events,
                     &state.http,
                     &route,
                     account,
+                    &request_id,
                     &headers,
                     retry_request.body,
                     &stream_config,
@@ -513,6 +520,7 @@ pub(crate) async fn proxy(
                 let (response, mut fallback_attempts) = try_fallback(
                     &config,
                     &state.secrets,
+                    &state.events,
                     &state.health,
                     &state.http,
                     &route,
@@ -523,6 +531,7 @@ pub(crate) async fn proxy(
                     response,
                     &stream_config,
                     started,
+                    &request_id,
                 )
                 .await;
                 attempts.append(&mut fallback_attempts);
@@ -573,6 +582,7 @@ pub(crate) async fn proxy(
             let (response, mut fallback_attempts) = try_fallback_error(
                 &config,
                 &state.secrets,
+                &state.events,
                 &state.health,
                 &state.http,
                 &route,

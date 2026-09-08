@@ -64,6 +64,7 @@ mod admin_auth_tests {
         ("GET", "/admin/backup/export"),
         ("POST", "/admin/backup/import"),
         ("GET", "/admin/audit"),
+        ("GET", "/admin/events"),
         ("GET", "/admin/backups/backup-id"),
         ("GET", "/admin/backups"),
         ("GET", "/admin/backup/backup-id"),
@@ -154,6 +155,7 @@ mod admin_auth_tests {
             http: http::test_client().expect("admin auth HTTP client"),
             db: None,
             control_plane: None,
+            events: crate::infra::events::EventRepository::disabled(),
             health: health::HealthRegistry::new(std::time::Duration::from_secs(1)),
             admin_auth,
             secrets: secrets::SecretResolver::empty(),
@@ -332,6 +334,7 @@ mod health_api_tests {
             http: http::test_client().expect("health API HTTP client"),
             db: None,
             control_plane: None,
+            events: crate::infra::events::EventRepository::disabled(),
             health: health::HealthRegistry::new(Duration::from_secs(1)),
             admin_auth: AdminAuth::test(),
             secrets: secrets::SecretResolver::empty(),
@@ -491,6 +494,7 @@ mod audit_closeout_tests {
             http: http::test_client().expect("audit HTTP client"),
             db: None,
             control_plane: None,
+            events: crate::infra::events::EventRepository::disabled(),
             health: health::HealthRegistry::new(std::time::Duration::from_secs(30)),
             admin_auth: AdminAuth::test(),
             secrets: secrets::SecretResolver::empty(),
@@ -1037,11 +1041,13 @@ mod usage_api_tests {
             routes: vec![],
         });
         let live = LiveConfig::legacy(config);
+        let events = crate::infra::events::EventRepository::new(database.pool().clone());
         AppState {
             live: Arc::new(std::sync::RwLock::new(live)),
             http: http::test_client().expect("HTTP client"),
             db: Some(database),
             control_plane: None,
+            events,
             health: health::HealthRegistry::new(std::time::Duration::from_secs(1)),
             admin_auth: AdminAuth::test(),
             secrets: secrets::SecretResolver::empty(),
@@ -1349,7 +1355,8 @@ mod ops_api_tests {
             live: Arc::new(std::sync::RwLock::new(LiveConfig::legacy(config))),
             http: http::test_client().expect("ops API HTTP client"),
             db: Some(database),
-            control_plane: Some(control_plane),
+            control_plane: Some(control_plane.clone()),
+            events: control_plane.event_repository(),
             health: health::HealthRegistry::new(std::time::Duration::from_secs(1)),
             admin_auth: AdminAuth::test(),
             secrets: secrets::SecretResolver::empty(),
@@ -1378,7 +1385,11 @@ mod ops_api_tests {
         let policies = response_json(policies).await;
         assert_eq!(policies["version"], "v1");
         assert_eq!(policies["timezone"], "UTC");
-        assert_eq!(policies["data"].as_array().unwrap().len(), 4);
+        let policies = policies["data"].as_array().unwrap();
+        assert_eq!(policies.len(), 5);
+        assert!(policies
+            .iter()
+            .any(|policy| policy["policy_key"] == "system_events"));
 
         let dry_run = app
             .clone()
@@ -1399,12 +1410,13 @@ mod ops_api_tests {
             .await
             .expect("schema response");
         let schema_response = response_json(schema_response).await;
-        assert!(schema_response["data"]["schema_version"].as_i64().unwrap() >= 12);
-        assert!(
-            schema_response["data"]["migration_version"]
-                .as_i64()
-                .unwrap()
-                >= 12
+        assert_eq!(
+            schema_response["data"]["schema_version"].as_i64(),
+            Some(i64::from(crate::infra::ops::CURRENT_SCHEMA_VERSION))
+        );
+        assert_eq!(
+            schema_response["data"]["migration_version"].as_i64(),
+            Some(i64::from(crate::infra::ops::CURRENT_MIGRATION_VERSION))
         );
 
         let export_response = app
@@ -1565,6 +1577,7 @@ mod stream_contract_e2e_tests {
             http: http::test_client().expect("native e2e HTTP client"),
             db: None,
             control_plane: None,
+            events: crate::infra::events::EventRepository::disabled(),
             health: health::HealthRegistry::new(Duration::from_secs(1)),
             admin_auth: AdminAuth::test(),
             secrets: secrets::SecretResolver::empty(),
@@ -1810,6 +1823,7 @@ mod multi_turn_tool_tests {
             http: http::test_client().expect("round-trip HTTP client"),
             db: None,
             control_plane: None,
+            events: crate::infra::events::EventRepository::disabled(),
             health: health::HealthRegistry::new(Duration::from_secs(1)),
             admin_auth: AdminAuth::test(),
             secrets: secrets::SecretResolver::empty(),

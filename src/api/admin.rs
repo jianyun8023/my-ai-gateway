@@ -24,10 +24,11 @@ use crate::{
 
 use super::helpers::{
     admin_control_plane, admin_result, control_plane_error, delete_result, json_payload,
-    mutation_result,
+    mutation_result, record_snapshot_build_failure,
 };
 use crate::{
     http::response::error_response,
+    infra::events::SystemEvent,
     state::{AppState, LiveConfig},
 };
 
@@ -72,6 +73,7 @@ pub(crate) async fn create_source(
         StatusCode::CREATED,
         control_plane.create_source_from_request(&input).await,
     )
+    .await
 }
 
 pub(crate) async fn update_source(
@@ -93,6 +95,7 @@ pub(crate) async fn update_source(
         StatusCode::OK,
         control_plane.update_source(&id, &input).await,
     )
+    .await
 }
 
 pub(crate) async fn set_source_enabled(
@@ -114,6 +117,7 @@ pub(crate) async fn set_source_enabled(
         StatusCode::OK,
         control_plane.set_source_enabled(&id, input.enabled).await,
     )
+    .await
 }
 
 pub(crate) async fn delete_source(
@@ -125,7 +129,7 @@ pub(crate) async fn delete_source(
         Ok(control_plane) => control_plane,
         Err(response) => return response,
     };
-    delete_result(&state, control_plane.delete_source(&id).await)
+    delete_result(&state, control_plane.delete_source(&id).await).await
 }
 
 pub(crate) async fn list_accounts(
@@ -169,6 +173,7 @@ pub(crate) async fn create_account(
         StatusCode::CREATED,
         control_plane.create_account(&input).await,
     )
+    .await
 }
 
 pub(crate) async fn update_account(
@@ -190,6 +195,7 @@ pub(crate) async fn update_account(
         StatusCode::OK,
         control_plane.update_account(&id, &input).await,
     )
+    .await
 }
 
 pub(crate) async fn set_account_enabled(
@@ -211,6 +217,7 @@ pub(crate) async fn set_account_enabled(
         StatusCode::OK,
         control_plane.set_account_enabled(&id, input.enabled).await,
     )
+    .await
 }
 
 pub(crate) async fn delete_account(
@@ -222,7 +229,7 @@ pub(crate) async fn delete_account(
         Ok(control_plane) => control_plane,
         Err(response) => return response,
     };
-    delete_result(&state, control_plane.delete_account(&id).await)
+    delete_result(&state, control_plane.delete_account(&id).await).await
 }
 
 pub(crate) async fn list_logical_models(
@@ -266,6 +273,7 @@ pub(crate) async fn create_logical_model(
         StatusCode::CREATED,
         control_plane.create_logical_model(&input).await,
     )
+    .await
 }
 
 pub(crate) async fn update_logical_model(
@@ -287,6 +295,7 @@ pub(crate) async fn update_logical_model(
         StatusCode::OK,
         control_plane.update_logical_model(&id, &input).await,
     )
+    .await
 }
 
 pub(crate) async fn set_logical_model_enabled(
@@ -310,6 +319,7 @@ pub(crate) async fn set_logical_model_enabled(
             .set_logical_model_enabled(&id, input.enabled)
             .await,
     )
+    .await
 }
 
 pub(crate) async fn delete_logical_model(
@@ -321,7 +331,7 @@ pub(crate) async fn delete_logical_model(
         Ok(control_plane) => control_plane,
         Err(response) => return response,
     };
-    delete_result(&state, control_plane.delete_logical_model(&id).await)
+    delete_result(&state, control_plane.delete_logical_model(&id).await).await
 }
 
 pub(crate) async fn list_model_bindings(
@@ -365,6 +375,7 @@ pub(crate) async fn create_model_binding(
         StatusCode::CREATED,
         control_plane.create_model_binding(&input).await,
     )
+    .await
 }
 
 #[derive(Debug, Deserialize)]
@@ -436,6 +447,7 @@ pub(crate) async fn upsert_source_model_capability(
         StatusCode::OK,
         control_plane.upsert_source_model_capability(&input).await,
     )
+    .await
 }
 
 pub(crate) async fn update_model_binding(
@@ -457,6 +469,7 @@ pub(crate) async fn update_model_binding(
         StatusCode::OK,
         control_plane.update_model_binding(id, &input).await,
     )
+    .await
 }
 
 pub(crate) async fn set_model_binding_enabled(
@@ -480,6 +493,7 @@ pub(crate) async fn set_model_binding_enabled(
             .set_model_binding_enabled(id, input.enabled)
             .await,
     )
+    .await
 }
 
 pub(crate) async fn delete_model_binding(
@@ -491,7 +505,7 @@ pub(crate) async fn delete_model_binding(
         Ok(control_plane) => control_plane,
         Err(response) => return response,
     };
-    delete_result(&state, control_plane.delete_model_binding(id).await)
+    delete_result(&state, control_plane.delete_model_binding(id).await).await
 }
 
 pub(crate) async fn list_routes(
@@ -535,6 +549,7 @@ pub(crate) async fn create_route(
         StatusCode::CREATED,
         control_plane.create_route(&input).await,
     )
+    .await
 }
 
 pub(crate) async fn update_route(
@@ -556,6 +571,7 @@ pub(crate) async fn update_route(
         StatusCode::OK,
         control_plane.update_route(&id, &input).await,
     )
+    .await
 }
 
 pub(crate) async fn set_route_enabled(
@@ -577,6 +593,7 @@ pub(crate) async fn set_route_enabled(
         StatusCode::OK,
         control_plane.set_route_enabled(&id, input.enabled).await,
     )
+    .await
 }
 
 pub(crate) async fn delete_route(
@@ -588,7 +605,7 @@ pub(crate) async fn delete_route(
         Ok(control_plane) => control_plane,
         Err(response) => return response,
     };
-    delete_result(&state, control_plane.delete_route(&id).await)
+    delete_result(&state, control_plane.delete_route(&id).await).await
 }
 
 pub(crate) async fn admin_capabilities(
@@ -649,14 +666,53 @@ pub(crate) async fn reload_config_inner(state: &AppState) -> Response<Body> {
         Ok(snapshot) => {
             let revision = snapshot.revision;
             let generated_at = snapshot.generated_at;
-            state.reload_snapshot(snapshot);
+            let switched = state.reload_snapshot(snapshot).await;
+            let mut event = SystemEvent::new(
+                "configuration",
+                "configuration.reload_succeeded",
+                "info",
+                "runtime_snapshot",
+                "Runtime configuration reloaded",
+            )
+            .subject_id(revision.to_string())
+            .details(json!({
+                "snapshot_revision": revision,
+                "snapshot_generated_at": generated_at,
+                "switched": switched,
+            }));
+            if let Some(context) = crate::infra::audit::current_context() {
+                event = event.correlation_id(context.request_id);
+            }
+            state.events.record(event).await;
             (
                 StatusCode::OK,
                 Json(json!({"status":"reloaded", "snapshot_revision":revision, "snapshot_generated_at":generated_at})),
             )
                 .into_response()
         }
-        Err(error) => control_plane_error(error),
+        Err(error) => {
+            record_snapshot_build_failure(state, &error).await;
+            let database_failure =
+                matches!(error, crate::control_plane::ControlPlaneError::Database(_));
+            let mut event = SystemEvent::new(
+                "configuration",
+                "configuration.reload_failed",
+                "error",
+                "runtime_snapshot",
+                "Runtime configuration reload failed",
+            )
+            .subject_id("candidate")
+            .details(json!({"error_code": error.code()}));
+            if let Some(context) = crate::infra::audit::current_context() {
+                event = event.correlation_id(context.request_id);
+            }
+            if database_failure {
+                state.events.record_during_database_incident(event).await;
+            } else {
+                state.events.record(event).await;
+            }
+            control_plane_error(error)
+        }
     }
 }
 

@@ -7,7 +7,7 @@ use crate::{
     control_plane,
     domain::config::GatewayConfig,
     http::client as source_http_client,
-    infra::{db, health, observability, ops, secrets},
+    infra::{db, events::SystemEvent, health, observability, ops, secrets},
     source_url,
     state::{AppState, LiveConfig},
 };
@@ -60,16 +60,57 @@ pub(crate) async fn run() -> Result<(), Box<dyn std::error::Error>> {
         &listen_addr,
         source_url_policy.clone(),
     );
-    let snapshot = match bootstrap {
+    let events = control_plane.event_repository();
+    let snapshot_result = match bootstrap {
         Some(config) => match control_plane
             .initialize_from_config(&config, force_import)
-            .await?
+            .await
         {
-            Some(snapshot) => snapshot,
-            None => control_plane.load_snapshot().await?,
+            Ok(Some(snapshot)) => Ok(snapshot),
+            Ok(None) => control_plane.load_snapshot().await,
+            Err(error) => Err(error),
         },
-        None => control_plane.load_snapshot().await?,
+        None => control_plane.load_snapshot().await,
     };
+    let snapshot = match snapshot_result {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            if matches!(error, control_plane::ControlPlaneError::Database(_)) {
+                events.database_failed("runtime.snapshot.startup").await;
+            }
+            events
+                .record(
+                    SystemEvent::new(
+                        "configuration",
+                        "runtime.snapshot_startup_failed",
+                        "error",
+                        "runtime_snapshot",
+                        "Initial runtime snapshot could not be loaded",
+                    )
+                    .subject_id("candidate")
+                    .details(json!({"error_code": error.code()})),
+                )
+                .await;
+            return Err(error.into());
+        }
+    };
+    events.database_recovered("runtime.snapshot.startup").await;
+    events
+        .record(
+            SystemEvent::new(
+                "configuration",
+                "runtime.snapshot_built",
+                "info",
+                "runtime_snapshot",
+                "Initial runtime snapshot built",
+            )
+            .subject_id(snapshot.revision.to_string())
+            .details(json!({
+                "snapshot_revision": snapshot.revision,
+                "snapshot_generated_at": snapshot.generated_at,
+            })),
+        )
+        .await;
     let addr: SocketAddr = listen_addr.parse()?;
     let live = LiveConfig::from_snapshot(snapshot);
     let admin_auth = AdminAuth::from_env();
@@ -80,14 +121,34 @@ pub(crate) async fn run() -> Result<(), Box<dyn std::error::Error>> {
         database.clone(),
         health::HealthConfig::from_env(),
     );
-    health.restore().await?;
-    let secrets = secrets::SecretResolver::from_env().unwrap_or_else(|err| {
-        tracing::warn!(
-            ?err,
-            "credential master key unavailable; encrypted credentials will fail at request time"
-        );
-        secrets::SecretResolver::empty()
-    });
+    if let Err(error) = health.restore().await {
+        events.database_failed("health.restore").await;
+        return Err(error.into());
+    }
+    events.database_recovered("health.restore").await;
+    let secrets = match secrets::SecretResolver::from_env() {
+        Ok(secrets) => secrets,
+        Err(error) => {
+            tracing::warn!(
+                code = error.code(),
+                "credential master key unavailable; encrypted credentials will fail at request time"
+            );
+            events
+                .record(
+                    SystemEvent::new(
+                        "security",
+                        "credential.master_key_unavailable",
+                        "error",
+                        "credential_store",
+                        "Credential master key is unavailable",
+                    )
+                    .subject_id("gateway")
+                    .details(json!({"error_code": error.code()})),
+                )
+                .await;
+            secrets::SecretResolver::empty()
+        }
+    };
     let prometheus_handle = observability::prometheus_handle();
     observability::spawn_upkeep(prometheus_handle.clone());
     observability::set_snapshot_revision(live.revision);
@@ -96,17 +157,129 @@ pub(crate) async fn run() -> Result<(), Box<dyn std::error::Error>> {
         http: source_http_client(source_url_policy.clone())?,
         db: Some(database.clone()),
         control_plane: Some(control_plane),
+        events: events.clone(),
         health,
         admin_auth,
         secrets,
         prometheus_handle,
     };
     spawn_health_probe_loop(state.clone());
-    let app = crate::app::application(state);
-    let listener = tokio::net::TcpListener::bind(addr).await?;
+    let app = crate::app::application(state.clone());
+    let listener = match tokio::net::TcpListener::bind(addr).await {
+        Ok(listener) => listener,
+        Err(error) => {
+            events
+                .record(
+                    SystemEvent::new(
+                        "lifecycle",
+                        "gateway.start_failed",
+                        "error",
+                        "gateway",
+                        "Gateway listener failed to start",
+                    )
+                    .subject_id("process")
+                    .details(json!({"error_code": "listener_bind_failed"})),
+                )
+                .await;
+            return Err(error.into());
+        }
+    };
+    events
+        .record(
+            SystemEvent::new(
+                "configuration",
+                "runtime.snapshot_switched",
+                "info",
+                "runtime_snapshot",
+                "Initial runtime snapshot switched",
+            )
+            .subject_id(state.snapshot().revision.to_string())
+            .details(json!({
+                "snapshot_revision": state.snapshot().revision,
+                "snapshot_generated_at": state.snapshot().generated_at,
+                "previous_revision": null,
+            })),
+        )
+        .await;
+    events
+        .record(
+            SystemEvent::new(
+                "lifecycle",
+                "gateway.started",
+                "info",
+                "gateway",
+                "Gateway started",
+            )
+            .subject_id("process")
+            .details(json!({
+                "listen_addr": addr.to_string(),
+                "snapshot_revision": state.snapshot().revision,
+            })),
+        )
+        .await;
     tracing::info!(%addr, "AI gateway listening");
-    axum::serve(listener, app).await?;
-    Ok(())
+    match axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await
+    {
+        Ok(()) => {
+            events
+                .record(
+                    SystemEvent::new(
+                        "lifecycle",
+                        "gateway.stopped",
+                        "info",
+                        "gateway",
+                        "Gateway stopped gracefully",
+                    )
+                    .subject_id("process"),
+                )
+                .await;
+            Ok(())
+        }
+        Err(error) => {
+            events
+                .record(
+                    SystemEvent::new(
+                        "lifecycle",
+                        "gateway.serve_failed",
+                        "error",
+                        "gateway",
+                        "Gateway server stopped unexpectedly",
+                    )
+                    .subject_id("process")
+                    .details(json!({"error_code": "server_io_failed"})),
+                )
+                .await;
+            Err(error.into())
+        }
+    }
+}
+
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        if tokio::signal::ctrl_c().await.is_err() {
+            std::future::pending::<()>().await;
+        }
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut signal) => {
+                signal.recv().await;
+            }
+            Err(_) => std::future::pending::<()>().await,
+        }
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        () = ctrl_c => {},
+        () = terminate => {},
+    }
 }
 
 async fn run_ops_cli(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
@@ -327,9 +500,16 @@ async fn run_health_probes_once(state: &AppState) {
         return;
     };
     let targets = match database.health_probe_targets().await {
-        Ok(targets) => targets,
+        Ok(targets) => {
+            state
+                .events
+                .database_recovered("health.probe_targets")
+                .await;
+            targets
+        }
         Err(error) => {
             tracing::warn!(%error, "failed to enumerate periodic health probes");
+            state.events.database_failed("health.probe_targets").await;
             return;
         }
     };
@@ -359,18 +539,26 @@ async fn run_health_probes_once(state: &AppState) {
             )
             .await
         {
-            Ok(outcome) => tracing::info!(
-                account_id = %outcome.account_id,
-                %protocol,
-                status = %outcome.connection_test.status,
-                "periodic account health probe completed"
-            ),
-            Err(error) => tracing::warn!(
-                account_id = %account_id,
-                %protocol,
-                code = error.code(),
-                "periodic account health probe failed"
-            ),
+            Ok(outcome) => {
+                state.events.database_recovered("health.probe").await;
+                tracing::info!(
+                    account_id = %outcome.account_id,
+                    %protocol,
+                    status = %outcome.connection_test.status,
+                    "periodic account health probe completed"
+                )
+            }
+            Err(error) => {
+                if error.code() == "database_error" {
+                    state.events.database_failed("health.probe").await;
+                }
+                tracing::warn!(
+                    account_id = %account_id,
+                    %protocol,
+                    code = error.code(),
+                    "periodic account health probe failed"
+                )
+            }
         }
     }
 }

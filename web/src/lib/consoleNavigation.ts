@@ -1,5 +1,5 @@
 export const CONSOLE_PAGES = [
-  'overview', 'analysis', 'events',
+  'overview', 'analysis', 'events', 'runtime-events',
   'sources', 'discovery', 'models', 'capabilities', 'settings',
 ] as const;
 

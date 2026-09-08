@@ -3,7 +3,7 @@ use crate::domain::config;
 use crate::domain::protocol::Protocol;
 use crate::domain::routing::ResolvedRoute;
 use crate::http::SourceHttpClient;
-use crate::infra::secrets;
+use crate::infra::{events, secrets};
 use axum::body::{Body, Bytes};
 use axum::http::{HeaderMap, Response};
 use std::time::Instant;
@@ -16,15 +16,18 @@ use std::time::Instant;
 ))]
 pub(super) async fn forward_account(
     secrets: &secrets::SecretResolver,
+    events: &events::EventRepository,
     http: &SourceHttpClient,
     route: &ResolvedRoute,
     account: &config::AccountConfig,
+    request_id: &str,
     headers: &HeaderMap,
     body: Bytes,
     stream_config: &stream::StreamConfig,
     request_started: Instant,
 ) -> Result<Response<Body>, transport::TransportError> {
-    let credential = secrets.resolve_account_credential(account);
+    let credential =
+        resolve_credential(secrets, events, &route.source_id, account, request_id).await;
     if route.mode == "adapter" {
         return dispatch_adapter(
             http,
@@ -108,9 +111,12 @@ pub(super) async fn dispatch_adapter(
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn forward_fallback(
     secrets: &secrets::SecretResolver,
+    events: &events::EventRepository,
     http: &SourceHttpClient,
     provider: &config::ProviderConfig,
     account: &config::AccountConfig,
+    source_id: &str,
+    request_id: &str,
     protocol: Protocol,
     mode: &str,
     upstream_endpoint: Option<&str>,
@@ -119,7 +125,7 @@ pub(super) async fn forward_fallback(
     stream_config: &stream::StreamConfig,
     request_started: Instant,
 ) -> Result<Response<Body>, transport::TransportError> {
-    let credential = secrets.resolve_account_credential(account);
+    let credential = resolve_credential(secrets, events, source_id, account, request_id).await;
     if mode == "adapter" {
         return dispatch_adapter(
             http,
@@ -160,4 +166,42 @@ pub(super) async fn forward_fallback(
         request_started,
     )
     .await
+}
+
+async fn resolve_credential(
+    secrets: &secrets::SecretResolver,
+    events: &events::EventRepository,
+    source_id: &str,
+    account: &config::AccountConfig,
+    request_id: &str,
+) -> Option<String> {
+    match secrets.resolve_account_credential_result(account) {
+        Ok(credential) => credential,
+        Err(error) => {
+            tracing::warn!(
+                account_id = %account.id,
+                source_id,
+                error_code = error.code(),
+                "credential resolution failed"
+            );
+            events
+                .record(
+                    events::SystemEvent::new(
+                        "security",
+                        "credential.resolution_failed",
+                        "error",
+                        "account",
+                        "Account credential resolution failed",
+                    )
+                    .subject_id(account.id.clone())
+                    .correlation_id(request_id.to_owned())
+                    .details(serde_json::json!({
+                        "source_id": source_id,
+                        "error_code": error.code(),
+                    })),
+                )
+                .await;
+            None
+        }
+    }
 }

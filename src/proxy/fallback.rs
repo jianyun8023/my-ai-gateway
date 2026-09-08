@@ -7,7 +7,7 @@ use crate::domain::protocol::Protocol;
 use crate::domain::routing::ResolvedRoute;
 use crate::http::response::data_plane_error_response;
 use crate::http::SourceHttpClient;
-use crate::infra::{db, health, observability, secrets};
+use crate::infra::{db, events, health, observability, secrets};
 use axum::body::{Body, Bytes};
 use axum::http::{HeaderMap, Response};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
@@ -129,6 +129,7 @@ pub(super) async fn select_fallback_candidate<'a>(
 pub(super) async fn try_fallback(
     config: &GatewayConfig,
     secrets: &secrets::SecretResolver,
+    events: &events::EventRepository,
     health: &health::HealthRegistry,
     http: &SourceHttpClient,
     route: &ResolvedRoute,
@@ -139,6 +140,7 @@ pub(super) async fn try_fallback(
     first: Response<Body>,
     stream_config: &stream::StreamConfig,
     request_started: Instant,
+    request_id: &str,
 ) -> (Response<Body>, Vec<db::UsageAttempt>) {
     let mut attempts = Vec::new();
     let Some(candidate) = select_fallback_candidate(config, health, route, model, protocol).await
@@ -149,9 +151,12 @@ pub(super) async fn try_fallback(
     let started = Instant::now();
     match forward_fallback(
         secrets,
+        events,
         http,
         candidate.provider,
         candidate.account,
+        &candidate.source_id,
+        request_id,
         candidate.protocol_upstream,
         &candidate.mode,
         candidate.upstream_endpoint.as_deref(),
@@ -225,6 +230,7 @@ pub(super) async fn try_fallback(
 pub(crate) async fn try_fallback_error(
     config: &GatewayConfig,
     secrets: &secrets::SecretResolver,
+    events: &events::EventRepository,
     health: &health::HealthRegistry,
     http: &SourceHttpClient,
     route: &ResolvedRoute,
@@ -255,9 +261,12 @@ pub(crate) async fn try_fallback_error(
     let started = Instant::now();
     match forward_fallback(
         secrets,
+        events,
         http,
         candidate.provider,
         candidate.account,
+        &candidate.source_id,
+        request_id,
         candidate.protocol_upstream,
         &candidate.mode,
         candidate.upstream_endpoint.as_deref(),

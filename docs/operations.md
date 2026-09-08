@@ -4,7 +4,7 @@
 
 ## 数据边界
 
-网关默认只保存结构化用量和状态，不保存 prompt/response 正文。四类历史分别保留：
+网关默认只保存结构化用量和状态，不保存 prompt/response 正文。五类策略分别保留：
 
 | policy_key | 数据表 | 时间列 | 默认保留 |
 | --- | --- | --- | --- |
@@ -12,6 +12,7 @@
 | `usage_attempts` | `usage_event_attempts` | `created_at` | 90 天 |
 | `audit` | `audit_logs`、`source_connection_tests`、`account_health_events` | `created_at`/`tested_at` | 365 天 |
 | `discovery` | `source_discovery_runs` | `completed_at` | 365 天 |
+| `system_events` | `system_events` | `occurred_at` | 365 天 |
 
 策略使用 UTC 的 `retention_days`。`enabled=false` 表示该类不自动删除；`retention_days=0` 只适合明确的测试或紧急清理。清理先删过期 attempt，再删过期 logical event。若 logical event 仍有未到期 attempt，事件会延后删除，避免 `ON DELETE CASCADE` 破坏引用完整性。删除 logical event 时数据库级 cascade 会同时移除已经符合 attempt 策略的子记录。
 
@@ -31,7 +32,8 @@ curl -X PUT "$ADMIN_URL/admin/retention/policies" \
         {"policy_key":"usage_events","retention_days":90},
         {"policy_key":"usage_attempts","retention_days":90},
         {"policy_key":"audit","retention_days":365},
-        {"policy_key":"discovery","retention_days":365}
+        {"policy_key":"discovery","retention_days":365},
+        {"policy_key":"system_events","retention_days":365}
       ],"requested_by":"operator"}'
 ```
 
@@ -69,7 +71,7 @@ curl -X POST "$ADMIN_URL/admin/retention/cleanup/cleanup-2026-08-31/retry" \
   -H "Authorization: Bearer $GATEWAY_ADMIN_KEY"
 ```
 
-`GET /admin/audit?operation_id=...` 可查看 started、progress、cancelled、succeeded 或 failed 事件；`GET /admin/backups/:id` 查看导出/恢复状态、校验和及 schema 版本。清理错误会固定为脱敏错误码和消息，不保存 Authorization、API Key 或正文。
+`GET /admin/audit?operation_id=...` 可查看 started、progress、cancelled、succeeded 或 failed 事件；`GET /admin/events?operation_id=...&since=...` 可把同一操作与系统、健康等事实放在统一时间线增量轮询；`GET /admin/backups/:id` 查看导出/恢复状态、校验和及 schema 版本。清理错误会固定为脱敏错误码和消息，不保存 Authorization、API Key 或正文。
 
 ## 控制面脱敏导出
 

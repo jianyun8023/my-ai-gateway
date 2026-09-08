@@ -22,6 +22,7 @@ export const shell = {
     overview: '总览',
     analysis: '用量分析',
     events: '请求事件',
+    'runtime-events': '运行事件',
     sources: '来源管理',
     discovery: '模型发现',
     models: '模型与路由',

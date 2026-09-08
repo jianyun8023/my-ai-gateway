@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | [#113 测试总计划](https://github.com/jianyun8023/my-ai-gateway/issues/113) | Contract、SDK、差分框架与本地外部扫描已接入 | 补齐 Kimi 原生切换后的真实 Provider 覆盖与生产复验，再核对总体验收 |
 | [#120 性能与故障验证](https://github.com/jianyun8023/my-ai-gateway/issues/120) | [PR #159](https://github.com/jianyun8023/my-ai-gateway/pull/159) 已合并故障测试、压测工具和 Mock 性能基线 | 明确含 PostgreSQL 写入、实际网络与部署资源的性能验收范围 |
-| [#110 事件中心](https://github.com/jianyun8023/my-ai-gateway/issues/110) | 设计讨论 | 确定记录/查询方式、恢复语义及导航入口后再实施 |
+| [#110 事件中心](https://github.com/jianyun8023/my-ai-gateway/issues/110) | 方案 C 已收敛；窄 `system_events`、统一查询 API、恢复语义矩阵和运行事件页已实现 | 完成关联 PR 的评审/CI，并在部署环境复核 migration、保留清理与运行事件；Issue 在协调验收前保持开放 |
 
 ## 发布前
 

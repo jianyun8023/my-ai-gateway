@@ -13,7 +13,7 @@ use tower_http::{services::ServeDir, trace::TraceLayer};
 use crate::{api, auth::AdminAuth, http::response::error_response, infra::audit, state::AppState};
 
 pub(crate) fn application(state: AppState) -> Router {
-    use api::{admin, discovery, health_admin, keys, ops, proxy, usage};
+    use api::{admin, discovery, events, health_admin, keys, ops, proxy, usage};
 
     let discovery_router = discovery::auxiliary_router_with_health(
         state.db.clone(),
@@ -91,6 +91,7 @@ pub(crate) fn application(state: AppState) -> Router {
         .route("/admin/backup/export", get(ops::export_control_plane))
         .route("/admin/backup/import", post(ops::import_control_plane))
         .route("/admin/audit", get(ops::list_audit_logs))
+        .route("/admin/events", get(events::list_events))
         .route("/admin/backups/{id}", get(ops::get_backup_run))
         .route("/admin/backups", get(ops::list_backup_runs))
         .route("/admin/backup/{id}", get(ops::get_backup_run))

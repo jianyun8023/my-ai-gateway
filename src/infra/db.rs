@@ -394,6 +394,9 @@ impl Database {
         sqlx::raw_sql(include_str!("../../migrations/0012_health_persistence.sql"))
             .execute(&mut *tx)
             .await?;
+        sqlx::raw_sql(include_str!("../../migrations/0014_admin_audit.sql"))
+            .execute(&mut *tx)
+            .await?;
         sqlx::raw_sql(include_str!(
             "../../migrations/0015_virtual_key_lifecycle.sql"
         ))
@@ -437,6 +440,9 @@ impl Database {
         ))
         .execute(&mut *tx)
         .await?;
+        sqlx::raw_sql(include_str!("../../migrations/0024_system_events.sql"))
+            .execute(&mut *tx)
+            .await?;
         tx.commit().await
     }
 

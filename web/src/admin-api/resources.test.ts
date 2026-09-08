@@ -133,6 +133,26 @@ describe('GatewayAdminResources', () => {
     expect(transport.json).toHaveBeenCalledWith('/admin/keys/7/value', expect.any(Object));
   });
 
+  it('queries the unified runtime event feed with encoded filters and cursor', async () => {
+    const controller = new AbortController();
+    const transport = transportWith(async () => ({ data: [], page: { has_more: false } }));
+    const api = new GatewayAdminResources(transport);
+
+    await api.runtimeEvents({
+      category: 'operation',
+      level: 'error',
+      correlation_id: 'cleanup:one',
+      since: '2026-09-09T00:00:00Z',
+      limit: 50,
+      cursor: 'cursor/next',
+    }, controller.signal);
+
+    expect(transport.json).toHaveBeenCalledWith(
+      '/admin/events?category=operation&level=error&correlation_id=cleanup%3Aone&since=2026-09-09T00%3A00%3A00Z&limit=50&cursor=cursor%2Fnext',
+      { signal: controller.signal },
+    );
+  });
+
   it('builds configuration export from real resources and removes credential references', async () => {
     const source = {
       id: 'source-a',

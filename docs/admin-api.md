@@ -327,13 +327,54 @@ Content-Type: application/json
 
 `SourceModelCapability` 的 `pending`、`unknown`、`unsupported`、不可用或未确认状态不会进入 runtime snapshot。接口不会把这些缺失事实猜成 `native`、`adapter` 或 `unsupported`，而是保留 `mode=null` 的不可路由单元。缺 endpoint、未知 Adapter、非直接转换链或未经允许的 lossy 能力会在控制面事务构建候选 snapshot 时返回结构化校验错误；失败候选不会替换当前有效 snapshot。
 
+## 运行事件统一查询（Issue #110）
+
+`GET /admin/events` 返回 PostgreSQL 统一读模型。它不会把既有事实复制到 `system_events`：系统生命周期、配置/snapshot、数据库与凭据异常来自 `system_events`；Admin/运维、健康、发现分别投影 `audit_logs`、`account_health_events`、`source_discovery_runs`；请求只投影 `usage_events` 中失败、fallback 或 degraded 的行。普通成功请求仍只在 `/admin/usage/events`（Request Events）中查询。
+
+支持以下可组合参数：
+
+- `from` 或 `since`：RFC3339 下界，二者互斥；`from` 为包含，`since` 为不包含，后者适合轮询；
+- `to`：RFC3339 不包含上界；
+- `category=lifecycle|configuration|database|security|request|health|operation|admin|discovery`；
+- `level=info|warning|error`、精确 `event_type`、`subject_type`、`subject_id`；
+- `correlation_id`，或等价查询别名 `operation_id`；
+- `source=system_events|usage_events|account_health_events|audit_logs|source_discovery_runs`；
+- `limit=1..500`（默认 100）和服务端返回的不透明 `cursor`。
+
+响应按 `(occurred_at DESC,event_id DESC)` 稳定分页；`event_id` 带事实来源命名空间。示例：
+
+```json
+{
+  "version": "v1",
+  "timezone": "UTC",
+  "fact_source": "postgresql_unified_read_model",
+  "range": {"from": null, "since": "2026-09-09T00:00:00+00:00", "to": null, "boundary": "(since,to)"},
+  "data": [{
+    "event_id": "system:42",
+    "occurred_at": "2026-09-09T00:01:00Z",
+    "category": "configuration",
+    "event_type": "runtime.snapshot_switched",
+    "level": "info",
+    "subject_type": "runtime_snapshot",
+    "subject_id": "18",
+    "correlation_id": "admin-request-id",
+    "message": "Runtime snapshot switched",
+    "details": {"previous_revision": 17, "candidate_revision": 18},
+    "source": "system_events"
+  }],
+  "page": {"limit": 100, "has_more": false, "next_cursor": null}
+}
+```
+
+所有 `details` 都是 metadata-only，禁止包含 prompt/response 正文、Authorization、API Key、credential 或可逆正文编码。统一读模型用于时间线与关联检索；当前账号状态、请求详情和运维任务控制仍以各自专用接口为准。后台任务可用 `operation_id` + `since` 增量轮询，但完成、取消和 retry 不引入推送回调或 DB signal。
+
 ## 数据保留与恢复运维（Issue #53）
 
 以下接口使用与其他 Admin API 相同的 `Authorization: Bearer $GATEWAY_ADMIN_KEY` 鉴权，所有时间和 cut-off 都是 UTC。它们不读取或返回 prompt/response 正文、Authorization、API Key 或凭据值。
 
 ### 保留策略
 
-`GET /admin/retention/policies` 返回四个独立策略：`usage_events`（logical UsageEvent）、`usage_attempts`（UsageAttempt）、`audit`（`audit_logs`、连接测试和 `account_health_events` 历史）和 `discovery`（`source_discovery_runs`）。每项包含 `retention_days`、`enabled` 和 `updated_at`。
+`GET /admin/retention/policies` 返回五个独立策略：`usage_events`（logical UsageEvent）、`usage_attempts`（UsageAttempt）、`audit`（`audit_logs`、连接测试和 `account_health_events` 历史）、`discovery`（`source_discovery_runs`）和 `system_events`（窄系统事件）。每项包含 `retention_days`、`enabled` 和 `updated_at`。
 
 `PUT /admin/retention/policies` 接受以下任一形式：
 
@@ -343,7 +384,8 @@ Content-Type: application/json
     {"policy_key":"usage_events","retention_days":90,"enabled":true},
     {"policy_key":"usage_attempts","retention_days":90,"enabled":true},
     {"policy_key":"audit","retention_days":365,"enabled":true},
-    {"policy_key":"discovery","retention_days":365,"enabled":true}
+    {"policy_key":"discovery","retention_days":365,"enabled":true},
+    {"policy_key":"system_events","retention_days":365,"enabled":true}
   ],
   "requested_by":"admin-ui"
 }
@@ -362,7 +404,7 @@ Content-Type: application/json
 - `policy_keys`（可选，只运行指定策略）；
 - `requested_by`（可选审计主体）。
 
-dry-run 只统计候选，不删除数据。正式清理按 attempt → logical event → audit → discovery 的顺序分批提交；logical event 若仍有未到期 attempt 会延后删除。响应的 `data` 包含每类 scanned/deleted、`batches_completed`、固定 `cutoff_snapshot` 和 `progress`。`status=running` 表示本次达到 `max_batches`，可用相同 `operation_id` 继续。
+dry-run 只统计候选，不删除数据。正式清理按 attempt → logical event → audit → discovery → system event 的顺序分批提交；logical event 若仍有未到期 attempt 会延后删除。响应的 `data` 包含每类 scanned/deleted（包括 `scanned_system_events` / `deleted_system_events`）、`batches_completed`、固定 `cutoff_snapshot` 和 `progress`。`status=running` 表示本次达到 `max_batches`，可用相同 `operation_id` 继续。
 
 `GET /admin/retention/cleanup/{operation_id}` 查询进度；`POST /admin/retention/cleanup/{operation_id}/cancel` 设置取消标志并在当前批次结束后转为 `cancelled`；`POST /admin/retention/cleanup/{operation_id}/retry` 可恢复失败、取消或进程中断的运行。每个生命周期事件都写入 `audit_logs`，重试不会重复删除已提交的行。
 
@@ -380,7 +422,7 @@ dry-run 只统计候选，不删除数据。正式清理按 attempt → logical 
 
 `POST /admin/control-plane/import` 接受导出 JSON，或 `{ "data": <export>, "replace": true, "requested_by": "..." }` 包装。非空目标必须显式 `replace=true`。导入按 FK 顺序恢复并重置 serial sequence；提交后重新构建 snapshot，只有 fingerprint 与导出一致才返回 `verified=true` 和新的 `snapshot_revision`。目标环境必须自行注入导出中列出的 Secret。
 
-`GET /admin/ops/schema`（`/admin/schema` 为同义入口）返回当前 `schema_version`、`migration_version`、应用版本和 UTC 更新时间。网关启动时会顺序应用仓库中的迁移；当前版本为 22，`migrations/0022_health_failure_window.sql` 增加失败窗口状态并一次性清理旧的无界失败计数。
+`GET /admin/ops/schema`（`/admin/schema` 为同义入口）返回当前 `schema_version`、`migration_version`、应用版本和 UTC 更新时间。网关启动时会顺序应用仓库中的迁移；当前版本为 24，`migrations/0024_system_events.sql` 增加窄系统事件表、第五类 retention policy 及清理计数。
 
 完整的 PostgreSQL `pg_dump`、新库恢复、Docker Compose 和本地 CLI 步骤见 [`docs/operations.md`](./operations.md)。物理 dump 可能包含数据库内的加密凭据和全部历史，必须按高敏感备份保护；脱敏迁移请使用控制面 JSON 导出。
 
