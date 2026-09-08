@@ -1,3 +1,4 @@
+import { clearOperationNotification, notifySuccess } from '@/components/ui/notifications';
 import { Table } from '@mantine/core';
 import { useOverlayState } from '@/components/ui/useOverlayState';
 import type {
@@ -31,7 +32,7 @@ import { EntityDetailDrawer } from '@/features/control-plane/models/EntityDetail
 import { LogicalModelForm } from '@/features/control-plane/models/LogicalModelForm';
 import { RouteForm } from '@/features/control-plane/models/RouteForm';
 import { RuntimeBindingSummary } from '@/features/control-plane/models/RuntimeBindingSummary';
-import { ConfirmDialog, EmptyTable, ErrorState, FormError, PageActions, ProtocolPill, SuccessNotice, Toggle } from '@/features/control-plane/shared';
+import { ConfirmDialog, EmptyTable, ErrorState, FormError, PageActions, ProtocolPill, Toggle } from '@/features/control-plane/shared';
 import { useAdminQuery } from '@/hooks/useAdminQuery';
 import { useLocalizedApiError } from '@/hooks/useLocalizedApiError';
 import { useCallback, useState } from 'react';
@@ -54,7 +55,6 @@ export function ModelsRoutesPage({ api, refreshRevision = 0, onBusyChange }: Mod
   const [detailTarget, setDetailTarget] = useState<DetailTarget>();
   const [mutationBusy, setMutationBusy] = useState(false);
   const [mutationError, setMutationError] = useState<AdminErrorShape>();
-  const [notice, setNotice] = useState('');
   const mutationErrorMessage = mutationError ? apiErrorText(mutationError) : undefined;
 
   const load = useCallback(async (signal: AbortSignal): Promise<CatalogData> => {
@@ -73,6 +73,7 @@ export function ModelsRoutesPage({ api, refreshRevision = 0, onBusyChange }: Mod
 
   const mutate = async (operation: () => Promise<unknown>, successMessage: string) => {
     if (mutationBusy) return;
+    clearOperationNotification();
     setMutationBusy(true);
     setMutationError(undefined);
     onBusyChange?.(true);
@@ -81,7 +82,7 @@ export function ModelsRoutesPage({ api, refreshRevision = 0, onBusyChange }: Mod
       setEditor(undefined);
       setDeleteTarget(undefined);
       setDetailTarget(undefined);
-      setNotice(successMessage);
+      notifySuccess(successMessage);
       query.reload();
     } catch (error) {
       setMutationError(normalizeAdminError(error));
@@ -164,7 +165,6 @@ export function ModelsRoutesPage({ api, refreshRevision = 0, onBusyChange }: Mod
           <Button variant="primary" onClick={openNew} disabled={!canCreate}><IconPlus size={14} />{tab === 'logical-models' ? t('models.new.lm') : tab === 'bindings' ? t('models.new.binding') : t('models.new.route')}</Button>
         </div>
       </PageActions>
-      <SuccessNotice message={notice} onDismiss={() => setNotice('')} />
       {query.error && <ErrorState error={query.error} onRetry={query.reload} />}
       {mutationError && !editor && !deleteTarget && <ErrorState error={mutationError} />}
 

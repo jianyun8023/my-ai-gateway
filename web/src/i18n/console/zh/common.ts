@@ -7,7 +7,7 @@ export const common = {
   create: '创建',
   cancel: '取消',
   close: '关闭',
-  close_notice_aria: '关闭成功提示',
+  close_notice_aria: '关闭通知',
   edit: '编辑',
   delete: '删除',
   refresh: '刷新',

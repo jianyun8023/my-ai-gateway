@@ -1,6 +1,6 @@
 # Mantine 控制台迁移清单（#166）
 
-初始基线：2026-09-08，`main c99455e`（PR #168 已合并）。当前第八批基线为 `main 12ebda9`（PR #175 已合并），分支 `codex/166-mantine-shell`。关联 [Issue #166](https://github.com/jianyun8023/my-ai-gateway/issues/166)，本清单随每批实现更新；未完成全部验收前不关闭总任务。
+初始基线：2026-09-08，`main c99455e`（PR #168 已合并）。当前第九批基线为 `main 7b0beab`（PR #176 已合并），分支 `codex/166-notification-feedback`。关联 [Issue #166](https://github.com/jianyun8023/my-ai-gateway/issues/166)，本清单随每批实现更新；未完成全部验收前不关闭总任务。
 
 Issue 中 `de708e8` 的链接是历史调查依据。当前事件详情已位于 `features/usage/UsageEventDetails.tsx` 并复用公共 Modal；旧 Select、PortalTooltip、QuestionMarkHelp 等无调用实现已在 #168 删除，不再列为线上迁移对象。
 
@@ -14,7 +14,7 @@ Issue 中 `de708e8` 的链接是历史调查依据。当前事件详情已位于
 
 ## 页面与流程覆盖
 
-路径相对于 `web/src/`。前七批 PR #169–#175 均已合并且 CI 通过；下表已按当前第八批更新。接入和代表性验证不等于该页完成全部验收。
+路径相对于 `web/src/`。前八批 PR #169–#176 均已合并且 CI 通过；第九批反馈证据见文末。接入和代表性验证不等于该页完成全部验收。
 
 | 页面/流程 | 当前组件与实际入口 | 目标与保留项 | 迁移批次/PR | 验证证据与剩余工作 |
 | --- | --- | --- | --- | --- |
@@ -242,3 +242,32 @@ Web ESLint/Knip、TypeScript、测试（30 个文件、149 项）和构建通过
 构建 JS 合计 909.38 kB（gzip 278.52 kB），CSS 155.95 kB（gzip 28.54 kB）；相对第七批增加 6.02/1.94 kB 与 1.91/0.29 kB（原始/gzip）。NavLink 接入使主入口为 506.35 kB（gzip 157.46 kB），触发 Vite 默认 500kB 提示，构建仍通过；没有隐藏警告或为此引入额外分包方案/依赖。本批未建立帧耗时基准。
 
 八页完整业务状态、重复页面组合、KPI/通知规则、全部嵌套浮层、原生菜单 Esc、系统减少动画偏好及真实写流程仍待收敛。这里只完成应用壳范围与代表性组合验证，不据此勾选八页整体验收或关闭 #166。
+
+
+## 第九批：短暂通知与持久结果
+
+基线 main `7b0beab`（PR #176 已合并且两项 CI 通过），分支 `codex/166-notification-feedback`。范围限于公共通知入口、来源、模型与路由、模型发现及设置的操作反馈，不包含 KPI、重复页面组合或八页整体验收。
+
+- ConsoleProvider 接入唯一 Mantine Notifications 宿主，新增 `@mantine/notifications@9.6.0`，与 core/hooks 精确同版。右上角、400px 上限、5 秒自动关闭、悬停暂停、命名关闭按钮、窄屏 44px 操作、180ms 过渡与减少动画继承集中管理；样式使用品牌表面/文字/状态变量，通知层级 1400。
+- 普通 CRUD / 保存 / 导出等使用薄入口 `notifySuccess`；新操作清掉旧成功提示，后续不同消息使用新 ID 重置完整时长。删除四页旧 notice state 和无调用 SuccessNotice，不新增业务抽象。
+- 模型发现全部结果由最新运行详情展示，不再把 failed / unsupported 当成功通知；结果刷新失败保留目录和重试，不提前报成功。不支持结果独立展示错误码。能力保存通知在仍打开的 Modal 上方，失败继续保留行草稿；批量确认错误回到确认框内。
+- Key 创建/读取/轮换只使用结果 Modal，复制反馈不含 Key 正文。轮换最晚有效时间（重叠期与原到期时间较早者）或立即失效说明持续保留，关闭即清除敏感值和复制状态。
+
+验证通过：`mise exec -- npm --prefix web run lint`（ESLint/Knip）、`typecheck`、`test`（30 文件 **159 项**）、`build` 和 `git diff --check`。增加 8 项回归，覆盖通知单次 status/不抢焦点/命名关闭/自动关闭/连续替换重新计时、来源失败保留表单及重试、发现 failed/unsupported 单一反馈与目录/错误码、发现刷新失败重试、能力保存留在 Modal、Key 时限/复制/立即清理；既有 Key 创建和读取测试扩充无重复通知与正文不进 live region 断言。
+
+独立只读审查发现固定 ID 会吞掉后续消息且可能继承旧计时，已改为替换旧通知并生成新 ID，4.9 秒后替换再等待 101ms 的边界回归通过；复核无剩余代码阻断。审查另纠正文档，默认布局只在悬停时暂停，不宣称键盘聚焦暂停。
+
+浏览器使用真实 GatewayManagementPage 与来源/发现/设置组件，所有网络响应均为本地合成数据，未连接生产或调用 Provider：
+
+| 范围 | 实测结果 |
+| --- | --- |
+| 桌面浅色来源保存 | 保存后唯一成功通知，编辑框关闭后焦点返回“编辑 source-a”；通知自动消失，列表保留。400px 通知未撑宽页面 |
+| 深色发现结果 | 模拟失败后最新运行显示 failed、完整英文原因及错误码，已有 SourceModel 目录保留，没有伪成功通知 |
+| 390px 英文能力保存 | 通知宽 358px，关闭按钮 44×44px，页面 scrollWidth 390px；编辑 Modal 保持打开，保存后焦点留在 Save capability。关闭通知不关闭能力编辑框；通知层级 1400 高于 Modal |
+| Key 创建与轮换 | 浅色中文创建显示结果与自动复制状态，无额外通知；390px 深色英文轮换结果保留完整时限和新 Key，显式复制后时限仍可阅读。两种结果点击 Done/完成后立即不再包含合成 Key |
+
+公开截图全部为合成数据：[来源成功浅色](evidence/166/b9-source-success-light.png)、[发现失败深色](evidence/166/b9-discovery-failed-dark.png)、[能力保存窄屏深色](evidence/166/b9-capability-mobile-dark.png)、[Key 结果窄屏深色](evidence/166/b9-key-result-mobile-dark.png)。临时验证入口已移出仓库，浏览器视口已恢复。
+
+按 Vite 输出合计：JS **935.48 kB / gzip 286.90 kB**，CSS **160.26 kB / gzip 29.10 kB**；相对第八批约增加 **26.10/8.38 kB** 与 **4.31/0.56 kB**（原始/gzip）。主入口 **532.98 kB / gzip 165.90 kB**，继续保留默认 500kB warning，构建通过；没有隐藏提示或扩展分包改造。通知新增 store/transition 依赖由锁文件记录，未升级其他直接依赖。
+
+未覆盖：系统减少动画偏好的浏览器实测、屏幕阅读器实际朗读、全部键盘关闭组合、全八页业务状态、真实配置提交/Provider/Key 验收和性能基准。系统减少动画由现有主题与 Mantine 实现继承，不能据源码或 DOM 测试记为浏览器通过。本批无后端改动，本地未运行 Rust/PostgreSQL/live Provider 测试；PR CI 结果另在关联 PR 与 Issue 记录。#166 保持开放。

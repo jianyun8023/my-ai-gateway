@@ -29,3 +29,5 @@
 @import '@mantine/core/styles/Progress.css';
 @import '@mantine/core/styles/Table.css';
 @import '@mantine/core/styles/NavLink.css';
+@import '@mantine/core/styles/Notification.css';
+@import '@mantine/notifications/styles.css';

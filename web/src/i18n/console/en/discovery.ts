@@ -37,13 +37,10 @@ export const discovery = {
   state_failed_desc: 'Check the source connection and account credentials, then retry.',
   state_empty: 'Discovery succeeded but the upstream returned no models',
   state_empty_desc: 'Existing models are unchanged.',
-  state_ok: 'Discovery run #{{id}} finished; {{count}} models discovered.',
-  state_failed_recorded: 'Discovery recorded failed run #{{id}}.',
 
   // 消息
   message_saved: 'User fields for SourceModel {{name}} saved.',
   message_confirmed: '{{count}} SourceModels confirmed.',
-  message_unsupported: 'Discovery unsupported: {{code}}',
 
   // 主页面
   loading: 'Loading model discovery…',

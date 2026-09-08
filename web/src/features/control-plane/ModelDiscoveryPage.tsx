@@ -1,3 +1,4 @@
+import { clearOperationNotification, notifySuccess } from '@/components/ui/notifications';
 import { Notice } from '@/components/ui/Notice';
 import { Checkbox, Table } from '@mantine/core';
 import { useOverlayState } from '@/components/ui/useOverlayState';
@@ -29,7 +30,7 @@ import { LatestRunPanel } from '@/features/control-plane/discovery/LatestRunPane
 import { metadataSourcesSummary, metadataSummary, sourceDiscoveryDefinition, statusTone, type DiscoveryContext, type DiscoveryView } from '@/features/control-plane/discovery/model';
 import { SourceModelCapabilitiesEditor } from '@/features/control-plane/discovery/SourceModelCapabilitiesEditor';
 import { SourceModelEditor } from '@/features/control-plane/discovery/SourceModelEditor';
-import { ConfirmDialog, EmptyTable, ErrorState, FilterBar, PageActions, SuccessNotice } from '@/features/control-plane/shared';
+import { ConfirmDialog, EmptyTable, ErrorState, FilterBar, PageActions } from '@/features/control-plane/shared';
 import { useAdminQuery } from '@/hooks/useAdminQuery';
 import { useLocalizedApiError } from '@/hooks/useLocalizedApiError';
 import { PROTOCOL_LABELS } from '@/lib/protocols';
@@ -56,7 +57,6 @@ export function ModelDiscoveryPage({ api, refreshRevision = 0, onBusyChange }: M
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [mutationBusy, setMutationBusy] = useState(false);
   const [mutationError, setMutationError] = useState<AdminErrorShape>();
-  const [notice, setNotice] = useState('');
 
   const loadContext = useCallback(async (signal: AbortSignal): Promise<DiscoveryContext> => {
     const [sources, accounts] = await Promise.all([api.sources(signal), api.accounts(signal)]);
@@ -104,17 +104,18 @@ export function ModelDiscoveryPage({ api, refreshRevision = 0, onBusyChange }: M
     setSelectedModels(new Set());
   };
 
-  const runMutation = async <T,>(
-    operation: () => Promise<T>,
-    successMessage: string | ((result: T) => string),
+  const runMutation = async (
+    operation: () => Promise<unknown>,
+    successMessage?: string,
   ) => {
     if (mutationBusy) return;
+    clearOperationNotification();
     setMutationBusy(true);
     setMutationError(undefined);
     onBusyChange?.(true);
     try {
-      const result = await operation();
-      setNotice(typeof successMessage === 'function' ? successMessage(result) : successMessage);
+      await operation();
+      if (successMessage) notifySuccess(successMessage);
       setEditingModel(undefined);
       setConfirmOpen(false);
       setSelectedModels(new Set());
@@ -131,11 +132,6 @@ export function ModelDiscoveryPage({ api, refreshRevision = 0, onBusyChange }: M
     if (!effectiveSourceId || !effectiveAccountId) return;
     void runMutation(
       () => api.runDiscovery(effectiveSourceId, effectiveAccountId),
-      (result) => result.run.status === 'unsupported'
-        ? t('discovery.message_unsupported', { code: result.run.error_code ?? 'discovery_unsupported' })
-        : result.run.status === 'failed'
-          ? t('discovery.state_failed_recorded', { id: result.run.id })
-          : t('discovery.state_ok', { id: result.run.id, count: result.run.discovered_model_count }),
     );
   };
 
@@ -190,7 +186,6 @@ export function ModelDiscoveryPage({ api, refreshRevision = 0, onBusyChange }: M
         </div>
       </PageActions>
 
-      <SuccessNotice message={notice} onDismiss={() => setNotice('')} />
       {contextQuery.error && <ErrorState error={contextQuery.error} onRetry={contextQuery.reload} />}
       {mutationError && !editingModel && !confirmOpen && <ErrorState error={mutationError} />}
 
@@ -280,7 +275,7 @@ export function ModelDiscoveryPage({ api, refreshRevision = 0, onBusyChange }: M
             api={api}
             model={capabilityModel}
             onSaved={(protocol) => {
-              setNotice(t('discovery.capability_saved', { protocol: PROTOCOL_LABELS[protocol] }));
+              notifySuccess(t('discovery.capability_saved', { protocol: PROTOCOL_LABELS[protocol] }));
               discoveryQuery.reload();
             }}
           />
@@ -290,7 +285,7 @@ export function ModelDiscoveryPage({ api, refreshRevision = 0, onBusyChange }: M
       <ConfirmDialog
         open={confirmOpen}
         title={t('discovery.batch_confirm_title')}
-        description={t('discovery.batch_confirm_desc', { count: selectedModels.size })}
+        description={<>{t('discovery.batch_confirm_desc', { count: selectedModels.size })}{mutationError && <ErrorState error={mutationError} />}</>}
         confirmLabel={t('discovery.confirm_models')}
         busy={mutationBusy}
         onCancel={() => !mutationBusy && setConfirmOpen(false)}

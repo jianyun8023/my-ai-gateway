@@ -53,7 +53,7 @@ export function LatestRunPanel({ latest }: { latest: LatestDiscovery | null }) {
         </span>
       </div>
       {run.status === 'unsupported' && (
-        <Notice tone="warning"><strong>{t('discovery.state_unsupported')}</strong>{run.error_message && <small>{run.error_code}: {run.error_message}</small>}</Notice>
+        <Notice tone="warning"><strong>{t('discovery.state_unsupported')}</strong>{run.error_message && <small>{run.error_message}</small>}{run.error_code && <code>{run.error_code}</code>}</Notice>
       )}
       {run.status === 'failed' && (
         <Notice><strong>{t('discovery.state_failed')}</strong><span>{run.error_message ?? t('discovery.state_failed_desc')}</span>{run.error_code && <code>{run.error_code}</code>}</Notice>

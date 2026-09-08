@@ -1,3 +1,4 @@
+import { clearOperationNotification, notifySuccess } from '@/components/ui/notifications';
 import { Table } from '@mantine/core';
 import { useOverlayState } from '@/components/ui/useOverlayState';
 import { downloadBlob } from '@/utils/download';
@@ -29,7 +30,7 @@ import { Modal } from '@/components/ui/Modal';
 import { StatusPill } from '@/components/ui/StatusPill';
 import { TableScroll } from '@/components/ui/TableScroll';
 import styles from '@/features/control-plane/ControlPlane.module.scss';
-import { ConfirmDialog, DetailItem, DetailList, EmptyTable, ErrorState, FormError, PageActions, SuccessNotice } from '@/features/control-plane/shared';
+import { ConfirmDialog, DetailItem, DetailList, EmptyTable, ErrorState, FormError, PageActions } from '@/features/control-plane/shared';
 import { VirtualKeyForm } from '@/features/control-plane/VirtualKeyForm';
 import { VirtualKeyRotationForm } from '@/features/control-plane/VirtualKeyRotationForm';
 import { useAdminQuery } from '@/hooks/useAdminQuery';
@@ -61,14 +62,13 @@ export function SettingsPage({
   const { t } = useTranslation('console');
   const localizedApiError = useLocalizedApiError();
   const [createOpen, setCreateOpen] = useState(false);
-  const [revealedKey, setRevealedKey] = useState<{ id: number; name: string; key: string }>();
+  const [revealedKey, setRevealedKey] = useState<{ id: number; name: string; key: string; message?: string }>();
   const [copyStatus, setCopyStatus] = useState<'copied' | 'pending' | 'failed'>('pending');
   const { value: revokeTarget, setValue: setRevokeTarget, opened: revokeTargetOpen, afterExit: revokeTargetAfterExit } = useOverlayState<VirtualKey>();
   const { value: rotateTarget, setValue: setRotateTarget, opened: rotateTargetOpen, afterExit: rotateTargetAfterExit } = useOverlayState<VirtualKey>();
   const [now, setNow] = useState(Date.now);
   const [mutationBusy, setMutationBusy] = useState(false);
   const [mutationError, setMutationError] = useState<AdminErrorShape>();
-  const [notice, setNotice] = useState('');
   const [reloadResult, setReloadResult] = useState<RuntimeReloadResult>();
 
   const load = useCallback(async (signal: AbortSignal): Promise<SettingsData> => {
@@ -89,12 +89,13 @@ export function SettingsPage({
 
   const mutate = async (operation: () => Promise<void>, successMessage?: string) => {
     if (mutationBusy) return;
+    clearOperationNotification();
     setMutationBusy(true);
     setMutationError(undefined);
     onBusyChange?.(true);
     try {
       await operation();
-      if (successMessage) setNotice(successMessage);
+      if (successMessage) notifySuccess(successMessage);
     } catch (error) {
       setMutationError(normalizeAdminError(error));
     } finally {
@@ -117,7 +118,7 @@ export function SettingsPage({
     void mutate(async () => {
       const result = await api.createVirtualKey({ name, allowed_models: allowedModels });
       setCreateOpen(false);
-      setRevealedKey({ id: result.id, name: result.name, key: result.key });
+      setRevealedKey({ id: result.id, name: result.name, key: result.key, message: t('settings.key_created') });
       setCopyStatus('pending');
       try {
         await navigator.clipboard.writeText(result.key);
@@ -125,7 +126,6 @@ export function SettingsPage({
       } catch {
         setCopyStatus('failed');
       }
-      setNotice(t('settings.key_created'));
       query.reload();
     });
   };
@@ -146,11 +146,12 @@ export function SettingsPage({
       const validUntil = result.overlap_until && rotateTarget.expires_at
         ? new Date(Math.min(Date.parse(result.overlap_until), Date.parse(rotateTarget.expires_at))).toISOString()
         : result.overlap_until;
-      setRevealedKey({ id: result.new_id, name: rotateTarget.name, key: result.key });
+      setRevealedKey({ id: result.new_id, name: rotateTarget.name, key: result.key,
+        message: validUntil
+          ? t('settings.key_rotated_overlap', { name: rotateTarget.name, until: formatDateTime(validUntil) })
+          : t('settings.key_rotated_immediate', { name: rotateTarget.name }),
+      });
       setCopyStatus('pending');
-      setNotice(validUntil
-        ? t('settings.key_rotated_overlap', { name: rotateTarget.name, until: formatDateTime(validUntil) })
-        : t('settings.key_rotated_immediate', { name: rotateTarget.name }));
       setRotateTarget(undefined);
       query.reload();
     });
@@ -197,7 +198,6 @@ export function SettingsPage({
         </div>
         <Button variant="secondary" onClick={query.reload} loading={query.refreshing}><IconRefreshCw size={14} />{t('common.refresh')}</Button>
       </PageActions>
-      <SuccessNotice message={notice} onDismiss={() => setNotice('')} />
       {query.error && <ErrorState error={query.error} onRetry={query.reload} />}
       {mutationError && !createOpen && !revokeTarget && !rotateTarget && <ErrorState error={mutationError} />}
 
@@ -208,7 +208,7 @@ export function SettingsPage({
             <span><strong>{adminKeyConfigured ? t('settings.card.key_configured') : t('settings.card.key_not_configured')}</strong>{!adminKeyConfigured && <small>{t('settings.card.key_hint')}</small>}</span>
           </div>
           <div className={styles.cardActions}>
-            <Button variant="secondary" onClick={() => { onClearAdminKey(); setNotice(t('settings.key_cleared')); }} disabled={!adminKeyConfigured}>{t('settings.clear_key')}</Button>
+            <Button variant="secondary" onClick={() => { onClearAdminKey(); notifySuccess(t('settings.key_cleared')); }} disabled={!adminKeyConfigured}>{t('settings.clear_key')}</Button>
           </div>
         </Card>
 
@@ -298,10 +298,11 @@ export function SettingsPage({
         onClose={() => { setRevealedKey(undefined); setCopyStatus('pending'); }}
         footer={<Button variant="secondary" onClick={() => { setRevealedKey(undefined); setCopyStatus('pending'); }}>{t('common.done')}</Button>}
       >
-        <div className={styles.secretResult} role="status">
+        {revealedKey?.message && <p>{revealedKey.message}</p>}
+        <div className={styles.secretResult}>
           <IconKey size={22} />
           <div>
-            <strong>{copyStatus === 'copied' ? t('settings.api_key_copied') : copyStatus === 'failed' ? t('settings.api_key_copy_denied') : t('settings.modal.reveal_subtitle')}</strong>
+            <strong role="status">{copyStatus === 'copied' ? t('settings.api_key_copied') : copyStatus === 'failed' ? t('settings.api_key_copy_denied') : t('settings.modal.reveal_subtitle')}</strong>
             {revealedKey && <code className={styles.secretValue}>{revealedKey.key}</code>}
           </div>
           <Button variant="primary" onClick={() => void copyRevealedKey()}><IconCopy size={14} />{t('common.copy_api_key')}</Button>

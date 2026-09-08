@@ -3,6 +3,7 @@ import controls from './Controls.module.scss';
 import feedback from './Feedback.module.scss';
 import table from './Table.module.scss';
 import navigation from './Navigation.module.scss';
+import notifications from './Notifications.module.scss';
 
 // Colors and font families resolve from gateway-brand.scss on :root, including Portals.
 export const consoleTheme = createTheme({
@@ -17,6 +18,7 @@ export const consoleTheme = createTheme({
   radius: { xs: '4px', sm: '6px', md: '8px', lg: '12px', xl: '16px' },
   breakpoints: { xs: '23.75em', sm: '37.5em', md: '57.5em', lg: '75em', xl: '90em' },
   components: {
+    Notification: { classNames: { root: notifications.notification, description: notifications.description, closeButton: notifications.closeButton } },
     NavLink: { classNames: { root: navigation.link, label: navigation.label, section: navigation.section } },
     Progress: { styles: { root: { background: 'var(--fg-soft)' } } },
     Table: {

@@ -7,6 +7,8 @@ import { LoadingState } from '../LoadingState';
 import { EmptyState } from '../EmptyState';
 import { StatusPill } from '../StatusPill';
 import { Button } from '../Button';
+import { clearOperationNotification, notifySuccess } from '../notifications';
+import { setTestLanguage } from '@/test/setup';
 
 describe('console feedback', () => {
   let container: HTMLDivElement;
@@ -18,6 +20,45 @@ describe('console feedback', () => {
     root = createRoot(container);
   });
   afterEach(() => { act(() => root.unmount()); container.remove(); });
+
+  it('shows one polite notification without taking focus and supports named dismissal', async () => {
+    await setTestLanguage('zh');
+    act(() => root.render(<Button onClick={() => notifySuccess('Saved')}>Save</Button>));
+    const trigger = container.querySelector('button')!;
+    act(() => { trigger.focus(); trigger.click(); });
+    act(() => root.render(<Button onClick={() => notifySuccess('Saved')}>Save</Button>));
+    expect(container.querySelectorAll('[role="status"]')).toHaveLength(1);
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+    const close = container.querySelector<HTMLButtonElement>('[aria-label="关闭通知"]')!;
+    expect(close).not.toBeNull();
+    await act(async () => { close.click(); await new Promise(resolve => setTimeout(resolve, 10)); });
+    expect(container.querySelector('[role="status"]')).toBeNull();
+  });
+
+  it('auto closes transient feedback and clears it when another operation starts', async () => {
+    vi.useFakeTimers();
+    try {
+      act(() => root.render(<div />));
+      act(() => notifySuccess('Saved'));
+      await act(async () => vi.advanceTimersByTime(5000));
+      await act(async () => vi.advanceTimersByTime(10));
+      expect(container.querySelector('[role="status"]')).toBeNull();
+      act(() => notifySuccess('Saved again'));
+      await act(async () => vi.advanceTimersByTime(4900));
+      act(() => notifySuccess('Session key cleared'));
+      await act(async () => vi.advanceTimersByTime(101));
+      expect(container.querySelectorAll('[role="status"]')).toHaveLength(1);
+      expect(container.querySelector('[role="status"]')?.textContent).toBe('Session key cleared');
+      await act(async () => vi.advanceTimersByTime(4900));
+      await act(async () => vi.advanceTimersByTime(10));
+      expect(container.querySelector('[role="status"]')).toBeNull();
+      act(() => notifySuccess('Saved once more'));
+      act(() => clearOperationNotification());
+      await act(async () => vi.advanceTimersByTime(10));
+      expect(container.querySelector('[role="status"]')).toBeNull();
+    } finally { vi.useRealTimers(); }
+  });
 
   it('keeps retry and dismissal available with error and success live-region semantics', () => {
     function Feedback() {

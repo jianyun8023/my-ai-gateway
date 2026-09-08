@@ -39,6 +39,7 @@ Tech-Utility：冷灰底色、绿色强调、紧凑数据布局。使用固定�
 | `StatusPill` | Mantine Badge；success / warning / danger / accent / muted，页面负责业务映射；保留原始大小写、完整文本与长标签换行 |
 | `SegmentedTabs` | Mantine Tabs 负责内容面板键盘导航；`mode="group"` 使用 Mantine Button 保留 `aria-pressed` 筛选语义 |
 | `LanguageSwitcher` / `Toggle` | 语言使用按压按钮并沿用既有持久化；启用状态使用 Mantine Switch，布尔值回调与禁用状态由页面控制 |
+| `notifySuccess` / `Notifications` | ConsoleProvider 中唯一通知宿主，普通操作成功短暂显示；持久结果与错误按下文反馈规则处理 |
 | `LoadingState` / `Notice` / `EmptyState` | Mantine Loader/Alert/Paper 组合；错误使用 alert，成功/警告使用 status；Loader 装饰化并由外层提供一次加载播报，局部加载用 inline；空表使用 centered 并保留下一步操作 |
 | Mantine `NavLink` | Shell 使用 button 语义保留 hash 导航，选中态对应 `aria-current=page`；视觉与触摸尺寸由 UI 主题统一 |
 | Mantine `Table` / `TableScroll` | 原生表格语义与带名称、可聚焦的横向滚动区；主题统一单元格密度、表头与分隔线，页面负责列宽和行操作 |
@@ -71,9 +72,9 @@ Tech-Utility：冷灰底色、绿色强调、紧凑数据布局。使用固定�
 
 ## Mantine 浮层契约与迁移状态
 
-本批使用 Mantine **9.6.0**（core/hooks 精确锁定，React 19.2 兼容）。基础组件负责交互，公共组合负责项目契约，业务组件负责数据与提交。完整八页清单、批次和证据见 [迁移记录](docs/mantine-migration.md)。目前已迁移主题、浮层、公共按钮/字段、页面筛选、标签与语言切换、启用开关、发现选择框、反馈/状态、卡片、图表和控制面表格；虚拟事件列表与全页面完整验收仍待收敛。
+本批使用 Mantine **9.6.0**（core/hooks/notifications 精确锁定，React 19.2 兼容）。基础组件负责交互，公共组合负责项目契约，业务组件负责数据与提交。完整八页清单、批次和证据见 [迁移记录](docs/mantine-migration.md)。目前已迁移主题、浮层、公共按钮/字段、页面筛选、标签与语言切换、启用开关、发现选择框、反馈/状态、卡片、图表和控制面表格；虚拟事件列表与全页面完整验收仍待收敛。
 
-- Modal/Drawer 默认层级 1000，由 Mantine stack 按打开顺序递增；Popover 1200、Tooltip 1300，统一在 theme.ts 修改。ConsoleProvider 通过 Mantine 公开的两种 StackContext 共享同一 stack，跨类型叠加时仅顶层处理 Esc 和焦点约束。条件卸载的详情会注销 stack 条目。
+- Modal/Drawer 默认层级 1000，由 Mantine stack 按打开顺序递增；Popover 1200、Tooltip 1300、通知 1400，统一在 theme.ts 修改。ConsoleProvider 通过 Mantine 公开的两种 StackContext 共享同一 stack，跨类型叠加时仅顶层处理 Esc 和焦点约束。条件卸载的详情会注销 stack 条目。
 - 焦点恢复使用 Mantine useFocusReturn，与 stack 的 trapFocus 切换分离；条件挂载详情先完成关闭态挂载，再打开。不要在页面添加 focus 定时器。正文单独滚动，标题和底部操作保持可见；长 ID 可换行。关闭动画中的内容通过 inert 退出交互。
 - 对话框默认 520px，各业务通过 width 表达尺寸；600px 以下 Drawer 全宽。移动侧栏用左侧 Drawer，桌面保留导航内容；920px 以下隐藏的导航从可访问树移除。
 - closeDisabled 同时保护关闭按钮、Esc 和遮罩点击，提交按钮仍由业务 busy 防重复触发。没有提交中的普通浮层允许 Esc 和外部点击关闭。
@@ -91,3 +92,11 @@ Tech-Utility：冷灰底色、绿色强调、紧凑数据布局。使用固定�
 `GatewayConsoleShell` 统一八页导航、标题和顶栏。NavLink 的排版、选中态、焦点和减少动画规则维护于 `components/ui/Navigation.module.scss`，桌面导航至少 40px，移动导航至少 44px；页面不复制导航按钮样式。菜单、主题、刷新使用公共 IconButton，刷新中由 Mantine ActionIcon 禁用重复点击。页面一级标题采用 Mantine Title。
 
 Shell 保留原生 CSS Grid/Flex 布局与现有 hash 导航、刷新版本及 session-only Admin Key 契约。大于 1280px 顶栏单行，921–1280px 将连接信息放到第二行；不挤掉标题或隐藏操作。920px 及以下由公共 Drawer 承载导航、语言和连接信息，只有一份连接字段被渲染。草稿受同一 state 控制，切换布局/开关导航不自动应用，显式应用或 Enter 后才清空草稿并触发刷新。桌面侧栏可独立纵向滚动，移动侧栏沿用公共 Drawer 的内容滚动和焦点规则。主题按钮根据 resolvedTheme 决定文案及切换目标，兼容跟随系统深色。
+
+### 通知与持久反馈
+
+- 普通 CRUD、保存、运行时重载及导出完成调用 UI 的 `notifySuccess(message)`，不再维护页面 `SuccessNotice`。开始下一次操作先 `clearOperationNotification()`，防止旧成功与新失败并存。一个操作只反馈一次；通知不放密钥、字段错误、重试按钮或需要持续阅读的业务结果。
+- `ConsoleProvider` 只挂载一份 Mantine Notifications，最多一条、右上角 400px 上限、5 秒自动关闭，悬停时由 Mantine 暂停。关闭按钮有中英文名称、窄屏至少 44px；消息允许换行。视觉由 UI Notifications 样式与品牌变量统一，Portal 层级 1400 高于 Modal/Drawer，不抢输入焦点；180ms 过渡遵守 Mantine 的系统减少动画偏好。
+- 页面加载/刷新失败、字段及提交失败继续用 `Notice` / `ErrorState` / `FormError`，保留错误码、重试、已有目录和表单草稿。保存成功通知仅表示写操作已完成，后续列表刷新失败仍由持久错误独立说明。
+- 模型发现的 succeeded / failed / unsupported 都交给“最新运行”展示，不另发操作成功通知。结果刷新失败只显示可重试错误，保留已有目录，不提前宣告发现成功。协议能力保存保持编辑框打开，统一通知在浮层上方可见；行错误保留在对应编辑区。批量确认提交错误位于确认框内。
+- Virtual Key 创建、读取、轮换以结果 Modal 为唯一结果入口，复制状态只在 Modal 内播报，不把 Key 正文放入 live region 或通知。轮换结果保留旧 Key 最晚有效时间（取重叠期和原到期时间的较早者）或立即失效说明；复制不清除时限。关闭即清除 Key 与复制状态，不等待退出动画。

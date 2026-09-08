@@ -1,3 +1,4 @@
+import { clearOperationNotification, notifySuccess } from '@/components/ui/notifications';
 import { Table } from '@mantine/core';
 import { useOverlayState } from '@/components/ui/useOverlayState';
 import type {
@@ -28,7 +29,7 @@ import { SegmentedTabs } from '@/components/ui/SegmentedTabs';
 import { StatusPill } from '@/components/ui/StatusPill';
 import { TableScroll } from '@/components/ui/TableScroll';
 import styles from '@/features/control-plane/ControlPlane.module.scss';
-import { ConfirmDialog, EmptyTable, ErrorState, FormError, PageActions, SuccessNotice, Toggle } from '@/features/control-plane/shared';
+import { ConfirmDialog, EmptyTable, ErrorState, FormError, PageActions, Toggle } from '@/features/control-plane/shared';
 import { AccountForm } from '@/features/control-plane/sources/AccountForm';
 import { credentialKey, protocolModeKey, protocolModeTone } from '@/features/control-plane/sources/presentation';
 import { SourceDetailDrawer } from '@/features/control-plane/sources/SourceDetailDrawer';
@@ -71,7 +72,6 @@ export function SourcesPage({ api, refreshRevision = 0, onBusyChange }: SourcesP
   const [selectedSourceId, setSelectedSourceId] = useState<string>();
   const [mutationBusy, setMutationBusy] = useState(false);
   const [mutationError, setMutationError] = useState<AdminErrorShape>();
-  const [notice, setNotice] = useState('');
 
   const load = useCallback(async (signal: AbortSignal): Promise<SourcesData> => {
     const [sources, accounts, presets] = await Promise.all([
@@ -87,6 +87,7 @@ export function SourcesPage({ api, refreshRevision = 0, onBusyChange }: SourcesP
 
   const mutate = async (operation: () => Promise<unknown>, successMessage: string) => {
     if (mutationBusy) return;
+    clearOperationNotification();
     setMutationBusy(true);
     setMutationError(undefined);
     onBusyChange?.(true);
@@ -94,7 +95,7 @@ export function SourcesPage({ api, refreshRevision = 0, onBusyChange }: SourcesP
       await operation();
       setEditor(undefined);
       setDeleteTarget(undefined);
-      setNotice(successMessage);
+      notifySuccess(successMessage);
       query.reload();
     } catch (error) {
       setMutationError(normalizeAdminError(error));
@@ -165,7 +166,6 @@ export function SourcesPage({ api, refreshRevision = 0, onBusyChange }: SourcesP
         </div>
       </PageActions>
 
-      <SuccessNotice message={notice} onDismiss={() => setNotice('')} />
       {query.error && <ErrorState error={query.error} onRetry={query.reload} />}
       {mutationError && !editor && !deleteTarget && <ErrorState error={mutationError} />}
 

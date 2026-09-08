@@ -1,5 +1,6 @@
-import { useContext, type PropsWithChildren } from 'react';
+import { useContext, useEffect, type PropsWithChildren } from 'react';
 import { DrawerStackContext, MantineProvider, Modal, ModalStackContext } from '@mantine/core';
+import { Notifications, notifications } from '@mantine/notifications';
 import { useThemeStore } from '@/stores/useThemeStore';
 import { consoleCssVariables, consoleTheme } from './theme';
 
@@ -12,9 +13,13 @@ function DrawerStackBridge({ children }: PropsWithChildren) {
 
 export function ConsoleProvider({ children, env }: PropsWithChildren<{ env?: 'test' }>) {
   const colorScheme = useThemeStore((state) => state.resolvedTheme);
+  useEffect(() => () => notifications.clean(), []);
   return (
     <MantineProvider theme={consoleTheme} cssVariablesResolver={consoleCssVariables} forceColorScheme={colorScheme} env={env}>
       <Modal.Stack><DrawerStackBridge>{children}</DrawerStackBridge></Modal.Stack>
+      <Notifications position="top-right" limit={1} autoClose={5000} containerWidth={400}
+        zIndex={1400} transitionDuration={env === 'test' ? 0 : 180}
+        allowDragDismiss={false} allowScrollDismiss={false} />
     </MantineProvider>
   );
 }
