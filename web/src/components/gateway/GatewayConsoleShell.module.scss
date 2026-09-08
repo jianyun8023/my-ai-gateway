@@ -28,6 +28,7 @@
 /* Brand — AG icon + name + version */
 .brand {
   padding: 20px 20px 16px;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -64,6 +65,7 @@
 /* Flat nav */
 .sidebarNav {
   flex: 1;
+  min-height: 0;
   padding: 12px 8px;
   display: flex;
   flex-direction: column;
@@ -80,58 +82,9 @@
   padding: 16px 12px 6px;
 }
 
-.navItem {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 9px 12px;
-  border-radius: var(--radius-sm);
-  font-size: 13.5px;
-  color: var(--text-secondary);
-  background: transparent;
-  border: none;
-  width: 100%;
-  text-align: left;
-  cursor: pointer;
-  transition: background 0.1s, color 0.1s;
-
-  svg { width: 18px; height: 18px; flex-shrink: 0; }
-  &:hover { background: var(--bg-hover); color: var(--text-primary); }
-  &:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: var(--radius-sm); }
-}
-
-.navItemActive {
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-weight: 500;
-}
-
-.navBadge {
-  margin-left: auto;
-  font-family: var(--font-mono);
-  font-size: var(--fs-small);
-  background: var(--danger-soft, color-mix(in oklch, var(--danger) 12%, transparent));
-  color: var(--danger, oklch(58% 0.2 25));
-  padding: 1px 6px;
-  border-radius: 99px;
-}
-
-/* Mobile-only admin key — hidden on desktop, shown inside sidebar on ≤600px */
-.mobileKeySection {
-  display: none;
-  padding: 12px 16px;
-  border-top: 1px solid var(--border-color);
-  gap: 8px;
-  align-items: flex-end;
-}
-.mobileKeyLabel { flex: 1; min-width: 0; }
-
-.mobileMenuBtn { display: none; }
-.navigationContent { min-height: 100%; display: flex; flex-direction: column; }
-
-@media (prefers-reduced-motion: reduce) {
-  .navItem { transition: none; }
-}
+.navigationContent { display: flex; flex-direction: column; }
+.sidebar > .navigationContent { height: 100%; min-height: 0; }
+.mobileSettings { display: grid; gap: 16px; padding: 16px 0 0; border-top: 1px solid var(--border); }
 
 /* ─── main area ─────────────────────────────────────────────── */
 .mainArea {
@@ -144,58 +97,52 @@
 
 /* ─── topbar ────────────────────────────────────────────────── */
 .topbar {
-  height: var(--gateway-topbar-h);
+  min-height: var(--gateway-topbar-h);
   background: var(--floating-surface);
   border-bottom: 1px solid var(--border-color);
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
-  padding: 0 24px;
-  gap: 16px;
+  padding: 8px 24px;
+  gap: 12px;
   position: sticky;
   top: 0;
   z-index: 10;
 }
 
 .topbarTitle {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 15px;
   font-weight: 600;
 }
 
 .topbarRight {
-  margin-left: auto;
+  min-width: 0;
   display: flex;
   align-items: center;
-  gap: 12px;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
-/* Language switcher — desktop copy lives in the topbar; the sidebar drawer
-   shows its own copy below 920px where the topbar runs out of room. */
-.topbarLanguage {
-  display: inline-flex;
-  align-items: center;
-  flex-shrink: 0;
-}
-
-.sidebarLanguageArea {
-  display: none;
-  padding: 12px 16px;
-  border-top: 1px solid var(--border-color);
-}
-
+.connectionControls { min-width: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .endpointDisplay {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+  min-width: 0;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   padding: 5px 10px;
-  background: var(--bg-hover, color-mix(in oklch, var(--fg) 6%, transparent));
+  background: var(--fg-soft);
   border-radius: var(--radius-sm);
   font-family: var(--font-mono);
   font-size: var(--fs-meta);
-  color: var(--text-secondary);
+  color: var(--muted);
 }
-
 .keyInput { display: flex; align-items: center; gap: 6px; }
-.desktopKeyField {
+.keyField {
   display: flex; align-items: center; gap: 6px;
   > label { margin: 0; white-space: nowrap; }
   input { width: 140px; font-family: var(--font-mono); }
@@ -220,36 +167,28 @@
     font-weight: 700;
     letter-spacing: -0.02em;
     margin: 0;
+    overflow-wrap: anywhere;
   }
+}
+
+@media (min-width: 921px) and (max-width: 1280px) {
+  .topbar { grid-template-columns: minmax(0, 1fr) auto; }
+  .topbar > .connectionControls { grid-column: 1 / -1; grid-row: 2; }
 }
 
 /* ─── responsive: tablet ≤ 920px ───────────────────────────── */
 @media (max-width: 920px) {
-  .mobileMenuBtn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 44px;
-    height: 44px;
-    border-radius: var(--radius-sm);
-    color: var(--text-primary);
-    background: transparent;
-    border: none;
-    cursor: pointer;
-    flex-shrink: 0;
-    &:hover { background: var(--bg-hover); }
-    svg { width: 20px; height: 20px; }
-  }
-
   .mainArea { margin-left: 0; }
   .content { padding: 16px; }
 
-  .topbar { padding: 0 16px; gap: 10px; }
-  .topbarLanguage { display: none; }
-  .sidebarLanguageArea { display: flex; }
-  .endpointDisplay { font-size: 11px; padding: 4px 8px; }
-  .keyInput > span { display: none; }
-  .keyInput input { width: 120px; }
+  .topbar { grid-template-columns: auto minmax(0, 1fr) auto; padding: 4px 12px; gap: 8px; }
+  .topbarRight { flex-wrap: nowrap; flex-shrink: 0; }
+  .connectionControls { align-items: stretch; flex-direction: column; }
+  .endpointDisplay { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+  .keyInput { align-items: flex-end; }
+  .keyField { display: block; flex: 1; }
+  .keyField > label { margin-bottom: 6px; }
+  .keyField input { width: 100%; }
 
   .pageHeader { flex-direction: column; align-items: flex-start; gap: 12px; }
   .pageHeader h1 { font-size: 22px; }
@@ -260,13 +199,10 @@
   .shell { --keeper-card-radius: var(--radius); --keeper-card-padding: 16px; --keeper-card-header-padding-x: 16px; --keeper-card-header-padding-top: 16px; --keeper-card-header-padding-bottom: 12px; }
 
   .content { padding: 12px; }
-  .topbar { height: 48px; gap: 6px; }
-  .endpointDisplay { display: none; }
-  .keyInput { display: none; }
-  .mobileKeySection { display: flex; }
+  .topbar { --gateway-topbar-h: 52px; gap: 6px; }
 
   .pageHeader h1 { font-size: 20px; }
-  }
+}
 
 /* ─── responsive: small phone ≤ 380px ──────────────────────── */
 @media (max-width: 380px) {

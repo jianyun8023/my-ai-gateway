@@ -1,6 +1,6 @@
 # Mantine 控制台迁移清单（#166）
 
-初始基线：2026-09-08，`main c99455e`（PR #168 已合并）。当前第七批基线为 `main 535a22e`（PR #174 已合并），分支 `codex/166-mantine-events`。关联 [Issue #166](https://github.com/jianyun8023/my-ai-gateway/issues/166)，本清单随每批实现更新；未完成全部验收前不关闭总任务。
+初始基线：2026-09-08，`main c99455e`（PR #168 已合并）。当前第八批基线为 `main 12ebda9`（PR #175 已合并），分支 `codex/166-mantine-shell`。关联 [Issue #166](https://github.com/jianyun8023/my-ai-gateway/issues/166)，本清单随每批实现更新；未完成全部验收前不关闭总任务。
 
 Issue 中 `de708e8` 的链接是历史调查依据。当前事件详情已位于 `features/usage/UsageEventDetails.tsx` 并复用公共 Modal；旧 Select、PortalTooltip、QuestionMarkHelp 等无调用实现已在 #168 删除，不再列为线上迁移对象。
 
@@ -14,11 +14,11 @@ Issue 中 `de708e8` 的链接是历史调查依据。当前事件详情已位于
 
 ## 页面与流程覆盖
 
-路径相对于 `web/src/`。前六批 PR #169、#170、#171、#172、#173、#174 均已合并且 CI 通过；下表已按当前第七批更新。接入和代表性验证不等于该页完成全部验收。
+路径相对于 `web/src/`。前七批 PR #169–#175 均已合并且 CI 通过；下表已按当前第八批更新。接入和代表性验证不等于该页完成全部验收。
 
 | 页面/流程 | 当前组件与实际入口 | 目标与保留项 | 迁移批次/PR | 验证证据与剩余工作 |
 | --- | --- | --- | --- | --- |
-| 应用壳 | `GatewayConsoleShell`：桌面侧栏、移动导航、连接、主题、语言、刷新 | 保留 hash 与状态契约；公共 Drawer/字段/按钮 | #169、#170、#171 | 代表性窄屏导航、焦点、双主题与语言已验证；导航和工具栏整体收敛、全部嵌套组合待验收 |
+| 应用壳 | `GatewayConsoleShell`：桌面侧栏、移动导航、连接、主题、语言、刷新 | 保留 hash 与状态契约；公共 Drawer/字段/按钮 | #169–#171，第八批应用壳 | 八页导航/标题/选中态、临界宽度顶栏、移动语言/连接区、详情与确认焦点隔离已验证；全部页面状态组合仍待验收 |
 | 总览 | `UsageOverview`、`UsageFilters`、`UsageTrend` | Mantine 筛选/反馈/构成图；保留 Chart.js 与独立 Total | #169–#173 | 双主题趋势/精确表/单图构成、390px 已验证；KPI 与完整刷新/空错状态待收敛 |
 | 用量分析 | `UsageAnalysis`、`TokenDistribution`、`TokenComposition` | Progress 分布、Source 平均/P95 Table；完整值与 missing 保留 | #169–#173，第六批共享 Table 主题 | 代表性中英文、长字段、真实零值与缺失已验证；导出及全状态组合待验收 |
 | 请求事件 | `UsageEvents`、`UsageEventDetails` | Mantine Table/Popover/Drawer；TanStack Virtual 测量与单一滚动区 | #169–#172，第七批虚拟表 | DOM 覆盖千行测量、重排与分页；浏览器覆盖 390px 指针、列切换、连续追加、万行刷新和真实详情只读；全状态组合待验收 |
@@ -214,3 +214,31 @@ Web ESLint/Knip、TypeScript、测试（30 个文件、149 项）和构建通过
 公开合成截图：[万行桌面](evidence/166/b7-events-desktop.png)、[窄屏深色列表](evidence/166/b7-events-mobile-dark.png)、[英文窄屏详情](evidence/166/b7-event-drawer-mobile-dark.png)。临时页面已移出仓库。最终生产构建另只读复验授权管理端事件入口：列表约 20 行 DOM，时间单元格点击后成功读取详情和 Token 卡片，随后恢复原分析页；没有保存真实数据截图、执行管理写入或发送模型请求。
 
 本批解决此前窄屏事件详情指针验收缺口，完成虚拟列表代表性测量/滚动/刷新验证。八页完整状态、浮层全部组合、真实写流程与系统减少动画实测仍待完成，#166 保持开放。该浏览器观察和 DOM 数量记录用于检查明显 UI 回退，不等于生产性能或帧率基准。
+
+
+## 第八批：应用壳、导航与工具栏
+
+基线 main `12ebda9`（PR #175 已合并且两项 CI 通过），分支 `codex/166-mantine-shell`。
+
+- 八页导航使用 Mantine NavLink（button），保留 hash、当前页面与 `aria-current=page`；通用选中态、焦点、40/44px 密度和减少动画规则集中到 UI Navigation 样式与主题。
+- 顶栏采用 Paper、页面标题采用 Title，菜单/主题/刷新统一为 IconButton。刷新继承 ActionIcon loading，阻止重复点击。修复跟随系统深色时主题按钮判断错误：文案和切换目标使用 resolvedTheme。
+- 顶栏大屏单行、921–1280px 两行，920px 以下将语言与连接字段移入导航 Drawer；复用一份连接控件，保留草稿、显式应用、清空和 session-only 契约。桌面侧栏限定可用高度并独立滚动，移动侧栏沿用公共 Drawer。移除手写导航/菜单按钮样式、重复密钥 JSX 及其专属文案。
+
+新增两项 Shell 回归覆盖系统深色切换、刷新禁用、未应用草稿跨断点/开关导航保留、Enter 应用后清空；扩充 App 路由回归检查唯一选中项与 h1。Web lint/Knip、TypeScript、30 文件 151 项测试、build 和 `git diff --check` 通过。无后端改动，未运行后端/live Provider 测试。
+
+浏览器使用实际 App 和八页的合成数据完成以下验证：
+
+| 范围 | 结果 |
+| --- | --- |
+| 八页导航 | 逐个打开总览、分析、事件、来源、发现、模型与路由、能力、设置；hash、h1 与唯一当前导航一致，921px 均无页面横向溢出 |
+| 桌面与临界宽度 | 1468px 导航 40px、顶栏 59px；921px 英文顶栏为 107px 两行，标题宽约 447px，长网关 URL 局部截断且完整值保留，操作可见 |
+| 矮窗口 | 400px 高度桌面侧栏内导航区 331px，可滚动 134px 到设置，焦点可达末项 |
+| 移动侧栏 | 390px Drawer 全宽，导航和操作均 44px；完整网关 URL 可换行，语言和连接区在 Drawer 内滚动可达。768px 下 Drawer 为 320px、无内容横向溢出 |
+| 焦点与主题 | 移动侧栏内中英切换同步标题/导航；Tab 保持在侧栏，Esc 返回菜单按钮并恢复背景滚动。深色切换后来源详情的连续 12 次 Tab、删除确认框焦点均留在当前浮层；确认框仅取消，未提交 |
+| 后台刷新 | 模拟慢请求时刷新按钮禁用、来源行保留，移动导航仍可打开；恢复即时响应后正常使用 |
+
+公开截图：[桌面浅色](evidence/166/b8-desktop-shell-light.png)、[921px 两行顶栏](evidence/166/b8-compact-desktop-toolbar.png)、[移动导航深色](evidence/166/b8-mobile-navigation-dark.png)、[移动连接区深色](evidence/166/b8-mobile-connection-dark.png)。全部是合成数据，临时页面已移出仓库。本批没有执行真实管理写入或应用真实 Key；浏览器输入测试受 1Password 提示干扰，取消后重载到空草稿，密钥草稿/应用行为以 DOM 回归为证，不记作完整浏览器密钥验收。
+
+构建 JS 合计 909.38 kB（gzip 278.52 kB），CSS 155.95 kB（gzip 28.54 kB）；相对第七批增加 6.02/1.94 kB 与 1.91/0.29 kB（原始/gzip）。NavLink 接入使主入口为 506.35 kB（gzip 157.46 kB），触发 Vite 默认 500kB 提示，构建仍通过；没有隐藏警告或为此引入额外分包方案/依赖。本批未建立帧耗时基准。
+
+八页完整业务状态、重复页面组合、KPI/通知规则、全部嵌套浮层、原生菜单 Esc、系统减少动画偏好及真实写流程仍待收敛。这里只完成应用壳范围与代表性组合验证，不据此勾选八页整体验收或关闭 #166。

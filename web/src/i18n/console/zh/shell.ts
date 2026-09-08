@@ -9,8 +9,6 @@ export const shell = {
   close_nav: '关闭导航',
   close_overlay: '关闭导航遮罩',
   open_nav: '打开导航',
-  mobile_key_label: 'Admin Key',
-  mobile_key_apply: '应用',
 
   // 导航分组
   section: {
@@ -30,6 +28,8 @@ export const shell = {
     capabilities: '能力矩阵',
     settings: '系统设置',
   },
+
+  connection_aria: "网关连接",
 
   // 顶栏
   admin_key_label: 'Admin Key',
