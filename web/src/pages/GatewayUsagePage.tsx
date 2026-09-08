@@ -32,7 +32,7 @@ export function GatewayUsagePage({ activeTab, getAdminKey, refreshRevision, onLo
   const client = useMemo(() => new GatewayUsageClient(new AdminClient({ getAdminKey })), [getAdminKey]);
   const filterState = useUsageFilters();
   const [visibleColumns, setVisibleColumns] = useState<EventColumn[]>(loadVisibleColumns);
-  const [trendMetric, setTrendMetric] = useState<TrendMetric>('total');
+  const [trendMetric, setTrendMetric] = useState<TrendMetric>('composition');
   const [granularity, setGranularity] = useState<'auto' | 'hour' | 'day'>('auto');
   const data = useUsageData({ client, filters: filterState.filters, activeTab, granularity, refreshRevision, onLoadingChange });
   const { loading, overview, analysisSummary } = data;

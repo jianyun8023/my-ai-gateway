@@ -15,6 +15,8 @@ export const consoleTheme = createTheme({
   radius: { xs: '4px', sm: '6px', md: '8px', lg: '12px', xl: '16px' },
   breakpoints: { xs: '23.75em', sm: '37.5em', md: '57.5em', lg: '75em', xl: '90em' },
   components: {
+    Progress: { styles: { root: { background: 'var(--fg-soft)' } } },
+    Table: { styles: { table: { '--table-border-color': 'var(--border)' } } },
     Loader: { defaultProps: { color: 'var(--accent)', type: 'oval' }, classNames: { root: feedback.loader } },
     Input: {
       defaultProps: { size: 'sm' },

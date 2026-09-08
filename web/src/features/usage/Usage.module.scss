@@ -98,8 +98,14 @@
   gap: 20px;
 }
 
-.chartLarge { height: 310px; }
-.chartSmall { width: 148px; height: 148px; }
+.chartLarge { height: 240px; min-width: 0; }
+.chartFooter { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; justify-content: space-between; margin-top: 8px; color: var(--muted); }
+.chartFooter small { flex: 1; min-width: 160px; }
+.chartData { max-height: 280px; overflow: auto; margin-top: 8px; }
+.usageTable { min-width: 420px; }
+.usageTable th { color: var(--muted); font-size: var(--fs-small); }
+.usageTable td { font-family: var(--font-mono); font-size: var(--fs-meta); overflow-wrap: anywhere; }
+.usageTable th:not(:first-child), .usageTable td:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }
 
 .tokenComposition {
   display: grid;
@@ -115,27 +121,18 @@
   strong { font-family: var(--font-mono); font-size: 28px; font-variant-numeric: tabular-nums; }
 }
 
-.tokenBreakdown { display: grid; gap: 8px; }
-
-.tokenRow {
-  display: grid;
-  grid-template-columns: 100px minmax(0, 1fr) auto auto;
-  align-items: center;
-  gap: 10px;
-
-  span { color: var(--text-secondary); font-size: var(--fs-small); }
-  strong { font-family: var(--font-mono); font-size: var(--fs-meta); font-variant-numeric: tabular-nums; min-width: 60px; text-align: right; }
-  small { color: var(--text-secondary); font-family: var(--font-mono); font-size: var(--fs-small); min-width: 45px; text-align: right; }
-}
-
-.tokenBar {
-  height: 8px;
-  border-radius: 4px;
-  background: var(--bg-tertiary);
-  overflow: hidden;
-
-  > div { height: 100%; border-radius: inherit; background: var(--gateway-accent); }
-}
+.compositionChart { display: grid; gap: 10px; }
+.compositionLegend, .compositionDetails { margin: 0; display: grid; gap: 12px; min-width: 0; }
+.compositionLegend { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.compositionLegend dt { display: flex; align-items: center; gap: 6px; }
+.compositionLegend i { width: 8px; height: 8px; flex: 0 0 8px; border-radius: 2px; }
+.compositionLegend dd { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
+.compositionLegend strong { font-size: 18px; }
+.compositionLegend span { color: var(--muted); font-size: var(--fs-small); }
+.compositionDetails { grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid var(--border); padding-top: 14px; }
+.compositionLegend dt, .compositionDetails dt { color: var(--muted); font-size: var(--fs-small); overflow-wrap: anywhere; }
+.compositionLegend dd, .compositionDetails dd { margin: 4px 0 0; font-family: var(--font-mono); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.compositionDetails dd { font-size: var(--fs-meta); font-weight: 600; }
 
 .cacheNote { color: var(--text-secondary); font-size: var(--fs-small); }
 
@@ -160,11 +157,10 @@
 
 .distributionList { display: grid; gap: 13px; padding-top: 3px; }
 .distributionList > div { display: grid; gap: 6px; }
-.distributionList > div > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.distributionList strong { overflow: hidden; font-family: var(--font-mono); font-size: var(--fs-meta); overflow-wrap: anywhere; }
+.distributionHeading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.distributionList strong { min-width: 0; font-family: var(--font-mono); font-size: var(--fs-meta); overflow-wrap: anywhere; }
+.distributionList small { color: var(--muted); }
 .distributionList span { color: var(--text-secondary); font-family: var(--font-mono); font-size: var(--fs-small); }
-.distributionTrack { height: 5px; overflow: hidden; border-radius: 999px; background: var(--bg-tertiary); }
-.distributionTrack i { display: block; height: 100%; border-radius: inherit; background: var(--gateway-accent); }
 
 .analysisGrid {
   min-width: 0;
@@ -173,7 +169,6 @@
   gap: 20px;
 }
 
-.breakdownChart { height: 280px; }
 
 .eventActions { display: flex; align-items: center; gap: 6px; }
 
@@ -248,6 +243,7 @@
 }
 
 @media (max-width: 920px) {
+  .distributionHeading { align-items: flex-start; flex-direction: column; gap: 4px; }
   .advancedFilters { grid-template-columns: 1fr; }
   .commonFilters > .filterField { flex-basis: 100%; }
   .statsGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -272,13 +268,11 @@
   .stat { min-height: 98px; padding: 14px 15px; }
   .stat strong { font-size: 25px; }
   .chartLarge { height: 230px; }
-  .tokenRow { grid-template-columns: minmax(0, 1fr) auto auto; }
-  .tokenRow .tokenBar { grid-column: 1 / -1; }
 
   .recentList > div { grid-template-columns: 8px minmax(0, 1fr) auto; }
   .recentList time,
   .recentList > div > span:not(.statusDot) { display: none; }
-  .distributionList > div > div { align-items: flex-start; }
+  .distributionHeading { align-items: flex-start; }
   .distributionList span { white-space: normal; text-align: right; }
 
   .eventActions { flex-wrap: wrap; }

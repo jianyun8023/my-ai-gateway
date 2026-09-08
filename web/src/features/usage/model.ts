@@ -1,6 +1,6 @@
 import { type UsageBreakdownDimension } from '@/gateway-usage';
 
-export type TrendMetric = 'total' | 'input' | 'output' | 'reasoning' | 'cached' | 'requests';
+export type TrendMetric = 'composition' | 'total' | 'input' | 'output' | 'reasoning' | 'cached' | 'requests';
 
 export const ANALYSIS_DIMENSIONS: Array<{ dimension: UsageBreakdownDimension; titleKey: string }> = [
   { dimension: 'logical_model', titleKey: 'usage.field.logical_model' },

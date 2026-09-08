@@ -83,6 +83,7 @@ export const usage = {
 
   // —— 趋势/构成/分布 ——
   metric: {
+    composition: 'Input / Output',
     total: 'Total Tokens',
     input: 'Input Tokens',
     output: 'Output Tokens',
@@ -100,14 +101,26 @@ export const usage = {
     total: 'Total',
   },
   trend: {
+    empty: 'No trend data in this range',
+    view_data: 'View data',
+    hide_data: 'Hide data',
+    composition_hint: 'Input and output stacked; reported total is available separately.',
+    axes_hint: 'The two measures use separate axes.',
     title: 'Usage Trend',
     subtitle: 'Times shown in your local timezone',
   },
   composition: {
+    chart_title: 'Input / output split',
+    empty: 'No input or output tokens reported',
+    total_difference: 'Input + output: {{combined}}; reported total: {{total}}. The split uses input + output.',
+    overlap: 'Reasoning and cache are separate reported measures, excluded from this split.',
+    missing: 'Usage is missing for {{count}} requests and is not included in token totals.',
     title: 'Token Composition',
-    cache_rate: 'Cache hit rate: {{rate}}%',
+    cache_rate: 'Cache read / input: {{rate}}',
   },
   distribution: {
+    requests: '{{count}} requests',
+    top: 'Showing top {{count}} of {{total}} groups',
     title: 'Model Token Distribution',
     subtitle: 'Sorted by logical model · total tokens',
     empty: 'No model distribution yet',
@@ -125,12 +138,13 @@ export const usage = {
 
   // —— 空态与图表通用 ——
   breakdown: {
-    subtitle: 'Sorted by total tokens',
+    subtitle: 'Total tokens and share of the selected range',
     empty: 'No breakdown data yet',
   },
   latency: {
-    title: 'Latency Diagnostics',
-    subtitle: 'Average latency by aggregate dimension',
+    title: 'Latency by Source',
+    subtitle: 'Average latency, P95 and request counts by source',
+    p95: 'P95 latency',
     dataset: 'Avg latency (ms)',
     empty: 'No latency aggregates yet',
   },

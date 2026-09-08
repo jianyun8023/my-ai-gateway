@@ -81,3 +81,5 @@ Tech-Utility：冷灰底色、绿色强调、紧凑数据布局。使用固定�
 - 列偏好 Popover 使用 Portal、视口自动定位和 focus trap；交互内容使用 Popover，纯文本提示使用 Tooltip。公共字段选择器已采用 Mantine NativeSelect，保留浏览器菜单；用量与控制面页面筛选及 Shell 密钥输入已共用 Mantine 字段，页面仅保留布局。未来 Mantine Select 与嵌套 Popover 接入须按官方 Portal/事件规则单独验证，当前批次没有宣称这些组合已完成。
 
 新增页面的评审需检查：复用组件入口和主题；label/hint/error 与提交契约；首次加载/刷新/错误/空态；键盘和关闭焦点；双主题、长文案与窄屏；图表/虚拟列表测量及资源体积。专业组件继续保留 Chart.js/TanStack Virtual，主题与数据语义验收不能省略。CPA Usage Keeper 的既有 MIT License 与来源说明继续保留。
+
+用量图表使用 [UsageTrend](web/src/features/usage/UsageTrend.tsx) 保留 Chart.js 的时间序列绘制；默认 Input/Output 堆叠，其他指标使用有名称的独立双轴，并提供精确数值表。Canvas 配色由 [useChartTheme](web/src/features/usage/useChartTheme.ts) 读取品牌 Token，响应已有主题状态；分布采用 Mantine Progress，来源延迟与趋势数据采用 Mantine Table。Token 构成使用一张 Progress 分段图展示 Input/Output 占两者合计的比例，推理和缓存放在数值明细中，不参与图中归一化；上报 Total 独立保留，合计不一致时明确说明。原型差距、数据依据和本批取舍见[图表核对记录](docs/chart-prototype-review.md)。
