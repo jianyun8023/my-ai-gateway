@@ -1,0 +1,15 @@
+/* Import only adopted components and their base styles, in dependency order.
+   Add new component styles here when migrating another control. */
+@import '@mantine/core/styles/baseline.css';
+@import '@mantine/core/styles/default-css-variables.css';
+@import '@mantine/core/styles/global.css';
+@import '@mantine/core/styles/UnstyledButton.css';
+@import '@mantine/core/styles/Paper.css';
+@import '@mantine/core/styles/CloseButton.css';
+@import '@mantine/core/styles/Overlay.css';
+@import '@mantine/core/styles/ModalBase.css';
+@import '@mantine/core/styles/Modal.css';
+@import '@mantine/core/styles/Drawer.css';
+@import '@mantine/core/styles/Popover.css';
+@import '@mantine/core/styles/InlineInput.css';
+@import '@mantine/core/styles/Checkbox.css';

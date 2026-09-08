@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { act } from 'react';
-import { createRoot } from 'react-dom/client';
+import { createRoot } from '@/test/render';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GatewayAdminResources, type VirtualKey } from '@/admin-api';
 import { setTestLanguage } from '@/test/setup';

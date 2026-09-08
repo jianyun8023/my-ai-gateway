@@ -131,6 +131,7 @@ export function ConfirmDialog({
   danger = false,
   onCancel,
   onConfirm,
+  onExitTransitionEnd,
 }: {
   open: boolean;
   title: string;
@@ -140,11 +141,13 @@ export function ConfirmDialog({
   danger?: boolean;
   onCancel: () => void;
   onConfirm: () => void;
+  onExitTransitionEnd?: () => void;
 }) {
   const { t } = useTranslation('console');
   return (
     <Modal
       open={open}
+      onExitTransitionEnd={onExitTransitionEnd}
       title={title}
       onClose={onCancel}
       closeDisabled={busy}

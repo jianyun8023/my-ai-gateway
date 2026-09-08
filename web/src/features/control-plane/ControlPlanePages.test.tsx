@@ -3,7 +3,7 @@ import type { GatewayManagementPage as PageId } from '@/lib/consoleNavigation';
 import { GatewayManagementPage } from '@/pages/GatewayManagementPage';
 import { setTestLanguage } from '@/test/setup';
 import { act } from 'react';
-import { createRoot } from 'react-dom/client';
+import { createRoot } from '@/test/render';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const jsonResponse = (value: unknown, status = 200) => new Response(JSON.stringify(value), {
@@ -268,6 +268,20 @@ describe('production control-plane pages', () => {
     expect(container.textContent).toContain('Account A');
     expect(container.textContent).toContain('已配置');
     expect(container.textContent).not.toContain('PROVIDER_REFERENCE_ENV');
+  });
+
+  it('returns focus to the source row after switching from details to editing', async () => {
+    await renderPage('sources');
+    const trigger = container.querySelector<HTMLButtonElement>('button[aria-label="查看 source-a"]')!;
+    await act(async () => { trigger.focus(); trigger.click(); });
+    const edit = [...container.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find(button => button.textContent === '编辑来源')!;
+    act(() => { edit.focus(); edit.click(); });
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 250)); });
+    expect(container.querySelector('#source-editor-form')).not.toBeNull();
+    const close = container.querySelector<HTMLButtonElement>('[role="dialog"] button[aria-label="关闭"]')!;
+    act(() => { close.focus(); close.click(); });
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)); });
+    expect(document.activeElement).toBe(trigger);
   });
 
   it('shows unsupported discovery and pending SourceModel field provenance', async () => {

@@ -1,3 +1,4 @@
+import { useOverlayState } from '@/components/ui/useOverlayState';
 import type {
   AdminErrorShape,
   CatalogAvailability,
@@ -49,8 +50,8 @@ export function ModelDiscoveryPage({ api, refreshRevision = 0, onBusyChange }: M
   const [confirmationFilter, setConfirmationFilter] = useState<CatalogStatus | ''>('pending');
   const [availabilityFilter, setAvailabilityFilter] = useState<CatalogAvailability | ''>('');
   const [selectedModels, setSelectedModels] = useState<Set<string>>(() => new Set());
-  const [editingModel, setEditingModel] = useState<SourceModel>();
-  const [capabilityModel, setCapabilityModel] = useState<SourceModel>();
+  const { value: editingModel, setValue: setEditingModel, opened: editingModelOpen, afterExit: editingModelAfterExit } = useOverlayState<SourceModel>();
+  const { value: capabilityModel, setValue: setCapabilityModel, opened: capabilityModelOpen, afterExit: capabilityModelAfterExit } = useOverlayState<SourceModel>();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [mutationBusy, setMutationBusy] = useState(false);
   const [mutationError, setMutationError] = useState<AdminErrorShape>();
@@ -251,7 +252,8 @@ export function ModelDiscoveryPage({ api, refreshRevision = 0, onBusyChange }: M
       )}
 
       <Modal
-        open={Boolean(editingModel)}
+        open={editingModelOpen}
+        onExitTransitionEnd={editingModelAfterExit}
         title={t('discovery.edit_pending_title')}
         width={760}
         onClose={() => !mutationBusy && setEditingModel(undefined)}
@@ -267,7 +269,8 @@ export function ModelDiscoveryPage({ api, refreshRevision = 0, onBusyChange }: M
       </Modal>
 
       <Modal
-        open={Boolean(capabilityModel)}
+        open={capabilityModelOpen}
+        onExitTransitionEnd={capabilityModelAfterExit}
         title={t('discovery.capabilities_title', { model: capabilityModel?.upstream_model_id ?? '' })}
         width={820}
         onClose={() => setCapabilityModel(undefined)}

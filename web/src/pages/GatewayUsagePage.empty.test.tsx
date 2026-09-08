@@ -2,7 +2,7 @@
 import App from '@/App';
 import { setTestLanguage } from '@/test/setup';
 import { act } from 'react';
-import { createRoot } from 'react-dom/client';
+import { createRoot } from '@/test/render';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 describe('GatewayUsagePage empty state', () => {

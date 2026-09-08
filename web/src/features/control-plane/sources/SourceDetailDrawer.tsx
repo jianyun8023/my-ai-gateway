@@ -25,7 +25,7 @@ import { protocolModeKey, protocolModeTone } from '@/features/control-plane/sour
 import { PROTOCOL_LABELS } from '@/lib/protocols';
 import { useAdminQuery } from '@/hooks/useAdminQuery';
 import { formatDateTime, formatJsonValue } from '@/utils/format';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 export function SourceDetailDrawer({
@@ -43,6 +43,7 @@ export function SourceDetailDrawer({
 }) {
   const { t } = useTranslation('console');
   const [open, setOpen] = useState(true);
+  const [editAfterExit, setEditAfterExit] = useState(false);
   const enabledAccounts = accounts.filter((account) => account.enabled);
   const [accountId, setAccountId] = useState(enabledAccounts[0]?.id ?? '');
   const [testModel, setTestModel] = useState('');
@@ -50,11 +51,6 @@ export function SourceDetailDrawer({
   const [testResults, setTestResults] = useState<Partial<Record<GatewayProtocol, ConnectionTestResult>>>({});
   const [testError, setTestError] = useState<AdminErrorShape>();
 
-  useEffect(() => {
-    if (open) return;
-    const timer = window.setTimeout(onClose, 380);
-    return () => window.clearTimeout(timer);
-  }, [onClose, open]);
 
   const loadDiff = useCallback((signal: AbortSignal) => api.sourcePresetDiff(source.id, signal), [api, source.id]);
   const diffQuery = useAdminQuery({ load: loadDiff });
@@ -86,11 +82,11 @@ export function SourceDetailDrawer({
       variant="drawer"
       width={540}
       title={t('sources.detail.title_source')}
-      onClose={() => setOpen(false)}
+      onClose={() => setOpen(false)} onExitTransitionEnd={editAfterExit ? onEdit : onClose}
       footer={(
         <>
           <Button variant="secondary" onClick={() => setOpen(false)}>{t('common.close')}</Button>
-          <Button variant="primary" onClick={onEdit}><IconPencil size={14} />{t('sources.modal.edit_source')}</Button>
+          <Button variant="primary" onClick={() => { setEditAfterExit(true); setOpen(false); }}><IconPencil size={14} />{t('sources.modal.edit_source')}</Button>
         </>
       )}
     >
