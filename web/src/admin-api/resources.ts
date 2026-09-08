@@ -2,7 +2,6 @@ import type {
   Account,
   AccountWriteInput,
   AdminDataEnvelope,
-  AdminErrorShape,
   AdminMutationEnvelope,
   CapabilityMatrixResponse,
   ConnectionTestInput,
@@ -32,14 +31,13 @@ import type {
   VirtualKey,
   VirtualKeyCreateInput,
   VirtualKeyCreateResult,
-  VirtualKeySecret,
   VirtualKeyRotateInput,
   VirtualKeyRotateResult,
+  VirtualKeySecret
 } from './types';
 
-export interface AdminTransport {
-  json<T>(path: string, init?: RequestInit): Promise<T>;
-}
+import type { AdminTransport } from './client';
+import { normalizeAdminError } from './errors';
 
 const encodePath = (value: string | number): string => encodeURIComponent(String(value));
 
@@ -50,28 +48,8 @@ const jsonInit = (method: string, body?: unknown, signal?: AbortSignal): Request
   body: body === undefined ? undefined : JSON.stringify(body),
 });
 
-export const normalizeAdminError = (error: unknown): AdminErrorShape => {
-  if (typeof DOMException !== 'undefined' && error instanceof DOMException && error.name === 'AbortError') {
-    return { code: 'request_aborted', message: 'Request aborted' };
-  }
-  if (error instanceof Error) {
-    const candidate = error as Error & { status?: unknown; code?: unknown };
-    return {
-      status: typeof candidate.status === 'number' ? candidate.status : undefined,
-      code: typeof candidate.code === 'string' ? candidate.code : undefined,
-      message: error.message,
-    };
-  }
-  return { code: 'unknown_error', message: 'Admin API request failed' };
-};
-
-export const isAbortError = (error: unknown): boolean => (
-  (typeof DOMException !== 'undefined' && error instanceof DOMException && error.name === 'AbortError')
-  || (error instanceof Error && error.name === 'AbortError')
-);
-
 export class GatewayAdminResources {
-  constructor(private readonly transport: AdminTransport) {}
+  constructor(private readonly transport: Pick<AdminTransport, 'json'>) {}
 
   async providerPresets(signal?: AbortSignal): Promise<ProviderPreset[]> {
     return (await this.transport.json<AdminDataEnvelope<ProviderPreset[]>>(

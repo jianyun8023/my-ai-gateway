@@ -1,13 +1,4 @@
-import { IconButton } from '@/components/ui/IconButton';
-import { LoadingState } from '@/components/ui/LoadingState';
-import { StatusPill } from '@/components/ui/StatusPill';
-import { TableScroll } from '@/components/ui/TableScroll';
-import { TextAreaField, TextField } from '@/components/ui/FormField';
-import { Button } from '@/components/ui/Button';
-import { Card } from '@/components/ui/Card';
-import { Modal } from '@/components/ui/Modal';
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import { useTranslation } from 'react-i18next';
+import { downloadBlob } from '@/utils/download';
 import type {
   AdminErrorShape,
   CapabilityMatrixResponse,
@@ -17,7 +8,9 @@ import type {
   VirtualKeyRotateInput,
 } from '@/admin-api';
 import { normalizeAdminError } from '@/admin-api';
-import { useLocalizedApiError } from '@/hooks/useLocalizedApiError';
+import { Button } from '@/components/ui/Button';
+import { Card } from '@/components/ui/Card';
+import { IconButton } from '@/components/ui/IconButton';
 import {
   IconCopy,
   IconDatabase,
@@ -29,21 +22,19 @@ import {
   IconShield,
   IconTrash2,
 } from '@/components/ui/icons';
-import {
-  ConfirmDialog,
-  DetailItem,
-  DetailList,
-  EmptyTable,
-  ErrorState,
-  FormError,
-  FormGrid,
-  PageActions,
-  SuccessNotice,
-  formatDateTime,
-} from './shared';
-import { useAdminQuery } from './useAdminQuery';
-import { VirtualKeyRotationForm } from './VirtualKeyRotationForm';
-import styles from './ControlPlane.module.scss';
+import { LoadingState } from '@/components/ui/LoadingState';
+import { Modal } from '@/components/ui/Modal';
+import { StatusPill } from '@/components/ui/StatusPill';
+import { TableScroll } from '@/components/ui/TableScroll';
+import styles from '@/features/control-plane/ControlPlane.module.scss';
+import { ConfirmDialog, DetailItem, DetailList, EmptyTable, ErrorState, FormError, PageActions, SuccessNotice } from '@/features/control-plane/shared';
+import { VirtualKeyForm } from '@/features/control-plane/VirtualKeyForm';
+import { VirtualKeyRotationForm } from '@/features/control-plane/VirtualKeyRotationForm';
+import { useAdminQuery } from '@/hooks/useAdminQuery';
+import { useLocalizedApiError } from '@/hooks/useLocalizedApiError';
+import { formatDateTime } from '@/utils/format';
+import { useCallback, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 interface SettingsPageProps {
   api: GatewayAdminResources;
@@ -56,44 +47,6 @@ interface SettingsPageProps {
 interface SettingsData {
   keys: VirtualKey[];
   capabilities: CapabilityMatrixResponse;
-}
-
-function VirtualKeyForm({
-  busy,
-  error,
-  onSubmit,
-}: {
-  busy: boolean;
-  error?: string;
-  onSubmit: (name: string, allowedModels: string[]) => void;
-}) {
-  const { t } = useTranslation('console');
-  const [name, setName] = useState('');
-  const [allowedModels, setAllowedModels] = useState('');
-  const [validationError, setValidationError] = useState('');
-
-  const submit = (event: FormEvent) => {
-    event.preventDefault();
-    if (!name.trim()) {
-      setValidationError(t('settings.key_name_required'));
-      return;
-    }
-    setValidationError('');
-    onSubmit(
-      name.trim(),
-      [...new Set(allowedModels.split(',').map((model) => model.trim()).filter(Boolean))],
-    );
-  };
-
-  return (
-    <form id="virtual-key-editor-form" className={styles.page} onSubmit={submit}>
-      <FormGrid>
-        <TextField label={t('settings.key_name')} value={name} disabled={busy} onChange={(event) => setName(event.target.value)} autoComplete="off" />
-        <TextAreaField label={t('settings.allowed_models')} hint={t('settings.allowed_models_hint')} value={allowedModels} disabled={busy} onChange={(event) => setAllowedModels(event.target.value)} />
-      </FormGrid>
-      <FormError message={validationError || error} />
-    </form>
-  );
 }
 
 export function SettingsPage({
@@ -222,12 +175,7 @@ export function SettingsPage({
     void mutate(async () => {
       const exported = await api.sanitizedConfigurationExport();
       const blob = new Blob([`${JSON.stringify(exported, null, 2)}\n`], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement('a');
-      anchor.href = url;
-      anchor.download = `my-ai-gateway-config-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
-      anchor.click();
-      URL.revokeObjectURL(url);
+      downloadBlob(blob, `my-ai-gateway-config-${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
     }, t('settings.export_done'));
   };
 

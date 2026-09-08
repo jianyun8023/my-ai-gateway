@@ -11,7 +11,6 @@ import type {
 
 type UnknownRecord = Record<string, unknown>;
 
-const EMPTY_TOKENS: TokenTotals = { input: 0, output: 0, reasoning: 0, cached: 0, cacheRead: 0, cacheCreation: 0, total: 0 };
 
 const asRecord = (value: unknown): UnknownRecord => (
   value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -49,7 +48,7 @@ const readString = (record: UnknownRecord, keys: readonly string[], fallback = '
   asString(firstDefined(record, keys), fallback)
 );
 
-export const adaptTokenTotals = (payload: RawGatewayUsagePayload): TokenTotals => {
+const adaptTokenTotals = (payload: RawGatewayUsagePayload): TokenTotals => {
   const root = asRecord(payload);
   const tokens = Object.keys(asRecord(root.tokens)).length > 0 ? asRecord(root.tokens) : root;
   const input = readNumber(tokens, ['input', 'input_tokens']);
@@ -155,6 +154,7 @@ export const adaptUsageBreakdown = (payload: RawGatewayUsagePayload): UsageBreak
 
 const adaptAttempt = (payload: unknown, fallbackIndex: number): UsageAttemptViewModel => {
   const item = asRecord(payload);
+  const statusCode = readNumber(item, ['status_code']);
   return {
     attemptIndex: readNumber(item, ['attempt_index', 'attempt_no'], fallbackIndex),
     provider: readString(item, ['provider', 'provider_name', 'provider_id'], '—'),
@@ -162,13 +162,13 @@ const adaptAttempt = (payload: unknown, fallbackIndex: number): UsageAttemptView
     account: readString(item, ['account_name', 'account_id'], '—'),
     upstreamModel: readString(item, ['upstream_model', 'upstream_model_id'], '—'),
     protocolUpstream: readString(item, ['protocol_upstream', 'protocol_out'], '—'),
-    statusCode: readNumber(item, ['status_code']),
-    success: asBoolean(item.success, readNumber(item, ['status_code']) < 400),
+    statusCode,
+    success: asBoolean(item.success, statusCode > 0 && statusCode < 400),
     latencyMs: readNumber(item, ['latency_ms']),
   };
 };
 
-export const adaptUsageEvent = (payload: RawGatewayUsagePayload): UsageEventViewModel => {
+const adaptUsageEvent = (payload: RawGatewayUsagePayload): UsageEventViewModel => {
   const item = asRecord(payload);
   const requestId = readString(item, ['request_id', 'id'], 'unknown');
   const attempts = asArray(item.attempts).map(adaptAttempt);
@@ -215,15 +215,6 @@ export const adaptUsageEventPage = (payload: RawGatewayUsagePayload): UsageEvent
   };
 };
 
-export const emptyUsageSummary = (): UsageSummaryViewModel => ({
-  logicalRequests: 0,
-  successfulRequests: 0,
-  failedRequests: 0,
-  successRate: 0,
-  upstreamAttempts: 0,
-  retries: 0,
-  averageLatencyMs: 0,
-  p95LatencyMs: 0,
-  tokens: { ...EMPTY_TOKENS },
-  usageSources: {},
-});
+export const adaptUsageEventAttempts = (payload: unknown): UsageAttemptViewModel[] => (
+  asArray(asRecord(payload).attempts).map(adaptAttempt)
+);

@@ -274,11 +274,6 @@
 .loadingMore { position: sticky; bottom: 0; padding: 9px; text-align: center; color: var(--text-secondary); background: var(--floating-surface); font-size: var(--fs-small); }
 
 
-.drawerBackdrop { position: fixed; inset: 0; z-index: 50; display: flex; justify-content: flex-end; background: color-mix(in oklch, var(--fg) 30%, transparent); backdrop-filter: blur(3px); }
-.drawer { width: min(520px, 50vw); min-width: 440px; height: 100%; overflow: auto; display: grid; align-content: start; gap: 16px; padding: 20px; border-left: 1px solid var(--floating-border, var(--border-color)); background: var(--floating-surface, var(--bg-secondary)); box-shadow: var(--floating-shadow, -18px 0 44px color-mix(in oklch, var(--fg) 15%, transparent)); }
-.drawer > header { display: flex; justify-content: space-between; align-items: flex-start; }
-.drawer header span { color: var(--gateway-accent); font-size: var(--fs-small); font-weight: 700; text-transform: uppercase; letter-spacing: .1em; }
-.drawer h2 { max-width: 400px; margin: 5px 0 0; overflow-wrap: anywhere; font-size: 17px; }
 .detailGrid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 9px; }
 .detailGrid > div { display: grid; gap: 4px; padding: 10px; border: 1px solid var(--border-color); border-radius: var(--radius, 8px); background: var(--bg-primary, var(--floating-surface)); }
 .detailGrid span { color: var(--text-secondary); font-size: var(--fs-small); }
@@ -315,7 +310,6 @@
   .chartGrid,
   .overviewLowerGrid,
   .analysisGrid { grid-template-columns: 1fr; }
-  .drawer { width: min(520px, 76vw); min-width: 0; }
 }
 
 @media (max-width: 600px) {
@@ -349,7 +343,6 @@
   .eventActions summary { min-height: 44px; display: flex; align-items: center; }
   .columnMenu { right: auto; left: 0; max-width: calc(100vw - 48px); }
 
-  .drawer { width: 100%; min-width: 0; padding: 14px; }
   .detailGrid { grid-template-columns: 1fr; }
   .tokenDetails { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .attemptList li { grid-template-columns: 32px minmax(0, 1fr); }

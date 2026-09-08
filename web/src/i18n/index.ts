@@ -4,7 +4,7 @@ import { initReactI18next } from 'react-i18next';
 const LANGUAGE_STORAGE_KEY = 'my-ai-gateway-language';
 const DEFAULT_LANGUAGE = 'en';
 
-export const SUPPORTED_LANGUAGES = ['en', 'zh'] as const;
+const SUPPORTED_LANGUAGES = ['en', 'zh'] as const;
 export type SupportedLanguage = (typeof SUPPORTED_LANGUAGES)[number];
 
 export const isSupportedLanguage = (

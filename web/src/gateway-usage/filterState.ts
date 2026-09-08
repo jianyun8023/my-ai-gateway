@@ -1,125 +1,76 @@
-import type { GatewayUsageFilters } from './types';
+import { readLocalPreference } from '@/lib/browserStorage';
+import type { GatewayUsageFilters, UsageRelativePreset } from './types';
 
 export const FILTER_STORAGE_KEY = 'my-ai-gateway-usage-filters-v2';
-
-export type RelativePreset = '24h' | '7d' | '30d';
-export type TimeMode = 'relative' | 'absolute';
-
 const DAY_MS = 24 * 60 * 60 * 1000;
-
-export const RELATIVE_PRESET_MS: Record<RelativePreset, number> = {
-  '24h': DAY_MS,
-  '7d': 7 * DAY_MS,
-  '30d': 30 * DAY_MS,
-};
-
+const ROLLING_DAYS = { '24h': 1, '7d': 7, '30d': 30 } as const;
+const PRESETS: readonly UsageRelativePreset[] = ['today', 'yesterday', '24h', '7d', '30d'];
 const ADVANCED_FILTER_FIELDS = [
-  'upstreamModel',
-  'sourceId',
-  'account',
-  'clientSource',
-  'protocolIn',
-  'protocolUpstream',
-  'virtualKey',
-  'usageSource',
+  'upstreamModel', 'sourceId', 'account', 'clientSource',
+  'protocolIn', 'protocolUpstream', 'virtualKey', 'usageSource',
 ] as const satisfies ReadonlyArray<keyof GatewayUsageFilters>;
+const TEXT_FILTER_FIELDS = ['logicalModel', 'provider', ...ADVANCED_FILTER_FIELDS] as const;
 
-export function computeRelativeWindow(preset: RelativePreset, now: Date = new Date()): { from: string; to: string } {
-  const to = now;
-  const from = new Date(to.getTime() - RELATIVE_PRESET_MS[preset]);
-  return { from: from.toISOString(), to: to.toISOString() };
+export function computeRelativeWindow(preset: UsageRelativePreset, now: Date = new Date()): { from: string; to: string } {
+  if (preset === 'today' || preset === 'yesterday') {
+    // Construct calendar boundaries independently: DST days can be 23 or 25 hours.
+    const offset = preset === 'yesterday' ? -1 : 0;
+    const from = new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset);
+    const to = new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset + 1);
+    return { from: from.toISOString(), to: to.toISOString() };
+  }
+  return { from: new Date(now.getTime() - ROLLING_DAYS[preset] * DAY_MS).toISOString(), to: now.toISOString() };
 }
 
 export function defaultFilters(now: Date = new Date()): GatewayUsageFilters {
-  const { from, to } = computeRelativeWindow('24h', now);
-  return {
-    from,
-    to,
-    timeMode: 'relative',
-    relativePreset: '24h',
-  };
+  return { ...computeRelativeWindow('today', now), timeMode: 'relative', relativePreset: 'today' };
 }
 
 export function resolveFilterWindow(filters: GatewayUsageFilters, now: Date = new Date()): GatewayUsageFilters {
-  if (filters.timeMode === 'absolute') {
-    return filters;
-  }
-  const preset = filters.relativePreset ?? '24h';
-  const { from, to } = computeRelativeWindow(preset, now);
-  return {
-    ...filters,
-    from,
-    to,
-    timeMode: 'relative',
-    relativePreset: preset,
-  };
+  if (filters.timeMode === 'absolute') return filters;
+  const preset = filters.relativePreset ?? 'today';
+  return { ...filters, ...computeRelativeWindow(preset, now), timeMode: 'relative', relativePreset: preset };
 }
 
 export function serializeFiltersForStorage(filters: GatewayUsageFilters): Partial<GatewayUsageFilters> {
   if (filters.timeMode === 'relative') {
-    const { from: _from, to: _to, timeMode, relativePreset, ...rest } = filters;
-    return { timeMode, relativePreset, ...rest };
+    const { from: _from, to: _to, ...rest } = filters;
+    return rest;
   }
   return { ...filters };
 }
 
 export function countActiveAdvancedFilters(draft: GatewayUsageFilters): number {
-  return ADVANCED_FILTER_FIELDS.reduce((count, field) => {
-    const value = draft[field];
-    return value ? count + 1 : count;
-  }, 0);
+  return ADVANCED_FILTER_FIELDS.filter((field) => Boolean(draft[field])).length;
 }
 
-const isValidIsoRange = (from?: string, to?: string): boolean => {
-  if (!from || !to) return false;
+export function isValidTimeRange(from: string, to: string): boolean {
   const fromMs = Date.parse(from);
   const toMs = Date.parse(to);
-  return Number.isFinite(fromMs) && Number.isFinite(toMs);
-};
+  return Number.isFinite(fromMs) && Number.isFinite(toMs) && fromMs < toMs;
+}
 
 export function safeParseFilters(
-  readStorage: () => string = () => {
-    try {
-      return localStorage.getItem(FILTER_STORAGE_KEY) ?? '';
-    } catch {
-      return '';
-    }
-  },
+  readStorage: () => string = () => readLocalPreference(FILTER_STORAGE_KEY),
   now: Date = new Date(),
 ): GatewayUsageFilters {
   const fallback = defaultFilters(now);
   try {
-    const raw = readStorage();
-    if (!raw) return fallback;
-    const value = JSON.parse(raw) as Partial<GatewayUsageFilters>;
-
-    if (!value.timeMode) {
-      const { from: _from, to: _to, ...rest } = value;
-      return resolveFilterWindow({
-        ...fallback,
-        ...rest,
-        timeMode: 'relative',
-        relativePreset: '24h',
-      }, now);
+    const value: unknown = JSON.parse(readStorage());
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return fallback;
+    const saved = value as Record<string, unknown>;
+    const filters = { ...fallback };
+    for (const field of TEXT_FILTER_FIELDS) {
+      if (typeof saved[field] === 'string' && saved[field].trim()) filters[field] = saved[field].trim();
     }
-
-    if (value.timeMode === 'relative') {
-      return resolveFilterWindow({
-        ...fallback,
-        ...value,
-        timeMode: 'relative',
-        relativePreset: value.relativePreset ?? '24h',
-      }, now);
+    if (saved.status === 'success' || saved.status === 'failure') filters.status = saved.status;
+    if (saved.timeMode === 'relative' && PRESETS.includes(saved.relativePreset as UsageRelativePreset)) {
+      return resolveFilterWindow({ ...filters, relativePreset: saved.relativePreset as UsageRelativePreset }, now);
     }
-
-    if (!isValidIsoRange(value.from, value.to)) {
-      return fallback;
+    if (saved.timeMode === 'absolute' && typeof saved.from === 'string' && typeof saved.to === 'string' && isValidTimeRange(saved.from, saved.to)) {
+      return { ...filters, timeMode: 'absolute', from: saved.from, to: saved.to };
     }
-    return {
-      ...fallback,
-      ...value,
-      timeMode: 'absolute',
-    };
+    return filters;
   } catch {
     return fallback;
   }

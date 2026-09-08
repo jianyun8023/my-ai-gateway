@@ -148,6 +148,22 @@ SDK 解析失败"的情况。
 - 包含 contract + faults + 本地可运行的 conformance/sdk smoke；
 - 可作为未来 CI 的完整协议门禁。
 
+### 前端独立验证
+
+只修改 Web 时，可使用相同 Node 工具链运行对应检查：
+
+```bash
+mise exec -- npm --prefix web run lint
+mise exec -- npm --prefix web run typecheck
+mise exec -- npm --prefix web test
+mise exec -- npm --prefix web run build
+TZ=America/New_York mise exec -- npm --prefix web test -- src/gateway-usage/filterState.test.ts
+```
+
+`lint` 包含 ESLint 架构与网络边界、Knip 全量及生产入口检查；`typecheck` 包含应用与测试代码。Vitest 覆盖管理资源与表单、用量适配、时间筛选、请求取消、分页去重与详情重试；纽约时区用例额外验证自然日跨夏令时的 23 / 25 小时边界。治理规则与覆盖限制见 [前端架构](frontend-architecture.md)。
+
+浏览器验证应记录使用的后端或 Mock、页面、视口与实际交互结果。Mock 页面可验证布局与交互，不代表 PostgreSQL、真实 Provider 或生产验收通过；没有运行完整 `mise run verify` 时应明确报告独立 Web 检查。
+
 ### `test-contract` 运行方式
 
 `mise run test-contract` 依次运行两个 cargo test target：

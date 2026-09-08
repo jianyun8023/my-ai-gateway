@@ -1,24 +1,29 @@
-export interface ControlPlaneClientOptions {
+export interface AdminClientOptions {
   fetchImpl?: typeof fetch;
   getAdminKey?: () => string;
 }
 
-export interface ControlPlaneErrorEnvelope {
+interface AdminErrorEnvelope {
   error?: {
     code?: unknown;
     message?: unknown;
   };
 }
 
-export class ControlPlaneApiError extends Error {
+export class AdminApiError extends Error {
   constructor(
     message: string,
     readonly status: number,
     readonly code: string,
   ) {
     super(message);
-    this.name = 'ControlPlaneApiError';
+    this.name = 'AdminApiError';
   }
+}
+
+export interface AdminTransport {
+  json<T>(path: string, init?: RequestInit): Promise<T>;
+  blob(path: string, init?: RequestInit): Promise<Blob>;
 }
 
 const ADMIN_ORIGIN = 'http://gateway.invalid';
@@ -50,7 +55,7 @@ const parseJson = (text: string): unknown => {
 
 const readError = (payload: unknown): { code?: string; message?: string } => {
   if (!payload || typeof payload !== 'object') return {};
-  const error = (payload as ControlPlaneErrorEnvelope).error;
+  const error = (payload as AdminErrorEnvelope).error;
   if (!error || typeof error !== 'object') return {};
   return {
     code: typeof error.code === 'string' ? error.code : undefined,
@@ -58,21 +63,21 @@ const readError = (payload: unknown): { code?: string; message?: string } => {
   };
 };
 
-export class ControlPlaneClient {
+export class AdminClient implements AdminTransport {
   private readonly fetchImpl: typeof fetch;
   private readonly getAdminKey: () => string;
 
-  constructor(options: ControlPlaneClientOptions = {}) {
+  constructor(options: AdminClientOptions = {}) {
     this.fetchImpl = options.fetchImpl ?? (
       typeof window === 'undefined' ? fetch : window.fetch.bind(window)
     );
     this.getAdminKey = options.getAdminKey ?? (() => '');
   }
 
-  async json<T>(path: string, init: RequestInit = {}): Promise<T> {
+  private async request(path: string, init: RequestInit): Promise<Response> {
     const safePath = assertAdminPath(path);
     const headers = new Headers(init.headers);
-    headers.set('Accept', 'application/json');
+    if (!headers.has('Accept')) headers.set('Accept', 'application/json');
     headers.delete('Authorization');
     const adminKey = this.getAdminKey().trim();
     if (adminKey) headers.set('Authorization', `Bearer ${adminKey}`);
@@ -81,22 +86,31 @@ export class ControlPlaneClient {
       ...init,
       headers,
       cache: 'no-store',
+      redirect: 'error',
     });
-    const text = await response.text();
-    const payload = text ? parseJson(text) : undefined;
-
     if (!response.ok) {
-      const error = readError(payload);
-      throw new ControlPlaneApiError(
+      const error = readError(parseJson(await response.text()));
+      throw new AdminApiError(
         error.message ?? `Admin API request failed (${response.status})`,
         response.status,
         error.code ?? 'admin_request_failed',
       );
     }
 
+    return response;
+  }
+
+  async blob(path: string, init: RequestInit = {}): Promise<Blob> {
+    return (await this.request(path, init)).blob();
+  }
+
+  async json<T>(path: string, init: RequestInit = {}): Promise<T> {
+    const response = await this.request(path, init);
+    const text = await response.text();
+    const payload = text ? parseJson(text) : undefined;
     if (response.status === 204 || !text) return undefined as T;
     if (payload === undefined) {
-      throw new ControlPlaneApiError('Admin API returned a non-JSON response', response.status, 'invalid_json');
+      throw new AdminApiError('Admin API returned a non-JSON response', response.status, 'invalid_json');
     }
     return payload as T;
   }

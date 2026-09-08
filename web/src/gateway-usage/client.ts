@@ -1,11 +1,14 @@
+import type { AdminTransport } from '@/admin-api/client';
 import {
   adaptUsageBreakdown,
+  adaptUsageEventAttempts,
   adaptUsageEventPage,
   adaptUsageSummary,
   adaptUsageTimeseries,
 } from './adapter';
 import type {
   GatewayUsageFilters,
+  UsageAttemptViewModel,
   UsageBreakdownDimension,
   UsageBreakdownItem,
   UsageEventPageViewModel,
@@ -16,10 +19,6 @@ import type {
 
 const USAGE_API_ROOT = '/admin/usage';
 
-export interface GatewayUsageClientOptions {
-  fetchImpl?: typeof fetch;
-  getAdminKey?: () => string;
-}
 
 export interface EventPageRequest {
   filters: GatewayUsageFilters;
@@ -62,46 +61,11 @@ export const buildGatewayUsageURL = (
   return `${USAGE_API_ROOT}/${endpoint}${query ? `?${query}` : ''}`;
 };
 
-export class GatewayUsageApiError extends Error {
-  constructor(
-    message: string,
-    readonly status: number,
-  ) {
-    super(message);
-    this.name = 'GatewayUsageApiError';
-  }
-}
-
 export class GatewayUsageClient {
-  private readonly fetchImpl: typeof fetch;
-  private readonly getAdminKey: () => string;
+  constructor(private readonly transport: AdminTransport) {}
 
-  constructor(options: GatewayUsageClientOptions = {}) {
-    this.fetchImpl = options.fetchImpl ?? (
-      typeof window === 'undefined' ? fetch : window.fetch.bind(window)
-    );
-    this.getAdminKey = options.getAdminKey ?? (() => '');
-  }
-
-  private headers(): HeadersInit {
-    const adminKey = this.getAdminKey().trim();
-    return adminKey ? { Authorization: `Bearer ${adminKey}` } : {};
-  }
-
-  private async json(url: string, signal?: AbortSignal): Promise<unknown> {
-    if (!url.startsWith(`${USAGE_API_ROOT}/`)) {
-      throw new Error(`Blocked non-gateway usage endpoint: ${url}`);
-    }
-    const response = await this.fetchImpl(url, {
-      headers: this.headers(),
-      cache: 'no-store',
-      signal,
-    });
-    if (!response.ok) {
-      const error = await response.json().catch(() => null) as { error?: { message?: string } } | null;
-      throw new GatewayUsageApiError(error?.error?.message ?? `Usage API request failed (${response.status})`, response.status);
-    }
-    return response.json();
+  private json(url: string, signal?: AbortSignal): Promise<unknown> {
+    return this.transport.json(url, { signal });
   }
 
   async summary(filters: GatewayUsageFilters, signal?: AbortSignal): Promise<UsageSummaryViewModel> {
@@ -153,8 +117,8 @@ export class GatewayUsageClient {
     return { summary, timeseries, recentEvents: recentEvents.events, logicalModels };
   }
 
-  async eventDetail(requestId: string, signal?: AbortSignal): Promise<unknown> {
-    return this.json(`${USAGE_API_ROOT}/events/${encodeURIComponent(requestId)}`, signal);
+  async eventDetail(requestId: string, signal?: AbortSignal): Promise<UsageAttemptViewModel[]> {
+    return adaptUsageEventAttempts(await this.json(`${USAGE_API_ROOT}/events/${encodeURIComponent(requestId)}`, signal));
   }
 
   async exportEvents(
@@ -163,14 +127,6 @@ export class GatewayUsageClient {
     signal?: AbortSignal,
   ): Promise<Blob> {
     const url = buildGatewayUsageURL('export', filters, { format });
-    const response = await this.fetchImpl(url, {
-      headers: this.headers(),
-      cache: 'no-store',
-      signal,
-    });
-    if (!response.ok) {
-      throw new GatewayUsageApiError(`Usage export failed (${response.status})`, response.status);
-    }
-    return response.blob();
+    return this.transport.blob(url, { signal, headers: { Accept: format === 'csv' ? 'text/csv' : 'application/json' } });
   }
 }

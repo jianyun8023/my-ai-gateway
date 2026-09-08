@@ -1,0 +1,5 @@
+{
+  "$schema": "https://unpkg.com/knip/schema.json",
+  "project": ["src/**/*.{ts,tsx,js,scss,sass}!", "*.config.js", "eslint.architecture.js", "!src/**/*.test.{ts,tsx,js}!", "!src/**/test/**!"],
+  "includeEntryExports": true
+}

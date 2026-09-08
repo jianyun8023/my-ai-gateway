@@ -53,5 +53,3 @@ if (!i18n.hasResourceBundle('en', 'console')) {
   i18n.addResourceBundle('en', 'console', en);
   i18n.addResourceBundle('zh', 'console', zh);
 }
-
-export default i18n;

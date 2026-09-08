@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
-import { isAbortError, normalizeAdminError } from '@/admin-api';
 import type { AdminErrorShape } from '@/admin-api';
+import { isAbortError, normalizeAdminError } from '@/admin-api';
+import { useCallback, useEffect, useState } from 'react';
 
 interface AdminQueryState<T> {
   data?: T;
@@ -65,6 +65,5 @@ export function useAdminQuery<T>({
   return {
     ...state,
     reload: () => setReloadRevision((current) => current + 1),
-    setData: (data: T) => setState({ data, loading: false, refreshing: false }),
   };
 }

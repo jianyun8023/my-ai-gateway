@@ -1,32 +1,15 @@
-import { LoadingState } from '@/components/ui/LoadingState';
-import { SelectField } from '@/components/ui/FormField';
-import { StatusPill } from '@/components/ui/StatusPill';
-import { TableScroll } from '@/components/ui/TableScroll';
-import { Button } from '@/components/ui/Button';
-import { Card } from '@/components/ui/Card';
-import { Modal } from '@/components/ui/Modal';
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
-import { useTranslation } from 'react-i18next';
 import type {
-  Account,
   AdminErrorShape,
   CatalogAvailability,
   CatalogStatus,
-  DiscoveryDiff,
   GatewayAdminResources,
-  GatewayProtocol,
-  LatestDiscovery,
-  ModelMetadataField,
   ModelMetadataValues,
-  ProviderPresetDefinition,
-  Source,
-  SourceModel,
-  SourceModelCapability,
-  SourceModelCapabilityWrite,
-  SourceProtocolMode,
+  SourceModel
 } from '@/admin-api';
-import { GATEWAY_PROTOCOLS, normalizeAdminError } from '@/admin-api';
-import { useLocalizedApiError } from '@/hooks/useLocalizedApiError';
+import { normalizeAdminError } from '@/admin-api';
+import { Button } from '@/components/ui/Button';
+import { Card } from '@/components/ui/Card';
+import { SelectField } from '@/components/ui/FormField';
 import {
   IconCircleCheck,
   IconPencil,
@@ -35,342 +18,27 @@ import {
   IconSlidersHorizontal,
   IconTriangleAlert,
 } from '@/components/ui/icons';
-import {
-  ConfirmDialog,
-  EmptyTable,
-  ErrorState,
-  FilterBar,
-  FormError,
-  FormGrid,
-  PageActions,
-  PROTOCOL_LABELS,
-  ProtocolPill,
-  SuccessNotice,
-  formatDateTime,
-} from './shared';
-import {
-  ModelMetadataFields,
-  createMetadataDraft,
-  metadataFromDraft,
-  type MetadataDraft,
-} from './ModelMetadataEditor';
-import { useAdminQuery } from './useAdminQuery';
-import styles from './ControlPlane.module.scss';
+import { LoadingState } from '@/components/ui/LoadingState';
+import { Modal } from '@/components/ui/Modal';
+import { StatusPill } from '@/components/ui/StatusPill';
+import { TableScroll } from '@/components/ui/TableScroll';
+import styles from '@/features/control-plane/ControlPlane.module.scss';
+import { LatestRunPanel } from '@/features/control-plane/discovery/LatestRunPanel';
+import { metadataSourcesSummary, metadataSummary, sourceDiscoveryDefinition, statusTone, type DiscoveryContext, type DiscoveryView } from '@/features/control-plane/discovery/model';
+import { SourceModelCapabilitiesEditor } from '@/features/control-plane/discovery/SourceModelCapabilitiesEditor';
+import { SourceModelEditor } from '@/features/control-plane/discovery/SourceModelEditor';
+import { ConfirmDialog, EmptyTable, ErrorState, FilterBar, PageActions, SuccessNotice } from '@/features/control-plane/shared';
+import { useAdminQuery } from '@/hooks/useAdminQuery';
+import { useLocalizedApiError } from '@/hooks/useLocalizedApiError';
+import { PROTOCOL_LABELS } from '@/lib/protocols';
+import { formatDateTime } from '@/utils/format';
+import { useCallback, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 interface ModelDiscoveryPageProps {
   api: GatewayAdminResources;
   refreshRevision?: number;
   onBusyChange?: (busy: boolean) => void;
-}
-
-interface DiscoveryContext {
-  sources: Source[];
-  accounts: Account[];
-}
-
-interface DiscoveryView {
-  latest: LatestDiscovery | null;
-  models: SourceModel[];
-}
-
-const emptyDiff = (): DiscoveryDiff => ({ added: [], changed: [], missing: [] });
-
-const sourceDiscoveryDefinition = (source?: Source) => {
-  if (!source?.provider_preset_snapshot || typeof source.provider_preset_snapshot !== 'object') return undefined;
-  const definition = source.provider_preset_snapshot as Partial<ProviderPresetDefinition>;
-  return definition.discovery;
-};
-
-const statusTone = (status: string) => {
-  if (status === 'succeeded' || status === 'confirmed' || status === 'available') return 'success' as const;
-  if (status === 'failed' || status === 'unavailable') return 'danger' as const;
-  if (status === 'unsupported' || status === 'pending') return 'warning' as const;
-  return 'accent' as const;
-};
-
-const metadataSummary = (model: SourceModel): string => {
-  const displayName = typeof model.metadata.display_name === 'string' ? model.metadata.display_name : '';
-  const logicalName = typeof model.metadata.logical_model_name === 'string' ? model.metadata.logical_model_name : '';
-  return displayName || logicalName;
-};
-
-const metadataSourcesSummary = (model: SourceModel, sourceLabel: (source: string) => string): string => {
-  const counts = new Map<string, number>();
-  for (const source of Object.values(model.field_sources)) {
-    if (source) counts.set(source, (counts.get(source) ?? 0) + 1);
-  }
-  const parts = [...counts.entries()].map(([source, count]) => `${sourceLabel(source)} ${count}`);
-  return parts.length > 0 ? parts.join(' · ') : sourceLabel('unknown');
-};
-
-function DiffColumn({
-  title,
-  tone,
-  entries,
-}: {
-  title: string;
-  tone: 'success' | 'warning' | 'danger';
-  entries: DiscoveryDiff['added'];
-}) {
-  const { t } = useTranslation('console');
-  return (
-    <section className={styles.diffColumn}>
-      <header><h3>{title}</h3><StatusPill tone={tone}>{entries.length}</StatusPill></header>
-      {entries.length === 0 ? <span>{t('discovery.diff_none')}</span> : (
-        <ul>{entries.map((entry) => (
-          <li key={entry.upstream_model_id}>
-            <code>{entry.upstream_model_id}</code>
-            {entry.changed_fields.length > 0 && <small>{entry.changed_fields.join(', ')}</small>}
-          </li>
-        ))}</ul>
-      )}
-    </section>
-  );
-}
-
-function LatestRunPanel({ latest }: { latest: LatestDiscovery | null }) {
-  const { t } = useTranslation('console');
-  if (!latest) return <EmptyTable title={t('discovery.empty_run_title')} description={t('discovery.empty_run_desc')} />;
-  const { run } = latest;
-  const diff = latest.diff ?? run.diff ?? emptyDiff();
-  return (
-    <div className={styles.page}>
-      <div className={styles.runHeader}>
-        <span className={styles.primaryText}>
-          <strong><StatusPill tone={statusTone(run.status)}>{run.status}</StatusPill> {t('discovery.run_badge', { id: run.id })}</strong>
-          <small>{formatDateTime(run.completed_at)} · {t('discovery.run_meta', { duration: run.latency_ms, count: run.discovered_model_count })}</small>
-        </span>
-        <span className={styles.primaryText}>
-          <strong>{run.provider_preset_id}@{run.provider_preset_version}</strong>
-          <small>{t('discovery.account_http', { account: run.account_id ?? t('discovery.none'), http: run.http_status ?? t('discovery.none') })}</small>
-        </span>
-      </div>
-      {run.status === 'unsupported' && (
-        <div className={styles.warningState} role="status"><IconTriangleAlert size={17} /><span><strong>{t('discovery.state_unsupported')}</strong>{run.error_message && <small>{run.error_code}: {run.error_message}</small>}</span></div>
-      )}
-      {run.status === 'failed' && (
-        <div className={styles.errorState} role="alert"><IconTriangleAlert size={17} /><div><strong>{t('discovery.state_failed')}</strong><span>{run.error_message ?? t('discovery.state_failed_desc')}</span>{run.error_code && <code>{run.error_code}</code>}</div></div>
-      )}
-      {run.status === 'succeeded' && run.discovered_model_count === 0 && (
-        <EmptyTable title={t('discovery.state_empty')} description={t('discovery.state_empty_desc')} />
-      )}
-      <div className={styles.diffGrid}>
-        <DiffColumn title={t('discovery.diff_column.added')} tone="success" entries={diff.added} />
-        <DiffColumn title={t('discovery.diff_column.changed')} tone="warning" entries={diff.changed} />
-        <DiffColumn title={t('discovery.diff_column.missing')} tone="danger" entries={diff.missing} />
-      </div>
-    </div>
-  );
-}
-
-function SourceModelEditor({
-  model,
-  busy,
-  error,
-  onSubmit,
-}: {
-  model: SourceModel;
-  busy: boolean;
-  error?: string;
-  onSubmit: (metadata: ModelMetadataValues) => void;
-}) {
-  const { t } = useTranslation('console');
-  const [draft, setDraft] = useState<MetadataDraft>(() => createMetadataDraft(model.metadata));
-  const [dirty, setDirty] = useState<Set<ModelMetadataField>>(() => new Set());
-  const [validationError, setValidationError] = useState('');
-
-  const change = (field: ModelMetadataField, value: string) => {
-    setDraft((current) => ({ ...current, [field]: value }));
-    setDirty((current) => new Set(current).add(field));
-  };
-
-  const submit = (event: FormEvent) => {
-    event.preventDefault();
-    if (dirty.size === 0) {
-      setValidationError(t('discovery.no_field_changes'));
-      return;
-    }
-    const metadata = metadataFromDraft(draft, dirty);
-    const invalidNumber = (['context_window', 'max_input_tokens', 'max_output_tokens'] as const)
-      .some((field) => metadata[field] !== undefined && metadata[field] !== null
-        && (!Number.isFinite(metadata[field] as number) || (metadata[field] as number) <= 0));
-    if (invalidNumber) {
-      setValidationError(t('discovery.validate_tokens'));
-      return;
-    }
-    setValidationError('');
-    onSubmit(metadata);
-  };
-
-  return (
-    <form id="source-model-editor-form" className={styles.page} onSubmit={submit}>
-      <div className={styles.modelIdentity}>
-        <code>{model.upstream_model_id}</code>
-        <span><StatusPill tone={statusTone(model.confirmation_status)}>{t(`discovery.confirm_state.${model.confirmation_status}`)}</StatusPill><StatusPill tone={statusTone(model.availability_status)}>{t(`discovery.availability_state.${model.availability_status}`)}</StatusPill></span>
-      </div>
-      <ModelMetadataFields draft={draft} fieldSources={model.field_sources} disabled={busy} onChange={change} />
-      <FormError message={validationError || error} />
-    </form>
-  );
-}
-
-// 已注册的转换器(与后端 adapter_registry 保持一致)。当前生产环境无注册的
-// 转换器:Kimi Code 自 preset kimi_code@4 起原生支持 OpenAI Responses(#157),
-// adapter 框架保留,后续 Provider 接入时在此补充。
-const ADAPTER_OPTIONS: string[] = [];
-const CAPABILITY_MODES: SourceProtocolMode[] = ['unknown', 'native', 'adapter', 'unsupported'];
-const CAPABILITY_STATUSES: CatalogStatus[] = ['pending', 'confirmed', 'unavailable'];
-
-interface CapabilityDraft {
-  status: CatalogStatus;
-  mode: SourceProtocolMode;
-  source_protocol: GatewayProtocol | '';
-  adapter: string;
-}
-
-const defaultCapabilityDraft = (record?: SourceModelCapability): CapabilityDraft => ({
-  status: record?.status ?? 'pending',
-  mode: record?.mode ?? 'unknown',
-  source_protocol: record?.source_protocol ?? '',
-  adapter: record?.adapter ?? '',
-});
-
-function SourceModelCapabilitiesEditor({
-  api,
-  model,
-  onSaved,
-}: {
-  api: GatewayAdminResources;
-  model: SourceModel;
-  onSaved: (protocol: GatewayProtocol) => void;
-}) {
-  const { t } = useTranslation('console');
-  const localize = useLocalizedApiError();
-  const [records, setRecords] = useState<SourceModelCapability[]>();
-  const [loadError, setLoadError] = useState<AdminErrorShape>();
-  const [drafts, setDrafts] = useState<Partial<Record<GatewayProtocol, CapabilityDraft>>>({});
-  const [rowBusy, setRowBusy] = useState<GatewayProtocol>();
-  const [rowErrors, setRowErrors] = useState<Partial<Record<GatewayProtocol, string>>>({});
-
-  useEffect(() => {
-    const controller = new AbortController();
-    setRecords(undefined);
-    setLoadError(undefined);
-    api.sourceModelCapabilities(model.source_id, model.upstream_model_id, controller.signal)
-      .then((items) => {
-        if (controller.signal.aborted) return;
-        setRecords(items);
-        setDrafts(Object.fromEntries(
-          GATEWAY_PROTOCOLS.map((protocol) => [
-            protocol,
-            defaultCapabilityDraft(items.find((item) => item.protocol === protocol)),
-          ]),
-        ) as Partial<Record<GatewayProtocol, CapabilityDraft>>);
-      })
-      .catch((error) => {
-        if (!controller.signal.aborted) setLoadError(normalizeAdminError(error));
-      });
-    return () => controller.abort();
-  }, [api, model.source_id, model.upstream_model_id]);
-
-  const updateDraft = (protocol: GatewayProtocol, patch: Partial<CapabilityDraft>) => {
-    setDrafts((current) => ({
-      ...current,
-      [protocol]: { ...defaultCapabilityDraft(), ...current[protocol], ...patch },
-    }));
-  };
-
-  const save = async (protocol: GatewayProtocol) => {
-    const draft = drafts[protocol];
-    if (!draft || rowBusy) return;
-    setRowBusy(protocol);
-    setRowErrors((current) => ({ ...current, [protocol]: undefined }));
-    try {
-      const input: SourceModelCapabilityWrite = {
-        status: draft.status,
-        mode: draft.mode,
-        ...(draft.mode === 'adapter'
-          ? {
-              source_protocol: draft.source_protocol || undefined,
-              adapter: draft.adapter || undefined,
-            }
-          : {}),
-      };
-      const result = await api.upsertSourceModelCapability(
-        model.source_id,
-        model.upstream_model_id,
-        protocol,
-        input,
-      );
-      setRecords((current) => [
-        ...(current ?? []).filter((item) => item.protocol !== protocol),
-        result.data,
-      ]);
-      onSaved(protocol);
-    } catch (error) {
-      setRowErrors((current) => ({ ...current, [protocol]: localize(error) }));
-    } finally {
-      setRowBusy(undefined);
-    }
-  };
-
-  if (!records && !loadError) return <LoadingState label={t('discovery.capability_loading')} />;
-  if (loadError) return <ErrorState error={loadError} />;
-
-  return (
-    <div className={styles.page}>
-      {GATEWAY_PROTOCOLS.map((protocol) => {
-        const record = records?.find((item) => item.protocol === protocol);
-        const draft = drafts[protocol] ?? defaultCapabilityDraft(record);
-        const adapterIncomplete = draft.mode === 'adapter' && (!draft.source_protocol || !draft.adapter);
-        const unknownConfirm = draft.mode === 'unknown' && draft.status === 'confirmed';
-        const saveDisabled = Boolean(rowBusy) || adapterIncomplete || unknownConfirm;
-        return (
-          <section key={protocol} className={styles.capabilityRow}>
-            <header className={styles.capabilityRowHeader}>
-              <ProtocolPill protocol={protocol} />
-              {record ? (
-                <span className={styles.rowActions}>
-                  <StatusPill tone={statusTone(record.status)}>{t(`values.status.${record.status}`)}</StatusPill>
-                  <StatusPill tone={record.mode === 'unsupported' ? 'warning' : 'accent'}>{t(`values.mode.${record.mode}`)}</StatusPill>
-                </span>
-              ) : (
-                <StatusPill>{t('discovery.capability_undeclared')}</StatusPill>
-              )}
-            </header>
-            <FormGrid>
-              <SelectField label={t('discovery.capability_mode')} value={draft.mode} disabled={Boolean(rowBusy)} onChange={(event) => updateDraft(protocol, { mode: event.target.value as SourceProtocolMode })}>
-                {CAPABILITY_MODES.map((mode) => <option key={mode} value={mode}>{t(`values.mode.${mode}`)}</option>)}
-              </SelectField>
-              <SelectField label={t('discovery.capability_status')} value={draft.status} disabled={Boolean(rowBusy)} onChange={(event) => updateDraft(protocol, { status: event.target.value as CatalogStatus })}>
-                {CAPABILITY_STATUSES.map((status) => <option key={status} value={status}>{t(`values.status.${status}`)}</option>)}
-              </SelectField>
-              {draft.mode === 'adapter' && (
-                <>
-                  <SelectField label={t('discovery.capability_source_protocol')} value={draft.source_protocol} disabled={Boolean(rowBusy)} onChange={(event) => updateDraft(protocol, { source_protocol: event.target.value as GatewayProtocol })}>
-                    <option value="">{t('discovery.none')}</option>
-                    {GATEWAY_PROTOCOLS.filter((item) => item !== protocol).map((item) => <option key={item} value={item}>{PROTOCOL_LABELS[item]}</option>)}
-                  </SelectField>
-                  <SelectField label={t('discovery.capability_adapter')} value={draft.adapter} disabled={Boolean(rowBusy)} onChange={(event) => updateDraft(protocol, { adapter: event.target.value })}>
-                    <option value="">{t('discovery.none')}</option>
-                    {ADAPTER_OPTIONS.map((name) => <option key={name} value={name}>{name}</option>)}
-                  </SelectField>
-                </>
-              )}
-            </FormGrid>
-            {unknownConfirm && <small className={styles.secondaryText}>{t('discovery.capability_unknown_confirm_hint')}</small>}
-            {draft.mode === 'adapter' && <small className={styles.secondaryText}>{t('discovery.capability_adapter_hint')}</small>}
-            <FormError message={rowErrors[protocol]} />
-            <div className={styles.rowActions}>
-              <Button size="sm" variant="secondary" onClick={() => void save(protocol)} loading={rowBusy === protocol} disabled={saveDisabled}>
-                <IconCircleCheck size={14} />{t('discovery.capability_save')}
-              </Button>
-            </div>
-          </section>
-        );
-      })}
-    </div>
-  );
 }
 
 export function ModelDiscoveryPage({ api, refreshRevision = 0, onBusyChange }: ModelDiscoveryPageProps) {

@@ -1,13 +1,10 @@
 // @vitest-environment happy-dom
+import { createMetadataDraft, metadataFromDraft } from '@/features/control-plane/metadata';
+import { setTestLanguage } from '@/test/setup';
 import { act, createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { setTestLanguage } from '@/test/setup';
-import {
-  ModelMetadataFields,
-  createMetadataDraft,
-  metadataFromDraft,
-} from './ModelMetadataEditor';
+import { ModelMetadataFields } from './ModelMetadataEditor';
 
 describe('model metadata editing', () => {
   it('preserves explicit unknown values instead of guessing support', () => {

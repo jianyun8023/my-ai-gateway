@@ -1,14 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { DEFAULT_VISIBLE_COLUMNS, normalizeVisibleEventColumns } from '@/features/usage/eventColumns';
+import { formatFallbackReason } from '@/features/usage/formatters';
 import { adaptUsageEventPage } from '@/gateway-usage';
-import { gatewayUsageEventsFixture } from '@/gateway-usage/fixtures';
-import '@/i18n/console';
+import { gatewayUsageEventsFixture } from '@/test/fixtures/usage';
+import { appendStableEventPage } from '@/gateway-usage/pagination';
 import i18n from '@/i18n';
-import {
-  DEFAULT_VISIBLE_COLUMNS,
-  appendStableEventPage,
-  formatFallbackReason,
-  normalizeVisibleEventColumns,
-} from './GatewayUsagePage';
+import '@/i18n/console';
+import { describe, expect, it } from 'vitest';
 
 describe('GatewayUsagePage logic', () => {
   it('defaults to eight high-frequency event columns', () => {

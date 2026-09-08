@@ -45,7 +45,9 @@ export const usage = {
   // —— 筛选栏 ——
   filter: {
     aria: '用量筛选',
-    preset_24h: '24 小时',
+    preset_today: '今天',
+    preset_yesterday: '昨天',
+    preset_24h: '最近 24 小时',
     preset_7d: '7 天',
     preset_30d: '30 天',
     preset_custom: '自定义',

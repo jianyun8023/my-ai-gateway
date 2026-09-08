@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { GatewayAdminResources, type AdminTransport } from './resources';
+import { GatewayAdminResources } from './resources';
 import type {
   Account,
   CapabilityMatrixResponse,
@@ -9,7 +9,11 @@ import type {
   Source,
 } from './types';
 
-const transportWith = (handler: AdminTransport['json']) => ({ json: vi.fn(handler) });
+const transportWith = (handler: (path: string, init?: RequestInit) => Promise<unknown>) => {
+  const transport = { async json<T>(path: string, init?: RequestInit): Promise<T> { return await handler(path, init) as T; } };
+  vi.spyOn(transport, 'json');
+  return transport;
+};
 
 describe('GatewayAdminResources', () => {
   it('sends typed source mutations to encoded Admin resource paths', async () => {
@@ -145,6 +149,8 @@ describe('GatewayAdminResources', () => {
     const binding = { id: 1 } as ModelBinding;
     const route = { id: 'route-a' } as Route;
     const capability = {
+      version: 'v1',
+      fact_source: 'runtime_snapshot',
       snapshot_revision: 9,
       snapshot_generated_at: '2026-08-31T00:00:00Z',
       data: [],

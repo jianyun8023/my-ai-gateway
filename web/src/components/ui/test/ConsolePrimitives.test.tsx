@@ -4,7 +4,6 @@ import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SegmentedTabs } from '../SegmentedTabs';
 import { TextField, SelectField, TextAreaField } from '../FormField';
-import { Input } from '../Input';
 import { Button } from '../Button';
 
 describe('shared console interactions', () => {
@@ -59,10 +58,9 @@ describe('shared console interactions', () => {
       <TextField label="Name" hint="A name" error="Required" aria-describedby="external" aria-invalid={false} />
       <SelectField label="Protocol" hint="Choose one" error="Unavailable" aria-describedby="external"><option>Chat</option></SelectField>
       <TextAreaField label="Metadata" hint="JSON" error="Invalid JSON" aria-describedby="external" />
-      <Input label="Admin key" hint="Private" error="Missing" aria-describedby="external" aria-invalid={false} />
     </>));
     const controls = [...container.querySelectorAll<HTMLInputElement>('input, select, textarea')];
-    expect(new Set(controls.map(control => control.id)).size).toBe(4);
+    expect(new Set(controls.map(control => control.id)).size).toBe(3);
     for (const control of controls) {
       expect(container.querySelector(`label[for="${control.id}"]`)).not.toBeNull();
       expect(control.getAttribute('aria-invalid')).toBe('true');
