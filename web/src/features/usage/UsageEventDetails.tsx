@@ -1,3 +1,4 @@
+import { LoadingState } from '@/components/ui/LoadingState';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -50,7 +51,7 @@ export function EventDetails({ event, onClose, client }: { event: UsageEventView
         )}
         <Card title={t('usage.detail.attempts_title')} subtitle={t('usage.detail.attempts_subtitle')}>
           {query.error && <Notice action={<Button size="sm" variant="secondary" onClick={query.reload}>{t('common.retry')}</Button>}>{localizeError(query.error)}</Notice>}
-          {loadingAttempts ? <div style={{ padding: '1rem', opacity: 0.6 }}>{t('usage.detail.attempts_loading')}</div> : query.error && displayAttempts.length === 0 ? null : displayAttempts.length === 0 ? <EmptyState title={t('usage.detail.attempts_empty_title')} description={t('usage.detail.attempts_empty_desc')} /> : (
+          {loadingAttempts ? <LoadingState layout="inline" label={t('usage.detail.attempts_loading')} /> : query.error && displayAttempts.length === 0 ? null : displayAttempts.length === 0 ? <EmptyState title={t('usage.detail.attempts_empty_title')} description={t('usage.detail.attempts_empty_desc')} /> : (
             <ol className={styles.attemptList}>{displayAttempts.map((attempt) => <li key={attempt.attemptIndex}><span>#{attempt.attemptIndex + 1}</span><strong>{attempt.account}</strong><span>{attempt.sourceId} · {attempt.provider} · {attempt.upstreamModel}</span><span className={attempt.success ? styles.statusSuccess : styles.statusFailure}>{attempt.statusCode} · {attempt.latencyMs} ms</span></li>)}</ol>
           )}
         </Card>

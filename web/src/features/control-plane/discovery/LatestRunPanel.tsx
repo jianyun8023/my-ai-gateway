@@ -3,9 +3,7 @@ import type {
   LatestDiscovery
 } from '@/admin-api';
 import { StatusPill } from '@/components/ui/StatusPill';
-import {
-  IconTriangleAlert
-} from '@/components/ui/icons';
+import { Notice } from '@/components/ui/Notice';
 import styles from '@/features/control-plane/ControlPlane.module.scss';
 import { emptyDiff, statusTone } from '@/features/control-plane/discovery/model';
 import { EmptyTable } from '@/features/control-plane/shared';
@@ -55,10 +53,10 @@ export function LatestRunPanel({ latest }: { latest: LatestDiscovery | null }) {
         </span>
       </div>
       {run.status === 'unsupported' && (
-        <div className={styles.warningState} role="status"><IconTriangleAlert size={17} /><span><strong>{t('discovery.state_unsupported')}</strong>{run.error_message && <small>{run.error_code}: {run.error_message}</small>}</span></div>
+        <Notice tone="warning"><strong>{t('discovery.state_unsupported')}</strong>{run.error_message && <small>{run.error_code}: {run.error_message}</small>}</Notice>
       )}
       {run.status === 'failed' && (
-        <div className={styles.errorState} role="alert"><IconTriangleAlert size={17} /><div><strong>{t('discovery.state_failed')}</strong><span>{run.error_message ?? t('discovery.state_failed_desc')}</span>{run.error_code && <code>{run.error_code}</code>}</div></div>
+        <Notice><strong>{t('discovery.state_failed')}</strong><span>{run.error_message ?? t('discovery.state_failed_desc')}</span>{run.error_code && <code>{run.error_code}</code>}</Notice>
       )}
       {run.status === 'succeeded' && run.discovered_model_count === 0 && (
         <EmptyTable title={t('discovery.state_empty')} description={t('discovery.state_empty_desc')} />

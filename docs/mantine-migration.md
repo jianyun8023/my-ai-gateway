@@ -37,8 +37,8 @@ Issue 中 `de708e8` 的链接是历史调查依据。当前事件详情已位于
 | 活跃列设置 details | 首批迁移 Popover；复选项使用 Mantine Checkbox |
 | Button、IconButton、FormField、CheckboxField | 第二批迁移公共入口及其调用页面；字段下拉使用 Mantine NativeSelect，第三批收敛页面内筛选和 Shell 密钥输入 |
 | SegmentedTabs、LanguageSwitcher、Toggle | 第三批迁移到 Mantine Tabs、Button、Switch，保留面板/筛选语义和布尔值回调 |
-| Notice、LoadingState、LoadingSpinner、EmptyState、StatusPill | 后续统一通知/持久错误、加载/空态/状态色；保留部分失败与重试信息 |
-| Card、TableScroll、FormGrid、FilterBar、PageActions、DrawerSection | 保留有价值的页面组合；后续去除重复控件样式，公共布局归入 UI 层 |
+| Notice、LoadingState、LoadingSpinner、EmptyState、StatusPill | 第四批采用 Alert、Loader、Paper、ThemeIcon、Text、Badge，保留持久错误、部分失败与重试信息 |
+| Card、TableScroll、FormGrid、FilterBar、PageActions、DrawerSection | 第四批 Card 使用 Paper/Title/Text，样式归入 UI 层；其他领域组合继续保留，表格后续收敛 |
 | Chart.js、TanStack Virtual、格式工具 | 保留专业实现；后续统一主题、容器、数值/缺失值展示并验证性能 |
 | 已删除无调用组件 | #168 已清理旧 Input、Select、MainActionButton、PortalTooltip、QuestionMarkHelp、QuestionMarkHelpButton，不重新引入 |
 
@@ -109,3 +109,22 @@ Issue 中 `de708e8` 的链接是历史调查依据。当前事件详情已位于
 本批仍不包含反馈、卡片/表格/图表迁移、全八页状态组合或真实写操作验收；原生菜单 Esc、嵌套 Mantine Select/Popover、虚拟事件行指针命中等先前未覆盖项继续保留。总任务 #166 尚未完成。
 
 本批验证通过：`mise exec -- npm --prefix web run lint`（ESLint/Knip）、`typecheck`、`test`（28 个文件、138 项）、`build`、`git diff --check`。无 Rust 或后端契约改动，未运行后端/live Provider 测试。构建 JS 合计 882.82 kB（gzip 270.30 kB）、CSS 合计 141.51 kB（gzip 25.59 kB），相对第二批增加 8.94/2.88 kB 和 7.80/1.04 kB（原始/gzip）；主入口 JS 493.77 kB（gzip 153.60 kB）。新增 Tabs/Switch 按需样式，无新增依赖包。
+
+## 第四批：反馈、状态与卡片
+
+从 PR #171 合并后的 main `5d9449e` 开始，分支 `codex/166-mantine-feedback`。PR #171 的静态/构建、单元/PostgreSQL 两项 CI 均通过。
+
+- Notice 使用 Mantine Alert，共享成功、警告、错误语义色；保留错误的 alert、成功/警告的 status 和重试/关闭操作。发现声明不支持、发现运行失败及 FormError 复用此入口，错误码、说明和已有目录仍可同时查看。
+- LoadingSpinner 使用 Mantine Loader，装饰图标不再建立第二个空 status；LoadingState 外层播报标签。局部请求尝试加载使用 inline 布局；Loader 样式在减少动画偏好下停止旋转。
+- StatusPill 使用 Badge，保留页面业务映射、大小写和未知状态；覆盖 Badge 默认的大写/省略展示以允许长文本换行，事件与控制面共享配色。
+- EmptyState 使用 Paper/Text/ThemeIcon 组合，保留 inline/centered 和下一步按钮。Card 使用 Paper/Title/Text，保持标题层级、说明、元信息、操作区及 flush 表格容器，窄屏操作区堆叠。
+
+公共样式收敛到 `Feedback.module.scss`、`Card.module.scss`；移除旧全局卡片、空态、加载动画及页面独立反馈样式。没有新增依赖包或改变后端契约。
+
+DOM 回归覆盖错误重试到成功与关闭、单次加载播报转空态、警告详情及完整状态文本、卡片语义与操作；真实页面测试覆盖 401 重试恢复和发现失败仍保留目录。旧 Card/视觉样式字符串断言按新组件行为替换或删除。
+
+浏览器使用本地生产构建只读取授权管理端：来源页卡片和状态密度正常，标题 16px、状态标签约 21px；桌面点击事件行可打开详情，Token/上游尝试卡片可读，局部加载最终显示尝试记录。合成页面验证失败→重试加载→成功→关闭，警告、长错误码/状态、空态操作及卡片头部；桌面浅色和 390px 深色无横向溢出，窄屏按钮为 44px。截图全部使用合成内容：[桌面浅色](evidence/166/b4-feedback-light.png)、[窄屏深色](evidence/166/b4-feedback-mobile-dark.png)。临时页面已移除，未提交真实配置或请求模型。
+
+本批没有完成图表与表格迁移、全八页状态组合、屏幕阅读器实测或运行时性能基准。减少动画规则已实现，尚未在浏览器切换系统偏好复验。此前窄屏虚拟事件行指针命中、原生菜单 Esc 与嵌套 Select/Popover 验收缺口仍保留；本批桌面事件点击成功不能替代窄屏复验。#166 保持未完成。
+
+验证通过：`mise exec -- npm --prefix web run lint`（ESLint/Knip）、`typecheck`、`test`（29 个文件、139 项）、`build` 和 `git diff --check`。没有后端改动，未重跑后端或 live Provider 测试。本批构建 JS 合计 889.92 kB（gzip 272.32 kB），CSS 合计 146.54 kB（gzip 27.03 kB）；相对第三批增加 7.10/2.02 kB 与 5.03/1.44 kB（原始/gzip）。主入口 JS 494.30 kB（gzip 153.67 kB）。按需引入 Alert、Badge、Text、Title、ThemeIcon 样式，复用已接入的 Paper/Loader。

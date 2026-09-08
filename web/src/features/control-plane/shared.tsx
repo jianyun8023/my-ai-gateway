@@ -74,7 +74,7 @@ export function FormGrid({ children }: PropsWithChildren) {
 
 export function FormError({ message }: { message?: string }) {
   if (!message) return null;
-  return <div className={styles.formError} role="alert">{message}</div>;
+  return <Notice>{message}</Notice>;
 }
 
 export function DetailList({ children }: PropsWithChildren) {
