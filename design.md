@@ -48,7 +48,7 @@ Tech-Utility：冷灰底色、绿色强调、紧凑数据布局。使用固定�
 
 按钮、图标和字段的品牌尺寸、状态样式集中在 [Controls.module.scss](web/src/components/ui/Controls.module.scss)，通过 Mantine Styles API 和语义变量接入。字段使用 Mantine Input.Wrapper 的 label/description/error；`attributes.input` 合并调用方描述 ID 与生成的 hint/error ID，不覆盖业务输入值。`SelectField` 采用 NativeSelect 保留 option/optgroup、禁用项和浏览器菜单交互，不新增搜索能力或模拟 change 事件。旧 `.btn`、手写字段框及控制面复选框样式已删除；页面操作布局按 `data-ui="button"` 定位，不能恢复旧按钮视觉类。
 
-页面 SCSS 只维护布局与领域视觉。配置表格直接使用 Mantine Table 及其 Thead/Tbody/Tr/Th/Td，表头声明 `scope="col"`；基础视觉集中在 [Table.module.scss](web/src/components/ui/Table.module.scss)，默认单元格内边距为纵向 10px、横向 13px。TableScroll 保留原生、可聚焦的局部滚动，页面只指定领域列宽与最小宽度。可点击行仍保留表格语义，并提供可通过键盘访问的“查看”按钮；开关和操作单元格阻止事件冒泡，避免误开详情。事件虚拟列表继续保留独立的数据与测量实现。
+页面 SCSS 只维护布局与领域视觉。配置表格直接使用 Mantine Table 及其 Thead/Tbody/Tr/Th/Td，表头声明 `scope="col"`；基础视觉集中在 [Table.module.scss](web/src/components/ui/Table.module.scss)，默认单元格内边距为纵向 10px、横向 13px。TableScroll 保留原生、可聚焦的局部滚动，页面只指定领域列宽与最小宽度。可点击行仍保留表格语义，并提供可通过键盘访问的“查看”按钮；开关和操作单元格阻止事件冒泡，避免误开详情。事件虚拟列表也使用 Mantine Table 主题，继续由 TanStack Virtual 管理范围与行高：单一原生滚动区包含 sticky 表头和虚拟 tbody，以稳定事件标识缓存测量，通过 `measureElement`/`data-index` 响应尺寸变化。表头固定 44px，CSS 与 `scrollMargin` 共享同一常量，行位置扣除表头偏移。查看按钮放在首列供窄屏与键盘访问，数据单元格点击同样打开详情；虚拟表声明完整行索引，尚有下一页时总行数使用未知值。不要用全量 DOM 或第二套滚动容器替代此实现。
 
 ## 交互与响应式
 

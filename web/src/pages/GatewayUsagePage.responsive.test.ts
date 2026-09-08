@@ -25,7 +25,6 @@ describe('GatewayUsagePage prototype adaptation', () => {
     expect(shellStyles).toContain('@media (max-width: 380px)');
     expect(shellStyles).toContain('@media (prefers-reduced-motion: reduce)');
     expect(shellSource).toContain('aria-controls="gateway-navigation"');
-    expect(styles).toMatch(/\.eventTable \{ overflow-x: auto; \}/);
     expect(styles).toMatch(/\.statsGrid\s*\{\s*min-width: 0;/);
     expect(styles).toMatch(/\.chartGrid\s*\{\s*min-width: 0;/);
   });

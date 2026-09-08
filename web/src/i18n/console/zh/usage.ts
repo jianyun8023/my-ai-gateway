@@ -182,6 +182,7 @@ export const usage = {
 
   // —— 事件表 ——
   events: {
+    view_aria: '查看请求 {{id}} 详情',
     empty_title: '当前范围没有请求事件',
     empty_desc: '调整时间范围或筛选条件后重试。',
     title: '请求事件',
