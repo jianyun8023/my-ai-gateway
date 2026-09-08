@@ -8,30 +8,6 @@
   border: 1px solid var(--border-color);
   border-radius: 12px;
   background: var(--floating-surface);
-
-  label {
-    min-width: 0;
-    display: grid;
-    gap: 5px;
-    color: var(--text-secondary);
-    font-size: var(--fs-small);
-    font-weight: 600;
-  }
-  input,
-  select {
-    width: 100%;
-    min-width: 0;
-    min-height: var(--keeper-control-height-md, 36px);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius);
-    padding: 0 10px;
-    color: var(--text-primary);
-    background: var(--bg-primary);
-    outline: none;
-    font-size: var(--fs-meta);
-  }
-  input:focus-visible,
-  select:focus-visible { border-color: var(--gateway-accent); box-shadow: 0 0 0 2px var(--gateway-accent-soft); }
 }
 
 .commonFilters {
@@ -40,7 +16,7 @@
   gap: 8px;
   flex-wrap: wrap;
 
-  > label {
+  > .filterField {
     min-width: 120px;
     flex: 1 1 140px;
   }
@@ -60,7 +36,7 @@
   gap: 8px;
   flex-wrap: wrap;
 
-  label {
+  > .filterField {
     min-width: 160px;
   }
 }
@@ -69,31 +45,6 @@
   display: flex;
   gap: 5px;
   flex-wrap: wrap;
-
-  > button {
-    min-height: var(--keeper-control-height-md, 36px);
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0 12px;
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius, 8px);
-    color: var(--text-secondary);
-    background: var(--floating-surface);
-    cursor: pointer;
-    font-size: var(--fs-small);
-    transition: border-color 120ms ease, color 120ms ease, background-color 120ms ease;
-  }
-  > button:hover {
-    border-color: var(--border-hover);
-    color: var(--text-primary);
-  }
-  > button[data-active='true'] {
-    border-color: var(--gateway-accent);
-    color: var(--gateway-accent);
-    background: var(--gateway-accent-soft);
-    font-weight: 700;
-  }
 }
 
 .granularityBar {
@@ -268,7 +219,6 @@
 }
 .loadingMore { position: sticky; bottom: 0; padding: 9px; text-align: center; color: var(--text-secondary); background: var(--floating-surface); font-size: var(--fs-small); }
 
-
 .detailGrid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 9px; }
 .detailGrid > div { display: grid; gap: 4px; padding: 10px; border: 1px solid var(--border-color); border-radius: var(--radius, 8px); background: var(--bg-primary, var(--floating-surface)); }
 .detailGrid span { color: var(--text-secondary); font-size: var(--fs-small); }
@@ -283,8 +233,7 @@
 .statusSuccess { color: var(--success); }
 .statusFailure { color: var(--error-color); }
 
-.metricSelect { min-height: var(--keeper-control-height-sm, 32px); border: 1px solid var(--border-color); border-radius: var(--radius); padding: 0 10px; color: var(--text-primary); background: var(--bg-primary); font-size: var(--fs-small); outline: none; cursor: pointer; }
-.metricSelect:focus-visible { border-color: var(--gateway-accent); outline: 2px solid var(--accent-soft); outline-offset: 2px; }
+.metricSelect { min-width: 130px; }
 
 @media (max-width: 1280px) {
   .advancedFilters { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -300,7 +249,7 @@
 
 @media (max-width: 920px) {
   .advancedFilters { grid-template-columns: 1fr; }
-  .commonFilters > label { flex-basis: 100%; }
+  .commonFilters > .filterField { flex-basis: 100%; }
   .statsGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .chartGrid,
   .overviewLowerGrid,
@@ -317,10 +266,8 @@
   }
 
   .filters { padding: 12px; }
-  .filters input,
-  .filters select { min-height: 44px; font-size: 11px; }
   .filterPresets { flex-wrap: wrap; }
-  .commonFilters > label { flex-basis: 100%; }
+  .commonFilters > .filterField { flex-basis: 100%; }
 
   .stat { min-height: 98px; padding: 14px 15px; }
   .stat strong { font-size: 25px; }

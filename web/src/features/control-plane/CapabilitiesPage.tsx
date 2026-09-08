@@ -1,3 +1,4 @@
+import { TextField, SelectField } from '@/components/ui/FormField';
 import type {
   CapabilityMatrixResponse,
   CapabilityMatrixRow,
@@ -211,9 +212,9 @@ export function CapabilitiesPage({ api, refreshRevision = 0, onBusyChange }: Cap
       {query.error && <ErrorState error={query.error} onRetry={query.reload} />}
 
       <FilterBar>
-        <label>{t('capabilities.search_label')}<input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t('capabilities.search_placeholder')} /></label>
-        <label>{t('capabilities.source_filter')}<select value={sourceFilter} onChange={(event) => setSourceFilter(event.target.value)}><option value="">{t('capabilities.all_sources')}</option>{sources.map((source) => <option key={source} value={source}>{source}</option>)}</select></label>
-        <label>{t('capabilities.route_state_filter')}<select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as CapabilityFilter)}><option value="all">{t('capabilities.route_state_all')}</option><option value="routable">{t('capabilities.route_state_routable')}</option><option value="degraded">{t('capabilities.route_state_degraded')}</option><option value="unroutable">{t('capabilities.route_state_unroutable')}</option></select></label>
+        <TextField label={t('capabilities.search_label')} value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t('capabilities.search_placeholder')} />
+        <SelectField label={t('capabilities.source_filter')} value={sourceFilter} onChange={(event) => setSourceFilter(event.target.value)}><option value="">{t('capabilities.all_sources')}</option>{sources.map((source) => <option key={source} value={source}>{source}</option>)}</SelectField>
+        <SelectField label={t('capabilities.route_state_filter')} value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as CapabilityFilter)}><option value="all">{t('capabilities.route_state_all')}</option><option value="routable">{t('capabilities.route_state_routable')}</option><option value="degraded">{t('capabilities.route_state_degraded')}</option><option value="unroutable">{t('capabilities.route_state_unroutable')}</option></SelectField>
         <span className={styles.filterMeta}>{t('capabilities.rows_counter', { rows: rows.length, total: response.data.length })}</span>
       </FilterBar>
 

@@ -35,8 +35,8 @@ Issue 中 `de708e8` 的链接是历史调查依据。当前事件详情已位于
 | 活跃 Modal | 首批替换其手写焦点、滚动、计时和动画；来源/实体/能力详情的 380ms 外部计时改用 Mantine 退出回调 |
 | 移动侧栏 | 首批替换遮罩、手写 body overflow 和 Esc/焦点计时器；桌面导航继续使用同一内容 |
 | 活跃列设置 details | 首批迁移 Popover；复选项使用 Mantine Checkbox |
-| Button、IconButton、FormField、CheckboxField | 第二批迁移公共入口及其调用页面；字段下拉使用 Mantine NativeSelect，页面内直接原生控件仍待收敛 |
-| SegmentedTabs、LanguageSwitcher | 保留调用契约，后续迁移分段/语言切换和控制面 Toggle |
+| Button、IconButton、FormField、CheckboxField | 第二批迁移公共入口及其调用页面；字段下拉使用 Mantine NativeSelect，第三批收敛页面内筛选和 Shell 密钥输入 |
+| SegmentedTabs、LanguageSwitcher、Toggle | 第三批迁移到 Mantine Tabs、Button、Switch，保留面板/筛选语义和布尔值回调 |
 | Notice、LoadingState、LoadingSpinner、EmptyState、StatusPill | 后续统一通知/持久错误、加载/空态/状态色；保留部分失败与重试信息 |
 | Card、TableScroll、FormGrid、FilterBar、PageActions、DrawerSection | 保留有价值的页面组合；后续去除重复控件样式，公共布局归入 UI 层 |
 | Chart.js、TanStack Virtual、格式工具 | 保留专业实现；后续统一主题、容器、数值/缺失值展示并验证性能 |
@@ -93,3 +93,19 @@ Issue 中 `de708e8` 的链接是历史调查依据。当前事件详情已位于
 验证命令均在本批 worktree 执行通过：`mise exec -- npm --prefix web run lint`（ESLint/Knip）、`typecheck`、`test`、`build`，以及 `git diff --check`。测试为 28 个文件、134 项；相比首批删除 2 项旧样式字符串断言，增加 1 项来源表单行为回归。没有后端改动，未重复运行本地后端/live Provider 测试；首批 PR #169 的静态/构建、单元/PostgreSQL 两项 CI 均通过。
 
 本批生产构建 JS 合计 873.88 kB（gzip 267.42 kB），CSS 合计 133.71 kB（gzip 24.55 kB）；相对首批增加 41.28/13.28 kB 与 26.24/3.76 kB（原始/gzip）。主入口 JS 为 474.66 kB（gzip 147.93 kB）。增加 Button、ActionIcon、Tooltip、Input、Loader 及 NativeSelect 所需 Combobox 样式；未新增依赖包。
+
+## 第三批：页面筛选与选择控件
+
+从前两批 PR #169、#170 合并后的 main `ed597cb` 开始，分支 `codex/166-mantine-navigation-filters`，继续关联 #166。
+
+用量公共/高级筛选和自定义日期、能力矩阵搜索/条件、模型发现确认/可用状态使用共享 TextField/SelectField；趋势指标使用 Mantine NativeSelect，并补上可访问名称。Shell 桌面与移动 Admin Key 输入共用 TextField，保留原有会话密钥边界。时间预设及语言切换使用 Mantine Button；SegmentedTabs 的内容面板模式交由 Mantine Tabs 处理方向键/Home/End/循环与单一 Tab 停靠点，筛选组保留 `aria-pressed`。控制面 Toggle 使用 Mantine Switch，发现目录选择使用 Checkbox；紧凑复选图标通过关联 label 保持 44px 点击区域。
+
+删除页面旧输入框、选择器、开关和语言按钮视觉，仅保留布局与必要的标签外观。保留原有 UTC/本地日期换算、相对时间立即应用、自定义/高级条件草稿应用、发现筛选清空选择、仅可用且待确认模型可选，以及未知/缺失状态。
+
+新增四项行为回归：公共/高级筛选草稿与缺失用量应用/重置；发现可选范围与筛选清空；启用开关布尔回调与禁用；语言按压状态与持久化。原有标签键盘/面板关联、Admin Key 边界等测试继续通过。
+
+浏览器检查使用本地构建预览读取授权管理端：来源/账号标签方向键与面板 ID 正确；发现可按已确认目录筛选，已确认行保持禁选；能力矩阵来源/路由状态筛选生效。没有提交真实配置或发送模型请求。另以直接挂载实际 Shell、FilterBar、SegmentedTabs、Toggle 的合成页面验证：草稿到应用、缺失用量、开关、窄屏标签点击、自定义日期、中英切换和移动侧栏。桌面浅色及 390px 深色无页面横向溢出；窄屏字段和操作按钮为 44px。公开截图：[桌面筛选](evidence/166/b3-filters-light.png)、[窄屏自定义与高级筛选](evidence/166/b3-filters-mobile-dark.png)。临时验证页面已移除。
+
+本批仍不包含反馈、卡片/表格/图表迁移、全八页状态组合或真实写操作验收；原生菜单 Esc、嵌套 Mantine Select/Popover、虚拟事件行指针命中等先前未覆盖项继续保留。总任务 #166 尚未完成。
+
+本批验证通过：`mise exec -- npm --prefix web run lint`（ESLint/Knip）、`typecheck`、`test`（28 个文件、138 项）、`build`、`git diff --check`。无 Rust 或后端契约改动，未运行后端/live Provider 测试。构建 JS 合计 882.82 kB（gzip 270.30 kB）、CSS 合计 141.51 kB（gzip 25.59 kB），相对第二批增加 8.94/2.88 kB 和 7.80/1.04 kB（原始/gzip）；主入口 JS 493.77 kB（gzip 153.60 kB）。新增 Tabs/Switch 按需样式，无新增依赖包。

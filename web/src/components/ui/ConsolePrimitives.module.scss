@@ -1,3 +1,5 @@
+.tabs { min-width: 0; max-width: 100%; }
+
 .segmented {
   max-width: 100%;
   min-width: 0;
@@ -8,10 +10,11 @@
   border: 1px solid var(--border-color);
   border-radius: var(--radius);
   background: var(--bg-primary);
+  flex-wrap: nowrap;
   overflow-x: auto;
 }
 
-.segmented button {
+.segmentedTab {
   min-height: 38px;
   display: inline-flex;
   align-items: center;
@@ -25,17 +28,17 @@
   cursor: pointer;
 }
 
-.segmented button:hover {
+.segmentedTab:hover {
   color: var(--text-primary);
   background: var(--bg-hover);
 }
 
-.segmented button:focus-visible {
+.segmentedTab:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
 
-.segmented button[data-active='true'] {
+.segmentedTab[data-active] {
   color: var(--accent);
   background: var(--floating-surface);
   box-shadow: 0 0 0 1px var(--border-color);

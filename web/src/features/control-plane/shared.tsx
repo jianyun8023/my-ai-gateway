@@ -1,3 +1,4 @@
+import { Switch } from '@mantine/core';
 import type { AdminErrorShape, GatewayProtocol } from '@/admin-api';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -32,17 +33,11 @@ export function Toggle({
 }) {
   const { t } = useTranslation('console');
   return (
-    <label className={styles.toggle} aria-label={label}>
-      <input
-        type="checkbox"
-        aria-label={label}
-        checked={checked}
-        disabled={disabled}
-        onChange={(event) => onChange(event.target.checked)}
-      />
-      <span aria-hidden="true"><i /></span>
-      <em>{t(checked ? 'common.enabled' : 'common.disabled')}</em>
-    </label>
+    <Switch className={styles.toggle} aria-label={label}
+      checked={checked} disabled={disabled}
+      onChange={(event) => onChange(event.currentTarget.checked)}
+      label={t(checked ? 'common.enabled' : 'common.disabled')}
+    />
   );
 }
 

@@ -37,7 +37,8 @@ Tech-Utility：冷灰底色、绿色强调、紧凑数据布局。使用固定�
 | `TextField` / `SelectField` / `TextAreaField` | Mantine TextInput/NativeSelect/Textarea，共用 label、hint、error 关联；保留调用方描述 ID 和原生 change 事件 |
 | `CheckboxField` | Mantine Checkbox 的表单组合，label/hint、禁用与布尔值回调；位于 UI 层，控制面共享入口仅转导出 |
 | `StatusPill` | success / warning / danger / accent / muted；页面负责业务状态映射 |
-| `SegmentedTabs` | tabs 模式切换内容面板；`mode="group"` 用于筛选 |
+| `SegmentedTabs` | Mantine Tabs 负责内容面板键盘导航；`mode="group"` 使用 Mantine Button 保留 `aria-pressed` 筛选语义 |
+| `LanguageSwitcher` / `Toggle` | 语言使用按压按钮并沿用既有持久化；启用状态使用 Mantine Switch，布尔值回调与禁用状态由页面控制 |
 | `LoadingState` / `Notice` / `EmptyState` | 加载、错误重试、成功反馈与空态；空表使用 `layout="centered"` |
 | `TableScroll` | 带名称、可聚焦的横向滚动区；父级网格项需可收缩 |
 | `Modal` | Mantine Modal/Drawer 的项目契约：标题、尺寸、底部操作、关闭禁用、退出回调；管理详情、事件详情和移动导航共用 |
@@ -69,7 +70,7 @@ Tech-Utility：冷灰底色、绿色强调、紧凑数据布局。使用固定�
 
 ## Mantine 浮层契约与迁移状态
 
-本批使用 Mantine **9.6.0**（core/hooks 精确锁定，React 19.2 兼容）。基础组件负责交互，公共组合负责项目契约，业务组件负责数据与提交。完整八页清单、批次和证据见 [迁移记录](docs/mantine-migration.md)。当前为 #166 首批，FormField、Button、通知、图表、表格和全页面完整验收仍在后续范围内。
+本批使用 Mantine **9.6.0**（core/hooks 精确锁定，React 19.2 兼容）。基础组件负责交互，公共组合负责项目契约，业务组件负责数据与提交。完整八页清单、批次和证据见 [迁移记录](docs/mantine-migration.md)。目前已迁移主题、浮层、公共按钮/字段、页面筛选、标签与语言切换、启用开关和发现选择框；通知、图表、表格和全页面完整验收仍在后续范围内。
 
 - Modal/Drawer 默认层级 1000，由 Mantine stack 按打开顺序递增；Popover 1200、Tooltip 1300，统一在 theme.ts 修改。ConsoleProvider 通过 Mantine 公开的两种 StackContext 共享同一 stack，跨类型叠加时仅顶层处理 Esc 和焦点约束。条件卸载的详情会注销 stack 条目。
 - 焦点恢复使用 Mantine useFocusReturn，与 stack 的 trapFocus 切换分离；条件挂载详情先完成关闭态挂载，再打开。不要在页面添加 focus 定时器。正文单独滚动，标题和底部操作保持可见；长 ID 可换行。关闭动画中的内容通过 inert 退出交互。
@@ -77,6 +78,6 @@ Tech-Utility：冷灰底色、绿色强调、紧凑数据布局。使用固定�
 - closeDisabled 同时保护关闭按钮、Esc 和遮罩点击，提交按钮仍由业务 busy 防重复触发。没有提交中的普通浮层允许 Esc 和外部点击关闭。
 - 非敏感编辑/确认数据使用 useOverlayState：setValue(record) 打开、setValue(undefined) 开始关闭，把 afterExit 传入 onExitTransitionEnd 才清空数据，避免关闭过程中标题/表单跳变。敏感 Key 使用原有即时清除流程。
 - 来源/实体详情切换编辑时，先关闭详情并恢复焦点，再在 onExitTransitionEnd 中打开编辑。不要直接卸载正在持有编辑按钮的详情，否则编辑关闭后无法返回有效入口。
-- 列偏好 Popover 使用 Portal、视口自动定位和 focus trap；交互内容使用 Popover，纯文本提示使用 Tooltip。公共字段选择器已采用 Mantine NativeSelect，保留浏览器菜单；页面内直接原生控件待后续收敛。未来 Mantine Select 与嵌套 Popover 接入须按官方 Portal/事件规则单独验证，前两批没有宣称这些组合已完成。
+- 列偏好 Popover 使用 Portal、视口自动定位和 focus trap；交互内容使用 Popover，纯文本提示使用 Tooltip。公共字段选择器已采用 Mantine NativeSelect，保留浏览器菜单；用量与控制面页面筛选及 Shell 密钥输入已共用 Mantine 字段，页面仅保留布局。未来 Mantine Select 与嵌套 Popover 接入须按官方 Portal/事件规则单独验证，当前三批没有宣称这些组合已完成。
 
 新增页面的评审需检查：复用组件入口和主题；label/hint/error 与提交契约；首次加载/刷新/错误/空态；键盘和关闭焦点；双主题、长文案与窄屏；图表/虚拟列表测量及资源体积。专业组件继续保留 Chart.js/TanStack Virtual，主题与数据语义验收不能省略。CPA Usage Keeper 的既有 MIT License 与来源说明继续保留。

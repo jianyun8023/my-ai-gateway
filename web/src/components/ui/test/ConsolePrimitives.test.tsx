@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SegmentedTabs } from '../SegmentedTabs';
 import { TextField, SelectField, TextAreaField } from '../FormField';
 import { Button } from '../Button';
+import { LanguageSwitcher } from '../LanguageSwitcher';
+import { setTestLanguage } from '@/test/setup';
 
 describe('shared console interactions', () => {
   let container: HTMLDivElement;
@@ -51,6 +53,16 @@ describe('shared console interactions', () => {
     expect(container.querySelector('[aria-pressed="true"]')?.textContent).toBe('Auto');
     act(() => container.querySelectorAll<HTMLButtonElement>('button')[1].click());
     expect(onChange).toHaveBeenCalledWith('day');
+  });
+
+  it('switches language with pressed state and persists the preference', async () => {
+    await setTestLanguage('zh');
+    act(() => root.render(<LanguageSwitcher />));
+    expect(container.querySelector('[aria-pressed="true"]')?.textContent).toBe('中文');
+    await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent === 'EN')!.click());
+    expect(container.querySelector('[aria-pressed="true"]')?.textContent).toBe('EN');
+    expect(localStorage.getItem('my-ai-gateway-language')).toBe('en');
+    await act(async () => setTestLanguage('zh'));
   });
 
   it('associates labels, hints, errors and caller descriptions across all field types', () => {
