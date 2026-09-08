@@ -1,3 +1,4 @@
+import { clearOperationNotification } from '@/components/ui/notifications';
 import type {
   AdminErrorShape,
   CatalogStatus,
@@ -92,6 +93,7 @@ export function SourceModelCapabilitiesEditor({
   const save = async (protocol: GatewayProtocol) => {
     const draft = drafts[protocol];
     if (!draft || rowBusy) return;
+    clearOperationNotification();
     setRowBusy(protocol);
     setRowErrors((current) => ({ ...current, [protocol]: undefined }));
     try {

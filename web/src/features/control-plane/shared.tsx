@@ -60,12 +60,6 @@ export function ErrorState({ error, onRetry }: { error: AdminErrorShape; onRetry
   );
 }
 
-export function SuccessNotice({ message, onDismiss }: { message?: string; onDismiss?: () => void }) {
-  const { t } = useTranslation('console');
-  if (!message) return null;
-  return <Notice tone="success" action={onDismiss && <Button variant="ghost" size="sm" onClick={onDismiss} aria-label={t('common.close_notice_aria')}>{t('common.close')}</Button>}>{message}</Notice>;
-}
-
 export { CheckboxField } from '@/components/ui/CheckboxField';
 
 export function FormGrid({ children }: PropsWithChildren) {

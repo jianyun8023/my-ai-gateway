@@ -37,13 +37,10 @@ export const discovery = {
   state_failed_desc: '检查来源连接与账号凭据后重试。',
   state_empty: '发现成功,但上游返回空模型列表',
   state_empty_desc: '现有模型保持不变。',
-  state_ok: '发现运行 #{{id}} 完成,发现 {{count}} 个模型。',
-  state_failed_recorded: '发现已记录失败运行 #{{id}}。',
 
   // 消息
   message_saved: '来源模型 {{name}} 的用户字段已保存。',
   message_confirmed: '已确认 {{count}} 个来源模型。',
-  message_unsupported: '发现不受支持:{{code}}',
 
   // 主页面
   loading: '正在加载模型发现…',

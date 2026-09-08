@@ -36,7 +36,7 @@ const source = {
     openai_responses: '/responses',
     anthropic_messages: '/messages',
   },
-  auth_config: {},
+  auth_config: { credential_header: { header: 'authorization', prefix: 'Bearer' } },
   protocol_capabilities: {
     openai_chat_completions: { mode: 'native' },
     openai_responses: { mode: 'adapter', source_protocol: 'anthropic_messages', adapter: 'adapter-a' },
@@ -189,7 +189,7 @@ const baseHandler = async (input: RequestInfo | URL) => {
   const url = String(input);
   if (url === '/admin/sources') return jsonResponse({ data: [source] });
   if (url === '/admin/accounts') return jsonResponse({ data: [account] });
-  if (url === '/admin/provider-presets') return jsonResponse({ data: [] });
+  if (url === '/admin/provider-presets') return jsonResponse({ data: [{ id: 'preset-a', version: 1, display_name: 'Synthetic preset', definition: source.provider_preset_snapshot, created_at: source.created_at }] });
   if (url === '/admin/capabilities') return jsonResponse(capabilityResponse);
   if (url === '/admin/logical-models') return jsonResponse({ data: [logicalModel] });
   if (url === '/admin/model-bindings') return jsonResponse({ data: [binding] });
@@ -398,6 +398,36 @@ describe('production control-plane pages', () => {
     expect(container.querySelector('[role="status"]')?.textContent).toContain('discovery_unsupported');
   });
 
+  it('preserves the source form after a failed save and emits only one success on retry', async () => {
+    let failSave = true;
+    const save = vi.fn(async (init: RequestInit) => failSave
+      ? jsonResponse({ error: { code: 'source_conflict', message: 'Retry source save' } }, 409)
+      : jsonResponse({ data: { ...source, ...JSON.parse(init.body as string) } }));
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === '/admin/sources/source-a' && init?.method === 'PUT') return save(init);
+      return baseHandler(input);
+    }));
+    await renderPage('sources');
+    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="编辑 source-a"]')!.click());
+    const form = container.querySelector('#source-editor-form')!;
+    const name = [...form.querySelectorAll('input')].find(el => el.value === 'Source A')!;
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(name, 'Edited source');
+      name.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const submit = () => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await act(async () => { submit(); });
+    expect(form.querySelector('[role="alert"]')).not.toBeNull();
+    expect(name.value).toBe('Edited source');
+    expect(container.querySelector('.mantine-Notification-root')).toBeNull();
+    failSave = false;
+    await act(async () => { submit(); });
+    expect(save).toHaveBeenCalledTimes(2);
+    expect(container.querySelectorAll('.mantine-Notification-root[role="status"]')).toHaveLength(1);
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+  });
+
   it('retains discovery failure details alongside the existing model catalog', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const response = await baseHandler(input);
@@ -413,6 +443,78 @@ describe('production control-plane pages', () => {
     expect(alert.textContent).toContain('upstream_timeout');
     expect(alert.textContent).toContain('Catalog request timed out');
     expect(container.querySelector('tbody')?.textContent).toContain('upstream-a');
+  });
+
+  it.each(['failed', 'unsupported'])('reports a %s discovery once with its code and existing catalog', async (status) => {
+    const latest = await (await baseHandler('/admin/sources/source-a/discoveries/latest')).json();
+    let ran = false;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith('/discoveries') && init?.method === 'POST') {
+        ran = true;
+        latest.data = { ...latest.data, status, error_code: 'catalog_unavailable', error_message: null };
+        return jsonResponse({ data: { run: latest.data, diff: latest.diff } });
+      }
+      if (String(input).endsWith('/discoveries/latest') && ran) return jsonResponse(latest);
+      return baseHandler(input);
+    }));
+    await renderPage('discovery');
+    await act(async () => [...container.querySelectorAll('button')].find(el => el.textContent === '运行发现')!.click());
+    expect(ran).toBe(true);
+    expect(container.querySelectorAll(status === 'failed' ? '[role="alert"]' : '[role="status"]')).toHaveLength(1);
+    expect(container.textContent?.split('catalog_unavailable')).toHaveLength(2);
+    expect(container.querySelector('tbody')?.textContent).toContain('upstream-a');
+    expect(container.querySelector('.mantine-Notification-root')).toBeNull();
+  });
+
+  it('keeps the catalog and retry when a completed discovery cannot refresh its result', async () => {
+    let ran = false;
+    let failRefresh = true;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith('/discoveries') && init?.method === 'POST') {
+        ran = true;
+        return jsonResponse({ data: { run: { status: 'succeeded', id: 4, discovered_model_count: 1 } } });
+      }
+      if (ran && failRefresh && String(input).endsWith('/discoveries/latest')) return jsonResponse({ error: { code: 'refresh_unavailable', message: 'Refresh failed' } }, 503);
+      return baseHandler(input);
+    }));
+    await renderPage('discovery');
+    await act(async () => [...container.querySelectorAll('button')].find(el => el.textContent === '运行发现')!.click());
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('refresh_unavailable');
+    expect(container.querySelector('tbody')?.textContent).toContain('upstream-a');
+    expect(container.querySelector('.mantine-Notification-root')).toBeNull();
+    failRefresh = false;
+    await act(async () => container.querySelector<HTMLButtonElement>('[role="alert"] button')!.click());
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+  });
+
+  it('keeps capability drafts on failure and reports successful retry while the modal stays open', async () => {
+    let failSave = true;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path.endsWith('/capabilities/openai_chat_completions')) {
+        if (failSave) return jsonResponse({ error: { code: 'save_conflict', message: 'Retry capability save' } }, 409);
+        return jsonResponse({ data: { ...JSON.parse(init!.body as string), protocol: 'openai_chat_completions' } });
+      }
+      if (path.endsWith('/models/upstream-a/capabilities')) return jsonResponse({ data: [] });
+      return baseHandler(input);
+    }));
+    await renderPage('discovery');
+    await act(async () => [...container.querySelectorAll('button')].find(el => el.textContent === '协议能力')!.click());
+    const dialog = container.querySelector('[role="dialog"]')!;
+    const mode = dialog.querySelector('select')!;
+    await act(async () => { mode.value = 'native'; mode.dispatchEvent(new Event('change', { bubbles: true })); });
+    const save = [...dialog.querySelectorAll('button')].find(el => el.textContent === '保存能力')!;
+    await act(async () => save.click());
+    expect(mode.value).toBe('native');
+    expect(dialog.querySelector('[role="alert"]')).not.toBeNull();
+    expect(container.querySelector('.mantine-Notification-root')).toBeNull();
+    failSave = false;
+    await act(async () => { save.focus(); save.click(); });
+    expect(dialog.querySelector('[role="alert"]')).toBeNull();
+    expect(container.querySelectorAll('.mantine-Notification-root')).toHaveLength(1);
+    expect(container.querySelector('.mantine-Notification-root')?.textContent).toContain('能力已保存');
+    expect(container.querySelector('[role="dialog"]')).toBe(dialog);
+    expect(document.activeElement).toBe(save);
   });
 
   it('renders fixed three-protocol runtime facts without inferring unroutable as supported', async () => {
@@ -475,6 +577,11 @@ describe('production control-plane pages', () => {
     expect(writeText).toHaveBeenCalledWith(oneTimeValue);
     expect(document.body.textContent).toContain(oneTimeValue);
     expect(document.body.textContent).toContain('API Key 已复制到剪贴板');
+    expect(container.querySelector('.mantine-Notification-root')).toBeNull();
+    expect(container.querySelectorAll('[role="status"]')).toHaveLength(1);
+    expect(container.querySelector('[role="status"]')?.textContent).not.toContain(oneTimeValue);
+    await act(async () => [...container.querySelectorAll('button')].find(el => el.textContent === '完成')!.click());
+    expect(document.body.textContent).not.toContain(oneTimeValue);
   });
 
   it('reveals an existing recoverable Virtual Key through the explicit Admin endpoint', async () => {

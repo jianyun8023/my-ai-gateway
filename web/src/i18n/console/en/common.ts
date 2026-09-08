@@ -7,7 +7,7 @@ export const common = {
   create: 'Create',
   cancel: 'Cancel',
   close: 'Close',
-  close_notice_aria: 'Close notice',
+  close_notice_aria: 'Close notification',
   edit: 'Edit',
   delete: 'Delete',
   refresh: 'Refresh',

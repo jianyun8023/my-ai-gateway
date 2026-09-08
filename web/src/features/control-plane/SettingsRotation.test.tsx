@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GatewayAdminResources, type VirtualKey } from '@/admin-api';
 import { setTestLanguage } from '@/test/setup';
 import { SettingsPage } from './SettingsPage';
+import { formatDateTime } from '@/utils/format';
 
 const secret = 'test-rotated-key';
 const baseKey: VirtualKey = {
@@ -95,6 +96,32 @@ describe('Virtual Key rotation', () => {
     await submit();
     expect(rotate).toHaveBeenCalledWith(expect.objectContaining({ body: JSON.stringify({ overlap_secs: 0, allowed_models: [] }) }));
     expect(container.textContent).toContain('旧密钥已失效');
+    expect(container.querySelector('[role="dialog"]')?.textContent).toContain('旧密钥已失效');
+    expect(container.querySelector('.mantine-Notification-root')).toBeNull();
+  });
+
+  it('retains the earlier expiry in the result modal through copying and clears secrets on close', async () => {
+    const expiry = new Date(Date.now() + 600000).toISOString();
+    keys = [{ ...baseKey, expires_at: expiry }];
+    const writeText = vi.fn().mockRejectedValueOnce(new Error('Clipboard denied')).mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    await open();
+    await submit();
+    const dialog = container.querySelector('[role="dialog"]')!;
+    expect(dialog.textContent).toContain(formatDateTime(expiry));
+    expect(dialog.textContent).not.toContain(formatDateTime(overlapUntil));
+    expect(container.querySelector('.mantine-Notification-root')).toBeNull();
+    await act(async () => button('复制 API Key').click());
+    expect(dialog.textContent).toContain('复制');
+    expect(dialog.textContent).toContain(secret);
+    await act(async () => button('复制 API Key').click());
+    expect(writeText).toHaveBeenLastCalledWith(secret);
+    expect(dialog.textContent).toContain('API Key 已复制到剪贴板');
+    expect(dialog.textContent).toContain(formatDateTime(expiry));
+    expect(dialog.querySelector('[role="status"]')?.textContent).not.toContain(secret);
+    await act(async () => button('完成').click());
+    expect(document.body.textContent).not.toContain(secret);
+    expect(document.body.textContent).not.toContain('API Key 已复制到剪贴板');
   });
 
   it.each(['', '-1', '1.5', '86401'])('rejects invalid overlap %j without a mutation', async (value) => {
