@@ -106,13 +106,14 @@ export function ModelMetadataFields({
             aria-label={fieldLabel(field)}
             value={draft[field] || 'unknown'}
             disabled={disabled}
-            onChange={(event) => onChange(field, event.target.value)}
+            data={[
+              { value: 'unknown', label: t('settings.metadata.feature.unknown') },
+              { value: 'supported', label: t('settings.metadata.feature.supported') },
+              { value: 'unsupported', label: t('settings.metadata.feature.unsupported') },
+            ]}
+            onChange={(value) => onChange(field, value)}
             className={styles.metadataField}
-          >
-            <option value="unknown">{t('settings.metadata.feature.unknown')}</option>
-            <option value="supported">{t('settings.metadata.feature.supported')}</option>
-            <option value="unsupported">{t('settings.metadata.feature.unsupported')}</option>
-          </SelectField>
+          />
         </div>
       ))}
     </div>

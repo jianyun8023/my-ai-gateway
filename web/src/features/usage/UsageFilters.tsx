@@ -89,7 +89,17 @@ export function FilterBar({ draft, onChange, onApply, onPresetSelect, onReset, l
         )}
         <TextField className={styles.filterField} label={t('usage.field.logical_model')} value={draft.logicalModel ?? ''} onChange={(event) => update('logicalModel', event.target.value)} placeholder={t('common.all')} />
         <TextField className={styles.filterField} label={t('usage.field.provider')} value={draft.provider ?? ''} onChange={(event) => update('provider', event.target.value)} placeholder={t('common.all')} />
-        <SelectField className={styles.filterField} label={t('usage.field.status')} value={draft.status ?? ''} onChange={(event) => update('status', event.target.value)}><option value="">{t('common.all')}</option><option value="success">{t('usage.filter.status_success')}</option><option value="failure">{t('usage.filter.status_failure')}</option></SelectField>
+        <SelectField
+          className={styles.filterField}
+          label={t('usage.field.status')}
+          value={draft.status ?? ''}
+          data={[
+            { value: '', label: t('common.all') },
+            { value: 'success', label: t('usage.filter.status_success') },
+            { value: 'failure', label: t('usage.filter.status_failure') },
+          ]}
+          onChange={(value) => update('status', value)}
+        />
         <Button variant="ghost" aria-expanded={showAdvanced} onClick={() => setShowAdvanced(!showAdvanced)}>
           {t('usage.filter.advanced')}{advancedCount > 0 ? ` (${advancedCount})` : ''}
         </Button>
@@ -105,7 +115,19 @@ export function FilterBar({ draft, onChange, onApply, onPresetSelect, onReset, l
           <TextField className={styles.filterField} label={t('usage.field.protocol_in')} value={draft.protocolIn ?? ''} onChange={(event) => update('protocolIn', event.target.value)} placeholder={t('common.all')} />
           <TextField className={styles.filterField} label={t('usage.field.protocol_upstream')} value={draft.protocolUpstream ?? ''} onChange={(event) => update('protocolUpstream', event.target.value)} placeholder={t('common.all')} />
           <TextField className={styles.filterField} label={t('usage.field.virtual_key_id')} inputMode="numeric" value={draft.virtualKey ?? ''} onChange={(event) => update('virtualKey', event.target.value)} placeholder={t('common.all')} />
-          <SelectField className={styles.filterField} label={t('usage.field.usage_source')} value={draft.usageSource ?? ''} onChange={(event) => update('usageSource', event.target.value)}><option value="">{t('common.all')}</option><option value="upstream">{t('usage.usage_source.upstream')}</option><option value="parsed">{t('usage.usage_source.parsed')}</option><option value="estimated">{t('usage.usage_source.estimated')}</option><option value="missing">{t('usage.usage_source.missing')}</option></SelectField>
+          <SelectField
+            className={styles.filterField}
+            label={t('usage.field.usage_source')}
+            value={draft.usageSource ?? ''}
+            data={[
+              { value: '', label: t('common.all') },
+              { value: 'upstream', label: t('usage.usage_source.upstream') },
+              { value: 'parsed', label: t('usage.usage_source.parsed') },
+              { value: 'estimated', label: t('usage.usage_source.estimated') },
+              { value: 'missing', label: t('usage.usage_source.missing') },
+            ]}
+            onChange={(value) => update('usageSource', value)}
+          />
         </div>
       )}
     </FilterPanel>

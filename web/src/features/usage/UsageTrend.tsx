@@ -1,4 +1,4 @@
-import { NativeSelect, Table } from '@mantine/core';
+import { Select, Table } from '@mantine/core';
 import { useState } from 'react';
 import { Bar, Line } from 'react-chartjs-2';
 import { useTranslation } from 'react-i18next';
@@ -30,9 +30,14 @@ export function UsageTrend({ points, metric, onMetricChange }: { points: UsageTi
     : [{ label: t(`usage.metric.${metric}`), values: metricValues(points, metric) }, { label: t(`usage.metric.${secondary}`), values: metricValues(points, secondary) }];
   const labels = points.map(point => formatBucket(point.bucket));
   return <Card title={t('usage.trend.title')} subtitle={t('usage.trend.subtitle')} data-od-id="token-trend" extra={
-    <NativeSelect aria-label={t('usage.trend.title')} value={metric} onChange={event => onMetricChange(event.target.value as TrendMetric)} className={styles.metricSelect}>
-      {METRICS.map(value => <option key={value} value={value}>{t(`usage.metric.${value}`)}</option>)}
-    </NativeSelect>
+    <Select
+      aria-label={t('usage.trend.title')}
+      value={metric}
+      data={METRICS.map((value) => ({ value, label: t(`usage.metric.${value}`) }))}
+      allowDeselect={false}
+      onChange={(value) => value !== null && onMetricChange(value as TrendMetric)}
+      className={styles.metricSelect}
+    />
   }>
     {!points.length ? <EmptyState title={t('usage.trend.empty')} /> : <>
       <div className={styles.chartLarge}>

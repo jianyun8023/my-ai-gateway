@@ -4,6 +4,7 @@ import { createRoot } from '@/test/render';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { defaultFilters, resolveFilterWindow } from '@/gateway-usage/filterState';
 import { setTestLanguage } from '@/test/setup';
+import { selectComboboxValue } from '@/test/interactions';
 import { FilterBar } from './UsageFilters';
 import { useUsageFilters } from './useUsageFilters';
 
@@ -65,22 +66,27 @@ describe('usage time presets', () => {
     expect(JSON.parse(container.querySelector('output')!.textContent!).relativePreset).toBe('today');
   });
 
-  it('keeps common and advanced edits as drafts until apply, including missing usage', () => {
+  it('keeps common and advanced edits as drafts until apply, including missing usage', async () => {
     const control = (label: string) => {
       const id = [...container.querySelectorAll('label')].find(element => element.textContent === label)!.htmlFor;
-      return document.getElementById(id) as HTMLInputElement | HTMLSelectElement;
+      return document.getElementById(id) as HTMLInputElement;
     };
-    const change = (label: string, value: string) => act(() => {
+    const change = async (label: string, value: string) => {
       const input = control(label);
-      const prototype = input.tagName === 'SELECT' ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
-      Object.getOwnPropertyDescriptor(prototype, 'value')!.set!.call(input, value);
-      input.dispatchEvent(new Event(input.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true }));
-    });
-    change('逻辑模型', 'synthetic-model');
+      if (input.getAttribute('role') === 'combobox') {
+        await selectComboboxValue(input, value);
+        return;
+      }
+      act(() => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value);
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+    };
+    await change('逻辑模型', 'synthetic-model');
     click('高级筛选');
-    change('用量来源', 'missing');
-    change('上游模型', 'long-synthetic-upstream-model');
-    change('来源 ID', 'synthetic-source');
+    await change('用量来源', 'missing');
+    await change('上游模型', 'long-synthetic-upstream-model');
+    await change('来源 ID', 'synthetic-source');
     click('高级筛选 (3)');
     expect(container.querySelector('section[aria-label]')).not.toBeNull();
     expect(JSON.parse(container.querySelector('output')!.textContent!).logicalModel).toBeUndefined();
@@ -89,7 +95,7 @@ describe('usage time presets', () => {
     click('重置');
     expect(control('逻辑模型').value).toBe('');
     click('高级筛选');
-    expect(control('用量来源').value).toBe('');
+    expect(control('用量来源').value).toBe('全部');
     expect(control('上游模型').value).toBe('');
     expect(control('来源 ID').value).toBe('');
   });

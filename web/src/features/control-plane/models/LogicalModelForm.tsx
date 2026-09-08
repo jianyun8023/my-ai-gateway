@@ -77,9 +77,13 @@ export function LogicalModelForm({
         <TextField label={t('models.field.lm_id')} value={id} disabled={Boolean(record) || busy} onChange={(event) => setId(event.target.value)} autoComplete="off" />
         <TextField label={t('models.field.public_name')} value={publicName} disabled={busy} onChange={(event) => setPublicName(event.target.value)} autoComplete="off" />
         <TextField label={t('models.field.display_name')} value={displayName} disabled={busy} onChange={(event) => setDisplayName(event.target.value)} autoComplete="off" />
-        <SelectField label={t('models.field.catalog_status')} value={status} disabled={busy} onChange={(event) => setStatus(event.target.value as CatalogStatus)}>
-          {statusOptions(record).map((option) => <option key={option} value={option}>{t(`values.status.${option}`)}</option>)}
-        </SelectField>
+        <SelectField
+          label={t('models.field.catalog_status')}
+          value={status}
+          disabled={busy}
+          data={statusOptions(record).map((option) => ({ value: option, label: t(`values.status.${option}`) }))}
+          onChange={(value) => setStatus(value as CatalogStatus)}
+        />
         <div className={styles.fullWidth}><CheckboxField checked={enabled} disabled={busy} onChange={setEnabled} label={t('models.field.enable_lm')} /></div>
       </FormGrid>
       <DrawerSection title={t('models.field.metadata')}>

@@ -56,9 +56,13 @@ export function RouteForm({
     <form id="route-editor-form" className={styles.page} onSubmit={submit}>
       <FormGrid>
         <TextField label={t('models.field.route_id')} value={id} disabled={Boolean(record) || busy} onChange={(event) => setId(event.target.value)} autoComplete="off" />
-        <SelectField label={t('models.field.lm')} value={logicalModelId} disabled={busy} onChange={(event) => setLogicalModelId(event.target.value)}>
-          {logicalModels.map((model) => <option key={model.id} value={model.id}>{model.display_name} · {model.id}</option>)}
-        </SelectField>
+        <SelectField
+          label={t('models.field.lm')}
+          value={logicalModelId}
+          disabled={busy}
+          data={logicalModels.map((model) => ({ value: model.id, label: `${model.display_name} · ${model.id}` }))}
+          onChange={setLogicalModelId}
+        />
         <TextField label={t('models.field.strategy')} value={strategy} readOnly disabled />
         <div className={styles.field}><label>{t('models.route_form.selection_label')}</label><StatusPill tone="accent">{t('models.state.strategy_fixed')}</StatusPill></div>
         <div className={styles.fullWidth}>

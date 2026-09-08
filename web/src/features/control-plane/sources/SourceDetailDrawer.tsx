@@ -151,9 +151,13 @@ export function SourceDetailDrawer({
         {enabledAccounts.length === 0 ? <EmptyTable title={t('sources.detail.test_no_account')} description={t('sources.detail.test_no_account_desc')} /> : (
           <div className={styles.page}>
             <FormGrid>
-              <SelectField label={t('common.account')} value={accountId} disabled={Boolean(testBusy)} onChange={(event) => setAccountId(event.target.value)}>
-                {enabledAccounts.map((account) => <option key={account.id} value={account.id}>{account.display_name} · {account.id}</option>)}
-              </SelectField>
+              <SelectField
+                label={t('common.account')}
+                value={accountId}
+                disabled={Boolean(testBusy)}
+                data={enabledAccounts.map((account) => ({ value: account.id, label: `${account.display_name} · ${account.id}` }))}
+                onChange={setAccountId}
+              />
               <TextField label={t('sources.detail.test_model')} value={testModel} disabled={Boolean(testBusy)} onChange={(event) => setTestModel(event.target.value)} autoComplete="off" />
             </FormGrid>
             {testError && <ErrorState error={testError} />}

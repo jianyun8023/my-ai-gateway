@@ -208,10 +208,18 @@ export function SourceForm({
       <FormGrid>
         <TextField label={t('sources.field.source_id')} value={id} disabled={Boolean(record) || busy} onChange={(event) => setId(event.target.value)} autoComplete="off" />
         <TextField label={t('sources.field.display_name')} value={displayName} disabled={busy} onChange={(event) => setDisplayName(event.target.value)} autoComplete="off" />
-        <SelectField label={t('sources.field.provider_preset')} value={presetKey} disabled={Boolean(record) || busy || orderedPresets.length === 0} onChange={(event) => selectPreset(event.target.value)}>
-          {orderedPresets.length === 0 && <option value="">{t('sources.form.no_preset')}</option>}
-          {orderedPresets.map((preset) => <option key={`${preset.id}@${preset.version}`} value={`${preset.id}@${preset.version}`}>{preset.display_name} · {preset.id}@{preset.version}</option>)}
-        </SelectField>
+        <SelectField
+          label={t('sources.field.provider_preset')}
+          value={presetKey}
+          disabled={Boolean(record) || busy || orderedPresets.length === 0}
+          data={orderedPresets.length === 0
+            ? [{ value: '', label: t('sources.form.no_preset') }]
+            : orderedPresets.map((preset) => ({
+                value: `${preset.id}@${preset.version}`,
+                label: `${preset.display_name} · ${preset.id}@${preset.version}`,
+              }))}
+          onChange={selectPreset}
+        />
         <TextField label={t('sources.field.base_url')} type="url" value={baseUrl} disabled={busy} onChange={(event) => setBaseUrl(event.target.value)} autoComplete="off" />
         {(['openai_chat_completions', 'openai_responses', 'anthropic_messages'] as const).map((protocol) => (
           <TextField
@@ -235,25 +243,36 @@ export function SourceForm({
             return (
               <div key={protocol}>
                 <strong>{PROTOCOL_LABELS[protocol]}</strong>
-                <SelectField label={t('sources.form.mode')} value={mode} disabled={busy} onChange={(event) => changeCapabilityMode(protocol, event.target.value as SourceProtocolMode)}>
-                  <option value="native">{t('sources.mode.native')}</option>
-                  <option value="adapter">{t('sources.mode.adapter')}</option>
-                  <option value="unsupported">{t('sources.mode.unsupported')}</option>
-                  <option value="unknown" disabled>{t('sources.mode.unknown')}</option>
-                </SelectField>
+                <SelectField
+                  label={t('sources.form.mode')}
+                  value={mode}
+                  disabled={busy}
+                  data={[
+                    { value: 'native', label: t('sources.mode.native') },
+                    { value: 'adapter', label: t('sources.mode.adapter') },
+                    { value: 'unsupported', label: t('sources.mode.unsupported') },
+                    { value: 'unknown', label: t('sources.mode.unknown'), disabled: true },
+                  ]}
+                  onChange={(value) => changeCapabilityMode(protocol, value as SourceProtocolMode)}
+                />
                 {mode === 'adapter' && (
                   <>
-                    <SelectField label={t('sources.form.upstream_protocol')} value={capability?.source_protocol ?? ''} disabled={busy} onChange={(event) => setCapabilities((current) => ({
-                      ...current,
-                      [protocol]: {
-                        ...current[protocol],
-                        mode: 'adapter',
-                        source_protocol: event.target.value as GatewayProtocol,
-                        adapter: current[protocol]?.adapter ?? '',
-                      },
-                    }))}>
-                      {GATEWAY_PROTOCOLS.filter((candidate) => candidate !== protocol).map((candidate) => <option key={candidate} value={candidate}>{PROTOCOL_LABELS[candidate]}</option>)}
-                    </SelectField>
+                    <SelectField
+                      label={t('sources.form.upstream_protocol')}
+                      value={capability?.source_protocol ?? ''}
+                      disabled={busy}
+                      data={GATEWAY_PROTOCOLS.filter((candidate) => candidate !== protocol)
+                        .map((candidate) => ({ value: candidate, label: PROTOCOL_LABELS[candidate] }))}
+                      onChange={(value) => setCapabilities((current) => ({
+                        ...current,
+                        [protocol]: {
+                          ...current[protocol],
+                          mode: 'adapter',
+                          source_protocol: value as GatewayProtocol,
+                          adapter: current[protocol]?.adapter ?? '',
+                        },
+                      }))}
+                    />
                     <TextField label={t('sources.form.adapter')} value={capability?.adapter ?? ''} disabled={busy} onChange={(event) => setCapabilities((current) => ({
                       ...current,
                       [protocol]: {

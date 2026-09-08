@@ -4,6 +4,7 @@ import { createRoot } from '@/test/render';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setTestLanguage } from '@/test/setup';
 import { Modal } from '../Modal';
+import { SelectField } from '../FormField';
 import { useThemeStore } from '@/stores/useThemeStore';
 
 const escape = () => (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
@@ -102,5 +103,23 @@ describe('console overlay composition', () => {
     act(() => { close.focus(); close.click(); });
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 30)); });
     expect(document.activeElement).toBe(trigger);
+  });
+
+  it('lets an open Mantine Select consume one Escape before the drawer', async () => {
+    const close = vi.fn();
+    await act(async () => root.render(<Modal open variant="drawer" title="Edit" onClose={close}>
+      <SelectField label="Mode" value="native" data={[{ value: 'native', label: 'Native' }, { value: 'adapter', label: 'Adapter' }]} />
+    </Modal>));
+    const select = container.querySelector<HTMLInputElement>('[role="combobox"]')!;
+    select.focus();
+    await act(async () => select.click());
+    expect(select.getAttribute('aria-expanded')).toBe('true');
+    expect(select.getAttribute('data-mantine-stop-propagation')).toBe('true');
+    act(escape);
+    expect(close).not.toHaveBeenCalled();
+    expect(select.getAttribute('aria-expanded')).toBe('false');
+    expect(select.hasAttribute('data-mantine-stop-propagation')).toBe(false);
+    act(escape);
+    expect(close).toHaveBeenCalledOnce();
   });
 });

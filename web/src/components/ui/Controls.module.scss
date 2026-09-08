@@ -11,7 +11,7 @@
 .button[data-appearance='action'] { border-radius: 999px; --button-height-md: 32px; font-weight: 700; }
 .buttonLabel { gap: 6px; }
 .buttonLabel svg { flex-shrink: 0; }
-.button:disabled, .iconButton:disabled { opacity: 0.6; cursor: not-allowed; }
+.button:disabled, .iconButton:is(:disabled, [data-disabled]) { opacity: 0.6; cursor: not-allowed; }
 .iconButton {
   --console-icon-size: 32px;
   flex: 0 0 auto;
@@ -29,6 +29,15 @@
 .input[aria-invalid='true'] { --input-bd: var(--danger); }
 .input:disabled { opacity: 0.6; cursor: not-allowed; background: var(--bg-secondary); color: var(--muted); }
 textarea.input { min-height: 88px; resize: vertical; }
+.selectDropdown { background: var(--surface); border-color: var(--border); color: var(--fg); }
+.selectOption { color: var(--fg); }
+.selectOption[data-combobox-selected] { background: var(--accent); color: var(--primary-contrast); }
+@media (hover: hover) {
+  .selectOption:hover:not([data-combobox-selected], [data-combobox-disabled]) { background: var(--fg-soft); }
+}
+@media (hover: none) {
+  .selectOption:active:not([data-combobox-selected], [data-combobox-disabled]) { background: var(--fg-soft); }
+}
 .label { font-size: 12px; font-weight: 650; margin-bottom: 6px; }
 .description, .error { font-size: var(--fs-small); line-height: 1.45; overflow-wrap: anywhere; margin-top: 6px; }
 .checkbox { min-height: 36px; display: flex; align-items: center; }

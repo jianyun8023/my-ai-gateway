@@ -58,7 +58,11 @@ describe('Virtual Key rotation', () => {
   };
   const open = async () => {
     await render();
-    await act(async () => button('轮换 editor').click());
+    await act(async () => {
+      const trigger = button('轮换 editor');
+      trigger.focus();
+      trigger.click();
+    });
   };
   const field = (selector: string) => document.querySelector<HTMLInputElement | HTMLTextAreaElement>(`#virtual-key-rotation-form ${selector}`)!;
   const setValue = async (selector: string, value: string) => {
@@ -72,6 +76,16 @@ describe('Virtual Key rotation', () => {
   const submit = async () => {
     await act(async () => button('轮换密钥').click());
   };
+  const waitFor = async (condition: () => boolean) => {
+    const deadline = Date.now() + 1000;
+    while (!condition() && Date.now() < deadline) {
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    }
+    expect(condition()).toBe(true);
+  };
+  const waitForOverlayExit = async () => {
+    await waitFor(() => document.body.textContent?.includes(secret) ?? false);
+  };
 
   it('prefills the allowlist, rotates with edited models, reveals the new key and refreshes old-key state', async () => {
     await open();
@@ -79,11 +93,12 @@ describe('Virtual Key rotation', () => {
     expect(field('input').value).toBe('3600');
     await setValue('textarea', 'model-b, model-b, model-c, ');
     await submit();
+    await waitForOverlayExit();
     expect(rotate).toHaveBeenCalledWith(expect.objectContaining({ method: 'POST', body: JSON.stringify({ overlap_secs: 3600, allowed_models: ['model-b', 'model-c'] }) }));
     expect(document.body.textContent).toContain(secret);
     expect(container.textContent).toContain('重叠期');
     expect(container.textContent).toContain('最晚有效至');
-    expect(button('轮换 editor').disabled).toBe(true);
+    expect(button('轮换 editor').getAttribute('aria-disabled')).toBe('true');
     expect(json.mock.calls.filter(([path]) => path === '/admin/keys')).toHaveLength(2);
   });
 
@@ -94,6 +109,7 @@ describe('Virtual Key rotation', () => {
     await setValue('textarea', '');
     expect(document.body.textContent).toContain('旧密钥立即失效');
     await submit();
+    await waitForOverlayExit();
     expect(rotate).toHaveBeenCalledWith(expect.objectContaining({ body: JSON.stringify({ overlap_secs: 0, allowed_models: [] }) }));
     expect(container.textContent).toContain('旧密钥已失效');
     expect(container.querySelector('[role="dialog"]')?.textContent).toContain('旧密钥已失效');
@@ -107,6 +123,7 @@ describe('Virtual Key rotation', () => {
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
     await open();
     await submit();
+    await waitForOverlayExit();
     const dialog = container.querySelector('[role="dialog"]')!;
     expect(dialog.textContent).toContain(formatDateTime(expiry));
     expect(dialog.textContent).not.toContain(formatDateTime(overlapUntil));
@@ -141,6 +158,7 @@ describe('Virtual Key rotation', () => {
     expect(document.body.textContent).not.toContain(secret);
     expect(document.querySelector('#virtual-key-rotation-form [role="alert"]')).not.toBeNull();
     await submit();
+    await waitForOverlayExit();
     expect(rotate).toHaveBeenCalledTimes(2);
     expect(document.body.textContent).toContain(secret);
   });
@@ -163,7 +181,22 @@ describe('Virtual Key rotation', () => {
   ])('disables rotation for an ineligible key %j', async (state) => {
     keys = [{ ...baseKey, ...state }];
     await render();
-    expect(button('轮换 editor').disabled).toBe(true);
+    expect(button('轮换 editor').getAttribute('aria-disabled')).toBe('true');
+  });
+
+  it('opens the result only after the rotation dialog exits and returns focus to the row action', async () => {
+    await open();
+    const trigger = button('轮换 editor');
+    await submit();
+    await waitForOverlayExit();
+    const resultDialog = document.querySelector<HTMLElement>('[role="dialog"]')!;
+    expect(resultDialog.textContent).toContain(secret);
+    await waitFor(() => resultDialog.contains(document.activeElement));
+    expect(resultDialog.contains(document.activeElement)).toBe(true);
+    await act(async () => button('完成').click());
+    await waitFor(() => document.activeElement === trigger);
+    expect(document.body.textContent).not.toContain(secret);
+    expect(document.activeElement).toBe(trigger);
   });
 
   it('updates the status when the overlap ends without a manual refresh', async () => {

@@ -40,10 +40,20 @@ export const consoleTheme = createTheme({
       defaultProps: { withinPortal: true, shadow: 'md', radius: 'md', zIndex: 1200, returnFocus: true },
       styles: { dropdown: { background: 'var(--surface)', borderColor: 'var(--border)', color: 'var(--fg)' } },
     },
+    Select: {
+      defaultProps: {
+        comboboxProps: {
+          withinPortal: true,
+          zIndex: 1200,
+          middlewares: { flip: true, shift: true },
+          transitionProps: { duration: 120 },
+        },
+      },
+      classNames: { dropdown: controls.selectDropdown, option: controls.selectOption },
+    },
     Switch: { defaultProps: { color: 'var(--accent)' } },
     Checkbox: { defaultProps: { color: 'var(--accent)', iconColor: 'var(--primary-contrast)' } },
     Tooltip: { defaultProps: { withinPortal: true, zIndex: 1300, multiline: true, maw: 320 } },
-    Select: { defaultProps: { comboboxProps: { withinPortal: true, zIndex: 1200 } } },
   },
 });
 

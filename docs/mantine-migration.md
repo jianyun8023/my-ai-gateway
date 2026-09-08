@@ -1,6 +1,6 @@
 # Mantine 控制台迁移清单（#166）
 
-初始基线：2026-09-08，`main c99455e`（PR #168 已合并）。当前第十二批基线为 `main 95ad077`（PR #179 已合并），分支 `codex/166-page-state-acceptance`、PR #180。关联 [Issue #166](https://github.com/jianyun8023/my-ai-gateway/issues/166)，本清单随每批实现更新；未完成全部验收前不关闭总任务。
+初始基线：2026-09-08，`main c99455e`（PR #168 已合并）。当前第十三批基线为 `main 8eef98f`（PR #180 已合并），分支 `codex/166-ui-closure`、PR #181。关联 [Issue #166](https://github.com/jianyun8023/my-ai-gateway/issues/166)，本清单随每批实现更新；Issue/PR、代码合并和生产验收分别记录，不互相推断。
 
 Issue 中 `de708e8` 的链接是历史调查依据。当前事件详情已位于 `features/usage/UsageEventDetails.tsx` 并复用公共 Modal；旧 Select、PortalTooltip、QuestionMarkHelp 等无调用实现已在 #168 删除，不再列为线上迁移对象。
 
@@ -10,11 +10,11 @@ Issue 中 `de708e8` 的链接是历史调查依据。当前事件详情已位于
 2. `components/ui` 负责品牌主题对接及确有项目契约的组合：Modal/Drawer 的统一标题、底部操作区、关闭禁用和退出回调；字段的 label/hint/error 关联；主次操作和状态语义。无需契约的 Mantine 组件从公共入口直接导出，不机械封装。
 3. `features` 负责业务数据、字段、校验、提交、筛选和领域展示；不重新实现浮层基础交互。
 
-首批：完整清单、主题接入、公共 Modal/Drawer、移动导航、事件列设置、退出生命周期与组合回归。后续批次继续控件、反馈、表格、图表和八页完整验收。本清单中的“接入”表示受公共基础覆盖，不等于该页完成验收。
+首批：完整清单、主题接入、公共 Modal/Drawer、移动导航、事件列设置、退出生命周期与组合回归。第二至十二批继续控件、反馈、表格、图表、查询状态和逐页证据；第十三批完成组件查漏、遗留样式清理与适用交互收尾。本清单中的“接入”表示受公共基础覆盖，不等于该页所有环境组合均已验收。
 
 ## 页面与流程覆盖
 
-路径相对于 `web/src/`。前十一批 PR #169–#179 均已合并；第十二批查询状态与逐页证据见文末。接入和代表性验证不等于该页完成全部验收。
+路径相对于 `web/src/`。前十二批 PR #169–#180 均已合并；第十二批查询状态和第十三批最终组件/交互矩阵见文末。接入和代表性验证不等于生产环境验收。
 
 | 页面/流程 | 当前组件与实际入口 | 目标与保留项 | 迁移批次/PR | 验证证据与剩余工作 |
 | --- | --- | --- | --- | --- |
@@ -35,12 +35,12 @@ Issue 中 `de708e8` 的链接是历史调查依据。当前事件详情已位于
 | 活跃 Modal | 首批替换其手写焦点、滚动、计时和动画；来源/实体/能力详情的 380ms 外部计时改用 Mantine 退出回调 |
 | 移动侧栏 | 首批替换遮罩、手写 body overflow 和 Esc/焦点计时器；桌面导航继续使用同一内容 |
 | 活跃列设置 details | 首批迁移 Popover；复选项使用 Mantine Checkbox |
-| Button、IconButton、FormField、CheckboxField | 第二批迁移公共入口及其调用页面；字段下拉使用 Mantine NativeSelect，第三批收敛页面内筛选和 Shell 密钥输入 |
+| Button、IconButton、FormField、CheckboxField | 第二批迁移公共入口及其调用页面；第十三批将字段和趋势下拉统一为 Mantine Select，禁用 Tooltip 使用可聚焦的 `aria-disabled` / `data-disabled` 契约 |
 | SegmentedTabs、LanguageSwitcher、Toggle | 第三批迁移到 Mantine Tabs、Button、Switch，保留面板/筛选语义和布尔值回调 |
 | Notice、LoadingState、LoadingSpinner、EmptyState、StatusPill | 第四批采用 Alert、Loader、Paper、ThemeIcon、Text、Badge，保留持久错误、部分失败与重试信息 |
 | Card、TableScroll、FormGrid、FilterBar、PageActions、DrawerSection | 第四批 Card 使用 Paper/Title/Text，样式归入 UI 层；第六批 TableScroll 与 Mantine Table 共用 UI 样式，领域组合继续保留 |
-| Chart.js、TanStack Virtual、格式工具 | 保留专业实现；第五批统一趋势主题、数值表和缺失值，分布改用 Progress；代表性浏览器验收完成，运行时性能验证仍待完成 |
-| 已删除无调用组件 | #168 已清理旧 Input、Select、MainActionButton、PortalTooltip、QuestionMarkHelp、QuestionMarkHelpButton，不重新引入 |
+| Chart.js、TanStack Virtual、格式工具 | 保留专业实现；第五批统一趋势主题、数值表和缺失值，分布改用 Progress；代表性浏览器验收完成，帧耗时基准按独立性能任务记录 |
+| 已删除无调用组件 | #168 已清理旧自研 Input/Select、MainActionButton、PortalTooltip、QuestionMarkHelp、QuestionMarkHelpButton；第十三批再删除无生产调用的四个旧全局 SCSS 入口，不重新引入 |
 
 ## 基线与验证记录
 
@@ -357,3 +357,51 @@ Vite 资源合计：JS **938.46 kB / gzip 287.94 kB**，CSS **159.86 kB / gzip 2
 Vite 资源合计：JS **942.77 kB / gzip 289.04 kB**，CSS **159.86 kB / gzip 29.05 kB**；相对第十一批分别 **+4.31/+1.10 kB**、**0/0 kB**（原始/gzip）。主入口 **533.82 kB / gzip 166.18 kB**，默认 500kB warning 保留且构建通过；本批没有新增依赖或进行无关分包优化。
 
 生产配置写入、真实 Provider 调用、屏幕阅读器人工朗读和帧耗时基准是本批未执行的环境/人工验证披露，不是 PR #180 新增的关闭条件。该 PR 只以本文列明的查询生命周期、状态恢复和代表性逐页证据为验收边界；#166 仍保持开放，后续是否关闭由 Issue 中原有未完成项和独立证据决定。
+
+## 第十三批：最终组件审计与适用交互收尾
+
+基线为 PR #180 合并后的 main `8eef98f`，分支 `codex/166-ui-closure`、PR #181。本批不改变 Rust、Admin API、数据库、核算规则、导航入口或业务 schema，只收敛前端组件、遗留样式和第十二批之后仍适用的真实浏览器交互。
+
+### 组件与样式审计
+
+- 生产源码中的 26 个 `SelectField` 调用点及 `UsageTrend` 的直接下拉全部前进迁移到 Mantine Select：调用方传 `data` 和受控字符串值，不解析旧 `<option>`、不合成 DOM change 事件，也不保留 NativeSelect 兼容层。主题统一配置 Portal、z-index、flip/shift、120ms 过渡与品牌 dropdown/option；按内部依赖补入 `ScrollArea.css`。生产与测试源码均无 `NativeSelect`、`<select>`、`<option>` 或 `HTMLSelectElement` 残留。
+- 全组件扫描未发现生产源码直接编写的 button/input/select/textarea/details/summary/progress、手写 Portal/overlay，或旧 PortalTooltip/QuestionMarkHelp。当前公共体系覆盖 Button、ActionIcon/Tooltip、TextInput/Select/Textarea、Checkbox/Switch/Tabs、Alert/Loader/Paper/Badge、Modal/Drawer/Popover、Table/Progress/NavLink/Notifications。LanguageSwitcher、SegmentedTabs、TableScroll、FormGrid、DrawerSection、PageActions 和 DetailList 是仍有项目语义的组合，保留而不机械包装成新的 Mantine 抽象。
+- 静态导入与选择器调用核对后删除无生产调用的 `components.scss`、`layout.scss`、`themes.scss`、`mixins.scss`，共 1,374 行；仍实际生效的卡片/控件尺寸与文字 Token 迁入 `gateway-brand.scss`。同时删除无调用的全局 utility/fade、刷新条动画和被更宽断点/父布局覆盖的重复响应式规则。最终加载顺序为 reset → 品牌 Token → Mantine 按需样式及依赖 → CSS Modules；`ConsolePrimitives.module.scss` 仅服务 SegmentedTabs。
+- 禁用 IconButton 改用 Mantine 官方可提示模式：保留焦点与 Tooltip，暴露 `aria-disabled` / `data-disabled`，公共入口阻止按钮动作及父行 click。Modal 的 `closeDisabled` 显式同时关闭 close button、Esc 与 backdrop 三条关闭路径。
+- Virtual Key 创建/轮换成功后先退出表单 Modal，再由 `onExitTransitionEnd` 打开结果 Modal；结果获得焦点，关闭后返回稳定触发器，Key 正文即时从 DOM 清除。避免同一 render 同时卸载焦点来源和挂载敏感结果。
+
+### 实际 App 浏览器矩阵
+
+Chrome 通过 Vite 运行最终源码，并经本地合成 API 覆盖可逆写流程；没有连接生产数据。先在 1900px 桌面、再在 390px 英文深色逐一进入八个真实 hash 路由，标题、一级标题和导航选中态一致，关闭残留浮层后各页根宽度不超过视口；宽表仅在命名的局部滚动区滚动。最终状态证据精确复用前批结果，并以本批实际重放补齐交互，不把单张截图扩写成笛卡尔积验收：
+
+| 页面 | 最终采用的证据范围 |
+| --- | --- |
+| 总览 | 第十批桌面/390px 指标与图表；第十二批 390px 英文深色慢刷新、错误/空态与查询身份 |
+| 用量分析 | 第十批 375px 深色构成/分布，第十一批长字段和筛选；该页无导出功能（N/A） |
+| 请求事件 | 第七批虚拟列表测量/滚动，第十/十二批详情与分页恢复；本批重放列 Popover、详情滚动及 CSV/JSON 实际落盘 |
+| 来源 | 第六/十一批表格、详情和长字段；本批重放 Tooltip、详情→编辑、Modal/Drawer 内 Select、禁用项与 Esc 层级 |
+| 模型发现 | 第九批失败反馈与第十二批来源 scope 切换/刷新恢复；本批确认 Mantine Select 接入无旧数据泄漏或交互回退 |
+| 模型与路由 | 第六批三表格和第十一批三实体表单/Route 编辑；本批确认全部下拉调用已迁移并可进入 |
+| 能力矩阵 | 第六/十一批 native/degraded/不可路由、筛选与窄屏详情；本批确认筛选/编辑下拉已迁移并可进入 |
+| 设置 | 第九/十一/十二批 Key 结果、操作区和脱敏导出；本批重放 pending 撤销、禁用 Tooltip、创建/轮换焦点与敏感 DOM 清理 |
+
+适用浮层组合的本批结果：
+
+| 组合 | 实际结果与证据 |
+| --- | --- |
+| Select in Modal / Drawer | 桌面英文深色和 390px 深色下由 Mantine 绘制，长文案、disabled `Unknown`、键盘选择和 Portal 均未被正文裁剪；第一次 Esc 只关闭 Select，第二次关闭父浮层。[来源 Drawer 截图](evidence/166/b13-source-select-drawer-desktop-dark-en.jpg) |
+| Popover at 390px edge | 事件列设置在视口内完成 flip/shift，Shift+Tab 在交互内容内循环，勾选即时同步列；Esc 或外部点击关闭并把焦点还给触发器，随后详情 Drawer 可滚动并返回对应行。[截图](evidence/166/b13-events-popover-mobile-dark-en.jpg) |
+| busy Modal | 撤销请求延迟期间 close button、Esc、backdrop 和重复提交均不关闭/不重发，请求日志只有一次 POST；完成后正常退出。创建/轮换按“来源 → 结果”串行交接焦点，截图不保存 Key 正文 |
+| disabled Tooltip | 桌面表格 Tooltip 不被 TableScroll 裁剪；390px 英文深色禁用行操作仍可聚焦并显示原因，但不会执行或触发行点击。[桌面](evidence/166/b13-source-tooltip-desktop-light.jpg) / [移动](evidence/166/b13-settings-disabled-tooltip-mobile-dark-en.jpg) |
+| mobile navigation Drawer | 390×844 浅色下焦点约束、body scroll lock、关闭卸载和无整页横向溢出通过。[截图](evidence/166/b13-mobile-navigation-drawer-light.jpg) |
+| reduced motion | 通过 Chrome DevTools 实际启用 `prefers-reduced-motion: reduce`，页面 `matchMedia` 为 true，Modal content/overlay 过渡时长均为 0s，焦点进入和 Esc 返回仍正常；随后恢复默认模拟状态 |
+
+当前生产代码没有 Menu、Popover 内 Select、Modal 内 Popover 或 Drawer 内二次确认，因此这些组合为 N/A；不为验收构造不存在的产品层级。事件 CSV（184 B）与 JSON（3,209 B）由真实浏览器下载到文件系统并检查文件名、格式与内容，补齐第十二批只验证 Blob 的披露。UI 合成写操作不代表生产 Key、配置或 Provider 验收。
+
+### 验证与边界
+
+最终 Web 验证通过：`npm run lint`（ESLint、Knip、production Knip）、`npm run typecheck`、`npm run test`（32 文件 **198 项**）、`npm run build` 和 `git diff --check`；其中组件/表单定向回归为 6 文件 **55 项**。生产源码扫描无上述原生控件与旧浮层残留。
+
+Vite 资源合计：JS **960.74 kB / gzip 293.96 kB**，CSS **143.06 kB / gzip 25.62 kB**；相对第十二批分别 **+17.97/+4.92 kB**、**−16.80/−3.43 kB**（原始/gzip）。主入口 **567.00 kB / gzip 175.77 kB**，保留默认 500kB warning，构建通过；增长来自将浏览器原生下拉改为 Mantine Select，CSS 减少来自确认无调用的旧全局层。本批没有新增依赖或进行无关分包优化。
+
+未执行 Rust/PostgreSQL/live Provider、生产配置/密钥写入、屏幕阅读器人工朗读或帧耗时基准。它们仍是环境/人工验证披露，不是本批新增加的关闭条件；第十三批的完成范围是 #166 剩余前端代码审计、适用交互和合成 API 浏览器验收。

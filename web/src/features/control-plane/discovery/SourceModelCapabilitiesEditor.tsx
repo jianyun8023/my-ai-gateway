@@ -150,22 +150,40 @@ export function SourceModelCapabilitiesEditor({
               )}
             </header>
             <FormGrid>
-              <SelectField label={t('discovery.capability_mode')} value={draft.mode} disabled={Boolean(rowBusy)} onChange={(event) => updateDraft(protocol, { mode: event.target.value as SourceProtocolMode })}>
-                {CAPABILITY_MODES.map((mode) => <option key={mode} value={mode}>{t(`values.mode.${mode}`)}</option>)}
-              </SelectField>
-              <SelectField label={t('discovery.capability_status')} value={draft.status} disabled={Boolean(rowBusy)} onChange={(event) => updateDraft(protocol, { status: event.target.value as CatalogStatus })}>
-                {CAPABILITY_STATUSES.map((status) => <option key={status} value={status}>{t(`values.status.${status}`)}</option>)}
-              </SelectField>
+              <SelectField
+                label={t('discovery.capability_mode')}
+                value={draft.mode}
+                disabled={Boolean(rowBusy)}
+                data={CAPABILITY_MODES.map((mode) => ({ value: mode, label: t(`values.mode.${mode}`) }))}
+                onChange={(value) => updateDraft(protocol, { mode: value as SourceProtocolMode })}
+              />
+              <SelectField
+                label={t('discovery.capability_status')}
+                value={draft.status}
+                disabled={Boolean(rowBusy)}
+                data={CAPABILITY_STATUSES.map((status) => ({ value: status, label: t(`values.status.${status}`) }))}
+                onChange={(value) => updateDraft(protocol, { status: value as CatalogStatus })}
+              />
               {draft.mode === 'adapter' && (
                 <>
-                  <SelectField label={t('discovery.capability_source_protocol')} value={draft.source_protocol} disabled={Boolean(rowBusy)} onChange={(event) => updateDraft(protocol, { source_protocol: event.target.value as GatewayProtocol })}>
-                    <option value="">{t('discovery.none')}</option>
-                    {GATEWAY_PROTOCOLS.filter((item) => item !== protocol).map((item) => <option key={item} value={item}>{PROTOCOL_LABELS[item]}</option>)}
-                  </SelectField>
-                  <SelectField label={t('discovery.capability_adapter')} value={draft.adapter} disabled={Boolean(rowBusy)} onChange={(event) => updateDraft(protocol, { adapter: event.target.value })}>
-                    <option value="">{t('discovery.none')}</option>
-                    {ADAPTER_OPTIONS.map((name) => <option key={name} value={name}>{name}</option>)}
-                  </SelectField>
+                  <SelectField
+                    label={t('discovery.capability_source_protocol')}
+                    value={draft.source_protocol}
+                    disabled={Boolean(rowBusy)}
+                    data={[
+                      { value: '', label: t('discovery.none') },
+                      ...GATEWAY_PROTOCOLS.filter((item) => item !== protocol)
+                        .map((item) => ({ value: item, label: PROTOCOL_LABELS[item] })),
+                    ]}
+                    onChange={(value) => updateDraft(protocol, { source_protocol: value as GatewayProtocol })}
+                  />
+                  <SelectField
+                    label={t('discovery.capability_adapter')}
+                    value={draft.adapter}
+                    disabled={Boolean(rowBusy)}
+                    data={[{ value: '', label: t('discovery.none') }, ...ADAPTER_OPTIONS.map((name) => ({ value: name, label: name }))]}
+                    onChange={(value) => updateDraft(protocol, { adapter: value })}
+                  />
                 </>
               )}
             </FormGrid>

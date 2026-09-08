@@ -38,7 +38,7 @@ import { VirtualKeyRotationForm } from '@/features/control-plane/VirtualKeyRotat
 import { useAdminQuery } from '@/hooks/useAdminQuery';
 import { useLocalizedApiError } from '@/hooks/useLocalizedApiError';
 import { formatDateTime } from '@/utils/format';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 interface SettingsPageProps {
@@ -54,6 +54,13 @@ interface SettingsData {
   capabilities: CapabilityMatrixResponse;
 }
 
+interface RevealedKeyResult {
+  id: number;
+  name: string;
+  key: string;
+  message?: string;
+}
+
 export function SettingsPage({
   api,
   refreshRevision = 0,
@@ -64,7 +71,8 @@ export function SettingsPage({
   const { t } = useTranslation('console');
   const localizedApiError = useLocalizedApiError();
   const [createOpen, setCreateOpen] = useState(false);
-  const [revealedKey, setRevealedKey] = useState<{ id: number; name: string; key: string; message?: string }>();
+  const [revealedKey, setRevealedKey] = useState<RevealedKeyResult>();
+  const pendingRevealedKey = useRef<RevealedKeyResult | undefined>(undefined);
   const [copyStatus, setCopyStatus] = useState<'copied' | 'pending' | 'failed'>('pending');
   const { value: revokeTarget, setValue: setRevokeTarget, opened: revokeTargetOpen, afterExit: revokeTargetAfterExit } = useOverlayState<VirtualKey>();
   const { value: rotateTarget, setValue: setRotateTarget, opened: rotateTargetOpen, afterExit: rotateTargetAfterExit } = useOverlayState<VirtualKey>();
@@ -72,6 +80,12 @@ export function SettingsPage({
   const [mutationBusy, setMutationBusy] = useState(false);
   const [mutationError, setMutationError] = useState<AdminErrorShape>();
   const [reloadResult, setReloadResult] = useState<RuntimeReloadResult>();
+
+  const revealPendingKey = () => {
+    const result = pendingRevealedKey.current;
+    pendingRevealedKey.current = undefined;
+    if (result) setRevealedKey(result);
+  };
 
   const load = useCallback(async (signal: AbortSignal): Promise<SettingsData> => {
     const [keys, capabilities] = await Promise.all([
@@ -119,8 +133,8 @@ export function SettingsPage({
   const createKey = (name: string, allowedModels: string[]) => {
     void mutate(async () => {
       const result = await api.createVirtualKey({ name, allowed_models: allowedModels });
+      pendingRevealedKey.current = { id: result.id, name: result.name, key: result.key, message: t('settings.key_created') };
       setCreateOpen(false);
-      setRevealedKey({ id: result.id, name: result.name, key: result.key, message: t('settings.key_created') });
       setCopyStatus('pending');
       try {
         await navigator.clipboard.writeText(result.key);
@@ -148,11 +162,11 @@ export function SettingsPage({
       const validUntil = result.overlap_until && rotateTarget.expires_at
         ? new Date(Math.min(Date.parse(result.overlap_until), Date.parse(rotateTarget.expires_at))).toISOString()
         : result.overlap_until;
-      setRevealedKey({ id: result.new_id, name: rotateTarget.name, key: result.key,
+      pendingRevealedKey.current = { id: result.new_id, name: rotateTarget.name, key: result.key,
         message: validUntil
           ? t('settings.key_rotated_overlap', { name: rotateTarget.name, until: formatDateTime(validUntil) })
           : t('settings.key_rotated_immediate', { name: rotateTarget.name }),
-      });
+      };
       setCopyStatus('pending');
       setRotateTarget(undefined);
       query.reload();
@@ -272,6 +286,7 @@ export function SettingsPage({
 
       <Modal
         open={createOpen}
+        onExitTransitionEnd={revealPendingKey}
         title={t('settings.modal.new_key')}
         width={560}
         onClose={() => !mutationBusy && setCreateOpen(false)}
@@ -283,7 +298,10 @@ export function SettingsPage({
 
       <Modal
         open={rotateTargetOpen}
-        onExitTransitionEnd={rotateTargetAfterExit}
+        onExitTransitionEnd={() => {
+          rotateTargetAfterExit();
+          revealPendingKey();
+        }}
         title={t('settings.modal.rotate_title', { name: rotateTarget?.name })}
         width={560}
         onClose={() => !mutationBusy && setRotateTarget(undefined)}
