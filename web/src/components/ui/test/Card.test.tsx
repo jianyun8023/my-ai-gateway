@@ -1,57 +1,38 @@
-import { resolve } from 'node:path';
-import { renderToStaticMarkup } from 'react-dom/server';
-import { compile } from 'sass';
-import { describe, expect, it } from 'vitest';
+// @vitest-environment happy-dom
+import { act } from 'react';
+import { createRoot } from '@/test/render';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Card } from '../Card';
+import { Button } from '../Button';
 
-const componentsCSS = compile(resolve(process.cwd(), 'src/styles/components.scss')).css;
+describe('Card composition', () => {
+  let container: HTMLDivElement;
+  let root: ReturnType<typeof createRoot>;
+  beforeEach(() => {
+    globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+  afterEach(() => { act(() => root.unmount()); container.remove(); });
 
-describe('Card', () => {
-  it('renders the shared heading contract and flush surface variant', () => {
-    const html = renderToStaticMarkup(
-      <Card
-        title="Title"
-        subtitle="Description"
-        titleMeta={<span>3 items</span>}
-        extra={<button type="button">Action</button>}
-        variant="flush"
-      >
-        Body
-      </Card>,
-    );
-
-    expect(html).toContain('class="card card-flush"');
-    expect(html).toContain('class="card-header"');
-    expect(html).toContain('class="keeper-card-heading"');
-    expect(html).toContain('class="keeper-card-title-track"');
-    expect(html).toContain('class="keeper-card-title"');
-    expect(html).toContain('class="keeper-card-title-meta"');
-    expect(html).toContain('class="keeper-card-subtitle"');
-    expect(html).toContain('class="keeper-card-actions"');
-    expect(html).toContain('>Description</p>');
-    expect(html).toContain('>Body</div>');
+  it('preserves headings, metadata, actions and caller attributes around table content', () => {
+    const onAction = vi.fn();
+    act(() => root.render(<Card title="Models" subtitle="Confirmed catalog" titleMeta={<span>3 items</span>}
+      extra={<Button onClick={onAction}>Refresh</Button>} variant="flush" id="catalog-card" aria-label="Catalog"
+    ><table><tbody><tr><td>model-a</td></tr></tbody></table></Card>));
+    expect(container.querySelector('#catalog-card')?.getAttribute('aria-label')).toBe('Catalog');
+    expect(container.querySelector('h3')?.textContent).toBe('Models');
+    expect(container.querySelector('p')?.textContent).toBe('Confirmed catalog');
+    expect(container.textContent).toContain('3 items');
+    expect(container.querySelector('td')?.textContent).toBe('model-a');
+    act(() => container.querySelector('button')!.click());
+    expect(onAction).toHaveBeenCalledOnce();
   });
 
-  it('preserves heading and paragraph semantics for the shared card copy', () => {
-    const html = renderToStaticMarkup(
-      <Card title="Title" subtitle="Description">
-        Body
-      </Card>,
-    );
-
-    expect(html).toContain('<h3 class="keeper-card-title">Title</h3>');
-    expect(html).toContain('<p class="keeper-card-subtitle">Description</p>');
-  });
-
-  it('stacks card header actions below the heading at the mobile breakpoint', () => {
-    expect(componentsCSS).toMatch(
-      /@media \(max-width: 768px\) \{[\s\S]*?\.card-header \{[^}]*grid-template-columns: minmax\(0, 1fr\);/,
-    );
-  });
-
-  it('keeps the default surface free of the flush modifier', () => {
-    const html = renderToStaticMarkup(<Card>Body</Card>);
-
-    expect(html).toContain('class="card"');
+  it('supports body-only cards without adding an empty heading', () => {
+    act(() => root.render(<Card>Body</Card>));
+    expect(container.querySelector('h3')).toBeNull();
+    expect(container.querySelector('[data-ui="card"]')?.textContent).toBe('Body');
   });
 });

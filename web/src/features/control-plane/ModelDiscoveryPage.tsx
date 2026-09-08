@@ -1,3 +1,4 @@
+import { Notice } from '@/components/ui/Notice';
 import { Checkbox } from '@mantine/core';
 import { useOverlayState } from '@/components/ui/useOverlayState';
 import type {
@@ -18,7 +19,6 @@ import {
   IconPlay,
   IconRefreshCw,
   IconSlidersHorizontal,
-  IconTriangleAlert,
 } from '@/components/ui/icons';
 import { LoadingState } from '@/components/ui/LoadingState';
 import { Modal } from '@/components/ui/Modal';
@@ -195,10 +195,7 @@ export function ModelDiscoveryPage({ api, refreshRevision = 0, onBusyChange }: M
       {mutationError && !editingModel && !confirmOpen && <ErrorState error={mutationError} />}
 
       {discoveryDefinition?.support === 'unsupported' && !discovery?.latest && (
-        <div className={styles.warningState} role="status">
-          <IconTriangleAlert size={17} />
-          <span><strong>{t('discovery.declares_unsupported')}</strong><small>{discoveryDefinition.reason}</small></span>
-        </div>
+        <Notice tone="warning"><strong>{t('discovery.declares_unsupported')}</strong><small>{discoveryDefinition.reason}</small></Notice>
       )}
 
       <Card title={t('discovery.latest_run_card')} extra={<StatusPill tone="accent">{source?.provider_preset_id}@{source?.provider_preset_version}</StatusPill>}>

@@ -373,6 +373,24 @@ describe('production control-plane pages', () => {
     expect(container.textContent).toContain('预设 1');
     expect(container.textContent).toContain('上游 1');
     expect(container.textContent).toContain('未知 1');
+    expect(container.querySelector('[role="status"]')?.textContent).toContain('discovery_unsupported');
+  });
+
+  it('retains discovery failure details alongside the existing model catalog', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const response = await baseHandler(input);
+      if (String(input) !== '/admin/sources/source-a/discoveries/latest') return response;
+      const latest = await response.json();
+      latest.data.status = 'failed';
+      latest.data.error_code = 'upstream_timeout';
+      latest.data.error_message = 'Catalog request timed out';
+      return jsonResponse(latest);
+    }));
+    await renderPage('discovery');
+    const alert = container.querySelector('[role="alert"]')!;
+    expect(alert.textContent).toContain('upstream_timeout');
+    expect(alert.textContent).toContain('Catalog request timed out');
+    expect(container.querySelector('tbody')?.textContent).toContain('upstream-a');
   });
 
   it('renders fixed three-protocol runtime facts without inferring unroutable as supported', async () => {
@@ -468,13 +486,20 @@ describe('production control-plane pages', () => {
   });
 
   it('renders structured 401 state with a retry action', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({
+    const fetchRequest = vi.fn<typeof fetch>(async () => jsonResponse({
       error: { code: 'unauthorized', message: 'admin key required' },
-    }, 401)));
+    }, 401));
+    vi.stubGlobal('fetch', fetchRequest);
     await renderPage('capabilities');
 
     expect(container.textContent).toContain('Admin Key 未通过验证');
     expect(container.textContent).toContain('unauthorized');
     expect(container.textContent).toContain('重试');
+    fetchRequest.mockImplementation(baseHandler);
+    await act(async () => {
+      [...container.querySelectorAll('button')].find(button => button.textContent?.includes('重试'))!.click();
+    });
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(container.querySelector('tbody')?.textContent).toContain('Model A');
   });
 });

@@ -1,4 +1,6 @@
+import { Paper, Text, Title } from '@mantine/core';
 import { type PropsWithChildren, type ReactNode, type HTMLAttributes } from 'react';
+import styles from './Card.module.scss';
 
 interface CardProps extends Omit<HTMLAttributes<HTMLDivElement>, 'title'> {
   title?: ReactNode;
@@ -9,33 +11,19 @@ interface CardProps extends Omit<HTMLAttributes<HTMLDivElement>, 'title'> {
   className?: string;
 }
 
-export function Card({ title, subtitle, titleMeta, extra, variant = 'default', children, className, ...props }: PropsWithChildren<CardProps>) {
-  const cardClassName = [
-    'card',
-    variant === 'flush' ? 'card-flush' : '',
-    className,
-  ].filter(Boolean).join(' ');
+export function Card({ title, subtitle, titleMeta, extra, variant = 'default', children, className = '', ...props }: PropsWithChildren<CardProps>) {
   const hasHeading = title || subtitle || titleMeta;
-
-  return (
-    <div className={cardClassName} {...props}>
-      {(hasHeading || extra) && (
-        <div className="card-header">
-          {hasHeading && (
-            <div className="keeper-card-heading">
-              {(title || titleMeta) && (
-                <div className="keeper-card-title-track">
-                  {title && <h3 className="keeper-card-title">{title}</h3>}
-                  {titleMeta && <div className="keeper-card-title-meta">{titleMeta}</div>}
-                </div>
-              )}
-              {subtitle && <p className="keeper-card-subtitle">{subtitle}</p>}
-            </div>
-          )}
-          {extra && <div className="keeper-card-actions">{extra}</div>}
-        </div>
-      )}
-      {children}
-    </div>
-  );
+  return <Paper {...props} withBorder radius="var(--keeper-card-radius)" className={`${styles.card} ${className}`} data-ui="card" data-variant={variant}>
+    {(hasHeading || extra) && <div className={styles.header}>
+      {hasHeading && <div className={styles.heading}>
+        {(title || titleMeta) && <div className={styles.titleTrack}>
+          {title && <Title order={3} className={styles.title}>{title}</Title>}
+          {titleMeta && <div className={styles.titleMeta}>{titleMeta}</div>}
+        </div>}
+        {subtitle && <Text component="p" className={styles.subtitle}>{subtitle}</Text>}
+      </div>}
+      {extra && <div className={styles.actions}>{extra}</div>}
+    </div>}
+    {children}
+  </Paper>;
 }

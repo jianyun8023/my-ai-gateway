@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest';
 
 const themes = readFileSync(new URL('../themes.scss', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 const reset = readFileSync(new URL('../reset.scss', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
-const components = readFileSync(new URL('../components.scss', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 
 describe('Keeper visual foundation', () => {
   it('defines the global card, typography, and control scale', () => {
@@ -20,11 +19,4 @@ describe('Keeper visual foundation', () => {
     expect(reset).toMatch(/body\s*\{[\s\S]*?font-size:\s*var\(--keeper-body-font-size\);/);
   });
 
-  it('makes retained cards, titles and subtitles consume the global contract', () => {
-    expect(components).toMatch(/\.keeper-card-surface\s*\{[\s\S]*?border-radius:\s*var\(--keeper-card-radius\);/);
-    expect(components).toMatch(/\.card\s*\{[\s\S]*?padding:\s*var\(--keeper-card-padding\);/);
-    expect(components).toMatch(/\.card-flush\s*\{[\s\S]*?padding:\s*0;/);
-    expect(components).toMatch(/\.keeper-card-title\s*\{[\s\S]*?font-size:\s*var\(--keeper-card-title-size\);[\s\S]*?font-weight:\s*var\(--keeper-card-title-weight\);/);
-    expect(components).toMatch(/\.keeper-card-subtitle\s*\{[\s\S]*?font-size:\s*var\(--keeper-card-subtitle-size\);[\s\S]*?font-weight:\s*var\(--keeper-card-subtitle-weight\);/);
-  });
 });
