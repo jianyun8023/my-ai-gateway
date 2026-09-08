@@ -83,6 +83,7 @@ export const usage = {
 
   // —— 趋势/构成/分布 ——
   metric: {
+    composition: '输入 / 输出',
     total: 'Token 总量',
     input: '输入 Token',
     output: '输出 Token',
@@ -100,14 +101,23 @@ export const usage = {
     total: '总计',
   },
   trend: {
+    empty: '当前范围没有趋势数据',
+    view_data: '查看数据',
+    hide_data: '收起数据',
+    composition_hint: '输入与输出分项堆叠，上报总量可单独切换查看。',
+    axes_hint: '两项指标使用独立坐标轴。',
     title: '用量趋势',
     subtitle: '时间按本地时区显示',
   },
   composition: {
+    overlap: '推理、缓存可能包含在输入或输出中，各项不应相加。',
+    missing: '{{count}} 次请求缺失用量，未计入 Token 汇总。',
     title: 'Token 构成',
-    cache_rate: '缓存命中率: {{rate}}%',
+    cache_rate: '缓存命中率: {{rate}}',
   },
   distribution: {
+    requests: '{{count}} 次请求',
+    top: '显示前 {{count}} 项，共 {{total}} 项',
     title: '模型 Token 分布',
     subtitle: '按逻辑模型与 Token 总量排序',
     empty: '暂无模型分布',
@@ -125,12 +135,13 @@ export const usage = {
 
   // —— 空态与图表通用 ——
   breakdown: {
-    subtitle: '按 Token 总量排序',
+    subtitle: 'Token 总量及当前范围占比',
     empty: '暂无分布数据',
   },
   latency: {
-    title: '延迟诊断',
-    subtitle: '按聚合维度显示平均延迟',
+    title: '来源延迟',
+    subtitle: '按来源显示平均延迟、P95 和请求数',
+    p95: 'P95 延迟',
     dataset: '平均延迟(ms)',
     empty: '暂无延迟聚合',
   },

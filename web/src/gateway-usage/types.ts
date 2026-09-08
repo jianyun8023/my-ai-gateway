@@ -74,6 +74,7 @@ export interface UsageBreakdownItem {
   successfulRequests: number;
   tokens: TokenTotals;
   averageLatencyMs?: number;
+  p95LatencyMs?: number;
 }
 
 export interface UsageAttemptViewModel {

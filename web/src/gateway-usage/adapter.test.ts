@@ -3,6 +3,10 @@ import { adaptUsageBreakdown, adaptUsageEventAttempts, adaptUsageEventPage, adap
 import { gatewayUsageBreakdownFixture, gatewayUsageEventsFixture, gatewayUsageSummaryFixture, gatewayUsageTimeseriesFixture } from '@/test/fixtures/usage';
 
 describe('gateway usage adapter', () => {
+  it('preserves source P95 from the API and distinguishes absent percentiles from zero', () => {
+    const items = adaptUsageBreakdown({ items: [{ key: 'slow', p95_latency_ms: 1500 }, { key: 'zero', p95_latency_ms: 0 }, { key: 'missing' }] });
+    expect(items.map(item => item.p95LatencyMs)).toEqual([1500, 0, undefined]);
+  });
   it('maps detail attempts at the API boundary without interpreting missing status as success', () => {
     const attempts = adaptUsageEventAttempts({ attempts: [
       { attempt_no: 2, provider_id: 'provider-b', source_id: 'source-b', account_id: 'account-b', upstream_model_id: 'model-b', status_code: 200, latency_ms: 30 },

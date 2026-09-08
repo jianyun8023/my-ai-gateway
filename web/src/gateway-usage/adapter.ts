@@ -148,6 +148,7 @@ export const adaptUsageBreakdown = (payload: RawGatewayUsagePayload): UsageBreak
       averageLatencyMs: firstDefined(item, ['average_latency_ms', 'avg_latency_ms']) === undefined
         ? undefined
         : readNumber(item, ['average_latency_ms', 'avg_latency_ms']),
+      p95LatencyMs: firstDefined(item, ['p95_latency_ms']) === undefined ? undefined : readNumber(item, ['p95_latency_ms']),
     };
   });
 };

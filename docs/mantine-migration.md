@@ -39,7 +39,7 @@ Issue 中 `de708e8` 的链接是历史调查依据。当前事件详情已位于
 | SegmentedTabs、LanguageSwitcher、Toggle | 第三批迁移到 Mantine Tabs、Button、Switch，保留面板/筛选语义和布尔值回调 |
 | Notice、LoadingState、LoadingSpinner、EmptyState、StatusPill | 第四批采用 Alert、Loader、Paper、ThemeIcon、Text、Badge，保留持久错误、部分失败与重试信息 |
 | Card、TableScroll、FormGrid、FilterBar、PageActions、DrawerSection | 第四批 Card 使用 Paper/Title/Text，样式归入 UI 层；其他领域组合继续保留，表格后续收敛 |
-| Chart.js、TanStack Virtual、格式工具 | 保留专业实现；后续统一主题、容器、数值/缺失值展示并验证性能 |
+| Chart.js、TanStack Virtual、格式工具 | 保留专业实现；第五批统一趋势主题、数值表和缺失值，分布改用 Progress；浏览器与性能验证仍待完成 |
 | 已删除无调用组件 | #168 已清理旧 Input、Select、MainActionButton、PortalTooltip、QuestionMarkHelp、QuestionMarkHelpButton，不重新引入 |
 
 ## 基线与验证记录
@@ -128,3 +128,20 @@ DOM 回归覆盖错误重试到成功与关闭、单次加载播报转空态、�
 本批没有完成图表与表格迁移、全八页状态组合、屏幕阅读器实测或运行时性能基准。减少动画规则已实现，尚未在浏览器切换系统偏好复验。此前窄屏虚拟事件行指针命中、原生菜单 Esc 与嵌套 Select/Popover 验收缺口仍保留；本批桌面事件点击成功不能替代窄屏复验。#166 保持未完成。
 
 验证通过：`mise exec -- npm --prefix web run lint`（ESLint/Knip）、`typecheck`、`test`（29 个文件、139 项）、`build` 和 `git diff --check`。没有后端改动，未重跑后端或 live Provider 测试。本批构建 JS 合计 889.92 kB（gzip 272.32 kB），CSS 合计 146.54 kB（gzip 27.03 kB）；相对第三批增加 7.10/2.02 kB 与 5.03/1.44 kB（原始/gzip）。主入口 JS 494.30 kB（gzip 153.67 kB）。按需引入 Alert、Badge、Text、Title、ThemeIcon 样式，复用已接入的 Paper/Loader。
+
+## 第五批：图表主题、分布与原型核对
+
+基线为 PR #172 合并后的 main `ab5dad0`，分支 `codex/166-mantine-charts`。原型逐项核对与数据依据见[图表核对记录](chart-prototype-review.md)。
+
+- 总览增加默认 Input/Output 堆叠趋势；保留原有六类指标切换和独立 Total，双轴有明确名称。Canvas 图例、轴、网格、tooltip 和序列使用品牌 Token；提供可展开的精确数值表。
+- 总览模型分布与分析八个维度共享 Mantine Progress 行，显示 Token、占同一筛选范围比例、请求数及前 N/总组数。移除固定高度横条 canvas 与类别索引 tooltip 路径；零值不画人为最小进度。
+- Token 构成迁移 Progress，保留零值和五个独立类别，说明 Reasoning/缓存重叠及 missing；不按原型拼成相加的 100% 图。
+- 来源延迟采用 Mantine Table，只比较 Source；接入已有后端 P95，显示平均值、P95 与请求数，缺失和真实零值分开。后端/数据库契约未变。
+
+验证通过：`mise exec -- npm --prefix web run lint`（ESLint/Knip）、`typecheck`、`test`（30 个文件、145 项）、`build`、`git diff --check`。新增六项回归覆盖趋势切换/独立 Total/精确表、分布排序/零值/分母/截取、重叠与 missing、来源延迟/P95、空趋势及 API P95 映射。未运行后端/live Provider 测试；本批没有真实管理端读写或模型请求。
+
+本批浏览器工具两次报告 Mac 锁屏，自动解锁失败。已请求用户解锁；尚未完成原型与新实现的浏览器并排检查、canvas 实际配色/hover、浅深色切换、390px 尺寸和截图验收。临时合成验收页面已移出仓库；不提交未经视觉检查的截图。本批 PR 应保持草稿，待解锁后补充这些结果再标为可评审。
+
+控制面表格、全八页状态组合、虚拟事件列表指针命中与滚动、先前记录的真实写流程和性能验收仍未完成。总任务 #166 保持开放。
+
+本批构建 JS 合计 900.40 kB（gzip 275.74 kB）、CSS 合计 153.89 kB（gzip 28.24 kB）；相对第四批增加 10.48/3.42 kB 与 7.35/1.21 kB（原始/gzip）。主入口 JS 为 495.51 kB（gzip 154.13 kB）；新增 Progress/Table 按需样式，无新增依赖包。该记录是构建体积，不是运行时性能基准。

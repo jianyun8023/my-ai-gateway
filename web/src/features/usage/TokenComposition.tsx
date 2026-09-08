@@ -1,3 +1,4 @@
+import { Progress } from '@mantine/core';
 import { Card } from '@/components/ui/Card';
 import styles from '@/features/usage/Usage.module.scss';
 import { type UsageSummaryViewModel } from '@/gateway-usage';
@@ -8,11 +9,11 @@ export function TokenComposition({ summary }: { summary: UsageSummaryViewModel }
   const { t } = useTranslation('console');
   const total = summary.tokens.total;
   const rows = [
-    { key: 'input', label: t('usage.legend.input'), value: summary.tokens.input },
-    { key: 'output', label: t('usage.legend.output'), value: summary.tokens.output },
-    { key: 'reasoning', label: t('usage.legend.reasoning'), value: summary.tokens.reasoning },
-    { key: 'cache_read', label: t('usage.legend.cache_read'), value: summary.tokens.cacheRead },
-    { key: 'cache_creation', label: t('usage.legend.cache_creation'), value: summary.tokens.cacheCreation },
+    { color: 'var(--accent)', key: 'input', label: t('usage.legend.input'), value: summary.tokens.input },
+    { color: 'var(--muted)', key: 'output', label: t('usage.legend.output'), value: summary.tokens.output },
+    { color: 'var(--warn)', key: 'reasoning', label: t('usage.legend.reasoning'), value: summary.tokens.reasoning },
+    { color: 'var(--accent)', key: 'cache_read', label: t('usage.legend.cache_read'), value: summary.tokens.cacheRead },
+    { color: 'var(--muted)', key: 'cache_creation', label: t('usage.legend.cache_creation'), value: summary.tokens.cacheCreation },
   ];
   const totalFormatted = formatCompactWithTitle(total);
 
@@ -24,23 +25,23 @@ export function TokenComposition({ summary }: { summary: UsageSummaryViewModel }
           <strong title={totalFormatted.exact}>{totalFormatted.display}</strong>
         </div>
         <div className={styles.tokenBreakdown}>
-          {rows.filter((row) => row.value > 0).map((row) => {
+          {rows.map((row) => {
             const formatted = formatCompactWithTitle(row.value);
             return (
               <div key={row.key} className={styles.tokenRow}>
                 <span>{row.label}</span>
-                <div className={styles.tokenBar}>
-                  <div style={{ width: `${Math.max(2, (row.value / Math.max(total, 1)) * 100)}%` }} />
-                </div>
+                <Progress className={styles.tokenProgress} value={total > 0 ? Math.min(100, row.value / total * 100) : 0} color={row.color} size={8} aria-label={row.label} aria-valuetext={formatted.exact} />
                 <strong title={formatted.exact}>{formatted.display}</strong>
-                <small>{((row.value / Math.max(total, 1)) * 100).toFixed(1)}%</small>
+                <small>{total > 0 ? `${(row.value / total * 100).toFixed(1)}%` : '—'}</small>
               </div>
             );
           })}
         </div>
+        <small className={styles.cacheNote}>{t('usage.composition.overlap')}</small>
+        {(summary.usageSources.missing ?? 0) > 0 && <small className={styles.cacheNote}>{t('usage.composition.missing', { count: summary.usageSources.missing })}</small>}
         {summary.tokens.cacheRead > 0 && (
           <small className={styles.cacheNote}>
-            {t('usage.composition.cache_rate', { rate: ((summary.tokens.cacheRead / Math.max(summary.tokens.input, 1)) * 100).toFixed(1) })}
+            {t('usage.composition.cache_rate', { rate: summary.tokens.input > 0 ? `${(summary.tokens.cacheRead / summary.tokens.input * 100).toFixed(1)}%` : '—' })}
           </small>
         )}
       </div>
