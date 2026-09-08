@@ -1,11 +1,13 @@
+#[cfg(test)]
+use crate::domain::catalog::{LogicalModelInput, ModelBindingInput, SourceInput};
+
 use crate::domain::{
     catalog::{
         CatalogAvailability, CatalogError as DomainCatalogError, CatalogMetadata, CatalogStatus,
         ConnectionTestInput, DiscoveryApplyInput, DiscoveryDiff, DiscoveryDiffEntry,
-        DiscoveryFailureInput, LogicalModelInput, MetadataSource, MetadataValues,
-        ModelBindingInput, ModelPresetInput, ModelPresetRef, ProviderPresetInput, SourceInput,
-        SourceModelCapabilityInput, SourceModelConfirmation, SourceModelRefresh,
-        SourceProtocolMode,
+        DiscoveryFailureInput, MetadataSource, MetadataValues, ModelPresetInput, ModelPresetRef,
+        ProviderPresetInput, SourceModelCapabilityInput, SourceModelConfirmation,
+        SourceModelRefresh, SourceProtocolMode,
     },
     protocol::Protocol,
     provider_preset::{
@@ -20,7 +22,7 @@ use sqlx::{PgConnection, PgPool, Postgres, Transaction};
 use std::{collections::BTreeMap, error::Error, fmt};
 
 #[derive(Debug)]
-pub enum CatalogError {
+pub(crate) enum CatalogError {
     Database(sqlx::Error),
     Json(serde_json::Error),
     NotFound(String),
@@ -113,206 +115,204 @@ impl_catalog_enum_sqlx!(CatalogAvailability, "catalog_availability");
 impl_catalog_enum_sqlx!(SourceProtocolMode, "source_protocol_mode");
 
 #[derive(Clone, Debug, Serialize, sqlx::FromRow)]
-pub struct ProviderPresetRecord {
-    pub id: String,
-    pub version: i32,
-    pub display_name: String,
-    pub definition: Value,
-    pub created_at: DateTime<Utc>,
+pub(crate) struct ProviderPresetRecord {
+    pub(crate) id: String,
+    pub(crate) version: i32,
+    pub(crate) display_name: String,
+    pub(crate) definition: Value,
+    pub(crate) created_at: DateTime<Utc>,
 }
 
 #[derive(Clone, Debug, Serialize, sqlx::FromRow)]
-pub struct SourceRecord {
-    pub id: String,
-    pub display_name: String,
-    pub provider_preset_id: String,
-    pub provider_preset_version: i32,
-    pub provider_preset_snapshot: Value,
-    pub base_url: String,
-    pub endpoints: Value,
-    pub auth_config: Value,
-    pub protocol_capabilities: Value,
-    pub enabled: bool,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
+pub(crate) struct SourceRecord {
+    pub(crate) id: String,
+    pub(crate) display_name: String,
+    pub(crate) provider_preset_id: String,
+    pub(crate) provider_preset_version: i32,
+    pub(crate) provider_preset_snapshot: Value,
+    pub(crate) base_url: String,
+    pub(crate) endpoints: Value,
+    pub(crate) auth_config: Value,
+    pub(crate) protocol_capabilities: Value,
+    pub(crate) enabled: bool,
+    pub(crate) created_at: DateTime<Utc>,
+    pub(crate) updated_at: DateTime<Utc>,
 }
 
 #[derive(Clone, Debug, Serialize, sqlx::FromRow)]
-pub struct ModelPresetRecord {
-    pub id: String,
-    pub version: i32,
-    pub canonical_model_id: String,
-    pub aliases: Value,
-    pub metadata: Value,
-    pub field_sources: Value,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
+pub(crate) struct ModelPresetRecord {
+    pub(crate) id: String,
+    pub(crate) version: i32,
+    pub(crate) canonical_model_id: String,
+    pub(crate) aliases: Value,
+    pub(crate) metadata: Value,
+    pub(crate) field_sources: Value,
+    pub(crate) created_at: DateTime<Utc>,
+    pub(crate) updated_at: DateTime<Utc>,
 }
 
 impl ModelPresetRecord {
-    pub fn catalog_metadata(&self) -> Result<CatalogMetadata, CatalogError> {
+    pub(crate) fn catalog_metadata(&self) -> Result<CatalogMetadata, CatalogError> {
         CatalogMetadata::from_json(self.metadata.clone(), self.field_sources.clone())
             .map_err(Into::into)
     }
 }
 
 #[derive(Clone, Debug, Serialize, sqlx::FromRow)]
-pub struct SourceModelRecord {
-    pub source_id: String,
-    pub upstream_model_id: String,
-    pub confirmation_status: CatalogStatus,
-    pub availability_status: CatalogAvailability,
-    pub raw_snapshot: Value,
-    pub metadata: Value,
-    pub field_sources: Value,
-    pub matched_model_preset_id: Option<String>,
-    pub matched_model_preset_version: Option<i32>,
-    pub first_discovered_at: DateTime<Utc>,
-    pub last_discovered_at: DateTime<Utc>,
-    pub confirmed_at: Option<DateTime<Utc>>,
-    pub unavailable_at: Option<DateTime<Utc>>,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
+pub(crate) struct SourceModelRecord {
+    pub(crate) source_id: String,
+    pub(crate) upstream_model_id: String,
+    pub(crate) confirmation_status: CatalogStatus,
+    pub(crate) availability_status: CatalogAvailability,
+    pub(crate) raw_snapshot: Value,
+    pub(crate) metadata: Value,
+    pub(crate) field_sources: Value,
+    pub(crate) matched_model_preset_id: Option<String>,
+    pub(crate) matched_model_preset_version: Option<i32>,
+    pub(crate) first_discovered_at: DateTime<Utc>,
+    pub(crate) last_discovered_at: DateTime<Utc>,
+    pub(crate) confirmed_at: Option<DateTime<Utc>>,
+    pub(crate) unavailable_at: Option<DateTime<Utc>>,
+    pub(crate) created_at: DateTime<Utc>,
+    pub(crate) updated_at: DateTime<Utc>,
 }
 
 impl SourceModelRecord {
-    pub fn catalog_metadata(&self) -> Result<CatalogMetadata, CatalogError> {
+    pub(crate) fn catalog_metadata(&self) -> Result<CatalogMetadata, CatalogError> {
         CatalogMetadata::from_json(self.metadata.clone(), self.field_sources.clone())
             .map_err(Into::into)
     }
 }
 
 #[derive(Clone, Debug, Serialize, sqlx::FromRow)]
-pub struct DiscoveryRunRecord {
-    pub id: i64,
-    pub source_id: String,
-    pub account_id: Option<String>,
-    pub provider_preset_id: String,
-    pub provider_preset_version: i32,
-    pub status: String,
-    pub raw_snapshot: Option<Value>,
-    pub diff: Value,
-    pub discovered_model_count: i32,
-    pub http_status: Option<i32>,
-    pub latency_ms: i64,
-    pub error_code: Option<String>,
-    pub error_message: Option<String>,
-    pub requested_by: String,
-    pub started_at: DateTime<Utc>,
-    pub completed_at: DateTime<Utc>,
+pub(crate) struct DiscoveryRunRecord {
+    pub(crate) id: i64,
+    pub(crate) source_id: String,
+    pub(crate) account_id: Option<String>,
+    pub(crate) provider_preset_id: String,
+    pub(crate) provider_preset_version: i32,
+    pub(crate) status: String,
+    pub(crate) raw_snapshot: Option<Value>,
+    pub(crate) diff: Value,
+    pub(crate) discovered_model_count: i32,
+    pub(crate) http_status: Option<i32>,
+    pub(crate) latency_ms: i64,
+    pub(crate) error_code: Option<String>,
+    pub(crate) error_message: Option<String>,
+    pub(crate) requested_by: String,
+    pub(crate) started_at: DateTime<Utc>,
+    pub(crate) completed_at: DateTime<Utc>,
 }
 
 impl DiscoveryRunRecord {
-    pub fn discovery_diff(&self) -> Result<DiscoveryDiff, CatalogError> {
+    pub(crate) fn discovery_diff(&self) -> Result<DiscoveryDiff, CatalogError> {
         serde_json::from_value(self.diff.clone()).map_err(Into::into)
     }
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct DiscoveryApplyResult {
-    pub run: DiscoveryRunRecord,
-    pub diff: DiscoveryDiff,
-    pub models: Vec<SourceModelRecord>,
+pub(crate) struct DiscoveryApplyResult {
+    pub(crate) run: DiscoveryRunRecord,
+    pub(crate) diff: DiscoveryDiff,
+    pub(crate) models: Vec<SourceModelRecord>,
 }
 
 #[derive(Clone, Debug, Serialize, sqlx::FromRow)]
-pub struct ConnectionTestRecord {
-    pub id: i64,
-    pub source_id: String,
-    pub account_id: Option<String>,
-    pub protocol: Protocol,
-    pub upstream_protocol: Protocol,
-    pub mode: SourceProtocolMode,
-    pub status: String,
-    pub http_status: Option<i32>,
-    pub latency_ms: i64,
-    pub error_code: Option<String>,
-    pub error_message: Option<String>,
-    pub requested_by: String,
-    pub tested_at: DateTime<Utc>,
+pub(crate) struct ConnectionTestRecord {
+    pub(crate) id: i64,
+    pub(crate) source_id: String,
+    pub(crate) account_id: Option<String>,
+    pub(crate) protocol: Protocol,
+    pub(crate) upstream_protocol: Protocol,
+    pub(crate) mode: SourceProtocolMode,
+    pub(crate) status: String,
+    pub(crate) http_status: Option<i32>,
+    pub(crate) latency_ms: i64,
+    pub(crate) error_code: Option<String>,
+    pub(crate) error_message: Option<String>,
+    pub(crate) requested_by: String,
+    pub(crate) tested_at: DateTime<Utc>,
 }
 
 #[derive(Clone, Debug, Serialize, sqlx::FromRow)]
-pub struct AccountCredentialRef {
-    pub id: String,
-    pub source_id: String,
-    pub credential_env: Option<String>,
-    pub has_credential_ciphertext: bool,
+pub(crate) struct AccountCredentialRef {
+    pub(crate) id: String,
+    pub(crate) source_id: String,
+    pub(crate) credential_env: Option<String>,
+    pub(crate) has_credential_ciphertext: bool,
 }
 
 #[derive(Clone, Debug, Serialize, sqlx::FromRow)]
-pub struct LogicalModelRecord {
-    pub id: String,
-    pub public_name: String,
-    pub display_name: String,
-    pub status: CatalogStatus,
-    pub model_preset_id: Option<String>,
-    pub model_preset_version: Option<i32>,
-    pub metadata: Value,
-    pub field_sources: Value,
-    pub confirmed_at: Option<DateTime<Utc>>,
-    pub unavailable_at: Option<DateTime<Utc>>,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
+#[cfg(test)]
+pub(crate) struct LogicalModelRecord {
+    pub(crate) id: String,
+    pub(crate) public_name: String,
+    pub(crate) display_name: String,
+    pub(crate) status: CatalogStatus,
+    pub(crate) model_preset_id: Option<String>,
+    pub(crate) model_preset_version: Option<i32>,
+    pub(crate) metadata: Value,
+    pub(crate) field_sources: Value,
+    pub(crate) confirmed_at: Option<DateTime<Utc>>,
+    pub(crate) unavailable_at: Option<DateTime<Utc>>,
+    pub(crate) created_at: DateTime<Utc>,
+    pub(crate) updated_at: DateTime<Utc>,
 }
 
 #[derive(Clone, Debug, Serialize, sqlx::FromRow)]
-pub struct SourceModelCapabilityRecord {
-    pub source_id: String,
-    pub upstream_model_id: String,
-    pub protocol: Protocol,
-    pub status: CatalogStatus,
-    pub mode: SourceProtocolMode,
-    pub source_protocol: Option<Protocol>,
-    pub adapter: Option<String>,
-    pub feature_capabilities: Value,
-    pub field_source: String,
-    pub observed_at: DateTime<Utc>,
-    pub confirmed_at: Option<DateTime<Utc>>,
-    pub unavailable_at: Option<DateTime<Utc>>,
-    pub updated_at: DateTime<Utc>,
+pub(crate) struct SourceModelCapabilityRecord {
+    pub(crate) source_id: String,
+    pub(crate) upstream_model_id: String,
+    pub(crate) protocol: Protocol,
+    pub(crate) status: CatalogStatus,
+    pub(crate) mode: SourceProtocolMode,
+    pub(crate) source_protocol: Option<Protocol>,
+    pub(crate) adapter: Option<String>,
+    pub(crate) feature_capabilities: Value,
+    pub(crate) field_source: String,
+    pub(crate) observed_at: DateTime<Utc>,
+    pub(crate) confirmed_at: Option<DateTime<Utc>>,
+    pub(crate) unavailable_at: Option<DateTime<Utc>>,
+    pub(crate) updated_at: DateTime<Utc>,
 }
 
-impl SourceModelCapabilityRecord {
-    #[allow(dead_code)]
-    pub fn is_routable(&self) -> bool {
-        self.status == CatalogStatus::Confirmed && self.mode.is_routable()
-    }
+impl SourceModelCapabilityRecord {}
+
+#[derive(Clone, Debug, Serialize, sqlx::FromRow)]
+#[cfg(test)]
+pub(crate) struct ModelBindingRecord {
+    pub(crate) id: i64,
+    pub(crate) logical_model_id: String,
+    pub(crate) source_id: String,
+    pub(crate) account_id: String,
+    pub(crate) upstream_model_id: String,
+    pub(crate) protocol: Protocol,
+    pub(crate) status: CatalogStatus,
+    pub(crate) priority: i32,
+    pub(crate) confirmed_at: Option<DateTime<Utc>>,
+    pub(crate) unavailable_at: Option<DateTime<Utc>>,
+    pub(crate) created_at: DateTime<Utc>,
+    pub(crate) updated_at: DateTime<Utc>,
 }
 
 #[derive(Clone, Debug, Serialize, sqlx::FromRow)]
-pub struct ModelBindingRecord {
-    pub id: i64,
-    pub logical_model_id: String,
-    pub source_id: String,
-    pub account_id: String,
-    pub upstream_model_id: String,
-    pub protocol: Protocol,
-    pub status: CatalogStatus,
-    pub priority: i32,
-    pub confirmed_at: Option<DateTime<Utc>>,
-    pub unavailable_at: Option<DateTime<Utc>>,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
+#[cfg(test)]
+pub(crate) struct RoutableBindingRecord {
+    pub(crate) binding_id: i64,
+    pub(crate) logical_model_id: String,
+    pub(crate) public_name: String,
+    pub(crate) source_id: String,
+    pub(crate) account_id: String,
+    pub(crate) upstream_model_id: String,
+    pub(crate) protocol: Protocol,
+    pub(crate) mode: SourceProtocolMode,
+    pub(crate) source_protocol: Option<Protocol>,
+    pub(crate) adapter: Option<String>,
+    pub(crate) feature_capabilities: Value,
+    pub(crate) priority: i32,
 }
 
-#[derive(Clone, Debug, Serialize, sqlx::FromRow)]
-pub struct RoutableBindingRecord {
-    pub binding_id: i64,
-    pub logical_model_id: String,
-    pub public_name: String,
-    pub source_id: String,
-    pub account_id: String,
-    pub upstream_model_id: String,
-    pub protocol: Protocol,
-    pub mode: SourceProtocolMode,
-    pub source_protocol: Option<Protocol>,
-    pub adapter: Option<String>,
-    pub feature_capabilities: Value,
-    pub priority: i32,
-}
-
-pub fn provider_preset_diff(
+pub(crate) fn provider_preset_diff(
     source: &SourceRecord,
     latest: &ProviderPresetRecord,
 ) -> ProviderPresetDiff {
@@ -377,7 +377,7 @@ fn diff_json(
     }
 }
 
-pub async fn install_builtin_presets(
+pub(crate) async fn install_builtin_presets(
     repository: &ModelCatalogRepository,
 ) -> Result<(), CatalogError> {
     for preset in builtin_provider_presets()? {
@@ -390,17 +390,18 @@ pub async fn install_builtin_presets(
 }
 
 #[derive(Clone)]
-pub struct ModelCatalogRepository {
+pub(crate) struct ModelCatalogRepository {
     pool: PgPool,
 }
 
-#[allow(dead_code)]
 impl ModelCatalogRepository {
-    pub fn new(pool: PgPool) -> Self {
+    pub(crate) fn new(pool: PgPool) -> Self {
         Self { pool }
     }
 
-    pub async fn list_provider_presets(&self) -> Result<Vec<ProviderPresetRecord>, CatalogError> {
+    pub(crate) async fn list_provider_presets(
+        &self,
+    ) -> Result<Vec<ProviderPresetRecord>, CatalogError> {
         sqlx::query_as::<_, ProviderPresetRecord>(
             "SELECT id,version,display_name,definition,created_at FROM provider_presets ORDER BY id,version DESC",
         )
@@ -409,7 +410,8 @@ impl ModelCatalogRepository {
         .map_err(Into::into)
     }
 
-    pub async fn get_provider_preset(
+    #[cfg(test)]
+    pub(crate) async fn get_provider_preset(
         &self,
         id: &str,
         version: i32,
@@ -422,7 +424,7 @@ impl ModelCatalogRepository {
             .ok_or_else(|| CatalogError::NotFound(format!("provider preset {id} version {version} not found")))
     }
 
-    pub async fn latest_provider_preset(
+    pub(crate) async fn latest_provider_preset(
         &self,
         id: &str,
     ) -> Result<ProviderPresetRecord, CatalogError> {
@@ -433,7 +435,7 @@ impl ModelCatalogRepository {
             .ok_or_else(|| CatalogError::NotFound(format!("provider preset {id} not found")))
     }
 
-    pub async fn insert_provider_preset(
+    pub(crate) async fn insert_provider_preset(
         &self,
         input: &ProviderPresetInput,
     ) -> Result<ProviderPresetRecord, CatalogError> {
@@ -464,7 +466,11 @@ impl ModelCatalogRepository {
         Ok(record)
     }
 
-    pub async fn create_source(&self, input: &SourceInput) -> Result<SourceRecord, CatalogError> {
+    #[cfg(test)]
+    pub(crate) async fn create_source(
+        &self,
+        input: &SourceInput,
+    ) -> Result<SourceRecord, CatalogError> {
         for (name, value) in [
             ("endpoints", &input.endpoints),
             ("auth_config", &input.auth_config),
@@ -504,7 +510,7 @@ impl ModelCatalogRepository {
             .map_err(Into::into)
     }
 
-    pub async fn get_source(&self, id: &str) -> Result<SourceRecord, CatalogError> {
+    pub(crate) async fn get_source(&self, id: &str) -> Result<SourceRecord, CatalogError> {
         sqlx::query_as::<_, SourceRecord>("SELECT id,display_name,provider_preset_id,provider_preset_version,provider_preset_snapshot,base_url,endpoints,auth_config,protocol_capabilities,enabled,created_at,updated_at FROM sources WHERE id=$1")
             .bind(id)
             .fetch_optional(&self.pool)
@@ -512,14 +518,15 @@ impl ModelCatalogRepository {
             .ok_or_else(|| CatalogError::NotFound(format!("source {id} not found")))
     }
 
-    pub async fn list_sources(&self) -> Result<Vec<SourceRecord>, CatalogError> {
+    #[cfg(test)]
+    pub(crate) async fn list_sources(&self) -> Result<Vec<SourceRecord>, CatalogError> {
         sqlx::query_as::<_, SourceRecord>("SELECT id,display_name,provider_preset_id,provider_preset_version,provider_preset_snapshot,base_url,endpoints,auth_config,protocol_capabilities,enabled,created_at,updated_at FROM sources ORDER BY id")
             .fetch_all(&self.pool)
             .await
             .map_err(Into::into)
     }
 
-    pub async fn get_account_credential_ref(
+    pub(crate) async fn get_account_credential_ref(
         &self,
         source_id: &str,
         account_id: &str,
@@ -532,7 +539,7 @@ impl ModelCatalogRepository {
             .ok_or_else(|| CatalogError::NotFound(format!("enabled account {account_id} for source {source_id} not found")))
     }
 
-    pub async fn insert_model_preset(
+    pub(crate) async fn insert_model_preset(
         &self,
         input: &ModelPresetInput,
     ) -> Result<ModelPresetRecord, CatalogError> {
@@ -580,7 +587,7 @@ impl ModelCatalogRepository {
         Ok(record)
     }
 
-    pub async fn match_model_preset(
+    pub(crate) async fn match_model_preset(
         &self,
         upstream_model_id: &str,
     ) -> Result<Option<ModelPresetRecord>, CatalogError> {
@@ -591,7 +598,8 @@ impl ModelCatalogRepository {
             .map_err(Into::into)
     }
 
-    pub async fn refresh_source_model(
+    #[cfg(test)]
+    pub(crate) async fn refresh_source_model(
         &self,
         refresh: &SourceModelRefresh,
     ) -> Result<SourceModelRecord, CatalogError> {
@@ -602,7 +610,7 @@ impl ModelCatalogRepository {
         Ok(record)
     }
 
-    pub async fn list_source_models(
+    pub(crate) async fn list_source_models(
         &self,
         source_id: &str,
         confirmation_status: Option<CatalogStatus>,
@@ -617,7 +625,7 @@ impl ModelCatalogRepository {
             .map_err(Into::into)
     }
 
-    pub async fn update_source_model_user_overrides(
+    pub(crate) async fn update_source_model_user_overrides(
         &self,
         source_id: &str,
         upstream_model_id: &str,
@@ -640,7 +648,8 @@ impl ModelCatalogRepository {
         Ok(record)
     }
 
-    pub async fn confirm_source_model(
+    #[cfg(test)]
+    pub(crate) async fn confirm_source_model(
         &self,
         source_id: &str,
         upstream_model_id: &str,
@@ -659,7 +668,7 @@ impl ModelCatalogRepository {
         .ok_or_else(|| CatalogError::InvalidState("confirmation set cannot be empty".into()))
     }
 
-    pub async fn confirm_source_models(
+    pub(crate) async fn confirm_source_models(
         &self,
         source_id: &str,
         confirmations: &[SourceModelConfirmation],
@@ -710,7 +719,8 @@ impl ModelCatalogRepository {
         Ok(records)
     }
 
-    pub async fn mark_source_model_unavailable(
+    #[cfg(test)]
+    pub(crate) async fn mark_source_model_unavailable(
         &self,
         source_id: &str,
         upstream_model_id: &str,
@@ -725,7 +735,7 @@ impl ModelCatalogRepository {
             .ok_or_else(|| CatalogError::NotFound(format!("source model {source_id}/{upstream_model_id} not found")))
     }
 
-    pub async fn apply_discovery(
+    pub(crate) async fn apply_discovery(
         &self,
         input: &DiscoveryApplyInput,
     ) -> Result<DiscoveryApplyResult, CatalogError> {
@@ -848,7 +858,7 @@ impl ModelCatalogRepository {
         })
     }
 
-    pub async fn record_discovery_failure(
+    pub(crate) async fn record_discovery_failure(
         &self,
         input: &DiscoveryFailureInput,
     ) -> Result<DiscoveryRunRecord, CatalogError> {
@@ -887,7 +897,7 @@ impl ModelCatalogRepository {
             .map_err(Into::into)
     }
 
-    pub async fn latest_discovery_run(
+    pub(crate) async fn latest_discovery_run(
         &self,
         source_id: &str,
     ) -> Result<Option<DiscoveryRunRecord>, CatalogError> {
@@ -898,7 +908,7 @@ impl ModelCatalogRepository {
             .map_err(Into::into)
     }
 
-    pub async fn record_connection_test(
+    pub(crate) async fn record_connection_test(
         &self,
         input: &ConnectionTestInput,
     ) -> Result<ConnectionTestRecord, CatalogError> {
@@ -941,7 +951,8 @@ impl ModelCatalogRepository {
             .map_err(Into::into)
     }
 
-    pub async fn create_logical_model(
+    #[cfg(test)]
+    pub(crate) async fn create_logical_model(
         &self,
         input: &LogicalModelInput,
     ) -> Result<LogicalModelRecord, CatalogError> {
@@ -965,27 +976,8 @@ impl ModelCatalogRepository {
             .map_err(Into::into)
     }
 
-    pub async fn transition_logical_model_status(
-        &self,
-        id: &str,
-        next: CatalogStatus,
-    ) -> Result<LogicalModelRecord, CatalogError> {
-        let current: CatalogStatus =
-            sqlx::query_scalar("SELECT status FROM logical_models WHERE id=$1")
-                .bind(id)
-                .fetch_optional(&self.pool)
-                .await?
-                .ok_or_else(|| CatalogError::NotFound(format!("logical model {id} not found")))?;
-        ensure_transition(current, next, "logical model")?;
-        sqlx::query_as::<_, LogicalModelRecord>("UPDATE logical_models SET status=$2,confirmed_at=CASE WHEN $2='confirmed' THEN COALESCE(confirmed_at,NOW()) ELSE confirmed_at END,unavailable_at=CASE WHEN $2='unavailable' THEN NOW() ELSE NULL END,updated_at=NOW() WHERE id=$1 RETURNING id,public_name,display_name,status,model_preset_id,model_preset_version,metadata,field_sources,confirmed_at,unavailable_at,created_at,updated_at")
-            .bind(id)
-            .bind(next)
-            .fetch_one(&self.pool)
-            .await
-            .map_err(Into::into)
-    }
-
-    pub async fn upsert_source_model_capability(
+    #[cfg(test)]
+    pub(crate) async fn upsert_source_model_capability(
         &self,
         input: &SourceModelCapabilityInput,
     ) -> Result<SourceModelCapabilityRecord, CatalogError> {
@@ -993,17 +985,7 @@ impl ModelCatalogRepository {
         upsert_source_model_capability_conn(&mut conn, input).await
     }
 
-    pub async fn get_source_model_capability(
-        &self,
-        source_id: &str,
-        upstream_model_id: &str,
-        protocol: Protocol,
-    ) -> Result<SourceModelCapabilityRecord, CatalogError> {
-        let mut conn = self.pool.acquire().await?;
-        get_source_model_capability_conn(&mut conn, source_id, upstream_model_id, protocol).await
-    }
-
-    pub async fn list_source_model_capabilities(
+    pub(crate) async fn list_source_model_capabilities(
         &self,
         source_id: &str,
         upstream_model_id: &str,
@@ -1016,7 +998,8 @@ impl ModelCatalogRepository {
             .map_err(Into::into)
     }
 
-    pub async fn create_model_binding(
+    #[cfg(test)]
+    pub(crate) async fn create_model_binding(
         &self,
         input: &ModelBindingInput,
     ) -> Result<ModelBindingRecord, CatalogError> {
@@ -1032,7 +1015,8 @@ impl ModelCatalogRepository {
             .map_err(Into::into)
     }
 
-    pub async fn transition_model_binding_status(
+    #[cfg(test)]
+    pub(crate) async fn transition_model_binding_status(
         &self,
         id: i64,
         next: CatalogStatus,
@@ -1052,7 +1036,8 @@ impl ModelCatalogRepository {
             .map_err(Into::into)
     }
 
-    pub async fn list_routable_bindings(
+    #[cfg(test)]
+    pub(crate) async fn list_routable_bindings(
         &self,
         public_name: &str,
         protocol: Protocol,

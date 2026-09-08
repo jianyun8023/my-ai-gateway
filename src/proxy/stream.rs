@@ -20,22 +20,22 @@ use crate::domain::protocol::Protocol;
 /// A comment frame is valid for all three supported SSE protocols.  Keeping
 /// the marker stable lets usage observation filter gateway heartbeats without
 /// ever treating them as provider data or TTFT.
-pub const HEARTBEAT_FRAME: &[u8] = b": gateway-heartbeat\n\n";
-pub const HEARTBEAT_MARKER: &str = ": gateway-heartbeat";
+pub(crate) const HEARTBEAT_FRAME: &[u8] = b": gateway-heartbeat\n\n";
+pub(crate) const HEARTBEAT_MARKER: &str = ": gateway-heartbeat";
 
 /// OpenAI Chat Completions termination frame.  Native providers that omit the
 /// `data: [DONE]` sentinel (for example MiniMax) still need it appended so
 /// strict OpenAI clients can detect end-of-stream.
-pub const CHAT_DONE_FRAME: &[u8] = b"data: [DONE]\n\n";
+pub(crate) const CHAT_DONE_FRAME: &[u8] = b"data: [DONE]\n\n";
 
 /// Process-level streaming policy.  A zero duration disables that limit.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct StreamConfig {
-    pub heartbeat_interval: Duration,
-    pub connection_timeout: Duration,
-    pub first_event_timeout: Duration,
-    pub idle_timeout: Duration,
-    pub total_timeout: Duration,
+pub(crate) struct StreamConfig {
+    pub(crate) heartbeat_interval: Duration,
+    pub(crate) connection_timeout: Duration,
+    pub(crate) first_event_timeout: Duration,
+    pub(crate) idle_timeout: Duration,
+    pub(crate) total_timeout: Duration,
 }
 
 impl Default for StreamConfig {
@@ -55,12 +55,12 @@ impl StreamConfig {
     /// are canonical, while duration strings (for example `2s` or `500ms`)
     /// are accepted for operational convenience.  A bare number in a
     /// non-`_MS` variable is interpreted as seconds.
-    pub fn from_env() -> Self {
+    pub(crate) fn from_env() -> Self {
         Self::from_env_prefix("GATEWAY_SSE")
     }
 
     /// Same parser for embedded/standalone adapters with their own prefix.
-    pub fn from_env_prefix(prefix: &str) -> Self {
+    pub(crate) fn from_env_prefix(prefix: &str) -> Self {
         let defaults = Self::default();
         Self {
             heartbeat_interval: env_duration_suffixes(
@@ -145,7 +145,7 @@ fn parse_duration(raw: &str, bare_ms: bool) -> Option<Duration> {
 /// Why a streaming response stopped.  `Completed` is the only successful
 /// outcome; every other variant is persisted as a failed logical request.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum StreamTermination {
+pub(crate) enum StreamTermination {
     Completed,
     EmptyStream,
     UpstreamError,
@@ -157,11 +157,11 @@ pub enum StreamTermination {
 }
 
 impl StreamTermination {
-    pub fn is_failure(self) -> bool {
+    pub(crate) fn is_failure(self) -> bool {
         self != Self::Completed
     }
 
-    pub fn code(self) -> &'static str {
+    pub(crate) fn code(self) -> &'static str {
         match self {
             Self::Completed => "completed",
             Self::EmptyStream => "gateway_empty_stream",
@@ -174,7 +174,7 @@ impl StreamTermination {
         }
     }
 
-    pub fn message(self) -> &'static str {
+    pub(crate) fn message(self) -> &'static str {
         match self {
             Self::Completed => "stream completed",
             Self::EmptyStream => "upstream stream ended without an event",
@@ -187,7 +187,7 @@ impl StreamTermination {
         }
     }
 
-    pub fn status_code(self) -> i32 {
+    pub(crate) fn status_code(self) -> i32 {
         match self {
             Self::Completed => 200,
             Self::ClientCancelled => 499,
@@ -201,17 +201,17 @@ impl StreamTermination {
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct SseActivity {
-    pub provider_event: bool,
-    pub terminal: Option<StreamTermination>,
-    pub error: bool,
+pub(crate) struct SseActivity {
+    pub(crate) provider_event: bool,
+    pub(crate) terminal: Option<StreamTermination>,
+    pub(crate) error: bool,
 }
 
 /// Small, allocation-bounded SSE frame tracker used only for timing and
 /// termination decisions.  It never rewrites or buffers bytes sent to the
 /// client.
 #[derive(Clone, Debug, Default)]
-pub struct SseEventTracker {
+pub(crate) struct SseEventTracker {
     line: Vec<u8>,
     event_name: String,
     data_lines: Vec<String>,
@@ -224,7 +224,7 @@ pub struct SseEventTracker {
 }
 
 impl SseEventTracker {
-    pub fn feed(&mut self, bytes: &[u8]) -> SseActivity {
+    pub(crate) fn feed(&mut self, bytes: &[u8]) -> SseActivity {
         let mut activity = SseActivity::default();
         if self.line.is_empty()
             && self.data_lines.is_empty()
@@ -254,7 +254,7 @@ impl SseEventTracker {
         activity
     }
 
-    pub fn finish_eof(&mut self) -> SseActivity {
+    pub(crate) fn finish_eof(&mut self) -> SseActivity {
         let mut activity = SseActivity::default();
         if !self.line.is_empty() {
             self.process_line(&mut activity);
@@ -263,11 +263,11 @@ impl SseEventTracker {
         activity
     }
 
-    pub fn saw_provider_event(&self) -> bool {
+    pub(crate) fn saw_provider_event(&self) -> bool {
         self.saw_provider_event
     }
 
-    pub fn terminal(&self) -> Option<StreamTermination> {
+    pub(crate) fn terminal(&self) -> Option<StreamTermination> {
         self.terminal
     }
 
@@ -275,15 +275,15 @@ impl SseEventTracker {
     /// the provider sending the `data: [DONE]` sentinel.  The caller has
     /// already injected the termination frame into the outgoing byte stream,
     /// so the tracker should agree it completed successfully.
-    pub fn mark_completed_after_eof(&mut self) {
+    pub(crate) fn mark_completed_after_eof(&mut self) {
         merge_terminal(&mut self.terminal, Some(StreamTermination::Completed));
     }
 
-    pub fn saw_sse_frame(&self) -> bool {
+    pub(crate) fn saw_sse_frame(&self) -> bool {
         self.saw_sse_frame
     }
 
-    pub fn safe_for_heartbeat(&self) -> bool {
+    pub(crate) fn safe_for_heartbeat(&self) -> bool {
         self.line.is_empty()
             && self.data_lines.is_empty()
             && self.event_name.is_empty()
@@ -495,14 +495,14 @@ fn termination_from_code(data: &str) -> Option<StreamTermination> {
     })
 }
 
-pub fn is_gateway_heartbeat(bytes: &[u8]) -> bool {
+pub(crate) fn is_gateway_heartbeat(bytes: &[u8]) -> bool {
     let text = String::from_utf8_lossy(bytes);
     text.trim() == HEARTBEAT_MARKER
 }
 
 /// Build a protocol-compatible gateway error frame.  The custom error code is
 /// stable and intentionally contains no upstream response text.
-pub fn gateway_error_frame(protocol: Protocol, termination: StreamTermination) -> Bytes {
+pub(crate) fn gateway_error_frame(protocol: Protocol, termination: StreamTermination) -> Bytes {
     let code = termination.code();
     let message = termination.message();
     let payload = match protocol {
@@ -597,7 +597,7 @@ impl NativeState {
 /// Wrap an upstream byte body with heartbeats and stream timing.  The input
 /// bytes are yielded unchanged and in order; gateway frames are separate
 /// chunks and therefore cannot alter provider frame bytes.
-pub fn wrap_native_body(
+pub(crate) fn wrap_native_body(
     body: Body,
     protocol: Protocol,
     config: StreamConfig,

@@ -9,80 +9,80 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 
-pub const PROVIDER_PRESET_SCHEMA_VERSION: u32 = 1;
+pub(crate) const PROVIDER_PRESET_SCHEMA_VERSION: u32 = 1;
 /// The latest built-in provider preset record version.  Record versions are
 /// immutable snapshots; bumping this value never rewrites an existing Source.
-pub const BUILTIN_PROVIDER_PRESET_VERSION: i32 = 3;
+pub(crate) const BUILTIN_PROVIDER_PRESET_VERSION: i32 = 3;
 /// The latest built-in `kimi_code` preset record version.  Kimi runs one
 /// version ahead of the shared builtin line: v4 switches Responses to the
 /// officially supported native `/v1/responses` endpoint and retires the
 /// embedded Responses→Anthropic adapter (issue #157).
-pub const KIMI_CODE_PROVIDER_PRESET_VERSION: i32 = 4;
+pub(crate) const KIMI_CODE_PROVIDER_PRESET_VERSION: i32 = 4;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum HttpMethod {
+pub(crate) enum HttpMethod {
     Get,
     Post,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct CredentialHeaderTemplate {
-    pub header: String,
-    pub prefix: String,
+pub(crate) struct CredentialHeaderTemplate {
+    pub(crate) header: String,
+    pub(crate) prefix: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct SourceAuthConfig {
-    pub credential_header: CredentialHeaderTemplate,
+pub(crate) struct SourceAuthConfig {
+    pub(crate) credential_header: CredentialHeaderTemplate,
     #[serde(default)]
-    pub default_headers: BTreeMap<String, String>,
+    pub(crate) default_headers: BTreeMap<String, String>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct ConnectionTestTemplate {
-    pub method: HttpMethod,
-    pub default_model: String,
-    pub body: Value,
+pub(crate) struct ConnectionTestTemplate {
+    pub(crate) method: HttpMethod,
+    pub(crate) default_model: String,
+    pub(crate) body: Value,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct ProtocolPreset {
-    pub endpoint: String,
-    pub mode: SourceProtocolMode,
+pub(crate) struct ProtocolPreset {
+    pub(crate) endpoint: String,
+    pub(crate) mode: SourceProtocolMode,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub source_protocol: Option<Protocol>,
+    pub(crate) source_protocol: Option<Protocol>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub adapter: Option<String>,
+    pub(crate) adapter: Option<String>,
     #[serde(default)]
-    pub headers: BTreeMap<String, String>,
+    pub(crate) headers: BTreeMap<String, String>,
     #[serde(default)]
-    pub default_capabilities: BTreeMap<String, CapabilitySupport>,
-    pub connection_test: ConnectionTestTemplate,
+    pub(crate) default_capabilities: BTreeMap<String, CapabilitySupport>,
+    pub(crate) connection_test: ConnectionTestTemplate,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct SourceProtocolCapability {
-    pub mode: SourceProtocolMode,
+pub(crate) struct SourceProtocolCapability {
+    pub(crate) mode: SourceProtocolMode,
     #[serde(default)]
-    pub source_protocol: Option<Protocol>,
+    pub(crate) source_protocol: Option<Protocol>,
     #[serde(default)]
-    pub adapter: Option<String>,
+    pub(crate) adapter: Option<String>,
     #[serde(default)]
-    pub features: BTreeMap<String, CapabilitySupport>,
+    pub(crate) features: BTreeMap<String, CapabilitySupport>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct DiscoveryParser {
-    pub list_path: String,
-    pub id_path: String,
+pub(crate) struct DiscoveryParser {
+    pub(crate) list_path: String,
+    pub(crate) id_path: String,
     #[serde(default)]
-    pub metadata_paths: BTreeMap<MetadataField, String>,
+    pub(crate) metadata_paths: BTreeMap<MetadataField, String>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(tag = "support", rename_all = "snake_case")]
-pub enum DiscoveryPreset {
+pub(crate) enum DiscoveryPreset {
     Supported {
         method: HttpMethod,
         endpoint: String,
@@ -94,43 +94,43 @@ pub enum DiscoveryPreset {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct ProviderPresetDefinition {
-    pub schema_version: u32,
-    pub default_base_url: String,
-    pub credential_header: CredentialHeaderTemplate,
+pub(crate) struct ProviderPresetDefinition {
+    pub(crate) schema_version: u32,
+    pub(crate) default_base_url: String,
+    pub(crate) credential_header: CredentialHeaderTemplate,
     #[serde(default)]
-    pub default_headers: BTreeMap<String, String>,
-    pub protocols: BTreeMap<Protocol, ProtocolPreset>,
-    pub discovery: DiscoveryPreset,
+    pub(crate) default_headers: BTreeMap<String, String>,
+    pub(crate) protocols: BTreeMap<Protocol, ProtocolPreset>,
+    pub(crate) discovery: DiscoveryPreset,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum PresetDiffKind {
+pub(crate) enum PresetDiffKind {
     Added,
     Changed,
     Missing,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct PresetDiffEntry {
-    pub path: String,
-    pub kind: PresetDiffKind,
-    pub before: Option<Value>,
-    pub after: Option<Value>,
+pub(crate) struct PresetDiffEntry {
+    pub(crate) path: String,
+    pub(crate) kind: PresetDiffKind,
+    pub(crate) before: Option<Value>,
+    pub(crate) after: Option<Value>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct ProviderPresetDiff {
-    pub source_id: String,
-    pub provider_preset_id: String,
-    pub source_version: i32,
-    pub latest_version: i32,
-    pub changes: Vec<PresetDiffEntry>,
+pub(crate) struct ProviderPresetDiff {
+    pub(crate) source_id: String,
+    pub(crate) provider_preset_id: String,
+    pub(crate) source_version: i32,
+    pub(crate) latest_version: i32,
+    pub(crate) changes: Vec<PresetDiffEntry>,
 }
 
 impl ProviderPresetDefinition {
-    pub fn validate(&self) -> Result<(), CatalogError> {
+    pub(crate) fn validate(&self) -> Result<(), CatalogError> {
         if self.schema_version != PROVIDER_PRESET_SCHEMA_VERSION {
             return Err(CatalogError::InvalidState(format!(
                 "unsupported provider preset schema version {}",
@@ -217,7 +217,7 @@ impl ProviderPresetDefinition {
         Ok(())
     }
 
-    pub fn auth_snapshot(&self) -> Value {
+    pub(crate) fn auth_snapshot(&self) -> Value {
         serde_json::to_value(SourceAuthConfig {
             credential_header: self.credential_header.clone(),
             default_headers: self.default_headers.clone(),
@@ -225,7 +225,7 @@ impl ProviderPresetDefinition {
         .expect("provider authentication snapshot serializes")
     }
 
-    pub fn protocol_capabilities_snapshot(&self) -> Value {
+    pub(crate) fn protocol_capabilities_snapshot(&self) -> Value {
         let capabilities = self
             .protocols
             .iter()
@@ -254,7 +254,7 @@ fn validate_relative_endpoint(endpoint: &str) -> Result<(), CatalogError> {
     Ok(())
 }
 
-pub fn builtin_provider_presets() -> Result<Vec<ProviderPresetInput>, CatalogError> {
+pub(crate) fn builtin_provider_presets() -> Result<Vec<ProviderPresetInput>, CatalogError> {
     let (deepseek_id, deepseek_name, deepseek_definition) = deepseek();
     let (minimax_id, minimax_name, minimax_definition) = minimax();
     let (kimi_id, kimi_name, kimi_definition) = kimi_code();
@@ -414,7 +414,7 @@ fn mark_protocol_feature(
     }
 }
 
-pub fn builtin_model_presets() -> Result<Vec<ModelPresetInput>, CatalogError> {
+pub(crate) fn builtin_model_presets() -> Result<Vec<ModelPresetInput>, CatalogError> {
     Ok(vec![
         model_preset(
             "deepseek-v4-flash",

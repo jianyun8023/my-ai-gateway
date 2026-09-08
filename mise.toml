@@ -85,7 +85,7 @@ run = "cargo run -- ops control-plane-export --output control-plane.json"
 
 [tasks.lint]
 description = "运行 Rust 与前端静态检查"
-run = "cargo fmt --all -- --check && cargo check --workspace && cargo clippy --all-targets -- -D warnings && npm --prefix web run lint && npm --prefix web run typecheck"
+run = "cargo fmt --all -- --check && cargo check --workspace && cargo clippy --all-targets --features test-support -- -D warnings && npm --prefix web run lint && npm --prefix web run typecheck"
 
 [tasks.test-contract]
 description = "运行 Mock Provider 基础设施和协议 Contract 测试（#115, #116, #117）"

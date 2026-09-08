@@ -13,7 +13,7 @@ use serde_json::json;
 use crate::infra::{db, secrets};
 
 use super::helpers::virtual_key_error_response;
-use crate::state::{error_response, AppState};
+use crate::{http::response::error_response, state::AppState};
 
 fn encrypted_virtual_key_material(
     state: &AppState,
@@ -70,8 +70,11 @@ pub(crate) async fn encrypt_credential(
             "credential master key is not configured",
         );
     }
-    let aad = secrets::SecretResolver::account_aad(&request.source_id, &request.account_id);
-    match state.secrets.encrypt(&request.plaintext, aad.as_bytes()) {
+    match state.secrets.encrypt_for_account(
+        &request.source_id,
+        &request.account_id,
+        &request.plaintext,
+    ) {
         Ok(ciphertext) => Json(json!({
             "data": {
                 "ciphertext": ciphertext,
@@ -99,59 +102,36 @@ pub(crate) async fn rotate_account_credential(
             "missing or invalid admin key",
         );
     }
-    let Some(database) = &state.db else {
+    let Some(control_plane) = &state.control_plane else {
         return error_response(
             StatusCode::SERVICE_UNAVAILABLE,
             "database_unavailable",
             "database is not configured",
         );
     };
-    let row = sqlx::query_as::<_, (String, Option<String>)>(
-        "SELECT source_id, credential_ciphertext FROM accounts WHERE id=$1",
-    )
-    .bind(&account_id)
-    .fetch_optional(database.pool())
-    .await;
-    match row {
-        Ok(Some((source_id, Some(ciphertext)))) => {
-            match state
-                .secrets
-                .rotate_for_account(&source_id, &account_id, &ciphertext)
-            {
-                Ok(rotated) => {
-                    let _ = sqlx::query(
-                        "UPDATE accounts SET credential_ciphertext=$2, updated_at=NOW() WHERE id=$1",
-                    )
-                    .bind(&account_id)
-                    .bind(&rotated)
-                    .execute(database.pool())
-                    .await;
-                    Json(json!({
-                        "data": {
-                            "account_id": account_id,
-                            "key_version": state.secrets.active_key_version(),
-                        }
-                    }))
-                    .into_response()
+    match control_plane
+        .rotate_account_credential(&account_id, &state.secrets)
+        .await
+    {
+        Ok(snapshot) => {
+            state.reload_snapshot(snapshot);
+            Json(json!({
+                "data": {
+                    "account_id": account_id,
+                    "key_version": state.secrets.active_key_version(),
                 }
-                Err(err) => error_response(
-                    StatusCode::UNPROCESSABLE_ENTITY,
-                    err.code(),
-                    err.public_message(),
-                ),
-            }
+            }))
+            .into_response()
         }
-        Ok(Some((_, None))) => error_response(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "no_ciphertext",
-            "account does not have an encrypted credential",
-        ),
-        Ok(None) => error_response(StatusCode::NOT_FOUND, "not_found", "account not found"),
-        Err(_) => error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "database_error",
-            "failed to fetch account",
-        ),
+        Err(crate::control_plane::ControlPlaneError::Database(error)) => {
+            tracing::warn!(%error, "account credential rotation failed");
+            error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "database_error",
+                "failed to rotate account credential",
+            )
+        }
+        Err(error) => super::helpers::control_plane_error(error),
     }
 }
 

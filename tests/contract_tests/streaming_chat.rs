@@ -227,7 +227,7 @@ async fn chat_stream_incomplete() {
     assert!(!events.is_empty(), "some events delivered before EOF");
 
     let json_events: Vec<_> = events.iter().filter(|e| !e.is_done()).collect();
-    assert!(json_events.len() >= 1, "at least one content event");
+    assert!(!json_events.is_empty(), "at least one content event");
 
     assert!(
         body.contains("gateway_upstream_error"),

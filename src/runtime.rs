@@ -3,12 +3,13 @@ use std::{net::SocketAddr, sync::Arc};
 use serde_json::{json, Value};
 
 use crate::{
+    auth::AdminAuth,
     control_plane,
     domain::config::GatewayConfig,
     http::client as source_http_client,
     infra::{db, health, observability, ops, secrets},
     source_url,
-    state::{AdminAuth, AppState, LiveConfig},
+    state::{AppState, LiveConfig},
 };
 
 pub(crate) async fn run() -> Result<(), Box<dyn std::error::Error>> {

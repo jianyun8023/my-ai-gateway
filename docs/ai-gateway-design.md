@@ -4,6 +4,8 @@
 
 当前详细 TODO 见 [todo.md](todo.md)。
 
+后端模块职责、事务边界、公共能力和治理验证记录见 [后端分层与维护约束](backend-architecture.md)。
+
 ## 1. 项目目标
 
 构建一个面向个人自用的 Rust AI Provider 聚合端，将多个上游 Provider、模型来源和少量上游账号统一管理为一个服务入口，并为本地工具和应用提供统一调用方式。

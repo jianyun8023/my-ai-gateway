@@ -8,90 +8,90 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 use std::{collections::BTreeMap, error::Error, fmt};
 
-pub const CAPABILITY_MATRIX_VERSION: &str = "v1";
+pub(crate) const CAPABILITY_MATRIX_VERSION: &str = "v1";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum CapabilityFactSource {
+pub(crate) enum CapabilityFactSource {
     RuntimeSnapshot,
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct CapabilityMatrixResponse {
-    pub version: &'static str,
-    pub fact_source: CapabilityFactSource,
-    pub snapshot_revision: i64,
-    pub snapshot_generated_at: DateTime<Utc>,
-    pub data: Vec<RouteCapabilityMatrix>,
+pub(crate) struct CapabilityMatrixResponse {
+    pub(crate) version: &'static str,
+    pub(crate) fact_source: CapabilityFactSource,
+    pub(crate) snapshot_revision: i64,
+    pub(crate) snapshot_generated_at: DateTime<Utc>,
+    pub(crate) data: Vec<RouteCapabilityMatrix>,
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct RouteCapabilityMatrix {
-    pub route_id: String,
-    pub source: RuntimeSourceRef,
-    pub account: RuntimeAccountRef,
-    pub model: String,
-    pub model_display_name: String,
-    pub upstream_model_id: String,
-    pub protocols: Vec<EffectiveProtocolCapability>,
+pub(crate) struct RouteCapabilityMatrix {
+    pub(crate) route_id: String,
+    pub(crate) source: RuntimeSourceRef,
+    pub(crate) account: RuntimeAccountRef,
+    pub(crate) model: String,
+    pub(crate) model_display_name: String,
+    pub(crate) upstream_model_id: String,
+    pub(crate) protocols: Vec<EffectiveProtocolCapability>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub struct RuntimeSourceRef {
-    pub source_id: String,
-    pub display_name: Option<String>,
+pub(crate) struct RuntimeSourceRef {
+    pub(crate) source_id: String,
+    pub(crate) display_name: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub struct RuntimeAccountRef {
-    pub account_id: String,
-    pub display_name: Option<String>,
-    pub enabled: Option<bool>,
+pub(crate) struct RuntimeAccountRef {
+    pub(crate) account_id: String,
+    pub(crate) display_name: Option<String>,
+    pub(crate) enabled: Option<bool>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum CapabilityRouteStatus {
+pub(crate) enum CapabilityRouteStatus {
     Routable,
     Unroutable,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum CapabilityBindingSelection {
+pub(crate) enum CapabilityBindingSelection {
     Primary,
     Fallback,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub struct ProtocolConversionHop {
-    pub protocol_from: Protocol,
-    pub protocol_to: Protocol,
-    pub mode: ProtocolMode,
-    pub adapter: Option<String>,
+pub(crate) struct ProtocolConversionHop {
+    pub(crate) protocol_from: Protocol,
+    pub(crate) protocol_to: Protocol,
+    pub(crate) mode: ProtocolMode,
+    pub(crate) adapter: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct EffectiveProtocolCapability {
-    pub protocol_in: Protocol,
-    pub status: CapabilityRouteStatus,
-    pub binding_id: Option<i64>,
-    pub selection: Option<CapabilityBindingSelection>,
-    pub selection_rank: Option<usize>,
-    pub protocol_upstream: Option<Protocol>,
-    pub endpoint: Option<String>,
-    pub mode: Option<ProtocolMode>,
-    pub adapter: Option<String>,
-    pub conversion_chain: Vec<ProtocolConversionHop>,
-    pub effective_capabilities: Capabilities,
-    pub degraded: bool,
-    pub degraded_features: Vec<String>,
-    pub allow_lossy_conversion: Option<bool>,
-    pub error: Option<RouteResolutionError>,
+pub(crate) struct EffectiveProtocolCapability {
+    pub(crate) protocol_in: Protocol,
+    pub(crate) status: CapabilityRouteStatus,
+    pub(crate) binding_id: Option<i64>,
+    pub(crate) selection: Option<CapabilityBindingSelection>,
+    pub(crate) selection_rank: Option<usize>,
+    pub(crate) protocol_upstream: Option<Protocol>,
+    pub(crate) endpoint: Option<String>,
+    pub(crate) mode: Option<ProtocolMode>,
+    pub(crate) adapter: Option<String>,
+    pub(crate) conversion_chain: Vec<ProtocolConversionHop>,
+    pub(crate) effective_capabilities: Capabilities,
+    pub(crate) degraded: bool,
+    pub(crate) degraded_features: Vec<String>,
+    pub(crate) allow_lossy_conversion: Option<bool>,
+    pub(crate) error: Option<RouteResolutionError>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum CapabilityMatrixBuildError {
+pub(crate) enum CapabilityMatrixBuildError {
     NotRuntimeSnapshot,
     MissingRuntimeBindingId {
         route_id: String,
@@ -110,7 +110,7 @@ pub enum CapabilityMatrixBuildError {
 }
 
 impl CapabilityMatrixBuildError {
-    pub fn code(&self) -> &'static str {
+    pub(crate) fn code(&self) -> &'static str {
         "invalid_runtime_snapshot"
     }
 }
@@ -170,7 +170,7 @@ impl CapabilityMatrixResponse {
     /// Build the effective matrix from the same immutable DB-backed snapshot
     /// used by proxy routing. `config` is only the transport/display metadata
     /// materialized inside that snapshot; configured routes are never read.
-    pub fn from_runtime_snapshot(
+    pub(crate) fn from_runtime_snapshot(
         config: &GatewayConfig,
         resolver: &RouteResolver,
         models: &[PublishedModel],

@@ -1,3 +1,6 @@
+#[cfg(test)]
+use std::sync::RwLock;
+
 use super::db::{AccountHealthRow, Database};
 use crate::{
     control_plane::{
@@ -9,28 +12,24 @@ use crate::{
 };
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use serde::Serialize;
-use std::{
-    collections::HashMap,
-    sync::{Arc, RwLock},
-    time::Duration,
-};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::sync::{Mutex, OwnedMutexGuard};
 
-pub const DEFAULT_COOLDOWN: Duration = Duration::from_secs(30);
-pub const DEFAULT_MAX_COOLDOWN: Duration = Duration::from_secs(30 * 60);
-pub const DEFAULT_STALE_AFTER: Duration = Duration::from_secs(10 * 60);
-pub const DEFAULT_PROBE_INTERVAL: Duration = Duration::from_secs(60);
-pub const DEFAULT_FAILURE_THRESHOLD: u32 = 3;
-pub const DEFAULT_FAILURE_WINDOW: Duration = Duration::from_secs(60);
+pub(crate) const DEFAULT_COOLDOWN: Duration = Duration::from_secs(30);
+pub(crate) const DEFAULT_MAX_COOLDOWN: Duration = Duration::from_secs(30 * 60);
+pub(crate) const DEFAULT_STALE_AFTER: Duration = Duration::from_secs(10 * 60);
+pub(crate) const DEFAULT_PROBE_INTERVAL: Duration = Duration::from_secs(60);
+pub(crate) const DEFAULT_FAILURE_THRESHOLD: u32 = 3;
+pub(crate) const DEFAULT_FAILURE_WINDOW: Duration = Duration::from_secs(60);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct HealthConfig {
-    pub cooldown: Duration,
-    pub max_cooldown: Duration,
-    pub stale_after: Duration,
-    pub probe_interval: Duration,
-    pub failure_threshold: u32,
-    pub failure_window: Duration,
+pub(crate) struct HealthConfig {
+    pub(crate) cooldown: Duration,
+    pub(crate) max_cooldown: Duration,
+    pub(crate) stale_after: Duration,
+    pub(crate) probe_interval: Duration,
+    pub(crate) failure_threshold: u32,
+    pub(crate) failure_window: Duration,
 }
 
 impl Default for HealthConfig {
@@ -47,7 +46,7 @@ impl Default for HealthConfig {
 }
 
 impl HealthConfig {
-    pub fn from_env() -> Self {
+    pub(crate) fn from_env() -> Self {
         let defaults = Self::default();
         Self {
             cooldown: env_duration_ms("GATEWAY_HEALTH_COOLDOWN_MS", defaults.cooldown),
@@ -104,12 +103,12 @@ fn env_duration_secs(name: &str, default: Duration) -> Duration {
         .unwrap_or(default)
 }
 
-pub trait HealthClock: Send + Sync {
+pub(crate) trait HealthClock: Send + Sync {
     fn now(&self) -> DateTime<Utc>;
 }
 
 #[derive(Clone, Copy, Debug, Default)]
-pub struct SystemHealthClock;
+pub(crate) struct SystemHealthClock;
 
 impl HealthClock for SystemHealthClock {
     fn now(&self) -> DateTime<Utc> {
@@ -118,23 +117,20 @@ impl HealthClock for SystemHealthClock {
 }
 
 #[derive(Clone)]
-pub struct ManualHealthClock {
+#[cfg(test)]
+pub(crate) struct ManualHealthClock {
     now: Arc<RwLock<DateTime<Utc>>>,
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 impl ManualHealthClock {
-    pub fn new(now: DateTime<Utc>) -> Self {
+    pub(crate) fn new(now: DateTime<Utc>) -> Self {
         Self {
             now: Arc::new(RwLock::new(now)),
         }
     }
 
-    pub fn set(&self, now: DateTime<Utc>) {
-        *self.now.write().expect("manual health clock lock") = now;
-    }
-
-    pub fn advance(&self, duration: Duration) {
+    pub(crate) fn advance(&self, duration: Duration) {
         let duration =
             ChronoDuration::from_std(duration).unwrap_or_else(|_| ChronoDuration::zero());
         let mut now = self.now.write().expect("manual health clock lock");
@@ -142,6 +138,7 @@ impl ManualHealthClock {
     }
 }
 
+#[cfg(test)]
 impl HealthClock for ManualHealthClock {
     fn now(&self) -> DateTime<Utc> {
         *self.now.read().expect("manual health clock lock")
@@ -149,21 +146,21 @@ impl HealthClock for ManualHealthClock {
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct AccountHealth {
-    pub available: bool,
-    pub source_enabled: bool,
-    pub consecutive_failures: u32,
-    pub cooldown_remaining_ms: u64,
-    pub status: String,
-    pub source: String,
-    pub stale: bool,
-    pub updated_at: Option<DateTime<Utc>>,
-    pub cooldown_until: Option<DateTime<Utc>>,
-    pub last_error: Option<String>,
-    pub last_success_at: Option<DateTime<Utc>>,
-    pub last_probe_at: Option<DateTime<Utc>>,
-    pub last_probe_status: Option<String>,
-    pub last_probe_error: Option<String>,
+pub(crate) struct AccountHealth {
+    pub(crate) available: bool,
+    pub(crate) source_enabled: bool,
+    pub(crate) consecutive_failures: u32,
+    pub(crate) cooldown_remaining_ms: u64,
+    pub(crate) status: String,
+    pub(crate) source: String,
+    pub(crate) stale: bool,
+    pub(crate) updated_at: Option<DateTime<Utc>>,
+    pub(crate) cooldown_until: Option<DateTime<Utc>>,
+    pub(crate) last_error: Option<String>,
+    pub(crate) last_success_at: Option<DateTime<Utc>>,
+    pub(crate) last_probe_at: Option<DateTime<Utc>>,
+    pub(crate) last_probe_status: Option<String>,
+    pub(crate) last_probe_error: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -183,7 +180,7 @@ struct MemoryAccountState {
 }
 
 #[derive(Clone)]
-pub struct HealthRegistry {
+pub(crate) struct HealthRegistry {
     config: HealthConfig,
     database: Option<Database>,
     state: Arc<Mutex<HashMap<String, MemoryAccountState>>>,
@@ -191,45 +188,26 @@ pub struct HealthRegistry {
     clock: Arc<dyn HealthClock>,
 }
 
-#[allow(dead_code)]
 impl HealthRegistry {
-    pub fn new(cooldown: Duration) -> Self {
+    #[cfg(any(test, feature = "test-support"))]
+    pub(crate) fn new(cooldown: Duration) -> Self {
         let mut config = HealthConfig::default();
         config.cooldown = cooldown;
         config.max_cooldown = config.max_cooldown.max(cooldown);
         Self::with_config_and_clock(config, Arc::new(SystemHealthClock))
     }
 
-    pub fn with_config(config: HealthConfig) -> Self {
+    #[cfg(test)]
+    pub(crate) fn with_config(config: HealthConfig) -> Self {
         Self::with_config_and_clock(config, Arc::new(SystemHealthClock))
     }
 
-    pub fn with_database(database: Database, cooldown: Duration) -> Self {
-        let mut config = HealthConfig::default();
-        config.cooldown = cooldown;
-        config.max_cooldown = config.max_cooldown.max(cooldown);
-        Self::with_database_config(database, config)
-    }
-
-    pub fn with_database_config(database: Database, config: HealthConfig) -> Self {
+    pub(crate) fn with_database_config(database: Database, config: HealthConfig) -> Self {
         Self::with_database_config_and_clock(database, config, Arc::new(SystemHealthClock))
     }
 
-    pub fn from_database(database: Database, config: HealthConfig) -> Self {
-        Self::with_database_config(database, config)
-    }
-
-    pub fn with_clock<C>(cooldown: Duration, clock: C) -> Self
-    where
-        C: HealthClock + 'static,
-    {
-        let mut config = HealthConfig::default();
-        config.cooldown = cooldown;
-        config.max_cooldown = config.max_cooldown.max(cooldown);
-        Self::with_config_and_clock(config, Arc::new(clock))
-    }
-
-    pub fn with_config_and_clock(config: HealthConfig, clock: Arc<dyn HealthClock>) -> Self {
+    #[cfg(any(test, feature = "test-support"))]
+    pub(crate) fn with_config_and_clock(config: HealthConfig, clock: Arc<dyn HealthClock>) -> Self {
         Self {
             config: config.normalized(),
             database: None,
@@ -239,7 +217,7 @@ impl HealthRegistry {
         }
     }
 
-    pub fn with_database_config_and_clock(
+    pub(crate) fn with_database_config_and_clock(
         database: Database,
         config: HealthConfig,
         clock: Arc<dyn HealthClock>,
@@ -253,15 +231,15 @@ impl HealthRegistry {
         }
     }
 
-    pub fn config(&self) -> HealthConfig {
+    pub(crate) fn config(&self) -> HealthConfig {
         self.config
     }
 
-    pub fn database(&self) -> Option<Database> {
+    pub(crate) fn database(&self) -> Option<Database> {
         self.database.clone()
     }
 
-    pub fn now(&self) -> DateTime<Utc> {
+    pub(crate) fn now(&self) -> DateTime<Utc> {
         self.clock.now()
     }
 
@@ -276,7 +254,7 @@ impl HealthRegistry {
         lock.lock_owned().await
     }
 
-    pub async fn restore(&self) -> Result<(), sqlx::Error> {
+    pub(crate) async fn restore(&self) -> Result<(), sqlx::Error> {
         if let Some(database) = &self.database {
             database.account_health_all().await.map(|_| ())
         } else {
@@ -284,7 +262,7 @@ impl HealthRegistry {
         }
     }
 
-    pub async fn is_available(&self, account_id: &str) -> bool {
+    pub(crate) async fn is_available(&self, account_id: &str) -> bool {
         if let Some(database) = &self.database {
             return match database.account_health(account_id).await {
                 Ok(Some(row)) => {
@@ -304,7 +282,7 @@ impl HealthRegistry {
             .unwrap_or(true)
     }
 
-    pub async fn get_health(&self, account_id: &str) -> AccountHealth {
+    pub(crate) async fn get_health(&self, account_id: &str) -> AccountHealth {
         if let Some(database) = &self.database {
             return match database.account_health(account_id).await {
                 Ok(Some(row)) => health_from_row(&row, self.now(), self.config.stale_after),
@@ -322,7 +300,7 @@ impl HealthRegistry {
             .unwrap_or_else(|| unknown_health(true, "unknown"))
     }
 
-    pub async fn all_health(&self) -> HashMap<String, AccountHealth> {
+    pub(crate) async fn all_health(&self) -> HashMap<String, AccountHealth> {
         if let Some(database) = &self.database {
             return match database.account_health_all().await {
                 Ok(rows) => rows
@@ -352,12 +330,13 @@ impl HealthRegistry {
             .collect()
     }
 
-    pub async fn mark_failure(&self, account_id: &str) {
+    #[cfg(test)]
+    pub(crate) async fn mark_failure(&self, account_id: &str) {
         self.mark_failure_with_details(account_id, "passive", Some("upstream_failure"), None)
             .await;
     }
 
-    pub async fn mark_failure_with_details(
+    pub(crate) async fn mark_failure_with_details(
         &self,
         account_id: &str,
         source: &str,
@@ -499,12 +478,12 @@ impl HealthRegistry {
         cooldown_started
     }
 
-    pub async fn mark_success(&self, account_id: &str) {
+    pub(crate) async fn mark_success(&self, account_id: &str) {
         self.mark_success_with_source(account_id, "passive", None, None)
             .await;
     }
 
-    pub async fn mark_success_with_source(
+    pub(crate) async fn mark_success_with_source(
         &self,
         account_id: &str,
         source: &str,
@@ -561,7 +540,7 @@ impl HealthRegistry {
 
     /// Apply the result of the shared ProviderPreset connection-test service.
     /// Model discovery never calls this method.
-    pub async fn apply_connection_test(&self, record: &ConnectionTestRecord) {
+    pub(crate) async fn apply_connection_test(&self, record: &ConnectionTestRecord) {
         let Some(account_id) = record.account_id.as_deref() else {
             return;
         };
@@ -587,7 +566,7 @@ impl HealthRegistry {
 
     /// Execute a ProviderPreset connection test for an enabled account. This
     /// deliberately does not invoke model discovery.
-    pub async fn probe_account(
+    pub(crate) async fn probe_account(
         &self,
         http: &SourceHttpClient,
         account_id: &str,
@@ -625,7 +604,7 @@ impl HealthRegistry {
 }
 
 #[derive(Debug)]
-pub enum ProbeError {
+pub(crate) enum ProbeError {
     DatabaseRequired,
     Database(sqlx::Error),
     Discovery(DiscoveryServiceError),
@@ -633,7 +612,7 @@ pub enum ProbeError {
 }
 
 impl ProbeError {
-    pub fn code(&self) -> &'static str {
+    pub(crate) fn code(&self) -> &'static str {
         match self {
             Self::DatabaseRequired => "database_unavailable",
             Self::Database(_) => "database_error",
@@ -642,7 +621,7 @@ impl ProbeError {
         }
     }
 
-    pub fn message(&self) -> String {
+    pub(crate) fn message(&self) -> String {
         match self {
             Self::DatabaseRequired => "health probes require PostgreSQL".into(),
             Self::Database(error) => {
@@ -656,11 +635,11 @@ impl ProbeError {
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct ProbeOutcome {
-    pub account_id: String,
-    pub protocol: Protocol,
-    pub connection_test: ConnectionTestRecord,
-    pub health: AccountHealth,
+pub(crate) struct ProbeOutcome {
+    pub(crate) account_id: String,
+    pub(crate) protocol: Protocol,
+    pub(crate) connection_test: ConnectionTestRecord,
+    pub(crate) health: AccountHealth,
 }
 
 fn normalize_source(source: &str) -> &str {
@@ -1298,7 +1277,7 @@ mod tests {
             .await
             .expect("create probe account");
 
-        let _environment_lock = crate::state::ENV_LOCK.lock().await;
+        let _environment_lock = crate::test_helpers::ENV_LOCK.lock().await;
         let previous = std::env::var_os("HEALTH_PROBE_TEST_KEY");
         std::env::set_var("HEALTH_PROBE_TEST_KEY", "probe-secret");
         let registry = HealthRegistry::with_database_config(
@@ -1322,11 +1301,11 @@ mod tests {
             db: Some(database.clone()),
             control_plane: None,
             health: registry.clone(),
-            admin_auth: crate::state::AdminAuth::test(),
+            admin_auth: crate::auth::AdminAuth::test(),
             secrets: crate::infra::secrets::SecretResolver::empty(),
             prometheus_handle: crate::infra::observability::prometheus_handle(),
         };
-        let response = crate::application(app_state)
+        let response = crate::app::application(app_state)
             .oneshot(
                 Request::builder()
                     .method("POST")

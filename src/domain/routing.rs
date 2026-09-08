@@ -6,7 +6,7 @@ use serde::Serialize;
 use std::{fmt, sync::Arc};
 
 #[derive(Clone)]
-pub struct RouteResolver {
+pub(crate) struct RouteResolver {
     config: Arc<GatewayConfig>,
     runtime_routes: Option<Arc<Vec<RuntimeRoute>>>,
 }
@@ -14,85 +14,85 @@ pub struct RouteResolver {
 /// A validated, immutable route candidate built from one confirmed model
 /// binding and its SourceModelCapability row.
 #[derive(Clone, Debug)]
-pub struct RuntimeBinding {
-    pub binding_id: i64,
-    pub source_id: String,
-    pub provider_id: String,
-    pub account_id: String,
-    pub upstream_model_id: String,
-    pub protocol_upstream: Protocol,
-    pub upstream_endpoint: String,
-    pub mode: String,
-    pub adapter: Option<String>,
-    pub effective_capabilities: Capabilities,
-    pub degraded_features: Vec<String>,
+pub(crate) struct RuntimeBinding {
+    pub(crate) binding_id: i64,
+    pub(crate) source_id: String,
+    pub(crate) provider_id: String,
+    pub(crate) account_id: String,
+    pub(crate) upstream_model_id: String,
+    pub(crate) protocol_upstream: Protocol,
+    pub(crate) upstream_endpoint: String,
+    pub(crate) mode: String,
+    pub(crate) adapter: Option<String>,
+    pub(crate) effective_capabilities: Capabilities,
+    pub(crate) degraded_features: Vec<String>,
 }
 
 /// Route policy plus all currently routable bindings, in deterministic
 /// preference order. It is never mutated after publication.
 #[derive(Clone, Debug)]
-pub struct RuntimeRoute {
-    pub route_id: String,
-    pub model: String,
-    pub protocol: Protocol,
-    pub allow_lossy_conversion: bool,
-    pub bindings: Vec<RuntimeBinding>,
+pub(crate) struct RuntimeRoute {
+    pub(crate) route_id: String,
+    pub(crate) model: String,
+    pub(crate) protocol: Protocol,
+    pub(crate) allow_lossy_conversion: bool,
+    pub(crate) bindings: Vec<RuntimeBinding>,
 }
 
 /// Complete ingress -> upstream explanation of a selected route.
 #[derive(Clone, Debug, Serialize)]
-pub struct ResolvedRoute {
-    pub route_id: String,
+pub(crate) struct ResolvedRoute {
+    pub(crate) route_id: String,
     /// Backward-compatible alias for `protocol_in`.
-    pub protocol: Protocol,
-    pub protocol_in: Protocol,
-    pub protocol_upstream: Protocol,
-    pub model: String,
-    pub requested_model: String,
-    pub upstream_model_id: String,
-    pub source_id: String,
-    pub provider_id: String,
-    pub primary_account_id: String,
-    pub fallback_accounts: Vec<String>,
+    pub(crate) protocol: Protocol,
+    pub(crate) protocol_in: Protocol,
+    pub(crate) protocol_upstream: Protocol,
+    pub(crate) model: String,
+    pub(crate) requested_model: String,
+    pub(crate) upstream_model_id: String,
+    pub(crate) source_id: String,
+    pub(crate) provider_id: String,
+    pub(crate) primary_account_id: String,
+    pub(crate) fallback_accounts: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub fallback_bindings: Vec<ResolvedBinding>,
+    pub(crate) fallback_bindings: Vec<ResolvedBinding>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub binding_id: Option<i64>,
-    pub upstream_endpoint: String,
-    pub mode: String,
-    pub adapter: Option<String>,
-    pub effective_capabilities: Capabilities,
-    pub degraded_features: Vec<String>,
-    pub allow_lossy_conversion: bool,
+    pub(crate) binding_id: Option<i64>,
+    pub(crate) upstream_endpoint: String,
+    pub(crate) mode: String,
+    pub(crate) adapter: Option<String>,
+    pub(crate) effective_capabilities: Capabilities,
+    pub(crate) degraded_features: Vec<String>,
+    pub(crate) allow_lossy_conversion: bool,
 }
 
 impl ResolvedRoute {
-    pub fn is_degraded(&self) -> bool {
+    pub(crate) fn is_degraded(&self) -> bool {
         !self.degraded_features.is_empty()
     }
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct ResolvedBinding {
-    pub binding_id: i64,
-    pub source_id: String,
-    pub provider_id: String,
-    pub account_id: String,
-    pub upstream_model_id: String,
-    pub protocol_upstream: Protocol,
-    pub upstream_endpoint: String,
-    pub mode: String,
-    pub adapter: Option<String>,
-    pub effective_capabilities: Capabilities,
-    pub degraded_features: Vec<String>,
+pub(crate) struct ResolvedBinding {
+    pub(crate) binding_id: i64,
+    pub(crate) source_id: String,
+    pub(crate) provider_id: String,
+    pub(crate) account_id: String,
+    pub(crate) upstream_model_id: String,
+    pub(crate) protocol_upstream: Protocol,
+    pub(crate) upstream_endpoint: String,
+    pub(crate) mode: String,
+    pub(crate) adapter: Option<String>,
+    pub(crate) effective_capabilities: Capabilities,
+    pub(crate) degraded_features: Vec<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub struct RouteResolutionError {
-    pub code: String,
-    pub message: String,
+pub(crate) struct RouteResolutionError {
+    pub(crate) code: String,
+    pub(crate) message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub route_id: Option<String>,
+    pub(crate) route_id: Option<String>,
 }
 
 impl RouteResolutionError {
@@ -113,21 +113,21 @@ impl std::error::Error for RouteResolutionError {}
 
 impl RouteResolver {
     #[cfg(any(test, feature = "test-support"))]
-    pub fn new(config: Arc<GatewayConfig>) -> Self {
+    pub(crate) fn new(config: Arc<GatewayConfig>) -> Self {
         Self {
             config,
             runtime_routes: None,
         }
     }
 
-    pub fn from_runtime(config: Arc<GatewayConfig>, routes: Vec<RuntimeRoute>) -> Self {
+    pub(crate) fn from_runtime(config: Arc<GatewayConfig>, routes: Vec<RuntimeRoute>) -> Self {
         Self {
             config,
             runtime_routes: Some(Arc::new(routes)),
         }
     }
 
-    pub fn resolve_detailed(
+    pub(crate) fn resolve_detailed(
         &self,
         protocol: Protocol,
         model: &str,

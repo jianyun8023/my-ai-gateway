@@ -13,11 +13,11 @@ use std::{
     sync::Arc,
 };
 
-pub const SOURCE_URL_ALLOWLIST_ENV: &str = "GATEWAY_SOURCE_URL_ALLOWLIST";
+pub(crate) const SOURCE_URL_ALLOWLIST_ENV: &str = "GATEWAY_SOURCE_URL_ALLOWLIST";
 const MAX_REDIRECTS: usize = 5;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum SourceUrlPolicyError {
+pub(crate) enum SourceUrlPolicyError {
     InvalidAllowlist,
     InvalidUrl,
     DisallowedTarget,
@@ -27,7 +27,7 @@ pub enum SourceUrlPolicyError {
 }
 
 impl SourceUrlPolicyError {
-    pub fn is_policy_violation(self) -> bool {
+    pub(crate) fn is_policy_violation(self) -> bool {
         matches!(
             self,
             Self::DisallowedTarget | Self::RedirectBlocked | Self::InvalidUrl
@@ -51,14 +51,14 @@ impl fmt::Display for SourceUrlPolicyError {
 impl Error for SourceUrlPolicyError {}
 
 #[derive(Clone, Debug, Default)]
-pub struct SourceUrlPolicy {
+pub(crate) struct SourceUrlPolicy {
     allowed_hosts: Arc<HashSet<String>>,
     allowed_ips: Arc<HashSet<IpAddr>>,
     allowed_networks: Arc<Vec<IpNet>>,
 }
 
 impl SourceUrlPolicy {
-    pub fn from_env() -> Result<Self, SourceUrlPolicyError> {
+    pub(crate) fn from_env() -> Result<Self, SourceUrlPolicyError> {
         match env::var(SOURCE_URL_ALLOWLIST_ENV) {
             Ok(value) => Self::from_allowlist(&value),
             Err(env::VarError::NotPresent) => Ok(Self::default()),
@@ -66,7 +66,7 @@ impl SourceUrlPolicy {
         }
     }
 
-    pub fn from_allowlist(value: &str) -> Result<Self, SourceUrlPolicyError> {
+    pub(crate) fn from_allowlist(value: &str) -> Result<Self, SourceUrlPolicyError> {
         let mut allowed_hosts = HashSet::new();
         let mut allowed_ips = HashSet::new();
         let mut allowed_networks = Vec::new();
@@ -111,7 +111,7 @@ impl SourceUrlPolicy {
         })
     }
 
-    pub fn validate_base_url(&self, value: &str) -> Result<Url, SourceUrlPolicyError> {
+    pub(crate) fn validate_base_url(&self, value: &str) -> Result<Url, SourceUrlPolicyError> {
         let url = Url::parse(value).map_err(|_| SourceUrlPolicyError::InvalidUrl)?;
         self.validate_url_common(&url)?;
         if url.query().is_some() || url.fragment().is_some() {
@@ -120,7 +120,7 @@ impl SourceUrlPolicy {
         Ok(url)
     }
 
-    pub fn validate_request_url(&self, url: &Url) -> Result<(), SourceUrlPolicyError> {
+    pub(crate) fn validate_request_url(&self, url: &Url) -> Result<(), SourceUrlPolicyError> {
         self.validate_url_common(url)?;
         if url.fragment().is_some() {
             return Err(SourceUrlPolicyError::InvalidUrl);
@@ -128,13 +128,13 @@ impl SourceUrlPolicy {
         Ok(())
     }
 
-    pub fn parse_request_url(&self, value: &str) -> Result<Url, SourceUrlPolicyError> {
+    pub(crate) fn parse_request_url(&self, value: &str) -> Result<Url, SourceUrlPolicyError> {
         let url = Url::parse(value).map_err(|_| SourceUrlPolicyError::InvalidUrl)?;
         self.validate_request_url(&url)?;
         Ok(url)
     }
 
-    pub fn validate_resolved_addresses(
+    pub(crate) fn validate_resolved_addresses(
         &self,
         host: &str,
         addresses: &[SocketAddr],
@@ -157,7 +157,7 @@ impl SourceUrlPolicy {
         }
     }
 
-    pub fn redirect_policy(self: &Arc<Self>) -> redirect::Policy {
+    pub(crate) fn redirect_policy(self: &Arc<Self>) -> redirect::Policy {
         let policy = Arc::clone(self);
         redirect::Policy::custom(move |attempt| {
             let blocked = attempt.previous().len() > MAX_REDIRECTS
@@ -248,7 +248,7 @@ impl Resolve for PolicyDnsResolver {
     }
 }
 
-pub fn reqwest_error_is_policy_violation(error: &reqwest::Error) -> bool {
+pub(crate) fn reqwest_error_is_policy_violation(error: &reqwest::Error) -> bool {
     let mut current: Option<&(dyn Error + 'static)> = Some(error);
     while let Some(source) = current {
         if source

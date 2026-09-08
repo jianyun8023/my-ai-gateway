@@ -1,3 +1,5 @@
+pub(crate) mod response;
+
 use crate::source_url::{SourceUrlPolicy, SourceUrlPolicyError};
 use reqwest::{Client, Method, RequestBuilder, Url};
 use std::sync::Arc;
@@ -7,13 +9,13 @@ use std::sync::Arc;
 /// Keeping the client beside the URL policy makes the network boundary usable
 /// by both layers without making either one depend on the proxy module.
 #[derive(Clone)]
-pub struct SourceHttpClient {
+pub(crate) struct SourceHttpClient {
     inner: Client,
     policy: Arc<SourceUrlPolicy>,
 }
 
 impl SourceHttpClient {
-    pub fn request(
+    pub(crate) fn request(
         &self,
         method: Method,
         url: Url,
@@ -22,23 +24,24 @@ impl SourceHttpClient {
         Ok(self.inner.request(method, url))
     }
 
-    pub fn post(&self, url: &str) -> Result<RequestBuilder, SourceUrlPolicyError> {
+    pub(crate) fn post(&self, url: &str) -> Result<RequestBuilder, SourceUrlPolicyError> {
         let url = self.policy.parse_request_url(url)?;
         Ok(self.inner.post(url))
     }
 
     #[cfg(test)]
-    pub fn get(&self, url: &str) -> Result<RequestBuilder, SourceUrlPolicyError> {
+    pub(crate) fn get(&self, url: &str) -> Result<RequestBuilder, SourceUrlPolicyError> {
         let url = self.policy.parse_request_url(url)?;
         Ok(self.inner.get(url))
     }
 
-    pub fn validate_base_url(&self, value: &str) -> Result<Url, SourceUrlPolicyError> {
+    #[cfg(test)]
+    pub(crate) fn validate_base_url(&self, value: &str) -> Result<Url, SourceUrlPolicyError> {
         self.policy.validate_base_url(value)
     }
 }
 
-pub fn client(policy: Arc<SourceUrlPolicy>) -> Result<SourceHttpClient, reqwest::Error> {
+pub(crate) fn client(policy: Arc<SourceUrlPolicy>) -> Result<SourceHttpClient, reqwest::Error> {
     let redirect = policy.redirect_policy();
     let resolver = Arc::new(policy.dns_resolver());
     let inner = Client::builder()
@@ -53,6 +56,6 @@ pub fn client(policy: Arc<SourceUrlPolicy>) -> Result<SourceHttpClient, reqwest:
 }
 
 #[cfg(any(test, feature = "test-support"))]
-pub fn test_client() -> Result<SourceHttpClient, reqwest::Error> {
+pub(crate) fn test_client() -> Result<SourceHttpClient, reqwest::Error> {
     client(crate::source_url::test_policy())
 }

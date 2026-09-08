@@ -1,11 +1,11 @@
-pub mod admin;
-pub mod discovery;
+pub(crate) mod admin;
+pub(crate) mod discovery;
 pub(crate) mod health_admin;
 pub(crate) mod helpers;
-pub mod keys;
+pub(crate) mod keys;
 pub(crate) mod ops;
-pub mod proxy;
-pub mod usage;
+pub(crate) mod proxy;
+pub(crate) mod usage;
 
 #[cfg(test)]
 mod runtime_usage_tests;

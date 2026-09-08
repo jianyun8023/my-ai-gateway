@@ -1,6 +1,14 @@
 use super::*;
 use crate::domain::protocol::Protocol;
 
+#[derive(sqlx::FromRow)]
+pub(crate) struct HealthAccountMetadata {
+    pub(crate) id: String,
+    pub(crate) source_id: String,
+    pub(crate) display_name: String,
+    pub(crate) enabled: bool,
+}
+
 const HEALTH_SELECT_ONE: &str = "SELECT a.id AS account_id,a.enabled,s.enabled AS source_enabled,a.health_status,a.health_source,a.cooldown_until,a.consecutive_failures,a.failure_window_started_at,a.last_error,a.last_success_at,a.health_updated_at,a.last_probe_at,a.last_probe_status,a.last_probe_error,a.updated_at AS account_updated_at FROM accounts a JOIN sources s ON s.id=a.source_id WHERE a.id=$1";
 const HEALTH_SELECT_ONE_FOR_UPDATE: &str = "SELECT a.id AS account_id,a.enabled,s.enabled AS source_enabled,a.health_status,a.health_source,a.cooldown_until,a.consecutive_failures,a.failure_window_started_at,a.last_error,a.last_success_at,a.health_updated_at,a.last_probe_at,a.last_probe_status,a.last_probe_error,a.updated_at AS account_updated_at FROM accounts a JOIN sources s ON s.id=a.source_id WHERE a.id=$1 FOR UPDATE OF a";
 const HEALTH_SELECT_ALL: &str = "SELECT a.id AS account_id,a.enabled,s.enabled AS source_enabled,a.health_status,a.health_source,a.cooldown_until,a.consecutive_failures,a.failure_window_started_at,a.last_error,a.last_success_at,a.health_updated_at,a.last_probe_at,a.last_probe_status,a.last_probe_error,a.updated_at AS account_updated_at FROM accounts a JOIN sources s ON s.id=a.source_id ORDER BY a.id";
@@ -57,9 +65,27 @@ fn exponential_backoff(base: Duration, maximum: Duration, failures: u32) -> Dura
 }
 
 impl Database {
+    pub(crate) async fn health_accounts_metadata(
+        &self,
+    ) -> Result<Vec<HealthAccountMetadata>, sqlx::Error> {
+        sqlx::query_as("SELECT id,source_id,display_name,enabled FROM accounts ORDER BY id")
+            .fetch_all(&self.pool)
+            .await
+    }
+
+    pub(crate) async fn health_account_metadata(
+        &self,
+        account_id: &str,
+    ) -> Result<Option<HealthAccountMetadata>, sqlx::Error> {
+        sqlx::query_as("SELECT id,source_id,display_name,enabled FROM accounts WHERE id=$1")
+            .bind(account_id)
+            .fetch_optional(&self.pool)
+            .await
+    }
+
     /// Read one persisted account health row. Routing uses this on every
     /// selection so a process restart cannot lose the cooldown state.
-    pub async fn account_health(
+    pub(crate) async fn account_health(
         &self,
         account_id: &str,
     ) -> Result<Option<AccountHealthRow>, sqlx::Error> {
@@ -69,13 +95,16 @@ impl Database {
             .await
     }
 
-    pub async fn account_health_all(&self) -> Result<Vec<AccountHealthRow>, sqlx::Error> {
+    pub(crate) async fn account_health_all(&self) -> Result<Vec<AccountHealthRow>, sqlx::Error> {
         sqlx::query_as::<_, AccountHealthRow>(HEALTH_SELECT_ALL)
             .fetch_all(&self.pool)
             .await
     }
 
-    pub async fn account_source_id(&self, account_id: &str) -> Result<Option<String>, sqlx::Error> {
+    pub(crate) async fn account_source_id(
+        &self,
+        account_id: &str,
+    ) -> Result<Option<String>, sqlx::Error> {
         sqlx::query_scalar("SELECT source_id FROM accounts WHERE id=$1")
             .bind(account_id)
             .fetch_optional(&self.pool)
@@ -84,7 +113,7 @@ impl Database {
 
     /// Return one deterministic enabled protocol per account for periodic
     /// probes. The explicit Admin endpoint can choose another protocol.
-    pub async fn health_probe_targets(
+    pub(crate) async fn health_probe_targets(
         &self,
     ) -> Result<Vec<(String, String, Protocol)>, sqlx::Error> {
         let rows: Vec<(String, String, Value, Value)> = sqlx::query_as(
@@ -118,7 +147,7 @@ impl Database {
         Ok(targets)
     }
 
-    pub async fn health_probe_protocol(
+    pub(crate) async fn health_probe_protocol(
         &self,
         account_id: &str,
     ) -> Result<Option<Protocol>, sqlx::Error> {
@@ -134,7 +163,7 @@ impl Database {
     /// exponential cooldown. `SELECT ... FOR UPDATE` serializes concurrent
     /// request/probe transitions for the same account.
     #[allow(clippy::too_many_arguments)]
-    pub async fn record_account_health_failure(
+    pub(crate) async fn record_account_health_failure(
         &self,
         account_id: &str,
         observed_at: DateTime<Utc>,
@@ -240,7 +269,7 @@ impl Database {
         Ok((health, cooldown_started))
     }
 
-    pub async fn record_account_health_success(
+    pub(crate) async fn record_account_health_success(
         &self,
         account_id: &str,
         observed_at: DateTime<Utc>,

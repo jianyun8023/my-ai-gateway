@@ -8,7 +8,7 @@
 
 use axum::http::{HeaderMap, Method};
 use serde_json::{json, Map, Value};
-use sqlx::{PgPool, Postgres, Transaction};
+use sqlx::PgPool;
 use std::{
     future::Future,
     sync::{
@@ -44,19 +44,19 @@ const SENSITIVE_MARKERS: [&str; 14] = [
 /// Tokio task-local. The recorded flag lets the HTTP middleware avoid emitting
 /// a duplicate success event when a control-plane transaction already wrote it.
 #[derive(Clone, Debug)]
-pub struct AuditContext {
-    pub request_id: String,
-    pub actor: String,
-    pub action: String,
-    pub resource_type: String,
-    pub resource_id: Option<String>,
-    pub resource: Option<String>,
-    pub diff: Value,
+pub(crate) struct AuditContext {
+    pub(crate) request_id: String,
+    pub(crate) actor: String,
+    pub(crate) action: String,
+    pub(crate) resource_type: String,
+    pub(crate) resource_id: Option<String>,
+    pub(crate) resource: Option<String>,
+    pub(crate) diff: Value,
     recorded: Arc<AtomicBool>,
 }
 
 impl AuditContext {
-    pub fn new(
+    pub(crate) fn new(
         request_id: impl Into<String>,
         actor: impl Into<String>,
         action: impl Into<String>,
@@ -85,7 +85,7 @@ impl AuditContext {
         }
     }
 
-    pub fn was_recorded(&self) -> bool {
+    pub(crate) fn was_recorded(&self) -> bool {
         self.recorded.load(Ordering::Acquire)
     }
 
@@ -101,34 +101,20 @@ tokio::task_local! {
 /// Run a request inside its audit context. Calls made outside an HTTP request
 /// (startup imports, tests, background jobs) intentionally have no implicit
 /// actor and therefore do not create Admin-write events.
-pub async fn scope<F>(context: AuditContext, future: F) -> F::Output
+pub(crate) async fn scope<F>(context: AuditContext, future: F) -> F::Output
 where
     F: Future,
 {
     CURRENT_CONTEXT.scope(context, future).await
 }
 
-pub fn current_context() -> Option<AuditContext> {
+pub(crate) fn current_context() -> Option<AuditContext> {
     CURRENT_CONTEXT.try_with(Clone::clone).ok()
-}
-
-/// Insert a successful event in the caller's open control-plane transaction.
-/// The boolean indicates whether a request context existed.
-#[allow(dead_code)] // consumed by control-plane mutation helpers once wired
-pub async fn append_current_success_tx(
-    tx: &mut Transaction<'_, Postgres>,
-) -> Result<bool, sqlx::Error> {
-    let Some(context) = current_context() else {
-        return Ok(false);
-    };
-    append_tx(tx, &context, "success", None, None).await?;
-    context.mark_recorded();
-    Ok(true)
 }
 
 /// Insert a successful event in an independent statement when the operation
 /// did not expose a transaction hook (for example a legacy provider helper).
-pub async fn append_current_success_pool(pool: &PgPool) -> Result<bool, sqlx::Error> {
+pub(crate) async fn append_current_success_pool(pool: &PgPool) -> Result<bool, sqlx::Error> {
     let Some(context) = current_context() else {
         return Ok(false);
     };
@@ -140,7 +126,7 @@ pub async fn append_current_success_pool(pool: &PgPool) -> Result<bool, sqlx::Er
 /// Insert a failure after the mutation transaction has rolled back. This is
 /// deliberately independent: a failed audit insert must never turn a failed
 /// request into a partially committed control-plane write.
-pub async fn append_current_failure_pool(
+pub(crate) async fn append_current_failure_pool(
     pool: &PgPool,
     status: &str,
     error_code: Option<&str>,
@@ -153,37 +139,7 @@ pub async fn append_current_failure_pool(
     Ok(true)
 }
 
-#[allow(dead_code)] // consumed by control-plane mutation helpers once wired
-pub async fn append_tx(
-    tx: &mut Transaction<'_, Postgres>,
-    context: &AuditContext,
-    result: &str,
-    error_code: Option<&str>,
-    error_message: Option<&str>,
-) -> Result<(), sqlx::Error> {
-    let (status, result) = normalize_result(result);
-    let details = details_for(context, result);
-    sqlx::query(
-        "INSERT INTO audit_logs (operation_id,action,status,actor,details,error_code,error_message,request_id,resource_type,resource_id,resource,result,diff,completed_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$1,$8,$9,$10,$11,$12,CASE WHEN $3 IN ('succeeded','failed','cancelled') THEN clock_timestamp() ELSE NULL END)",
-    )
-    .bind(&context.request_id)
-    .bind(&context.action)
-    .bind(status)
-    .bind(&context.actor)
-    .bind(details)
-    .bind(sanitize_error_code(error_code))
-    .bind(sanitize_error_message(error_message))
-    .bind(&context.resource_type)
-    .bind(&context.resource_id)
-    .bind(&context.resource)
-    .bind(result)
-    .bind(&context.diff)
-    .execute(&mut **tx)
-    .await?;
-    Ok(())
-}
-
-pub async fn append_pool(
+pub(crate) async fn append_pool(
     pool: &PgPool,
     context: &AuditContext,
     result: &str,
@@ -255,7 +211,7 @@ fn sanitize_error_message(value: Option<&str>) -> Option<String> {
     value.map(|_| "admin operation failed".to_owned())
 }
 
-pub fn sanitize_actor(value: &str) -> String {
+pub(crate) fn sanitize_actor(value: &str) -> String {
     let value = value.trim();
     if value.is_empty() {
         return "admin_api".into();
@@ -314,7 +270,7 @@ fn sanitize_label(value: &str, fallback: &str) -> String {
 
 /// Build a request context from an Admin HTTP request. Only field names and
 /// JSON types are retained in diff; scalar values are intentionally omitted.
-pub fn context_from_request(
+pub(crate) fn context_from_request(
     method: &Method,
     path: &str,
     headers: &HeaderMap,
@@ -442,7 +398,7 @@ fn enabled_action(resource: &str, payload: Option<&Value>) -> String {
 /// Summarize a JSON request without retaining scalar values. Sensitive field
 /// names are listed separately, which is useful for audit review while keeping
 /// credentials, tokens and prompt/response content out of the row.
-pub fn summarize_diff(value: &Value) -> Value {
+pub(crate) fn summarize_diff(value: &Value) -> Value {
     let mut fields = Map::new();
     let mut sensitive = Vec::<String>::new();
     collect_fields(value, "", &mut fields, &mut sensitive);
@@ -510,7 +466,7 @@ fn is_sensitive_key(key: &str) -> bool {
 }
 
 /// Recursively redact arbitrary JSON used by legacy operational audit calls.
-pub fn sanitize_diff(value: Value) -> Value {
+pub(crate) fn sanitize_diff(value: Value) -> Value {
     sanitize_value(value, None)
 }
 

@@ -1,15 +1,19 @@
+#[cfg(test)]
+use crate::{domain::provider_preset::ProviderPresetDefinition, source_url::SourceUrlPolicyError};
+#[cfg(test)]
+use std::collections::BTreeMap;
+
+use crate::http::response::error_response;
 use crate::{
+    auth::AdminAuth,
     control_plane::model_catalog::{provider_preset_diff, CatalogError, ModelCatalogRepository},
     control_plane::model_discovery::{DiscoveryServiceError, ModelDiscoveryService},
     domain::{
         catalog::{CatalogAvailability, CatalogStatus, MetadataValues, SourceModelConfirmation},
         protocol::Protocol,
-        provider_preset::ProviderPresetDefinition,
     },
     http::SourceHttpClient,
     infra::db::Database,
-    source_url::SourceUrlPolicyError,
-    state::AdminAuth,
 };
 use axum::{
     body::{Body, Bytes},
@@ -21,7 +25,6 @@ use axum::{
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::collections::BTreeMap;
 
 const MAX_ADMIN_JSON_BYTES: usize = 1024 * 1024;
 
@@ -34,51 +37,39 @@ struct DiscoveryApiState {
 }
 
 #[cfg(test)]
-pub fn router(database: Option<Database>, http: SourceHttpClient) -> Router {
+pub(crate) fn router(database: Option<Database>, http: SourceHttpClient) -> Router {
     let health = database.clone().map(|database| {
         crate::infra::health::HealthRegistry::with_database_config(
             database,
             crate::infra::health::HealthConfig::default(),
         )
     });
-    router_inner(database, http, AdminAuth::test(), true, health)
+    routes()
+        .route("/admin/sources", get(list_sources).post(create_source))
+        .with_state(DiscoveryApiState {
+            database,
+            http,
+            admin_auth: AdminAuth::test(),
+            health,
+        })
 }
 
-/// Discovery endpoints mounted by the gateway application. The Source
-/// collection itself is owned by the DB-first control plane so creation can
-/// publish a validated runtime snapshot in the same operation.
-#[allow(dead_code)]
-pub fn auxiliary_router(
-    database: Option<Database>,
-    http: SourceHttpClient,
-    admin_auth: AdminAuth,
-) -> Router {
-    router_inner(database, http, admin_auth, false, None)
-}
-
-pub fn auxiliary_router_with_health(
+pub(crate) fn auxiliary_router_with_health(
     database: Option<Database>,
     http: SourceHttpClient,
     admin_auth: AdminAuth,
     health: crate::infra::health::HealthRegistry,
 ) -> Router {
-    router_inner(database, http, admin_auth, false, Some(health))
-}
-
-fn router_inner(
-    database: Option<Database>,
-    http: SourceHttpClient,
-    admin_auth: AdminAuth,
-    include_source_collection: bool,
-    health: Option<crate::infra::health::HealthRegistry>,
-) -> Router {
-    let state = DiscoveryApiState {
+    routes().with_state(DiscoveryApiState {
         database,
         http,
         admin_auth,
-        health,
-    };
-    let router = Router::new()
+        health: Some(health),
+    })
+}
+
+fn routes() -> Router<DiscoveryApiState> {
+    Router::new()
         .route("/admin/provider-presets", get(list_provider_presets))
         .route(
             "/admin/sources/{source_id}/preset-diff",
@@ -103,13 +94,7 @@ fn router_inner(
         .route(
             "/admin/sources/{source_id}/models/confirm",
             post(confirm_source_models),
-        );
-    let router = if include_source_collection {
-        router.route("/admin/sources", get(list_sources).post(create_source))
-    } else {
-        router
-    };
-    router.with_state(state)
+        )
 }
 
 async fn list_provider_presets(
@@ -126,6 +111,7 @@ async fn list_provider_presets(
 }
 
 #[derive(Deserialize)]
+#[cfg(test)]
 struct CreateSourceRequest {
     id: String,
     display_name: String,
@@ -136,6 +122,7 @@ struct CreateSourceRequest {
     endpoint_overrides: BTreeMap<Protocol, String>,
 }
 
+#[cfg(test)]
 async fn create_source(
     State(state): State<DiscoveryApiState>,
     headers: HeaderMap,
@@ -152,7 +139,7 @@ async fn create_source(
         || request.display_name.trim().is_empty()
         || request.provider_preset_id.trim().is_empty()
     {
-        return api_error(
+        return error_response(
             StatusCode::UNPROCESSABLE_ENTITY,
             "invalid_source",
             "source id, display_name, and provider_preset_id are required",
@@ -178,7 +165,7 @@ async fn create_source(
         match serde_json::from_value(preset.definition.clone()) {
             Ok(definition) => definition,
             Err(_) => {
-                return api_error(
+                return error_response(
                     StatusCode::UNPROCESSABLE_ENTITY,
                     "invalid_provider_preset",
                     "provider preset cannot create a managed source",
@@ -186,7 +173,7 @@ async fn create_source(
             }
         };
     if definition.validate().is_err() {
-        return api_error(
+        return error_response(
             StatusCode::UNPROCESSABLE_ENTITY,
             "invalid_provider_preset",
             "provider preset cannot create a managed source",
@@ -205,7 +192,7 @@ async fn create_source(
         .collect::<BTreeMap<_, _>>();
     for (protocol, endpoint) in request.endpoint_overrides {
         if !endpoint.starts_with('/') || endpoint.starts_with("//") {
-            return api_error(
+            return error_response(
                 StatusCode::UNPROCESSABLE_ENTITY,
                 "invalid_endpoint",
                 "source endpoint overrides must be absolute paths",
@@ -229,6 +216,7 @@ async fn create_source(
     }
 }
 
+#[cfg(test)]
 async fn list_sources(
     State(state): State<DiscoveryApiState>,
     headers: HeaderMap,
@@ -360,7 +348,7 @@ async fn latest_discovery(
             })),
             Err(error) => catalog_error_response(error),
         },
-        Ok(None) => api_error(
+        Ok(None) => error_response(
             StatusCode::NOT_FOUND,
             "discovery_not_found",
             "source has no discovery history",
@@ -474,14 +462,14 @@ async fn confirm_source_models(
 
 fn parse_json<T: for<'de> Deserialize<'de>>(body: &[u8]) -> Result<T, Box<Response<Body>>> {
     if body.len() > MAX_ADMIN_JSON_BYTES {
-        return Err(Box::new(api_error(
+        return Err(Box::new(error_response(
             StatusCode::PAYLOAD_TOO_LARGE,
             "request_too_large",
             "admin request body exceeds the size limit",
         )));
     }
     serde_json::from_slice(body).map_err(|_| {
-        Box::new(api_error(
+        Box::new(error_response(
             StatusCode::BAD_REQUEST,
             "invalid_json",
             "request body is not valid for this operation",
@@ -510,19 +498,19 @@ fn authorization_or_database_error(
     headers: &HeaderMap,
 ) -> Response<Body> {
     if !state.admin_auth.authorized(headers) {
-        api_error(
+        error_response(
             StatusCode::UNAUTHORIZED,
             "unauthorized",
             "admin key required",
         )
     } else if state.database.is_none() {
-        api_error(
+        error_response(
             StatusCode::SERVICE_UNAVAILABLE,
             "database_unavailable",
             "DATABASE_URL is not configured",
         )
     } else {
-        api_error(
+        error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
             "catalog_unavailable",
             "catalog service is unavailable",
@@ -536,32 +524,36 @@ fn service_error_response(error: DiscoveryServiceError) -> Response<Body> {
         "database_error" => StatusCode::INTERNAL_SERVER_ERROR,
         _ => StatusCode::UNPROCESSABLE_ENTITY,
     };
-    api_error(status, error.code(), error.public_message())
+    error_response(status, error.code(), error.public_message())
 }
 
 fn catalog_error_response(error: CatalogError) -> Response<Body> {
     match error {
-        CatalogError::NotFound(message) => api_error(StatusCode::NOT_FOUND, "not_found", &message),
-        CatalogError::InvalidMetadata(message) | CatalogError::InvalidState(message) => api_error(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "invalid_catalog_state",
-            &message,
-        ),
+        CatalogError::NotFound(message) => {
+            error_response(StatusCode::NOT_FOUND, "not_found", &message)
+        }
+        CatalogError::InvalidMetadata(message) | CatalogError::InvalidState(message) => {
+            error_response(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "invalid_catalog_state",
+                &message,
+            )
+        }
         CatalogError::ImmutableVersionConflict(message) => {
-            api_error(StatusCode::CONFLICT, "immutable_version_conflict", &message)
+            error_response(StatusCode::CONFLICT, "immutable_version_conflict", &message)
         }
         CatalogError::Database(error)
             if error
                 .as_database_error()
                 .is_some_and(|error| matches!(error.code().as_deref(), Some("23505"))) =>
         {
-            api_error(
+            error_response(
                 StatusCode::CONFLICT,
                 "catalog_conflict",
                 "catalog record already exists",
             )
         }
-        CatalogError::Database(_) | CatalogError::Json(_) => api_error(
+        CatalogError::Database(_) | CatalogError::Json(_) => error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
             "database_error",
             "catalog database operation failed",
@@ -569,15 +561,16 @@ fn catalog_error_response(error: CatalogError) -> Response<Body> {
     }
 }
 
+#[cfg(test)]
 fn source_url_error_response(error: SourceUrlPolicyError) -> Response<Body> {
     if error == SourceUrlPolicyError::InvalidUrl {
-        api_error(
+        error_response(
             StatusCode::UNPROCESSABLE_ENTITY,
             "invalid_source_url",
             "source base_url must be an http(s) URL without credentials, query, or fragment",
         )
     } else {
-        api_error(
+        error_response(
             StatusCode::UNPROCESSABLE_ENTITY,
             "source_url_blocked",
             "source base_url is blocked by server policy",
@@ -593,14 +586,6 @@ fn ok(value: Value) -> Response<Body> {
     (StatusCode::OK, Json(value)).into_response()
 }
 
-fn api_error(status: StatusCode, kind: &str, message: &str) -> Response<Body> {
-    (
-        status,
-        Json(json!({"error":{"code":kind,"type":kind,"message":message}})),
-    )
-        .into_response()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -611,7 +596,7 @@ mod tests {
             provider_preset::BUILTIN_PROVIDER_PRESET_VERSION,
         },
         http,
-        state::TEST_ADMIN_KEY,
+        test_helpers::TEST_ADMIN_KEY,
     };
     use axum::{body::to_bytes, http::Request};
     use chrono::Utc;

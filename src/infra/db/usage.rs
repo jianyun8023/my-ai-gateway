@@ -1,12 +1,12 @@
 use super::*;
 
 impl Database {
-    #[allow(dead_code)]
-    pub async fn insert_usage(&self, event: &UsageEvent) -> Result<(), sqlx::Error> {
+    #[cfg(test)]
+    pub(crate) async fn insert_usage(&self, event: &UsageEvent) -> Result<(), sqlx::Error> {
         self.insert_usage_with_attempts(event, &[]).await
     }
 
-    pub async fn insert_usage_with_attempts(
+    pub(crate) async fn insert_usage_with_attempts(
         &self,
         event: &UsageEvent,
         attempts: &[UsageAttempt],
@@ -31,7 +31,7 @@ impl Database {
         }
         tx.commit().await
     }
-    pub async fn list_usage_events_page(
+    pub(crate) async fn list_usage_events_page(
         &self,
         filter: &UsageFilter,
         limit: i64,
@@ -77,7 +77,7 @@ impl Database {
         })
     }
 
-    pub async fn export_usage_events(
+    pub(crate) async fn export_usage_events(
         &self,
         filter: &UsageFilter,
         limit: i64,
@@ -93,7 +93,7 @@ impl Database {
         q.bind(limit).fetch_all(&self.pool).await
     }
 
-    pub async fn get_usage_event_detail(
+    pub(crate) async fn get_usage_event_detail(
         &self,
         request_id: &str,
     ) -> Result<Option<UsageEventRecord>, sqlx::Error> {
@@ -106,7 +106,7 @@ impl Database {
         .await
     }
 
-    pub async fn list_attempts_for_event(
+    pub(crate) async fn list_attempts_for_event(
         &self,
         request_id: &str,
     ) -> Result<Vec<UsageAttemptRecord>, sqlx::Error> {
@@ -117,7 +117,10 @@ impl Database {
     }
 
     #[cfg(test)]
-    pub async fn delete_usage_events_for_test(&self, prefix: &str) -> Result<(), sqlx::Error> {
+    pub(crate) async fn delete_usage_events_for_test(
+        &self,
+        prefix: &str,
+    ) -> Result<(), sqlx::Error> {
         sqlx::query("DELETE FROM usage_events WHERE request_id LIKE $1")
             .bind(format!("{prefix}%"))
             .execute(&self.pool)
@@ -125,7 +128,7 @@ impl Database {
         Ok(())
     }
 
-    pub async fn usage_aggregate(
+    pub(crate) async fn usage_aggregate(
         &self,
         filter: &UsageFilter,
     ) -> Result<UsageAggregate, sqlx::Error> {
@@ -138,7 +141,7 @@ impl Database {
         q.fetch_one(&self.pool).await
     }
 
-    pub async fn usage_timeseries(
+    pub(crate) async fn usage_timeseries(
         &self,
         filter: &UsageFilter,
         granularity: &str,
@@ -161,7 +164,7 @@ impl Database {
         q.fetch_all(&self.pool).await
     }
 
-    pub async fn usage_breakdown(
+    pub(crate) async fn usage_breakdown(
         &self,
         filter: &UsageFilter,
         dimension: &str,
