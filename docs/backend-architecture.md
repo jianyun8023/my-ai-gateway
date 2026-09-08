@@ -82,4 +82,4 @@ Cargo 将 `dead_code` 设为 `deny`。新增代码不能通过宽泛的 `allow(d
 
 本轮只涉及后端和相应 Rust 测试，没有重跑 Web lint/build/test，也没有将这些 Rust 检查记作完整 `mise run verify`。真实 Provider、生产部署、性能基线及 #96/#97/#98 的生产复验不属于本轮本地验证结论。
 
-没有创建或回写 GitHub Issue/PR：本轮授权为本地更新与后端治理。可用于后续同步的标题为「refactor: 治理后端分层、公共能力与死代码」；范围和验证以上述记录为准。
+关联任务：[后端分层、公共能力与死代码治理 #164](https://github.com/jianyun8023/my-ai-gateway/issues/164)。范围与本地验证以上述记录为准；PR CI 和合并状态以 GitHub 实时记录为准。
