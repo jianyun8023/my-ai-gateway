@@ -33,8 +33,9 @@ Tech-Utility：冷灰底色、绿色强调、紧凑数据布局。使用固定�
 | --- | --- |
 | `GatewayConsoleShell` | 导航、页面标题、Admin 连接、主题、语言和刷新 |
 | `Card` | 标题、可选说明与操作区；`flush` 用于表格 |
-| `Button` / `IconButton` | 主次操作、禁用、加载与可访问名称；提交按钮显式设置 `type="submit"` |
-| `TextField` / `SelectField` / `TextAreaField` | 原生表单，共用 label、hint、error 关联；保留调用方描述 ID |
+| `Button` / `IconButton` | Mantine Button/ActionIcon，主次操作、禁用、加载与可访问名称；图标提示用 Tooltip，提交按钮显式设置 `type="submit"` |
+| `TextField` / `SelectField` / `TextAreaField` | Mantine TextInput/NativeSelect/Textarea，共用 label、hint、error 关联；保留调用方描述 ID 和原生 change 事件 |
+| `CheckboxField` | Mantine Checkbox 的表单组合，label/hint、禁用与布尔值回调；位于 UI 层，控制面共享入口仅转导出 |
 | `StatusPill` | success / warning / danger / accent / muted；页面负责业务状态映射 |
 | `SegmentedTabs` | tabs 模式切换内容面板；`mode="group"` 用于筛选 |
 | `LoadingState` / `Notice` / `EmptyState` | 加载、错误重试、成功反馈与空态；空表使用 `layout="centered"` |
@@ -43,6 +44,8 @@ Tech-Utility：冷灰底色、绿色强调、紧凑数据布局。使用固定�
 | `overlays.ts` | 直接导出 Mantine Popover/Checkbox，列偏好在公共主题下使用，无需机械包装 |
 
 通用组件在 `web/src/components/ui`，不反向依赖 API 或控制面模块。浮层布局由 [Overlay.module.scss](web/src/components/ui/Overlay.module.scss) 管理，行为交给 Mantine；其余尚未迁移组件继续使用 [ConsolePrimitives.module.scss](web/src/components/ui/ConsolePrimitives.module.scss) 与 [components.scss](web/src/styles/components.scss)。`features/control-plane/shared.tsx` 保留协议标签、错误展示、确认流程和业务布局；协议常量、错误归一化与格式化分别由 `lib/protocols.ts`、`admin-api/errors.ts` 和 `utils/format.ts` 提供。分层约束见 [前端架构](docs/frontend-architecture.md)。
+
+按钮、图标和字段的品牌尺寸、状态样式集中在 [Controls.module.scss](web/src/components/ui/Controls.module.scss)，通过 Mantine Styles API 和语义变量接入。字段使用 Mantine Input.Wrapper 的 label/description/error；`attributes.input` 合并调用方描述 ID 与生成的 hint/error ID，不覆盖业务输入值。`SelectField` 采用 NativeSelect 保留 option/optgroup、禁用项和浏览器菜单交互，不新增搜索能力或模拟 change 事件。旧 `.btn`、手写字段框及控制面复选框样式已删除；页面操作布局按 `data-ui="button"` 定位，不能恢复旧按钮视觉类。
 
 页面 SCSS 只维护布局与领域视觉。事件虚拟列表和配置表格分别保留各自的数据与滚动逻辑。
 
@@ -74,6 +77,6 @@ Tech-Utility：冷灰底色、绿色强调、紧凑数据布局。使用固定�
 - closeDisabled 同时保护关闭按钮、Esc 和遮罩点击，提交按钮仍由业务 busy 防重复触发。没有提交中的普通浮层允许 Esc 和外部点击关闭。
 - 非敏感编辑/确认数据使用 useOverlayState：setValue(record) 打开、setValue(undefined) 开始关闭，把 afterExit 传入 onExitTransitionEnd 才清空数据，避免关闭过程中标题/表单跳变。敏感 Key 使用原有即时清除流程。
 - 来源/实体详情切换编辑时，先关闭详情并恢复焦点，再在 onExitTransitionEnd 中打开编辑。不要直接卸载正在持有编辑按钮的详情，否则编辑关闭后无法返回有效入口。
-- 列偏好 Popover 使用 Portal、视口自动定位和 focus trap；交互内容使用 Popover，纯文本提示使用 Tooltip。当前表单选择器仍为原生实现；未来 Mantine Select 与嵌套 Popover 接入须按官方 Portal/事件规则单独验证，首批没有宣称这些组合已完成。
+- 列偏好 Popover 使用 Portal、视口自动定位和 focus trap；交互内容使用 Popover，纯文本提示使用 Tooltip。公共字段选择器已采用 Mantine NativeSelect，保留浏览器菜单；页面内直接原生控件待后续收敛。未来 Mantine Select 与嵌套 Popover 接入须按官方 Portal/事件规则单独验证，前两批没有宣称这些组合已完成。
 
 新增页面的评审需检查：复用组件入口和主题；label/hint/error 与提交契约；首次加载/刷新/错误/空态；键盘和关闭焦点；双主题、长文案与窄屏；图表/虚拟列表测量及资源体积。专业组件继续保留 Chart.js/TanStack Virtual，主题与数据语义验收不能省略。CPA Usage Keeper 的既有 MIT License 与来源说明继续保留。

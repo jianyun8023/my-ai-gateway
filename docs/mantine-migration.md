@@ -14,11 +14,11 @@ Issue 中 `de708e8` 的链接是历史调查依据。当前事件详情已位于
 
 ## 页面与流程覆盖
 
-路径相对于 `web/src/`。PR 列在外部写入获得授权后填写；本轮仅本地实施。
+路径相对于 `web/src/`。首批已提交 [PR #169](https://github.com/jianyun8023/my-ai-gateway/pull/169)，第二批在 `codex/166-mantine-controls` 上承接；不将批次完成视为总任务完成。
 
 | 页面/流程 | 当前组件与实际入口 | 目标与保留项 | 迁移批次/PR | 验证证据与剩余工作 |
 | --- | --- | --- | --- | --- |
-| 应用壳 | `components/gateway/GatewayConsoleShell`：桌面侧栏、移动导航、连接、主题、语言、刷新 | 桌面导航保留 hash 语义；移动导航使用公共 Drawer；主题状态唯一 | 首批，本地 | 已验证关闭/返回焦点、窄屏和双主题；后续收敛工具栏控件 |
+| 应用壳 | `components/gateway/GatewayConsoleShell`：桌面侧栏、移动导航、连接、主题、语言、刷新 | 桌面导航保留 hash 语义；移动导航使用公共 Drawer；主题状态唯一 | 首批，#169 | 已验证关闭/返回焦点、窄屏和双主题；后续收敛工具栏控件 |
 | 总览 | `features/usage/UsageOverview`、`UsageFilters`、`charts.ts`：时间/模型过滤、KPI、Chart.js | 保留时间/Token 语义；字段、图例、轴与 canvas 主题接入 | 全局 Provider 首批；页面后续 | 后续验证有数据、空态、部分失败、刷新、主题和图表尺寸 |
 | 用量分析 | `UsageAnalysis`、`UsageFilters`：趋势、分布、价格与导出 | 保留 Chart.js 与格式化工具；统一图表容器和表格 | 全局 Provider 首批；页面后续 | 后续验证筛选/导出、missing 与 unknown、长文本 |
 | 请求事件 | `UsageEvents`、`UsageEventDetails`：TanStack Virtual、列设置、详情/重试、导出 | details → Popover；详情 → Mantine Drawer；保留虚拟化与查询取消 | 浮层首批；列表后续 | 首批列切换、详情关闭；后续密集数据滚动、刷新与列测量 |
@@ -35,7 +35,8 @@ Issue 中 `de708e8` 的链接是历史调查依据。当前事件详情已位于
 | 活跃 Modal | 首批替换其手写焦点、滚动、计时和动画；来源/实体/能力详情的 380ms 外部计时改用 Mantine 退出回调 |
 | 移动侧栏 | 首批替换遮罩、手写 body overflow 和 Esc/焦点计时器；桌面导航继续使用同一内容 |
 | 活跃列设置 details | 首批迁移 Popover；复选项使用 Mantine Checkbox |
-| Button、IconButton、FormField、SegmentedTabs、LanguageSwitcher | 保留调用契约，后续逐类改用 Mantine；原生 select 仍在页面/字段中，首批不宣称全部下拉完成 |
+| Button、IconButton、FormField、CheckboxField | 第二批迁移公共入口及其调用页面；字段下拉使用 Mantine NativeSelect，页面内直接原生控件仍待收敛 |
+| SegmentedTabs、LanguageSwitcher | 保留调用契约，后续迁移分段/语言切换和控制面 Toggle |
 | Notice、LoadingState、LoadingSpinner、EmptyState、StatusPill | 后续统一通知/持久错误、加载/空态/状态色；保留部分失败与重试信息 |
 | Card、TableScroll、FormGrid、FilterBar、PageActions、DrawerSection | 保留有价值的页面组合；后续去除重复控件样式，公共布局归入 UI 层 |
 | Chart.js、TanStack Virtual、格式工具 | 保留专业实现；后续统一主题、容器、数值/缺失值展示并验证性能 |
@@ -76,3 +77,19 @@ Issue 中 `de708e8` 的链接是历史调查依据。当前事件详情已位于
 ### 尚未验收
 
 本批没有完成 Button/字段/下拉、反馈、表格与图表的迁移，也没有完成八页全部浅/深色、桌面/窄屏及加载/错误/空态组合。真实表单提交、模型发现确认、连接测试、密钥读写和导入导出未执行；已有 DOM 测试不能替代这些完整浏览器流程。密集事件列表滚动与列测量、嵌套 Select/Popover、屏幕阅读器及性能继续由后续批次验证。一次窄屏自动化指针点击虚拟事件行未打开详情，随后键盘打开成功；指针命中与虚拟化滚动组合仍需单独复核，不能据此宣称事件列表完整验收。没有 Rust 改动，未运行后端或 live Provider 测试。总任务 #166 保持未完成。
+
+## 第二批：公共按钮与表单字段
+
+基线为首批 `2966895`，分支 `codex/166-mantine-controls`。首批真实管理端截图已从提交历史移除，仅保留本地副本；本批公开截图全部使用合成数据。
+
+迁移入口：`Button` → Mantine Button；`IconButton` → ActionIcon/Tooltip；`TextField`、`SelectField`、`TextAreaField` → TextInput、NativeSelect、Textarea；控制面 `CheckboxField` 移到 UI 层并使用 Mantine Checkbox。公共入口覆盖来源/账号、模型发现、模型与路由、设置等已有表单，以及页面主次操作与行操作。保留原生受控值和 option、独立表单提交按钮、加载禁用、布尔值回调、label/hint/error/调用方描述 ID。
+
+删除旧 `.btn` 全局视觉、字段框、图标按钮及控制面复选框样式。品牌外观集中在 `Controls.module.scss` 和主题的 Input/InputWrapper 配置；页面保留领域布局。原有仅断言按钮样式字符串的测试删除，行为测试保留，并新增实际 SourceForm 的 JSON 校验、选择项/复选框提交、输入保留和忙碌禁用回归。
+
+浏览器验证：真实管理端来源编辑可输入、改变模式/启用勾选后取消，再打开仍为原配置，关闭焦点回到编辑按钮；未提交真实配置。临时合成数据页面直接挂载同一个 SourceForm，确认无效 JSON 提示、修正后本地提交、提交时禁用控件，以及浅色桌面/深色 390px 下的长表单和固定操作区；窄屏字段与按钮均为 44px，页面无横向溢出。截图：[桌面浅色](evidence/166/b2-source-form-light.png)、[窄屏深色](evidence/166/b2-source-form-mobile-dark.png)。合成页面无后端请求，验证后已移除。
+
+第二批不包含页面内直接编写的筛选控件、Toggle、分段/语言切换、反馈、表格与图表。NativeSelect 使用浏览器菜单，尚未取得可靠的原生菜单 Esc 组合自动化证据；Mantine Select/嵌套 Popover 的 Portal 组合也未纳入本批。
+
+验证命令均在本批 worktree 执行通过：`mise exec -- npm --prefix web run lint`（ESLint/Knip）、`typecheck`、`test`、`build`，以及 `git diff --check`。测试为 28 个文件、134 项；相比首批删除 2 项旧样式字符串断言，增加 1 项来源表单行为回归。没有后端改动，未重复运行本地后端/live Provider 测试；首批 PR #169 的静态/构建、单元/PostgreSQL 两项 CI 均通过。
+
+本批生产构建 JS 合计 873.88 kB（gzip 267.42 kB），CSS 合计 133.71 kB（gzip 24.55 kB）；相对首批增加 41.28/13.28 kB 与 26.24/3.76 kB（原始/gzip）。主入口 JS 为 474.66 kB（gzip 147.93 kB）。增加 Button、ActionIcon、Tooltip、Input、Loader 及 NativeSelect 所需 Combobox 样式；未新增依赖包。
