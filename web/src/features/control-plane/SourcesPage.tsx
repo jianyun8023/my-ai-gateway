@@ -1,3 +1,4 @@
+import { Table } from '@mantine/core';
 import { useOverlayState } from '@/components/ui/useOverlayState';
 import type {
   Account,
@@ -173,69 +174,69 @@ export function SourcesPage({ api, refreshRevision = 0, onBusyChange }: SourcesP
         data.sources.length === 0 ? <EmptyTable title={t('sources.empty.sources_title')} description={t('sources.empty.sources_desc')} /> : (
           <Card variant="flush" title={t('sources.card.sources_title')}>
             <TableScroll label={t('sources.table.sources_region')}>
-              <table className={styles.table}>
-                <thead><tr>
-                  <th>{t('sources.field.source')}</th>
-                  <th>{t('sources.field.provider_preset')}</th>
-                  <th>{t('sources.field.base_url')}</th>
-                  {GATEWAY_PROTOCOLS.map((protocol) => <th key={protocol}>{PROTOCOL_LABELS[protocol]}</th>)}
-                  <th>{t('sources.tab.accounts')}</th>
-                  <th>{t('common.status')}</th>
-                  <th>{t('common.actions')}</th>
-                </tr></thead>
-                <tbody>{data.sources.map((source) => (
-                  <tr key={source.id} data-clickable="true" onClick={() => setSelectedSourceId(source.id)}>
-                    <td><span className={styles.primaryText}><strong>{source.display_name}</strong><small className={styles.mono}>{source.id}</small></span></td>
-                    <td><code>{source.provider_preset_id}@{source.provider_preset_version}</code></td>
-                    <td><code>{source.base_url}</code></td>
+              <Table className={styles.table}>
+                <Table.Thead><Table.Tr>
+                  <Table.Th scope="col">{t('sources.field.source')}</Table.Th>
+                  <Table.Th scope="col">{t('sources.field.provider_preset')}</Table.Th>
+                  <Table.Th scope="col">{t('sources.field.base_url')}</Table.Th>
+                  {GATEWAY_PROTOCOLS.map((protocol) => <Table.Th scope="col" key={protocol}>{PROTOCOL_LABELS[protocol]}</Table.Th>)}
+                  <Table.Th scope="col">{t('sources.tab.accounts')}</Table.Th>
+                  <Table.Th scope="col">{t('common.status')}</Table.Th>
+                  <Table.Th scope="col">{t('common.actions')}</Table.Th>
+                </Table.Tr></Table.Thead>
+                <Table.Tbody>{data.sources.map((source) => (
+                  <Table.Tr key={source.id} data-clickable="true" onClick={() => setSelectedSourceId(source.id)}>
+                    <Table.Td><span className={styles.primaryText}><strong>{source.display_name}</strong><small className={styles.mono}>{source.id}</small></span></Table.Td>
+                    <Table.Td><code>{source.provider_preset_id}@{source.provider_preset_version}</code></Table.Td>
+                    <Table.Td><code>{source.base_url}</code></Table.Td>
                     {GATEWAY_PROTOCOLS.map((protocol) => (
-                      <td key={protocol}><StatusPill tone={protocolModeTone(source.protocol_capabilities[protocol]?.mode)}>{t(protocolModeKey(source.protocol_capabilities[protocol]?.mode))}</StatusPill></td>
+                      <Table.Td key={protocol}><StatusPill tone={protocolModeTone(source.protocol_capabilities[protocol]?.mode)}>{t(protocolModeKey(source.protocol_capabilities[protocol]?.mode))}</StatusPill></Table.Td>
                     ))}
-                    <td><span className={styles.mono}>{data.accounts.filter((account) => account.source_id === source.id).length}</span></td>
-                    <td onClick={(event) => event.stopPropagation()}><Toggle label={t('sources.table.toggle_aria', { id: source.id })} checked={source.enabled} disabled={mutationBusy} onChange={(enabled) => void mutate(() => api.setSourceEnabled(source.id, enabled), t(enabled ? 'sources.table.toggle_enabled' : 'sources.table.toggle_disabled', { name: source.id }))} /></td>
-                    <td onClick={(event) => event.stopPropagation()}><div className={styles.rowActions}>
+                    <Table.Td><span className={styles.mono}>{data.accounts.filter((account) => account.source_id === source.id).length}</span></Table.Td>
+                    <Table.Td onClick={(event) => event.stopPropagation()}><Toggle label={t('sources.table.toggle_aria', { id: source.id })} checked={source.enabled} disabled={mutationBusy} onChange={(enabled) => void mutate(() => api.setSourceEnabled(source.id, enabled), t(enabled ? 'sources.table.toggle_enabled' : 'sources.table.toggle_disabled', { name: source.id }))} /></Table.Td>
+                    <Table.Td onClick={(event) => event.stopPropagation()}><div className={styles.rowActions}>
                       <IconButton label={t('sources.table.view_aria', { id: source.id })} onClick={() => setSelectedSourceId(source.id)}><IconEye size={16} /></IconButton>
                       <IconButton label={t('sources.table.edit_aria', { id: source.id })} onClick={() => setEditor({ kind: 'source', record: source })}><IconPencil size={16} /></IconButton>
                       <IconButton label={`${source.enabled ? t('common.disable') : t('common.enable')} ${source.id}`} disabled={mutationBusy} onClick={() => void mutate(() => api.setSourceEnabled(source.id, !source.enabled), t(source.enabled ? 'sources.table.toggle_disabled' : 'sources.table.toggle_enabled', { name: source.id }))}><IconPower size={16} /></IconButton>
                       <IconButton label={t('sources.table.delete_aria', { id: source.id })} className={styles.dangerIcon} onClick={() => setDeleteTarget({ kind: 'source', record: source })}><IconTrash2 size={16} /></IconButton>
-                    </div></td>
-                  </tr>
-                ))}</tbody>
-              </table>
+                    </div></Table.Td>
+                  </Table.Tr>
+                ))}</Table.Tbody>
+              </Table>
             </TableScroll>
           </Card>
         )
       ) : data.accounts.length === 0 ? <EmptyTable title={t('sources.empty.accounts_title')} description={t('sources.empty.accounts_desc')} /> : (
         <Card variant="flush" title={t('sources.card.accounts_title')}>
           <TableScroll label={t('sources.table.accounts_region')}>
-            <table className={styles.table}>
-              <thead><tr>
-                <th>{t('common.account')}</th>
-                <th>{t('sources.field.source')}</th>
-                <th>{t('sources.table.header_credentials')}</th>
-                <th>{t('sources.table.header_fallback_weight')}</th>
-                <th>{t('sources.table.header_health')}</th>
-                <th>{t('sources.table.header_cooldown')}</th>
-                <th>{t('common.status')}</th>
-                <th>{t('common.actions')}</th>
-              </tr></thead>
-              <tbody>{data.accounts.map((account) => (
-                <tr key={account.id}>
-                  <td><span className={styles.primaryText}><strong>{account.display_name}</strong><small className={styles.mono}>{account.id}</small></span></td>
-                  <td><code>{account.source_id}</code></td>
-                  <td><StatusPill tone={account.credential_configured ? 'success' : 'danger'}>{t(credentialKey(account))}</StatusPill></td>
-                  <td><span className={styles.mono}>{account.weight}</span></td>
-                  <td><StatusPill tone={account.health_status === 'healthy' ? 'success' : account.health_status === 'unknown' ? 'accent' : 'warning'}>{t(`values.health.${account.health_status || 'unknown'}`, { defaultValue: account.health_status || 'unknown' })}</StatusPill></td>
-                  <td>{formatDateTime(account.cooldown_until)}</td>
-                  <td><Toggle label={t('sources.table.toggle_aria', { id: account.id })} checked={account.enabled} disabled={mutationBusy} onChange={(enabled) => void mutate(() => api.setAccountEnabled(account.id, enabled), t(enabled ? 'sources.table.account_toggle_enabled' : 'sources.table.account_toggle_disabled', { name: account.id }))} /></td>
-                  <td><div className={styles.rowActions}>
+            <Table className={styles.table}>
+              <Table.Thead><Table.Tr>
+                <Table.Th scope="col">{t('common.account')}</Table.Th>
+                <Table.Th scope="col">{t('sources.field.source')}</Table.Th>
+                <Table.Th scope="col">{t('sources.table.header_credentials')}</Table.Th>
+                <Table.Th scope="col">{t('sources.table.header_fallback_weight')}</Table.Th>
+                <Table.Th scope="col">{t('sources.table.header_health')}</Table.Th>
+                <Table.Th scope="col">{t('sources.table.header_cooldown')}</Table.Th>
+                <Table.Th scope="col">{t('common.status')}</Table.Th>
+                <Table.Th scope="col">{t('common.actions')}</Table.Th>
+              </Table.Tr></Table.Thead>
+              <Table.Tbody>{data.accounts.map((account) => (
+                <Table.Tr key={account.id}>
+                  <Table.Td><span className={styles.primaryText}><strong>{account.display_name}</strong><small className={styles.mono}>{account.id}</small></span></Table.Td>
+                  <Table.Td><code>{account.source_id}</code></Table.Td>
+                  <Table.Td><StatusPill tone={account.credential_configured ? 'success' : 'danger'}>{t(credentialKey(account))}</StatusPill></Table.Td>
+                  <Table.Td><span className={styles.mono}>{account.weight}</span></Table.Td>
+                  <Table.Td><StatusPill tone={account.health_status === 'healthy' ? 'success' : account.health_status === 'unknown' ? 'accent' : 'warning'}>{t(`values.health.${account.health_status || 'unknown'}`, { defaultValue: account.health_status || 'unknown' })}</StatusPill></Table.Td>
+                  <Table.Td>{formatDateTime(account.cooldown_until)}</Table.Td>
+                  <Table.Td><Toggle label={t('sources.table.toggle_aria', { id: account.id })} checked={account.enabled} disabled={mutationBusy} onChange={(enabled) => void mutate(() => api.setAccountEnabled(account.id, enabled), t(enabled ? 'sources.table.account_toggle_enabled' : 'sources.table.account_toggle_disabled', { name: account.id }))} /></Table.Td>
+                  <Table.Td><div className={styles.rowActions}>
                     <IconButton label={t('sources.table.edit_aria', { id: account.id })} onClick={() => setEditor({ kind: 'account', record: account })}><IconPencil size={16} /></IconButton>
                     <IconButton label={`${account.enabled ? t('common.disable') : t('common.enable')} ${account.id}`} disabled={mutationBusy} onClick={() => void mutate(() => api.setAccountEnabled(account.id, !account.enabled), t(account.enabled ? 'sources.table.account_toggle_disabled' : 'sources.table.account_toggle_enabled', { name: account.id }))}><IconPower size={16} /></IconButton>
                     <IconButton label={t('sources.table.delete_aria', { id: account.id })} className={styles.dangerIcon} onClick={() => setDeleteTarget({ kind: 'account', record: account })}><IconTrash2 size={16} /></IconButton>
-                  </div></td>
-                </tr>
-              ))}</tbody>
-            </table>
+                  </div></Table.Td>
+                </Table.Tr>
+              ))}</Table.Tbody>
+            </Table>
           </TableScroll>
         </Card>
       )}

@@ -1,3 +1,4 @@
+import { Table } from '@mantine/core';
 import { useOverlayState } from '@/components/ui/useOverlayState';
 import { downloadBlob } from '@/utils/download';
 import type {
@@ -237,9 +238,9 @@ export function SettingsPage({
       <Card variant="flush" title={t('settings.card.keys')} extra={<Button size="sm" variant="primary" onClick={() => setCreateOpen(true)}><IconPlus size={14} />{t('settings.new_key')}</Button>}>
         {data.keys.length === 0 ? <EmptyTable title={t('settings.keys_empty')} /> : (
           <TableScroll label={t('settings.keys_table_aria')}>
-            <table className={styles.table}>
-              <thead><tr><th>{t('settings.keys_column.name')}</th><th>{t('settings.keys_column.prefix')}</th><th>{t('settings.keys_column.allowed_models')}</th><th>{t('settings.keys_column.created')}</th><th>{t('settings.keys_column.last_used')}</th><th>{t('settings.keys_column.status')}</th><th>{t('common.actions')}</th></tr></thead>
-              <tbody>{data.keys.map((key) => {
+            <Table className={styles.table}>
+              <Table.Thead><Table.Tr><Table.Th scope="col">{t('settings.keys_column.name')}</Table.Th><Table.Th scope="col">{t('settings.keys_column.prefix')}</Table.Th><Table.Th scope="col">{t('settings.keys_column.allowed_models')}</Table.Th><Table.Th scope="col">{t('settings.keys_column.created')}</Table.Th><Table.Th scope="col">{t('settings.keys_column.last_used')}</Table.Th><Table.Th scope="col">{t('settings.keys_column.status')}</Table.Th><Table.Th scope="col">{t('common.actions')}</Table.Th></Table.Tr></Table.Thead>
+              <Table.Tbody>{data.keys.map((key) => {
                 const expired = Boolean(key.expires_at && Date.parse(key.expires_at) <= now);
                 const replaced = key.replaced_by_id != null;
                 const overlapActive = replaced && Boolean(key.overlap_until && Date.parse(key.overlap_until) > now);
@@ -248,21 +249,21 @@ export function SettingsPage({
                   ? new Date(Math.min(Date.parse(key.overlap_until), Date.parse(key.expires_at))).toISOString()
                   : key.overlap_until;
                 return (
-                <tr key={key.id}>
-                  <td><span className={styles.primaryText}><strong>{key.name}</strong><small>{t('settings.row_id', { id: key.id })}</small></span></td>
-                  <td><code>{key.key_prefix}…</code></td>
-                  <td>{key.allowed_models.length === 0 ? <StatusPill>{t('settings.all_models')}</StatusPill> : <span className={styles.inlineActions}>{key.allowed_models.map((model) => <StatusPill key={model}>{model}</StatusPill>)}</span>}</td>
-                  <td>{formatDateTime(key.created_at)}</td>
-                  <td>{formatDateTime(key.last_used_at)}</td>
-                  <td><span className={styles.primaryText}><StatusPill tone={status === 'active' ? 'success' : status === 'overlap' ? 'warning' : 'muted'}>{t(`settings.key_status.${status}`)}</StatusPill>{overlapActive && status === 'overlap' && <small>{t('settings.valid_until', { until: formatDateTime(validUntil) })}</small>}</span></td>
-                  <td><span className={styles.inlineActions}>
+                <Table.Tr key={key.id}>
+                  <Table.Td><span className={styles.primaryText}><strong>{key.name}</strong><small>{t('settings.row_id', { id: key.id })}</small></span></Table.Td>
+                  <Table.Td><code>{key.key_prefix}…</code></Table.Td>
+                  <Table.Td>{key.allowed_models.length === 0 ? <StatusPill>{t('settings.all_models')}</StatusPill> : <span className={styles.inlineActions}>{key.allowed_models.map((model) => <StatusPill key={model}>{model}</StatusPill>)}</span>}</Table.Td>
+                  <Table.Td>{formatDateTime(key.created_at)}</Table.Td>
+                  <Table.Td>{formatDateTime(key.last_used_at)}</Table.Td>
+                  <Table.Td><span className={styles.primaryText}><StatusPill tone={status === 'active' ? 'success' : status === 'overlap' ? 'warning' : 'muted'}>{t(`settings.key_status.${status}`)}</StatusPill>{overlapActive && status === 'overlap' && <small>{t('settings.valid_until', { until: formatDateTime(validUntil) })}</small>}</span></Table.Td>
+                  <Table.Td><span className={styles.inlineActions}>
                     <IconButton label={key.key_recoverable ? t('settings.view_key_aria', { name: key.name }) : t('settings.view_key_unavailable_aria', { name: key.name })} disabled={mutationBusy || !key.key_recoverable} onClick={() => revealKey(key)}><IconEye size={16} /></IconButton>
                     <IconButton label={t('settings.rotate_key_aria', { name: key.name })} disabled={mutationBusy || status !== 'active'} onClick={() => { setMutationError(undefined); setRotateTarget(key); }}><IconRefreshCw size={16} /></IconButton>
                     <IconButton label={t('settings.revoke_key_aria', { name: key.name })} className={styles.dangerIcon} disabled={!key.enabled || Boolean(key.revoked_at)} onClick={() => setRevokeTarget(key)}><IconTrash2 size={16} /></IconButton>
-                  </span></td>
-                </tr>
-              ); })}</tbody>
-            </table>
+                  </span></Table.Td>
+                </Table.Tr>
+              ); })}</Table.Tbody>
+            </Table>
           </TableScroll>
         )}
       </Card>

@@ -1,5 +1,5 @@
 import { Notice } from '@/components/ui/Notice';
-import { Checkbox } from '@mantine/core';
+import { Checkbox, Table } from '@mantine/core';
 import { useOverlayState } from '@/components/ui/useOverlayState';
 import type {
   AdminErrorShape,
@@ -221,30 +221,30 @@ export function ModelDiscoveryPage({ api, refreshRevision = 0, onBusyChange }: M
           </div>
         )}>
           <TableScroll label={t('discovery.table_aria')}>
-            <table className={styles.table}>
-              <thead><tr><th><Checkbox className={styles.tableCheckbox} label=" " classNames={{ label: styles.tableCheckboxLabel }} aria-label={t('discovery.select_all_aria')} checked={eligibleModels.length > 0 && eligibleModels.every((model) => selectedModels.has(model.upstream_model_id))} onChange={(event) => toggleAll(event.target.checked)} /></th><th>{t('discovery.column.upstream_model')}</th><th>{t('discovery.column.confirmation')}</th><th>{t('discovery.column.availability')}</th><th>{t('discovery.column.metadata')}</th><th>{t('discovery.column.field_source')}</th><th>{t('discovery.column.preset_match')}</th><th>{t('discovery.column.last_discovered')}</th><th>{t('common.actions')}</th></tr></thead>
-              <tbody>{visibleModels.map((model) => {
+            <Table className={styles.table}>
+              <Table.Thead><Table.Tr><Table.Th scope="col"><Checkbox className={styles.tableCheckbox} label=" " classNames={{ label: styles.tableCheckboxLabel }} aria-label={t('discovery.select_all_aria')} checked={eligibleModels.length > 0 && eligibleModels.every((model) => selectedModels.has(model.upstream_model_id))} onChange={(event) => toggleAll(event.target.checked)} /></Table.Th><Table.Th scope="col">{t('discovery.column.upstream_model')}</Table.Th><Table.Th scope="col">{t('discovery.column.confirmation')}</Table.Th><Table.Th scope="col">{t('discovery.column.availability')}</Table.Th><Table.Th scope="col">{t('discovery.column.metadata')}</Table.Th><Table.Th scope="col">{t('discovery.column.field_source')}</Table.Th><Table.Th scope="col">{t('discovery.column.preset_match')}</Table.Th><Table.Th scope="col">{t('discovery.column.last_discovered')}</Table.Th><Table.Th scope="col">{t('common.actions')}</Table.Th></Table.Tr></Table.Thead>
+              <Table.Tbody>{visibleModels.map((model) => {
                 const eligible = model.confirmation_status === 'pending' && model.availability_status === 'available';
                 return (
-                  <tr key={`${model.source_id}:${model.upstream_model_id}`}>
-                    <td><Checkbox className={styles.tableCheckbox} label=" " classNames={{ label: styles.tableCheckboxLabel }} aria-label={t('discovery.select_row_aria', { model: model.upstream_model_id })} disabled={!eligible} checked={selectedModels.has(model.upstream_model_id)} onChange={(event) => setSelectedModels((current) => { const next = new Set(current); if (event.target.checked) next.add(model.upstream_model_id); else next.delete(model.upstream_model_id); return next; })} /></td>
-                    <td><code>{model.upstream_model_id}</code></td>
-                    <td><StatusPill tone={statusTone(model.confirmation_status)}>{t(`discovery.confirm_state.${model.confirmation_status}`)}</StatusPill></td>
-                    <td><StatusPill tone={statusTone(model.availability_status)}>{t(`discovery.availability_state.${model.availability_status}`)}</StatusPill></td>
-                    <td><span className={styles.primaryText}><strong>{metadataSummary(model) || t('discovery.unnamed_metadata')}</strong><small>context {String(model.metadata.context_window ?? 'unknown')}</small></span></td>
-                    <td><span className={styles.secondaryText}>{metadataSourcesSummary(model, fieldSourceLabel)}</span></td>
-                    <td>{model.matched_model_preset_id ? <code>{model.matched_model_preset_id}@{model.matched_model_preset_version}</code> : <StatusPill>{t('discovery.none')}</StatusPill>}</td>
-                    <td>{formatDateTime(model.last_discovered_at)}</td>
-                    <td>
+                  <Table.Tr key={`${model.source_id}:${model.upstream_model_id}`}>
+                    <Table.Td><Checkbox className={styles.tableCheckbox} label=" " classNames={{ label: styles.tableCheckboxLabel }} aria-label={t('discovery.select_row_aria', { model: model.upstream_model_id })} disabled={!eligible} checked={selectedModels.has(model.upstream_model_id)} onChange={(event) => setSelectedModels((current) => { const next = new Set(current); if (event.target.checked) next.add(model.upstream_model_id); else next.delete(model.upstream_model_id); return next; })} /></Table.Td>
+                    <Table.Td><code>{model.upstream_model_id}</code></Table.Td>
+                    <Table.Td><StatusPill tone={statusTone(model.confirmation_status)}>{t(`discovery.confirm_state.${model.confirmation_status}`)}</StatusPill></Table.Td>
+                    <Table.Td><StatusPill tone={statusTone(model.availability_status)}>{t(`discovery.availability_state.${model.availability_status}`)}</StatusPill></Table.Td>
+                    <Table.Td><span className={styles.primaryText}><strong>{metadataSummary(model) || t('discovery.unnamed_metadata')}</strong><small>context {String(model.metadata.context_window ?? 'unknown')}</small></span></Table.Td>
+                    <Table.Td><span className={styles.secondaryText}>{metadataSourcesSummary(model, fieldSourceLabel)}</span></Table.Td>
+                    <Table.Td>{model.matched_model_preset_id ? <code>{model.matched_model_preset_id}@{model.matched_model_preset_version}</code> : <StatusPill>{t('discovery.none')}</StatusPill>}</Table.Td>
+                    <Table.Td>{formatDateTime(model.last_discovered_at)}</Table.Td>
+                    <Table.Td>
                       <div className={styles.rowActions}>
                         <Button size="sm" variant="ghost" onClick={() => setCapabilityModel(model)}><IconSlidersHorizontal size={14} />{t('discovery.capabilities_action')}</Button>
                         <Button size="sm" variant="ghost" onClick={() => setEditingModel(model)} disabled={model.confirmation_status !== 'pending'}><IconPencil size={14} />{t('common.edit')}</Button>
                       </div>
-                    </td>
-                  </tr>
+                    </Table.Td>
+                  </Table.Tr>
                 );
-              })}</tbody>
-            </table>
+              })}</Table.Tbody>
+            </Table>
           </TableScroll>
         </Card>
       )}

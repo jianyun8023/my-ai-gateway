@@ -30,32 +30,12 @@
 .filterBar > div { min-width: 160px; }
 
 .table {
-  width: 100%;
   min-width: 1040px;
-  border-collapse: collapse;
-  font-size: 13px;
-}
-
-.table th,
-.table td {
-  padding: 10px 13px;
-  border-bottom: 1px solid var(--border-color);
-  text-align: left;
-  vertical-align: middle;
-}
-
-.table thead tr {
-  background: var(--bg-primary);
 }
 
 .table .rowActions {
   gap: 4px;
   flex-wrap: nowrap;
-}
-
-.table [data-ui="icon-button"] {
-  width: 36px;
-  height: 36px;
 }
 
 .table .primaryText {
@@ -72,27 +52,6 @@
   line-height: 1.2;
 }
 
-.table th {
-  color: var(--text-secondary);
-  font-family: var(--font-mono);
-  font-size: var(--fs-small);
-  font-weight: 600;
-  text-transform: uppercase;
-}
-
-.table tbody tr:last-child td {
-  border-bottom: 0;
-}
-
-.table tbody tr[data-clickable='true'] {
-  cursor: pointer;
-}
-
-.table tbody tr[data-clickable='true']:hover {
-  background: var(--fg-soft);
-}
-
-.table code,
 .mono {
   font-family: var(--font-mono);
   font-size: 12px;
@@ -126,7 +85,7 @@
   background: var(--danger-soft);
 }
 
-.toggle { min-height: 44px; display: flex; align-items: center; }
+.toggle { min-height: 44px; display: flex; align-items: center; white-space: nowrap; }
 
 .formGrid {
   display: grid;
@@ -257,7 +216,6 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
-
 
 .diffGrid {
   display: grid;
@@ -742,15 +700,9 @@
   .table .rowActions {
     gap: 2px;
   }
-
-  .table [data-ui="icon-button"] {
-    width: 32px;
-    height: 32px;
-  }
 }
 
 @media (max-width: 920px) {
-  .table [data-ui="icon-button"] { width: 44px; height: 44px; }
   .table { min-width: 1040px; }
   .capabilitiesTable { min-width: 1180px; }
   .bindingsTable { min-width: 1260px; }

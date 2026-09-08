@@ -1,3 +1,4 @@
+import { Table } from '@mantine/core';
 import { TextField, SelectField } from '@/components/ui/FormField';
 import type {
   CapabilityMatrixResponse,
@@ -223,17 +224,17 @@ export function CapabilitiesPage({ api, refreshRevision = 0, onBusyChange }: Cap
       ) : rows.length === 0 ? <EmptyTable title={t('capabilities.empty_filter')} /> : (
         <Card variant="flush" title={t('capabilities.card_title')}>
           <TableScroll label={t('capabilities.matrix_aria')}>
-            <table className={`${styles.table} ${styles.capabilitiesTable}`}>
-              <thead><tr><th>{t('capabilities.column_route')}</th><th>{t('capabilities.column_source_account')}</th>{GATEWAY_PROTOCOLS.map((protocol) => <th key={protocol}>{PROTOCOL_LABELS[protocol]}</th>)}<th>{t('common.actions')}</th></tr></thead>
-              <tbody>{rows.map((row) => (
-                <tr key={`${row.route_id}:${row.source.source_id}:${row.account.account_id}:${row.upstream_model_id}`}>
-                  <td><span className={styles.primaryText}><strong>{row.model_display_name || row.model}</strong><small><code>{row.model}</code> · {t('capabilities.row_route_label')} <code>{row.route_id}</code></small><small>{t('capabilities.row_upstream_label')} <code>{row.upstream_model_id}</code></small></span></td>
-                  <td><span className={styles.primaryText}><strong>{row.source.display_name ?? row.source.source_id}</strong><small>{row.source.source_id}</small><small>{row.account.display_name ?? row.account.account_id} · {row.account.account_id}</small></span></td>
-                  {GATEWAY_PROTOCOLS.map((protocol) => <td key={protocol}><CapabilityCell cell={protocolCell(row, protocol)} /></td>)}
-                  <td><IconButton label={t('capabilities.view_aria', { route: row.route_id })} onClick={() => setSelectedRow(row)}><IconEye size={16} /></IconButton></td>
-                </tr>
-              ))}</tbody>
-            </table>
+            <Table className={`${styles.table} ${styles.capabilitiesTable}`}>
+              <Table.Thead><Table.Tr><Table.Th scope="col">{t('capabilities.column_route')}</Table.Th><Table.Th scope="col">{t('capabilities.column_source_account')}</Table.Th>{GATEWAY_PROTOCOLS.map((protocol) => <Table.Th scope="col" key={protocol}>{PROTOCOL_LABELS[protocol]}</Table.Th>)}<Table.Th scope="col">{t('common.actions')}</Table.Th></Table.Tr></Table.Thead>
+              <Table.Tbody>{rows.map((row) => (
+                <Table.Tr key={`${row.route_id}:${row.source.source_id}:${row.account.account_id}:${row.upstream_model_id}`}>
+                  <Table.Td><span className={styles.primaryText}><strong>{row.model_display_name || row.model}</strong><small><code>{row.model}</code> · {t('capabilities.row_route_label')} <code>{row.route_id}</code></small><small>{t('capabilities.row_upstream_label')} <code>{row.upstream_model_id}</code></small></span></Table.Td>
+                  <Table.Td><span className={styles.primaryText}><strong>{row.source.display_name ?? row.source.source_id}</strong><small>{row.source.source_id}</small><small>{row.account.display_name ?? row.account.account_id} · {row.account.account_id}</small></span></Table.Td>
+                  {GATEWAY_PROTOCOLS.map((protocol) => <Table.Td key={protocol}><CapabilityCell cell={protocolCell(row, protocol)} /></Table.Td>)}
+                  <Table.Td><IconButton label={t('capabilities.view_aria', { route: row.route_id })} onClick={() => setSelectedRow(row)}><IconEye size={16} /></IconButton></Table.Td>
+                </Table.Tr>
+              ))}</Table.Tbody>
+            </Table>
           </TableScroll>
         </Card>
       )}

@@ -1,6 +1,7 @@
 import { createTheme, type CSSVariablesResolver } from '@mantine/core';
 import controls from './Controls.module.scss';
 import feedback from './Feedback.module.scss';
+import table from './Table.module.scss';
 
 // Colors and font families resolve from gateway-brand.scss on :root, including Portals.
 export const consoleTheme = createTheme({
@@ -16,7 +17,10 @@ export const consoleTheme = createTheme({
   breakpoints: { xs: '23.75em', sm: '37.5em', md: '57.5em', lg: '75em', xl: '90em' },
   components: {
     Progress: { styles: { root: { background: 'var(--fg-soft)' } } },
-    Table: { styles: { table: { '--table-border-color': 'var(--border)' } } },
+    Table: {
+      defaultProps: { horizontalSpacing: 13, verticalSpacing: 10 },
+      classNames: { table: table.table, thead: table.thead, th: table.th, td: table.td, tr: table.tr },
+    },
     Loader: { defaultProps: { color: 'var(--accent)', type: 'oval' }, classNames: { root: feedback.loader } },
     Input: {
       defaultProps: { size: 'sm' },

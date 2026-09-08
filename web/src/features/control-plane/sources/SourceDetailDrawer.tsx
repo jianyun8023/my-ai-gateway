@@ -1,3 +1,4 @@
+import { Table } from '@mantine/core';
 import type {
   Account,
   AdminErrorShape,
@@ -129,17 +130,17 @@ export function SourceDetailDrawer({
               <span className={styles.secondaryText}>{t('sources.detail.diff_count', { count: diff.changes.length })}</span>
             </div>
             <TableScroll label={t('sources.detail.preset_diff')}>
-              <table className={styles.table}>
-                <thead><tr><th>{t('sources.detail.diff_path')}</th><th>{t('sources.detail.diff_type')}</th><th>{t('sources.detail.diff_old')}</th><th>{t('sources.detail.diff_new')}</th></tr></thead>
-                <tbody>{diff.changes.map((change) => (
-                  <tr key={`${change.kind}:${change.path}`}>
-                    <td><code>{change.path}</code></td>
-                    <td><StatusPill tone={change.kind === 'added' ? 'success' : change.kind === 'missing' ? 'danger' : 'warning'}>{change.kind}</StatusPill></td>
-                    <td><code>{formatJsonValue(change.before)}</code></td>
-                    <td><code>{formatJsonValue(change.after)}</code></td>
-                  </tr>
-                ))}</tbody>
-              </table>
+              <Table className={styles.table}>
+                <Table.Thead><Table.Tr><Table.Th scope="col">{t('sources.detail.diff_path')}</Table.Th><Table.Th scope="col" miw={96}>{t('sources.detail.diff_type')}</Table.Th><Table.Th scope="col">{t('sources.detail.diff_old')}</Table.Th><Table.Th scope="col">{t('sources.detail.diff_new')}</Table.Th></Table.Tr></Table.Thead>
+                <Table.Tbody>{diff.changes.map((change) => (
+                  <Table.Tr key={`${change.kind}:${change.path}`}>
+                    <Table.Td><code>{change.path}</code></Table.Td>
+                    <Table.Td><StatusPill tone={change.kind === 'added' ? 'success' : change.kind === 'missing' ? 'danger' : 'warning'}>{change.kind}</StatusPill></Table.Td>
+                    <Table.Td><code>{formatJsonValue(change.before)}</code></Table.Td>
+                    <Table.Td><code>{formatJsonValue(change.after)}</code></Table.Td>
+                  </Table.Tr>
+                ))}</Table.Tbody>
+              </Table>
             </TableScroll>
           </div>
         )}
