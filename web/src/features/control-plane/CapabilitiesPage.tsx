@@ -215,8 +215,23 @@ export function CapabilitiesPage({ api, refreshRevision = 0, onBusyChange }: Cap
 
       <FilterBar label={t('capabilities.filters_aria')}>
         <TextField label={t('capabilities.search_label')} value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t('capabilities.search_placeholder')} />
-        <SelectField label={t('capabilities.source_filter')} value={sourceFilter} onChange={(event) => setSourceFilter(event.target.value)}><option value="">{t('capabilities.all_sources')}</option>{sources.map((source) => <option key={source} value={source}>{source}</option>)}</SelectField>
-        <SelectField label={t('capabilities.route_state_filter')} value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as CapabilityFilter)}><option value="all">{t('capabilities.route_state_all')}</option><option value="routable">{t('capabilities.route_state_routable')}</option><option value="degraded">{t('capabilities.route_state_degraded')}</option><option value="unroutable">{t('capabilities.route_state_unroutable')}</option></SelectField>
+        <SelectField
+          label={t('capabilities.source_filter')}
+          value={sourceFilter}
+          data={[{ value: '', label: t('capabilities.all_sources') }, ...sources.map((source) => ({ value: source, label: source }))]}
+          onChange={setSourceFilter}
+        />
+        <SelectField
+          label={t('capabilities.route_state_filter')}
+          value={statusFilter}
+          data={[
+            { value: 'all', label: t('capabilities.route_state_all') },
+            { value: 'routable', label: t('capabilities.route_state_routable') },
+            { value: 'degraded', label: t('capabilities.route_state_degraded') },
+            { value: 'unroutable', label: t('capabilities.route_state_unroutable') },
+          ]}
+          onChange={(value) => setStatusFilter(value as CapabilityFilter)}
+        />
         <span className={styles.filterMeta}>{t('capabilities.rows_counter', { rows: rows.length, total: response.data.length })}</span>
       </FilterBar>
 

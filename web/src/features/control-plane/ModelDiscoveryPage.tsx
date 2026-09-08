@@ -180,13 +180,21 @@ export function ModelDiscoveryPage({ api, refreshRevision = 0, onBusyChange }: M
     <section className={styles.page} data-od-id="page-model-discovery">
       <PageActions>
         <div className={styles.inlineActions}>
-          <SelectField label={t('discovery.source')} value={effectiveSourceId} onChange={(event) => changeSource(event.target.value)}>
-            {context.sources.map((item) => <option key={item.id} value={item.id}>{item.display_name} · {item.id}</option>)}
-          </SelectField>
-          <SelectField label={t('discovery.account')} value={effectiveAccountId} disabled={enabledAccounts.length === 0} onChange={(event) => setAccountId(event.target.value)}>
-            {enabledAccounts.length === 0 && <option value="">{t('discovery.no_enabled_account')}</option>}
-            {enabledAccounts.map((account) => <option key={account.id} value={account.id}>{account.display_name} · {account.id}</option>)}
-          </SelectField>
+          <SelectField
+            label={t('discovery.source')}
+            value={effectiveSourceId}
+            data={context.sources.map((item) => ({ value: item.id, label: `${item.display_name} · ${item.id}` }))}
+            onChange={changeSource}
+          />
+          <SelectField
+            label={t('discovery.account')}
+            value={effectiveAccountId}
+            disabled={enabledAccounts.length === 0}
+            data={enabledAccounts.length === 0
+              ? [{ value: '', label: t('discovery.no_enabled_account') }]
+              : enabledAccounts.map((account) => ({ value: account.id, label: `${account.display_name} · ${account.id}` }))}
+            onChange={setAccountId}
+          />
         </div>
         <div className={styles.rowActions}>
           <Button variant="secondary" onClick={() => { contextQuery.reload(); discoveryQuery.reload(); }} loading={contextQuery.refreshing || discoveryQuery.refreshing}><IconRefreshCw size={14} />{t('common.refresh')}</Button>
@@ -211,8 +219,28 @@ export function ModelDiscoveryPage({ api, refreshRevision = 0, onBusyChange }: M
       </Card>
 
       <FilterBar label={t('discovery.filters_aria')}>
-        <SelectField label={t('discovery.confirmation_filter')} value={confirmationFilter} onChange={(event) => { setConfirmationFilter(event.target.value as CatalogStatus | ''); setSelectedModels(new Set()); }}><option value="">{t('common.all')}</option><option value="pending">{t('discovery.confirm_state.pending')}</option><option value="confirmed">{t('discovery.confirm_state.confirmed')}</option><option value="unavailable">{t('discovery.confirm_state.unavailable')}</option></SelectField>
-        <SelectField label={t('discovery.availability_filter')} value={availabilityFilter} onChange={(event) => { setAvailabilityFilter(event.target.value as CatalogAvailability | ''); setSelectedModels(new Set()); }}><option value="">{t('common.all')}</option><option value="unknown">{t('discovery.availability_state.unknown')}</option><option value="available">{t('discovery.availability_state.available')}</option><option value="unavailable">{t('discovery.availability_state.unavailable')}</option></SelectField>
+        <SelectField
+          label={t('discovery.confirmation_filter')}
+          value={confirmationFilter}
+          data={[
+            { value: '', label: t('common.all') },
+            { value: 'pending', label: t('discovery.confirm_state.pending') },
+            { value: 'confirmed', label: t('discovery.confirm_state.confirmed') },
+            { value: 'unavailable', label: t('discovery.confirm_state.unavailable') },
+          ]}
+          onChange={(value) => { setConfirmationFilter(value as CatalogStatus | ''); setSelectedModels(new Set()); }}
+        />
+        <SelectField
+          label={t('discovery.availability_filter')}
+          value={availabilityFilter}
+          data={[
+            { value: '', label: t('common.all') },
+            { value: 'unknown', label: t('discovery.availability_state.unknown') },
+            { value: 'available', label: t('discovery.availability_state.available') },
+            { value: 'unavailable', label: t('discovery.availability_state.unavailable') },
+          ]}
+          onChange={(value) => { setAvailabilityFilter(value as CatalogAvailability | ''); setSelectedModels(new Set()); }}
+        />
         <span className={styles.filterMeta}>{t('discovery.source_model_count', { count: visibleModels.length })}</span>
       </FilterBar>
 

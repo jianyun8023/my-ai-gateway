@@ -634,28 +634,6 @@
   font-size: var(--fs-small);
 }
 
-.refreshingBar {
-  height: 2px;
-  position: fixed;
-  inset: 0 0 auto;
-  z-index: 100;
-  opacity: 0;
-  background: var(--accent);
-  transform: scaleX(0);
-  transform-origin: left;
-}
-
-.refreshingBar[data-visible='true'] {
-  opacity: 1;
-  animation: refresh-progress 1.2s ease-in-out infinite;
-}
-
-@keyframes refresh-progress {
-  0% { transform: scaleX(0); }
-  55% { transform: scaleX(0.72); }
-  100% { transform: scaleX(1); }
-}
-
 @media (max-width: 1280px) {
   .table .rowActions {
     gap: 2px;
@@ -663,10 +641,6 @@
 }
 
 @media (max-width: 920px) {
-  .table { min-width: 1040px; }
-  .capabilitiesTable { min-width: 1180px; }
-  .bindingsTable { min-width: 1260px; }
-  .routesTable { min-width: 1120px; }
   .diffGrid { grid-template-columns: minmax(0, 1fr); }
   .settingsGrid { grid-template-columns: minmax(0, 1fr); }
 }
@@ -692,10 +666,6 @@
 
 @media (max-width: 380px) {
   .rowActions { gap: 2px; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .refreshingBar[data-visible='true'] { animation: none; transform: scaleX(1); }
 }
 
 .field { min-width: 0; display: grid; align-content: start; gap: 6px; }

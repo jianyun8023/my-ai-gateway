@@ -44,6 +44,7 @@ export function Modal({ open, title, onClose, onExitTransitionEnd, footer, width
     onClose: () => { if (!closeDisabled) onClose(); },
     onExitTransitionEnd,
     closeButtonProps: { 'aria-label': t('common.close'), disabled: closeDisabled, size: mobile ? 44 : 32, icon: <IconX size={20} /> },
+    closeOnEscape: !closeDisabled,
     closeOnClickOutside: !closeDisabled,
     size: mobile && variant === 'drawer' ? '100%' : width,
     classNames: { content: `${styles.content} ${className ?? ''}`, body: styles.body, header: styles.header, title: styles.title },

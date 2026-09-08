@@ -6,6 +6,7 @@ import { Toggle } from './shared';
 import { FormActions } from '@/components/ui/FormActions';
 import type { Source } from '@/admin-api';
 import { setTestLanguage } from '@/test/setup';
+import { selectComboboxValue } from '@/test/interactions';
 import { act } from 'react';
 import { createRoot } from '@/test/render';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -20,6 +21,14 @@ function deferred<T>() {
   let reject!: (error: Error) => void;
   const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
   return { promise, resolve, reject };
+}
+
+async function waitFor(condition: () => boolean) {
+  const deadline = Date.now() + 1000;
+  while (!condition() && Date.now() < deadline) {
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+  }
+  expect(condition()).toBe(true);
 }
 
 const source = {
@@ -298,11 +307,8 @@ describe('production control-plane pages', () => {
     expect(checkbox('选择 upstream-a').checked).toBe(true);
     expect(checkbox('选择 unknown-model').checked).toBe(false);
     const filterId = [...container.querySelectorAll('label')].find(label => label.textContent === '可用状态')!.htmlFor;
-    const filter = document.getElementById(filterId) as HTMLSelectElement;
-    await act(async () => {
-      filter.value = 'unknown';
-      filter.dispatchEvent(new Event('change', { bubbles: true }));
-    });
+    const filter = document.getElementById(filterId) as HTMLInputElement;
+    await selectComboboxValue(filter, 'unknown');
     expect(checkbox('选择 upstream-a')).toBeNull();
     expect(checkbox('选择全部可确认模型').checked).toBe(false);
     expect([...container.querySelectorAll('button')].find(button => button.textContent?.includes('批量确认'))!.disabled).toBe(true);
@@ -379,9 +385,10 @@ describe('production control-plane pages', () => {
     expect(onSubmit).not.toHaveBeenCalled();
     expect(container.querySelector('[role="alert"]')).not.toBeNull();
     expect(name.value).toBe('Updated source');
-    const mode = container.querySelector<HTMLSelectElement>('select:not(:disabled)')!;
-    act(() => { setValue(headers, '{}'); mode.value = 'unsupported'; mode.dispatchEvent(new Event('change', { bubbles: true }));
-      container.querySelector<HTMLInputElement>('input[type="checkbox"]')!.click(); });
+    const mode = container.querySelector<HTMLInputElement>('input[role="combobox"]:not(:disabled)')!;
+    act(() => setValue(headers, '{}'));
+    await selectComboboxValue(mode, 'unsupported');
+    act(() => container.querySelector<HTMLInputElement>('input[type="checkbox"]')!.click());
     act(() => submit.click());
     expect(onSubmit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
       display_name: 'Updated source', enabled: false,
@@ -483,11 +490,8 @@ describe('production control-plane pages', () => {
     }));
     await renderPage('discovery');
     const sourceLabel = [...container.querySelectorAll('label')].find((label) => label.textContent === '来源')!;
-    const sourceSelect = document.getElementById(sourceLabel.htmlFor) as HTMLSelectElement;
-    act(() => {
-      sourceSelect.value = 'source-b';
-      sourceSelect.dispatchEvent(new Event('change', { bubbles: true }));
-    });
+    const sourceSelect = document.getElementById(sourceLabel.htmlFor) as HTMLInputElement;
+    await selectComboboxValue(sourceSelect, 'source-b');
     expect(container.textContent).not.toContain('upstream-a');
     expect(container.textContent).not.toContain('当前筛选没有来源模型');
     expect(container.textContent).toContain('正在加载来源模型');
@@ -585,11 +589,11 @@ describe('production control-plane pages', () => {
     await renderPage('discovery');
     await act(async () => [...container.querySelectorAll('button')].find(el => el.textContent === '协议能力')!.click());
     const dialog = container.querySelector('[role="dialog"]')!;
-    const mode = dialog.querySelector('select')!;
-    await act(async () => { mode.value = 'native'; mode.dispatchEvent(new Event('change', { bubbles: true })); });
+    const mode = dialog.querySelector<HTMLInputElement>('[role="combobox"]')!;
+    await selectComboboxValue(mode, 'native');
     const save = [...dialog.querySelectorAll('button')].find(el => el.textContent === '保存能力')!;
     await act(async () => save.click());
-    expect(mode.value).toBe('native');
+    expect(mode.value).toBe('原生');
     expect(dialog.querySelector('[role="alert"]')).not.toBeNull();
     expect(container.querySelector('.mantine-Notification-root')).toBeNull();
     failSave = false;
@@ -657,8 +661,9 @@ describe('production control-plane pages', () => {
   it('filters capabilities and exposes the selected protocol chain as labeled details', async () => {
     await renderPage('capabilities');
     const region = container.querySelector('section[aria-label="能力矩阵筛选"]')!;
-    const protocol = [...region.querySelectorAll('select')].find(select => [...select.options].some(option => option.value === 'degraded'))!;
-    await act(async () => { protocol.value = 'degraded'; protocol.dispatchEvent(new Event('change', { bubbles: true })); });
+    const statusLabel = [...region.querySelectorAll('label')].find((label) => label.textContent === '路由状态')!;
+    const protocol = document.getElementById(statusLabel.htmlFor) as HTMLInputElement;
+    await selectComboboxValue(protocol, 'degraded');
     const view = [...container.querySelectorAll<HTMLButtonElement>('tbody button')].find(button => button.getAttribute('aria-label')?.includes('查看'))!;
     await act(async () => view.click());
     const terms = [...container.querySelectorAll('[role="dialog"] dt')];
@@ -684,6 +689,7 @@ describe('production control-plane pages', () => {
     const newKey = Array.from(container.querySelectorAll<HTMLButtonElement>('button'))
       .find((button) => button.textContent?.includes('新建密钥'));
     await act(async () => {
+      newKey?.focus();
       newKey?.click();
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
@@ -695,19 +701,22 @@ describe('production control-plane pages', () => {
     });
     const create = Array.from(document.body.querySelectorAll<HTMLButtonElement>('button'))
       .find((button) => button.textContent?.includes('创建密钥'));
-    await act(async () => {
-      create?.click();
-      await new Promise((resolve) => setTimeout(resolve, 20));
-    });
+    await act(async () => create?.click());
+    await waitFor(() => document.body.textContent?.includes(oneTimeValue) ?? false);
 
     expect(writeText).toHaveBeenCalledWith(oneTimeValue);
+    const resultDialog = container.querySelector<HTMLElement>('[role="dialog"]')!;
+    await waitFor(() => resultDialog.contains(document.activeElement));
+    expect(resultDialog.contains(document.activeElement)).toBe(true);
     expect(document.body.textContent).toContain(oneTimeValue);
     expect(document.body.textContent).toContain('API Key 已复制到剪贴板');
     expect(container.querySelector('.mantine-Notification-root')).toBeNull();
     expect(container.querySelectorAll('[role="status"]')).toHaveLength(1);
     expect(container.querySelector('[role="status"]')?.textContent).not.toContain(oneTimeValue);
     await act(async () => [...container.querySelectorAll('button')].find(el => el.textContent === '完成')!.click());
+    await waitFor(() => document.activeElement === newKey);
     expect(document.body.textContent).not.toContain(oneTimeValue);
+    expect(document.activeElement).toBe(newKey);
   });
 
   it('reveals an existing recoverable Virtual Key through the explicit Admin endpoint', async () => {

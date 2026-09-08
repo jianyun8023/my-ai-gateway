@@ -213,28 +213,13 @@
   .distributionHeading { align-items: flex-start; flex-direction: column; gap: 4px; }
   .advancedFilters { grid-template-columns: 1fr; }
   .commonFilters > .filterField { flex-basis: 100%; }
-  .chartGrid,
-  .overviewLowerGrid,
-  .analysisGrid { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 600px) {
-  .content {
-    --keeper-card-radius: var(--radius);
-    --keeper-card-padding: 16px;
-    --keeper-card-header-padding-x: 16px;
-    --keeper-card-header-padding-top: 16px;
-    --keeper-card-header-padding-bottom: 12px;
-  }
-
-  .filterPresets { flex-wrap: wrap; }
-  .commonFilters > .filterField { flex-basis: 100%; }
-
   .chartLarge { height: 230px; }
 
   .recentList > div { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .recentList time, .recentAttribution, .recentList > div > [data-ui='status-pill'] { grid-column: 1 / -1; }
-  .distributionHeading { align-items: flex-start; }
   .distributionList span { white-space: normal; text-align: right; }
 
   .eventActions { flex-wrap: wrap; }

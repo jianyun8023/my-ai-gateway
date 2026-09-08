@@ -3,6 +3,7 @@ import { act, useState } from 'react';
 import { createRoot } from '@/test/render';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setTestLanguage } from '@/test/setup';
+import { selectComboboxValue } from '@/test/interactions';
 import type { UsageBreakdownItem, UsageSummaryViewModel } from '@/gateway-usage';
 import { UsageTrend } from './UsageTrend';
 import { TokenDistribution } from './TokenDistribution';
@@ -31,7 +32,7 @@ describe('usage charts and accessible data', () => {
   afterEach(() => { act(() => root.unmount()); container.remove(); });
   const click = (text: string) => act(() => [...container.querySelectorAll('button')].find(button => button.textContent === text)!.click());
 
-  it('stacks only input/output, preserves reported total on metric change and exposes exact tabular values', () => {
+  it('stacks only input/output, preserves reported total on metric change and exposes exact tabular values', async () => {
     function Probe() {
       const [metric, setMetric] = useState<TrendMetric>('composition');
       return <UsageTrend metric={metric} onMetricChange={setMetric} points={[{ bucket: '2026-09-08T00:00:00Z', tokens, logicalRequests: 20, upstreamAttempts: 22, successfulRequests: 18 }]} />;
@@ -42,11 +43,7 @@ describe('usage charts and accessible data', () => {
     expect(chart().options.scales.y.stacked).toBe(true);
     click('View data');
     expect([...container.querySelectorAll('tbody td')].map(cell => cell.textContent).slice(1)).toEqual(['1,200', '420']);
-    act(() => {
-      const select = container.querySelector('select')!;
-      select.value = 'total';
-      select.dispatchEvent(new Event('change', { bubbles: true }));
-    });
+    await selectComboboxValue(container.querySelector<HTMLInputElement>('[role="combobox"]')!, 'total');
     expect(container.querySelector('[data-chart="line"]')).not.toBeNull();
     expect(chart().data.datasets.map((dataset: { data: number[] }) => dataset.data)).toEqual([[1780], [20]]);
     expect(chart().options.scales.y.title.text).toBe('Total Tokens');
@@ -105,7 +102,7 @@ describe('usage charts and accessible data', () => {
   it('shows an explicit empty trend rather than a blank canvas', () => {
     act(() => root.render(<UsageTrend points={[]} metric="composition" onMetricChange={() => {}} />));
     expect(container.querySelector('output')).toBeNull();
-    expect(container.querySelector('select')).not.toBeNull();
+    expect(container.querySelector('[role="combobox"]')).not.toBeNull();
     expect(container.textContent).toContain('No trend data');
   });
 });

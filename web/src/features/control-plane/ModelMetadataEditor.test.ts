@@ -72,9 +72,9 @@ describe('model metadata field labels', () => {
 
   it('localizes feature option display text while keeping enum values', () => {
     renderFields();
-    const options = Array.from(container.querySelectorAll<HTMLOptionElement>('select option'));
+    const options = Array.from(container.querySelectorAll<HTMLElement>('[role="option"]'));
     expect(options.map((option) => option.textContent)).toEqual(expect.arrayContaining(['未知', '支持', '不支持']));
-    expect(options.map((option) => option.value)).toEqual(expect.arrayContaining(['unknown', 'supported', 'unsupported']));
+    expect(options.map((option) => option.getAttribute('value'))).toEqual(expect.arrayContaining(['unknown', 'supported', 'unsupported']));
   });
 
   it('hides source pills when field sources are undefined', () => {

@@ -1,5 +1,5 @@
-import { NativeSelect, TextInput, Textarea } from '@mantine/core';
-import { useId, type AriaAttributes, type InputHTMLAttributes, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react';
+import { Select, TextInput, Textarea, type SelectProps } from '@mantine/core';
+import { useId, type AriaAttributes, type InputHTMLAttributes, type TextareaHTMLAttributes } from 'react';
 
 interface FieldBaseProps {
   label: string;
@@ -36,9 +36,18 @@ export function TextField({ hint, error, id, 'aria-describedby': describedBy, 'a
   return <TextInput {...props} {...field} />;
 }
 
-export function SelectField({ hint, error, id, 'aria-describedby': describedBy, 'aria-invalid': invalid, ...props }: FieldBaseProps & FieldAttributes<SelectHTMLAttributes<HTMLSelectElement>>) {
+type SelectFieldProps = FieldBaseProps & Omit<FieldAttributes<SelectProps<string>>,
+  'allowDeselect' | 'children' | 'data' | 'description' | 'error' | 'label' | 'onChange'> & {
+  data: NonNullable<SelectProps<string>['data']>;
+  onChange?: (value: string) => void;
+};
+
+export function SelectField({ hint, error, id, 'aria-describedby': describedBy, 'aria-invalid': invalid,
+  data, onChange, ...props }: SelectFieldProps) {
   const field = useFieldProps({ hint, error, id, describedBy, invalid });
-  return <NativeSelect {...props} {...field} />;
+  return <Select {...props} data={data} {...field} allowDeselect={false} onChange={(value) => {
+    if (value !== null) onChange?.(value);
+  }} />;
 }
 
 export function TextAreaField({ hint, error, id, 'aria-describedby': describedBy, 'aria-invalid': invalid, ...props }: FieldBaseProps & FieldAttributes<TextareaHTMLAttributes<HTMLTextAreaElement>>) {

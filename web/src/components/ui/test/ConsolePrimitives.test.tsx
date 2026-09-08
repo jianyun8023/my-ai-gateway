@@ -6,6 +6,7 @@ import { SegmentedTabs } from '../SegmentedTabs';
 import { TextField, SelectField, TextAreaField } from '../FormField';
 import { Button } from '../Button';
 import { LanguageSwitcher } from '../LanguageSwitcher';
+import { IconButton } from '../IconButton';
 import { setTestLanguage } from '@/test/setup';
 
 describe('shared console interactions', () => {
@@ -68,10 +69,10 @@ describe('shared console interactions', () => {
   it('associates labels, hints, errors and caller descriptions across all field types', () => {
     act(() => root.render(<><p id="external">Shared guidance</p>
       <TextField label="Name" hint="A name" error="Required" aria-describedby="external" aria-invalid={false} />
-      <SelectField label="Protocol" hint="Choose one" error="Unavailable" aria-describedby="external"><option>Chat</option></SelectField>
+      <SelectField label="Protocol" hint="Choose one" error="Unavailable" aria-describedby="external" data={[{ value: 'chat', label: 'Chat' }]} />
       <TextAreaField label="Metadata" hint="JSON" error="Invalid JSON" aria-describedby="external" />
     </>));
-    const controls = [...container.querySelectorAll<HTMLInputElement>('input, select, textarea')];
+    const controls = [...container.querySelectorAll<HTMLInputElement>('input[id], textarea[id]')];
     expect(new Set(controls.map(control => control.id)).size).toBe(3);
     for (const control of controls) {
       expect(container.querySelector(`label[for="${control.id}"]`)).not.toBeNull();
@@ -81,6 +82,36 @@ describe('shared console interactions', () => {
       expect(ids).toHaveLength(3);
       expect(ids.every(id => document.getElementById(id))).toBe(true);
     }
+  });
+
+  it('renders a themed combobox, ignores disabled options and closes with Escape', async () => {
+    const selectKeyDown = vi.fn();
+    const onChange = vi.fn();
+    act(() => root.render(<SelectField
+      label="Protocol"
+      value="chat"
+      data={[
+        { value: 'chat', label: 'Chat' },
+        { value: 'responses', label: 'Responses' },
+        { value: 'unknown', label: 'Unknown', disabled: true },
+      ]}
+      onChange={onChange}
+      onKeyDown={selectKeyDown}
+    />));
+    const select = container.querySelector<HTMLInputElement>('[role="combobox"]')!;
+    await act(async () => select.click());
+    expect(select.getAttribute('aria-expanded')).toBe('true');
+    expect(select.getAttribute('data-mantine-stop-propagation')).toBe('true');
+    const options = [...document.querySelectorAll<HTMLElement>('[role="option"]')];
+    expect(options).toHaveLength(3);
+    expect(options[2].hasAttribute('data-combobox-disabled')).toBe(true);
+    act(() => options[2].click());
+    expect(onChange).not.toHaveBeenCalled();
+    expect(select.getAttribute('aria-expanded')).toBe('true');
+    act(() => select.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    expect(selectKeyDown).toHaveBeenCalledOnce();
+    expect(select.getAttribute('aria-expanded')).toBe('false');
+    expect(select.hasAttribute('data-mantine-stop-propagation')).toBe(false);
   });
 
   it('does not submit forms by default and prevents busy button activation', () => {
@@ -95,5 +126,19 @@ describe('shared console interactions', () => {
     act(() => buttons[2].click());
     expect(onBusyClick).not.toHaveBeenCalled();
     expect(buttons[2].getAttribute('aria-busy')).toBe('true');
+  });
+
+  it('keeps disabled icon help focusable while suppressing activation and row clicks', () => {
+    const onClick = vi.fn();
+    const onRowClick = vi.fn();
+    act(() => root.render(<div onClick={onRowClick}><IconButton label="Unavailable action" disabled onClick={onClick}>×</IconButton></div>));
+    const button = container.querySelector<HTMLButtonElement>('button')!;
+    expect(button.disabled).toBe(false);
+    expect(button.getAttribute('aria-disabled')).toBe('true');
+    expect(button.hasAttribute('data-disabled')).toBe(true);
+    act(() => { button.focus(); button.click(); });
+    expect(document.activeElement).toBe(button);
+    expect(onClick).not.toHaveBeenCalled();
+    expect(onRowClick).not.toHaveBeenCalled();
   });
 });

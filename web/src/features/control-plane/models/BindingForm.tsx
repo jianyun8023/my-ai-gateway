@@ -113,27 +113,57 @@ export function BindingForm({
   return (
     <form id="binding-editor-form" className={styles.page} onSubmit={submit}>
       <FormGrid>
-        <SelectField label={t('models.field.lm')} value={logicalModelId} disabled={busy} onChange={(event) => setLogicalModelId(event.target.value)}>
-          {logicalModels.map((model) => <option key={model.id} value={model.id}>{model.display_name} · {model.id}</option>)}
-        </SelectField>
-        <SelectField label={t('models.field.protocol_in')} value={protocol} disabled={busy} onChange={(event) => setProtocol(event.target.value as GatewayProtocol)}>
-          {GATEWAY_PROTOCOLS.map((item) => <option key={item} value={item}>{PROTOCOL_LABELS[item]}</option>)}
-        </SelectField>
-        <SelectField label={t('models.field.source')} value={sourceId} disabled={busy} onChange={(event) => changeSource(event.target.value)}>
-          {sources.map((source) => <option key={source.id} value={source.id}>{source.display_name} · {source.id}</option>)}
-        </SelectField>
-        <SelectField label={t('models.field.account')} value={accountId} disabled={busy || availableAccounts.length === 0} onChange={(event) => setAccountId(event.target.value)}>
-          {availableAccounts.length === 0 && <option value="">{t('models.binding_form.no_account')}</option>}
-          {availableAccounts.map((account) => <option key={account.id} value={account.id}>{account.display_name} · {account.id}</option>)}
-        </SelectField>
-        <SelectField label={t('models.field.source_model')} value={upstreamModelId} disabled={busy || modelsLoading || sourceModels.length === 0} onChange={(event) => setUpstreamModelId(event.target.value)}>
-          {modelsLoading && <option value="">{t('models.binding_form.source_model_loading')}</option>}
-          {!modelsLoading && sourceModels.length === 0 && <option value="">{t('models.binding_form.no_source_model')}</option>}
-          {sourceModels.map((model) => <option key={model.upstream_model_id} value={model.upstream_model_id}>{model.upstream_model_id} · {t(`values.status.${model.confirmation_status}`, { defaultValue: model.confirmation_status })}/{t(`values.availability.${model.availability_status}`, { defaultValue: model.availability_status })}</option>)}
-        </SelectField>
-        <SelectField label={t('models.field.binding_status')} value={status} disabled={busy} onChange={(event) => setStatus(event.target.value as CatalogStatus)}>
-          {statusOptions(record).map((option) => <option key={option} value={option}>{t(`values.status.${option}`)}</option>)}
-        </SelectField>
+        <SelectField
+          label={t('models.field.lm')}
+          value={logicalModelId}
+          disabled={busy}
+          data={logicalModels.map((model) => ({ value: model.id, label: `${model.display_name} · ${model.id}` }))}
+          onChange={setLogicalModelId}
+        />
+        <SelectField
+          label={t('models.field.protocol_in')}
+          value={protocol}
+          disabled={busy}
+          data={GATEWAY_PROTOCOLS.map((item) => ({ value: item, label: PROTOCOL_LABELS[item] }))}
+          onChange={(value) => setProtocol(value as GatewayProtocol)}
+        />
+        <SelectField
+          label={t('models.field.source')}
+          value={sourceId}
+          disabled={busy}
+          data={sources.map((source) => ({ value: source.id, label: `${source.display_name} · ${source.id}` }))}
+          onChange={changeSource}
+        />
+        <SelectField
+          label={t('models.field.account')}
+          value={accountId}
+          disabled={busy || availableAccounts.length === 0}
+          data={availableAccounts.length === 0
+            ? [{ value: '', label: t('models.binding_form.no_account') }]
+            : availableAccounts.map((account) => ({ value: account.id, label: `${account.display_name} · ${account.id}` }))}
+          onChange={setAccountId}
+        />
+        <SelectField
+          label={t('models.field.source_model')}
+          value={upstreamModelId}
+          disabled={busy || modelsLoading || sourceModels.length === 0}
+          data={modelsLoading
+            ? [{ value: '', label: t('models.binding_form.source_model_loading') }]
+            : sourceModels.length === 0
+              ? [{ value: '', label: t('models.binding_form.no_source_model') }]
+              : sourceModels.map((model) => ({
+                  value: model.upstream_model_id,
+                  label: `${model.upstream_model_id} · ${t(`values.status.${model.confirmation_status}`, { defaultValue: model.confirmation_status })}/${t(`values.availability.${model.availability_status}`, { defaultValue: model.availability_status })}`,
+                }))}
+          onChange={setUpstreamModelId}
+        />
+        <SelectField
+          label={t('models.field.binding_status')}
+          value={status}
+          disabled={busy}
+          data={statusOptions(record).map((option) => ({ value: option, label: t(`values.status.${option}`) }))}
+          onChange={(value) => setStatus(value as CatalogStatus)}
+        />
         <TextField label={t('models.field.priority')} hint={t('models.binding_form.priority_hint')} type="number" step={1} value={priority} disabled={busy} onChange={(event) => setPriority(Number(event.target.value))} />
         <div className={styles.field}><label>{t('models.field.binding_id')}</label><StatusPill>{record?.id ?? t('models.binding_form.binding_id_auto')}</StatusPill></div>
         <div className={styles.fullWidth}><CheckboxField checked={enabled} disabled={busy} onChange={setEnabled} label={t('models.field.enable_binding')} /></div>
