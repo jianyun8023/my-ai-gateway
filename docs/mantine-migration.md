@@ -1,6 +1,6 @@
 # Mantine 控制台迁移清单（#166）
 
-初始基线：2026-09-08，`main c99455e`（PR #168 已合并）。当前第十三批基线为 `main 8eef98f`（PR #180 已合并），分支 `codex/166-ui-closure`、PR #181。关联 [Issue #166](https://github.com/jianyun8023/my-ai-gateway/issues/166)，本清单随每批实现更新；Issue/PR、代码合并和生产验收分别记录，不互相推断。
+初始基线：2026-09-08，`main c99455e`（PR #168 已合并）。当前第十四批基线为 `main c1118db`（PR #181 已合并），分支 `codex/166-page-browser-evidence`。关联 [Issue #166](https://github.com/jianyun8023/my-ai-gateway/issues/166)，本清单随每批实现更新；Issue/PR、代码合并和生产验收分别记录，不互相推断。
 
 Issue 中 `de708e8` 的链接是历史调查依据。当前事件详情已位于 `features/usage/UsageEventDetails.tsx` 并复用公共 Modal；旧 Select、PortalTooltip、QuestionMarkHelp 等无调用实现已在 #168 删除，不再列为线上迁移对象。
 
@@ -10,23 +10,23 @@ Issue 中 `de708e8` 的链接是历史调查依据。当前事件详情已位于
 2. `components/ui` 负责品牌主题对接及确有项目契约的组合：Modal/Drawer 的统一标题、底部操作区、关闭禁用和退出回调；字段的 label/hint/error 关联；主次操作和状态语义。无需契约的 Mantine 组件从公共入口直接导出，不机械封装。
 3. `features` 负责业务数据、字段、校验、提交、筛选和领域展示；不重新实现浮层基础交互。
 
-首批：完整清单、主题接入、公共 Modal/Drawer、移动导航、事件列设置、退出生命周期与组合回归。第二至十二批继续控件、反馈、表格、图表、查询状态和逐页证据；第十三批完成组件查漏、遗留样式清理与适用交互收尾。本清单中的“接入”表示受公共基础覆盖，不等于该页所有环境组合均已验收。
+首批：完整清单、主题接入、公共 Modal/Drawer、移动导航、事件列设置、退出生命周期与组合回归。第二至十二批继续控件、反馈、表格、图表、查询状态和逐页证据；第十三批完成组件查漏、遗留样式清理与适用交互收尾；第十四批只补评审点名的逐页业务状态证据。本清单中的“接入”表示受公共基础覆盖，不等于该页所有环境组合均已验收。
 
 ## 页面与流程覆盖
 
-路径相对于 `web/src/`。前十二批 PR #169–#180 均已合并；第十二批查询状态和第十三批最终组件/交互矩阵见文末。接入和代表性验证不等于生产环境验收。
+路径相对于 `web/src/`。前十三批 PR #169–#181 均已合并；第十二批查询状态、第十三批最终组件/交互和第十四批逐页状态矩阵见文末。接入和代表性验证不等于生产环境验收。
 
 | 页面/流程 | 当前组件与实际入口 | 目标与保留项 | 迁移批次/PR | 验证证据与剩余工作 |
 | --- | --- | --- | --- | --- |
 | 应用壳 | `GatewayConsoleShell`：桌面侧栏、移动导航、连接、主题、语言、刷新 | 保留 hash 与状态契约；公共 Drawer/字段/按钮 | #169–#171，第八/十二批 | 八页导航/标题/选中态、临界宽度顶栏、移动语言/连接区、详情与确认焦点隔离已验证；第十二批增加不含密钥的认证代次，普通刷新不改变认证身份 |
 | 总览 | `UsageOverview`、`UsageFilters`、`UsageTrend` | Mantine 筛选/反馈/构成图；保留 Chart.js 与独立 Total | #169–#173，第十/十二批 | 双主题趋势/精确表/单图构成、390px 已验证；第十二批验证同范围刷新保留已发布数据、切换范围立即隐藏旧数据及错误/空态 |
-| 用量分析 | `UsageAnalysis`、`TokenDistribution`、`TokenComposition` | Progress 分布、Source 平均/P95 Table；完整值与 missing 保留 | #169–#173，第六/十/十二批 | 代表性中英文、长字段、真实零值与缺失已验证；共享查询生命周期覆盖加载/刷新/错误，页面没有导出功能（N/A），未逐一浏览器重放全部组合 |
+| 用量分析 | `UsageAnalysis`、`TokenDistribution`、`TokenComposition` | Progress 分布、Source 平均/P95 Table；完整值与 missing 保留 | #169–#173，第六/十/十二/十四批 | 代表性中英文、长字段、真实零值与缺失已验证；第十四批独立重放慢首屏、错误重试和空态；页面没有导出功能（N/A） |
 | 请求事件 | `UsageEvents`、`UsageEventDetails` | Mantine Table/Popover/Drawer；TanStack Virtual 测量与单一滚动区 | #169–#172，第七/十/十二批 | 千行测量、重排、分页、窄屏详情已验证；第十二批增加分页/导出独立失败重试、认证身份隔离，以及数据集变空时关闭失效详情并恢复合理焦点 |
-| 来源 | `SourcesPage`、`SourceForm`、`AccountForm`、`SourceDetailDrawer` | 公共表单/浮层、Table 来源/账号/预设差异 | #169–#172，第六批表格 | 编辑隔离、键盘详情与返回焦点、窄屏预设差异滚动已验证；真实提交/连接测试待验收 |
-| 模型发现 | `ModelDiscoveryPage`、`discovery/*` | 公共过滤/Checkbox/反馈与 Mantine Table | #169–#172，第六/十一/十二批 | 可选范围、筛选清空、部分失败、批量选择已验证；第十二批以来源和筛选组成查询身份，切换范围不显示旧目录，空来源可重试 |
-| 模型与路由 | `ModelsRoutesPage`、`models/*` | 三实体 Mantine Table；保留 Binding/Route/逻辑模型与运行时链 | #169–#172，第六批表格 | 详情转编辑、宽表键盘滚动/访问操作列已验证；三实体真实提交与全部状态待验收 |
-| 能力矩阵 | `CapabilitiesPage` | 公共筛选、Mantine Table/Drawer；保留能力状态 | #169–#172，第六批表格 | 原生/降级/不可路由、筛选和长详情代表性验证；全部协议/主题/窄屏组合待验收 |
-| 设置 | `SettingsPage`、`VirtualKeyForm`、`VirtualKeyRotationForm` | 公共表单/确认、Mantine Key Table；保留敏感值边界 | #169–#172，第六/九/十一/十二批 | Key 结果关闭即清理、列表缺失时间和导出脱敏已有回归；第十二批补桌面页面证据。当前没有 UI 导入入口（N/A）；生产密钥写入不在本 PR 验证范围 |
+| 来源 | `SourcesPage`、`SourceForm`、`AccountForm`、`SourceDetailDrawer` | 公共表单/浮层、Table 来源/账号/预设差异 | #169–#172，第六/十一/十三/十四批 | 编辑隔离、详情/焦点、预设差异、连接成功/失败、来源/账号空态及删除均已由真实 App + 合成 API 重放；不据此推断生产凭据或 Provider |
+| 模型发现 | `ModelDiscoveryPage`、`discovery/*` | 公共过滤/Checkbox/反馈与 Mantine Table | #169–#172，第六/十一至十四批 | 来源/筛选查询身份、可选范围与失败反馈已有回归；第十四批完整执行发现 → diff → 选择 → 确认失败保值 → 同请求重试成功 |
+| 模型与路由 | `ModelsRoutesPage`、`models/*` | 三实体 Mantine Table；保留 Binding/Route/逻辑模型与运行时链 | #169–#172，第六/十一/十三/十四批 | 三实体表单归因、详情、宽表和 Select 已验证；第十四批补齐三空态、刷新失败保值/重试及三类删除 |
+| 能力矩阵 | `CapabilitiesPage` | 公共筛选、Mantine Table/Drawer；保留能力状态 | #169–#172，第六/十一/十三/十四批 | 原生/降级/不可路由、三协议详情和窄屏已验证；第十四批补齐筛选无结果、无快照及刷新失败保值/重试，不扩写为全部协议 × 主题 × 宽度组合 |
+| 设置 | `SettingsPage`、`VirtualKeyForm`、`VirtualKeyRotationForm` | 公共表单/确认、Mantine Key Table；保留敏感值边界 | #169–#172，第六/九/十一至十四批 | Key 结果清理、操作区、禁用提示和脱敏导出已有证据；第十四批补慢首屏、错误重试和空 Key。当前没有 UI 导入入口（N/A）；不执行生产密钥写入 |
 
 ## 组件处置清单
 
@@ -405,3 +405,38 @@ Chrome 通过 Vite 运行最终源码，并经本地合成 API 覆盖可逆写�
 Vite 资源合计：JS **960.74 kB / gzip 293.96 kB**，CSS **143.06 kB / gzip 25.62 kB**；相对第十二批分别 **+17.97/+4.92 kB**、**−16.80/−3.43 kB**（原始/gzip）。主入口 **567.00 kB / gzip 175.77 kB**，保留默认 500kB warning，构建通过；增长来自将浏览器原生下拉改为 Mantine Select，CSS 减少来自确认无调用的旧全局层。本批没有新增依赖或进行无关分包优化。
 
 未执行 Rust/PostgreSQL/live Provider、生产配置/密钥写入、屏幕阅读器人工朗读或帧耗时基准。它们仍是环境/人工验证披露，不是本批新增加的关闭条件；第十三批的完成范围是 #166 剩余前端代码审计、适用交互和合成 API 浏览器验收。
+
+## 第十四批：逐页业务状态证据闭环
+
+基线为 PR #181 合并后的 main `c1118db`，分支 `codex/166-page-browser-evidence`。本批只补评审明确指出仍缺少的真实 App 浏览器状态；没有改变前端、Rust、Admin API、数据库或业务契约。Chrome 直接运行最终源码，经本地内存合成 Admin API 在 1440×900 中文浅色和 390×844 中文深色下重放；合成服务不读取生产配置或凭据，不发送真实 Provider 请求。
+
+本批的控制条件、浏览器操作、页面观察与请求日志如下。这里的“请求日志”来自合成服务按顺序记录的实际浏览器 HTTP 请求，不把直接设置夹具状态的 `GET /__control` 计作产品行为。
+
+| 页面/流程 | 控制条件与实际浏览器操作 | 可见结果与请求证据 | 截图 |
+| --- | --- | --- | --- |
+| 来源连接测试 | 普通来源与账号；打开 `source-browser` 详情，依次点击 Chat Completions、Responses 的“测试” | 两次 `POST /admin/sources/source-browser/connection-tests` 均带 `account_id=account-browser` 与 `requested_by=admin-ui`；Chat 返回 200/88 ms 并显示“连接成功”，Responses 返回 503/241 ms、`synthetic_upstream_unavailable` 并显示“连接失败”，两项结果同时保留 | [成功/失败并存](evidence/166/b14-source-connection-results-desktop.jpg) |
+| 来源/账号空态 | `sourcesMode=empty`、`accountsMode=empty` 后重新进入来源页并切换两个真实 Tab | `GET /admin/sources`、`GET /admin/accounts` 分别返回空数组；Tab 计数均为 0，来源显示“尚未配置来源”，账号显示“尚未配置账号”，且没有来源时“新增账号”保持禁用 | [来源空态](evidence/166/b14-source-empty-desktop.jpg) · [账号空态](evidence/166/b14-account-empty-desktop.jpg) |
+| 来源/账号删除 | 普通数据下分别点击来源、账号删除入口；先核对标题、目标 ID、危险操作和取消路径，再经单独动作时授权逐项确认删除 | 确认框分别绑定 `source-browser` 与 `account-browser`；取消不发请求且值保持。确认后分别只产生一次 `DELETE /admin/sources/source-browser`、`DELETE /admin/accounts/account-browser`，对应内存数组变为空，页面计数变 0、显示各自空态和成功通知；每项核对后重置夹具，未串联伪造依赖级联 | [来源确认](evidence/166/b14-source-delete-confirm-desktop.jpg) · [账号确认](evidence/166/b14-account-delete-confirm-desktop.jpg) |
+| 模型发现完整链 | 从无运行记录开始点击“运行发现”，查看 diff，选择全部两个可确认模型，第一次确认强制返回冲突，再在原确认框重试 | `POST /discoveries` 后显示新增 2、变更 1、缺失 1 及两条待确认目录。两次 `POST /admin/sources/source-browser/models/confirm` 请求体完全一致，均包含 alpha/beta 与空 metadata；第一次 409 `synthetic_confirm_conflict` 时确认框、`已选 2` 和两个勾选均保留，第二次成功后确认框关闭、提示确认 2 个模型、待确认筛选原子变为 0 | [运行与 diff](evidence/166/b14-discovery-run-diff-desktop.jpg) · [失败保值](evidence/166/b14-discovery-confirm-failure-retain-desktop.jpg) · [重试成功](evidence/166/b14-discovery-confirm-retry-success-desktop.jpg) |
+| 模型与路由空态 | `catalogMode=empty` 后进入模型页，依次切换逻辑模型、绑定、路由规则 | 三个列表 GET 均返回空数组；三个 Tab 计数为 0，并分别显示“尚无逻辑模型”“尚无绑定”“尚无路由”及各自下一步说明 | [逻辑模型](evidence/166/b14-models-logical-empty-desktop.jpg) · [绑定](evidence/166/b14-models-binding-empty-desktop.jpg) · [路由](evidence/166/b14-models-route-empty-desktop.jpg) |
+| 模型与路由刷新错误 | 先发布含 `logical-browser` 的正常目录，再令三列表刷新返回 503 并点击页面“刷新”，随后恢复服务并点击错误区“重试” | `catalog_refresh_failed` 作为持久错误显示，Tab 仍为 1/1/1，既有 `logical-browser` 行未被清空；重试成功后错误消失且同一行继续可见 | [错误保留快照](evidence/166/b14-models-refresh-error-retain-desktop.jpg) |
+| 三类模型资源删除 | 普通数据下依次进入逻辑模型、绑定、路由规则 Tab；先核对标题、ID、不可撤销说明和取消路径，再经同一动作时授权逐项确认删除 | 确认框分别绑定 `logical-browser`、`166`、`route-browser`；取消均不发 DELETE。确认后分别只产生一次 `DELETE /admin/logical-models/logical-browser`、`DELETE /admin/model-bindings/166`、`DELETE /admin/routes/route-browser`；对应数组、Tab 计数和列表原子变空，页面显示专用空态与成功通知。每项独立 reset 后执行，避免上一删除影响下一项 | [逻辑模型](evidence/166/b14-model-logical-delete-confirm-desktop.jpg) · [绑定](evidence/166/b14-model-binding-delete-confirm-desktop.jpg) · [路由](evidence/166/b14-model-route-delete-confirm-desktop.jpg) |
+| 能力矩阵无结果/无快照 | 正常快照输入 `no-matching-capability`；再令 `/admin/capabilities` 返回空 data | 筛选态准确显示 `0 / 1 行` 与“当前筛选没有能力行”；空响应保留 snapshot revision/fact source 元数据并显示专用“暂无已发布的模型能力”，不误写成筛选无结果 | [筛选无结果](evidence/166/b14-capabilities-filter-empty-390-dark.jpg) · [无快照](evidence/166/b14-capabilities-no-snapshot-390-dark.jpg) |
+| 能力矩阵刷新错误 | 先发布 revision 166、`route-browser` 正常行，再令刷新返回 503；随后恢复并点击“重试” | `capability_snapshot_unavailable` 与重试入口出现时，revision 166、`1 / 1 行` 和既有能力行仍可见；重试后错误消失 | [错误保留快照](evidence/166/b14-capabilities-refresh-error-retain-390-dark.jpg) |
+| 用量分析慢首屏/错误/空态 | `usageDelayMs=8000` 时首次进入分析页；再令全组 usage 请求返回 503；恢复为空数据并点击错误区“重试” | 慢请求期间只出现一次页面加载状态；失败时保留筛选控件并显示本地化持久错误和重试；重试后发布零 summary/空 breakdown，显示“当前范围暂无分析数据”而不构造图表或 KPI | [慢首屏](evidence/166/b14-analysis-initial-loading-390-dark.jpg) · [错误/重试](evidence/166/b14-analysis-error-retry-390-dark.jpg) · [空态](evidence/166/b14-analysis-empty-390-dark.jpg) |
+| 设置慢首屏/错误/空 Key | `keysDelayMs=8000` 时首次进入设置；再令 `GET /admin/keys` 返回 503；恢复为空数组并点击“重试” | 慢请求显示统一页面加载；失败显示 `keys_unavailable` 和重试且不发布半成品页面；成功重试后管理连接、revision 166 运行时快照和脱敏导出正常发布，Virtual Key 区显示“尚无虚拟密钥” | [慢首屏](evidence/166/b14-settings-initial-loading-desktop.jpg) · [错误/重试](evidence/166/b14-settings-error-retry-desktop.jpg) · [空 Key](evidence/166/b14-settings-empty-keys-desktop.jpg) |
+
+总览和请求事件没有在本批重复制造截图：总览的慢刷新、错误、空态和查询身份由第十二批真实 App 证据覆盖；事件的分页/导出失败重试、详情失效与焦点恢复由第十二批覆盖，文件落盘和 Popover/Drawer 实交互由第十三批覆盖。本批补上用量分析的独立三状态，因此不再以总览共用 hook 推断分析页呈现。
+
+### 对 #166 原始未勾项的最终映射
+
+| 原始验收组 | 组成证据 | 当前结论 |
+| --- | --- | --- |
+| 浮层 Portal、Esc、外部点击、焦点与滚动 | 第八批应用壳/事件组合、第十三批 Select/Popover/busy Modal/移动 Drawer/减少动画实测，以及本批五类删除确认框 | 当前生产代码中实际存在的组合均有浏览器证据；明确不存在的 Menu、Popover 内 Select、Modal 内 Popover、Drawer 内二次确认为 N/A |
+| 页面 SCSS、宽度/间距/主滚动与旧实现清理 | 第十/十一批宽表与长字段，第十三批 1,374 行无调用全局 SCSS 清理、生产源码扫描和 1900px/390px 八路由遍历 | 前端源码范围已收敛，没有未说明的旧组件或通用页面样式残留 |
+| 首次加载、刷新、空数据、筛选无结果、错误、重试、操作结果与上下文保留 | 第十二批查询身份/迟到响应/分页导出生命周期，加本批来源、发现、三目录、能力、分析和设置逐页状态 | 真实 App + 合成 API 已覆盖原始要求；失败保值与重试请求均有页面观察和请求日志，不再只依赖 DOM 单测 |
+| 八个页面与应用壳 | 总览 B10/B12；分析 B10/B11/B14；事件 B7/B10/B12/B13；来源 B6/B11/B13/B14；发现 B9/B12/B13/B14；模型与路由 B6/B11/B13/B14；能力 B6/B11/B13/B14；设置 B9/B11/B12/B13/B14；应用壳 B8/B12/B13 | 每个真实路由均有迁移结果和对应业务状态/交互证据，没有以一张截图扩写成未执行的主题、宽度或状态笛卡尔积 |
+| 导航、筛选/选择、表单/确认、列设置、详情、导出及主题/语言 | 第八至十三批行为与实际 App 证据，本批再补发现串行写流程、筛选无结果与删除目标确认 | 适用入口均已重放；用量分析导出、设置导入以及不存在的浮层组合继续明确为 N/A |
+| 公共组件约定与新增页面指导 | `design.md`、`docs/frontend-architecture.md`、本清单职责矩阵，以及第十三批公共入口/生产调用扫描 | 常规控件无需复制页面内部样式；专业表格、虚拟列表和 Chart.js 的保留边界已有说明 |
+
+本批未执行生产配置或密钥写入、真实 Provider、Rust/PostgreSQL、屏幕阅读器人工朗读或帧耗时基准。它们继续作为环境/人工边界披露，不由合成 API 证据推断。#166 是否勾选或关闭仍以本批 PR 合并和 Issue 协调结论为准；本分支不直接合并或关闭 Issue。
