@@ -40,7 +40,7 @@ Tech-Utility：冷灰底色、绿色强调、紧凑数据布局。使用固定�
 | `SegmentedTabs` | Mantine Tabs 负责内容面板键盘导航；`mode="group"` 使用 Mantine Button 保留 `aria-pressed` 筛选语义 |
 | `LanguageSwitcher` / `Toggle` | 语言使用按压按钮并沿用既有持久化；启用状态使用 Mantine Switch，布尔值回调与禁用状态由页面控制 |
 | `LoadingState` / `Notice` / `EmptyState` | Mantine Loader/Alert/Paper 组合；错误使用 alert，成功/警告使用 status；Loader 装饰化并由外层提供一次加载播报，局部加载用 inline；空表使用 centered 并保留下一步操作 |
-| `TableScroll` | 带名称、可聚焦的横向滚动区；父级网格项需可收缩 |
+| Mantine `Table` / `TableScroll` | 原生表格语义与带名称、可聚焦的横向滚动区；主题统一单元格密度、表头与分隔线，页面负责列宽和行操作 |
 | `Modal` | Mantine Modal/Drawer 的项目契约：标题、尺寸、底部操作、关闭禁用、退出回调；管理详情、事件详情和移动导航共用 |
 | `overlays.ts` | 直接导出 Mantine Popover/Checkbox，列偏好在公共主题下使用，无需机械包装 |
 
@@ -48,7 +48,7 @@ Tech-Utility：冷灰底色、绿色强调、紧凑数据布局。使用固定�
 
 按钮、图标和字段的品牌尺寸、状态样式集中在 [Controls.module.scss](web/src/components/ui/Controls.module.scss)，通过 Mantine Styles API 和语义变量接入。字段使用 Mantine Input.Wrapper 的 label/description/error；`attributes.input` 合并调用方描述 ID 与生成的 hint/error ID，不覆盖业务输入值。`SelectField` 采用 NativeSelect 保留 option/optgroup、禁用项和浏览器菜单交互，不新增搜索能力或模拟 change 事件。旧 `.btn`、手写字段框及控制面复选框样式已删除；页面操作布局按 `data-ui="button"` 定位，不能恢复旧按钮视觉类。
 
-页面 SCSS 只维护布局与领域视觉。事件虚拟列表和配置表格分别保留各自的数据与滚动逻辑。
+页面 SCSS 只维护布局与领域视觉。配置表格直接使用 Mantine Table 及其 Thead/Tbody/Tr/Th/Td，表头声明 `scope="col"`；基础视觉集中在 [Table.module.scss](web/src/components/ui/Table.module.scss)，默认单元格内边距为纵向 10px、横向 13px。TableScroll 保留原生、可聚焦的局部滚动，页面只指定领域列宽与最小宽度。可点击行仍保留表格语义，并提供可通过键盘访问的“查看”按钮；开关和操作单元格阻止事件冒泡，避免误开详情。事件虚拟列表继续保留独立的数据与测量实现。
 
 ## 交互与响应式
 
@@ -70,7 +70,7 @@ Tech-Utility：冷灰底色、绿色强调、紧凑数据布局。使用固定�
 
 ## Mantine 浮层契约与迁移状态
 
-本批使用 Mantine **9.6.0**（core/hooks 精确锁定，React 19.2 兼容）。基础组件负责交互，公共组合负责项目契约，业务组件负责数据与提交。完整八页清单、批次和证据见 [迁移记录](docs/mantine-migration.md)。目前已迁移主题、浮层、公共按钮/字段、页面筛选、标签与语言切换、启用开关、发现选择框、反馈/状态与卡片；图表、表格和全页面完整验收仍在后续范围内。
+本批使用 Mantine **9.6.0**（core/hooks 精确锁定，React 19.2 兼容）。基础组件负责交互，公共组合负责项目契约，业务组件负责数据与提交。完整八页清单、批次和证据见 [迁移记录](docs/mantine-migration.md)。目前已迁移主题、浮层、公共按钮/字段、页面筛选、标签与语言切换、启用开关、发现选择框、反馈/状态、卡片、图表和控制面表格；虚拟事件列表与全页面完整验收仍待收敛。
 
 - Modal/Drawer 默认层级 1000，由 Mantine stack 按打开顺序递增；Popover 1200、Tooltip 1300，统一在 theme.ts 修改。ConsoleProvider 通过 Mantine 公开的两种 StackContext 共享同一 stack，跨类型叠加时仅顶层处理 Esc 和焦点约束。条件卸载的详情会注销 stack 条目。
 - 焦点恢复使用 Mantine useFocusReturn，与 stack 的 trapFocus 切换分离；条件挂载详情先完成关闭态挂载，再打开。不要在页面添加 focus 定时器。正文单独滚动，标题和底部操作保持可见；长 ID 可换行。关闭动画中的内容通过 inert 退出交互。

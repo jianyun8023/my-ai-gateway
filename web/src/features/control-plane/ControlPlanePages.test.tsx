@@ -325,6 +325,28 @@ describe('production control-plane pages', () => {
     expect(document.activeElement).toBe(trigger);
   });
 
+  it('keeps source table actions separate from row details and preserves column semantics', async () => {
+    await renderPage('sources');
+    const table = container.querySelector('table')!;
+    expect([...table.querySelectorAll('thead th')].every(cell => cell.getAttribute('scope') === 'col')).toBe(true);
+    const region = table.closest('[role="region"]')!;
+    expect(region.getAttribute('aria-label')).toBeTruthy();
+    expect(region.getAttribute('tabindex')).toBe('0');
+    expect(table.querySelector('tbody tr')!.getAttribute('role')).toBeNull();
+
+    // The edit button bubbles through its cell, but must not also open row details.
+    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="编辑 source-a"]')!.click());
+    expect(container.querySelector('#source-editor-form')).not.toBeNull();
+    expect(container.querySelectorAll('[role="dialog"]')).toHaveLength(1);
+    act(() => container.querySelector<HTMLButtonElement>('[role="dialog"] button[aria-label="关闭"]')!.click());
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)); });
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+
+    await act(async () => table.querySelector<HTMLTableCellElement>('tbody td')!.click());
+    expect(container.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(container.querySelector('#source-editor-form')).toBeNull();
+  });
+
   it('keeps source field validation, native selection, checkbox state and external submit behavior', async () => {
     const onSubmit = vi.fn();
     const record = { ...source, auth_config: { credential_header: { header: 'authorization', prefix: 'Bearer' } } } as Source;

@@ -55,17 +55,5 @@
   text-align: center;
 }
 
-.tableScroll {
-  width: 100%;
-  max-width: 100%;
-  overflow-x: auto;
-  overscroll-behavior-inline: contain;
-}
-
-.tableScroll:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: -2px;
-}
-
 @media (max-width: 920px) { .segmented button { min-height: 44px; } }
 @media (max-width: 600px) { .segmented { width: 100%; } .segmented button { flex: 1 0 auto; } }

@@ -1,3 +1,4 @@
+import { Table } from '@mantine/core';
 import { useOverlayState } from '@/components/ui/useOverlayState';
 import type {
   AdminErrorShape,
@@ -170,86 +171,86 @@ export function ModelsRoutesPage({ api, refreshRevision = 0, onBusyChange }: Mod
       <div role="tabpanel" id="models-tabs-panel" aria-labelledby={`models-tabs-${tab}`} tabIndex={0}>
       {tab === 'logical-models' && (data.logicalModels.length === 0 ? <EmptyTable title={t('models.empty.lm_title')} description={t('models.empty.lm_desc')} /> : (
         <Card variant="flush" title={t('models.card.lm_title')}>
-          <TableScroll label={t('models.table.region_logical_models')}><table className={styles.table}>
-            <thead><tr><th>{t('models.field.lm')}</th><th>{t('models.field.public_name')}</th><th>{t('models.table.header_catalog_status')}</th><th>{t('models.table.header_bindings')}</th><th>{t('models.table.header_routes')}</th><th>{t('models.table.header_enabled')}</th><th>{t('common.actions')}</th></tr></thead>
-            <tbody>{data.logicalModels.map((model) => (
-              <tr key={model.id} data-clickable="true" onClick={() => setDetailTarget({ kind: 'logical-model', record: model })}>
-                <td><span className={styles.primaryText}><strong>{model.display_name}</strong><small><code>{model.id}</code></small></span></td>
-                <td><code>{model.public_name}</code></td>
-                <td><StatusPill tone={statusTone(model.status)}>{t(`values.status.${model.status}`, { defaultValue: model.status })}</StatusPill></td>
-                <td>{data.bindings.filter((binding) => binding.logical_model_id === model.id).length}</td>
-                <td>{data.routes.filter((route) => route.logical_model_id === model.id).length}</td>
-                <td onClick={(event) => event.stopPropagation()}><Toggle label={t('models.table.toggle_aria', { id: model.id })} checked={model.enabled} disabled={mutationBusy} onChange={(enabled) => void mutate(() => api.setLogicalModelEnabled(model.id, enabled), t(enabled ? 'models.table.toggle_enabled' : 'models.table.toggle_disabled', { name: model.id }))} /></td>
-                <td onClick={(event) => event.stopPropagation()}><div className={styles.rowActions}>
+          <TableScroll label={t('models.table.region_logical_models')}><Table className={styles.table}>
+            <Table.Thead><Table.Tr><Table.Th scope="col">{t('models.field.lm')}</Table.Th><Table.Th scope="col">{t('models.field.public_name')}</Table.Th><Table.Th scope="col">{t('models.table.header_catalog_status')}</Table.Th><Table.Th scope="col">{t('models.table.header_bindings')}</Table.Th><Table.Th scope="col">{t('models.table.header_routes')}</Table.Th><Table.Th scope="col">{t('models.table.header_enabled')}</Table.Th><Table.Th scope="col">{t('common.actions')}</Table.Th></Table.Tr></Table.Thead>
+            <Table.Tbody>{data.logicalModels.map((model) => (
+              <Table.Tr key={model.id} data-clickable="true" onClick={() => setDetailTarget({ kind: 'logical-model', record: model })}>
+                <Table.Td><span className={styles.primaryText}><strong>{model.display_name}</strong><small><code>{model.id}</code></small></span></Table.Td>
+                <Table.Td><code>{model.public_name}</code></Table.Td>
+                <Table.Td><StatusPill tone={statusTone(model.status)}>{t(`values.status.${model.status}`, { defaultValue: model.status })}</StatusPill></Table.Td>
+                <Table.Td>{data.bindings.filter((binding) => binding.logical_model_id === model.id).length}</Table.Td>
+                <Table.Td>{data.routes.filter((route) => route.logical_model_id === model.id).length}</Table.Td>
+                <Table.Td onClick={(event) => event.stopPropagation()}><Toggle label={t('models.table.toggle_aria', { id: model.id })} checked={model.enabled} disabled={mutationBusy} onChange={(enabled) => void mutate(() => api.setLogicalModelEnabled(model.id, enabled), t(enabled ? 'models.table.toggle_enabled' : 'models.table.toggle_disabled', { name: model.id }))} /></Table.Td>
+                <Table.Td onClick={(event) => event.stopPropagation()}><div className={styles.rowActions}>
                   <IconButton label={t('models.table.view_aria', { id: model.id })} onClick={() => setDetailTarget({ kind: 'logical-model', record: model })}><IconEye size={16} /></IconButton>
                   <IconButton label={t('models.table.edit_aria', { id: model.id })} onClick={() => setEditor({ kind: 'logical-model', record: model })}><IconPencil size={16} /></IconButton>
                   <IconButton label={model.enabled ? t('models.table.disable_aria', { id: model.id }) : t('models.table.enable_aria', { id: model.id })} onClick={() => void mutate(() => api.setLogicalModelEnabled(model.id, !model.enabled), t(model.enabled ? 'models.table.toggle_disabled' : 'models.table.toggle_enabled', { name: model.id }))}><IconPower size={16} /></IconButton>
                   <IconButton label={t('models.table.delete_aria', { id: model.id })} className={styles.dangerIcon} onClick={() => setDeleteTarget({ kind: 'logical-model', record: model })}><IconTrash2 size={16} /></IconButton>
-                </div></td>
-              </tr>
-            ))}</tbody>
-          </table></TableScroll>
+                </div></Table.Td>
+              </Table.Tr>
+            ))}</Table.Tbody>
+          </Table></TableScroll>
         </Card>
       ))}
 
       {tab === 'bindings' && (data.bindings.length === 0 ? <EmptyTable title={t('models.empty.binding_title')} description={t('models.empty.binding_desc')} /> : (
         <Card variant="flush" title={t('models.card.binding_title')} subtitle={t('models.card.binding_subtitle')}>
-          <TableScroll label={t('models.table.region_bindings')}><table className={`${styles.table} ${styles.bindingsTable}`}>
-            <thead><tr><th>{t('models.field.binding_id')}</th><th>{t('models.field.lm')}</th><th>{t('models.field.source_account')}</th><th>{t('models.field.upstream_model')}</th><th>{t('models.field.protocol')}</th><th>{t('models.field.priority')}</th><th>{t('models.field.runtime')}</th><th>{t('common.status')}</th><th>{t('models.table.header_enabled')}</th><th>{t('common.actions')}</th></tr></thead>
-            <tbody>{sortedBindings.map((binding) => {
+          <TableScroll label={t('models.table.region_bindings')}><Table className={`${styles.table} ${styles.bindingsTable}`}>
+            <Table.Thead><Table.Tr><Table.Th scope="col">{t('models.field.binding_id')}</Table.Th><Table.Th scope="col">{t('models.field.lm')}</Table.Th><Table.Th scope="col">{t('models.field.source_account')}</Table.Th><Table.Th scope="col">{t('models.field.upstream_model')}</Table.Th><Table.Th scope="col">{t('models.field.protocol')}</Table.Th><Table.Th scope="col">{t('models.field.priority')}</Table.Th><Table.Th scope="col">{t('models.field.runtime')}</Table.Th><Table.Th scope="col">{t('common.status')}</Table.Th><Table.Th scope="col">{t('models.table.header_enabled')}</Table.Th><Table.Th scope="col">{t('common.actions')}</Table.Th></Table.Tr></Table.Thead>
+            <Table.Tbody>{sortedBindings.map((binding) => {
               const runtimeCells = resolvedCellsForBinding(data.capabilities, binding.id);
               return (
-                <tr key={binding.id} data-clickable="true" onClick={() => setDetailTarget({ kind: 'binding', record: binding })}>
-                  <td><code>#{binding.id}</code></td>
-                  <td><code>{binding.logical_model_id}</code></td>
-                  <td><span className={styles.primaryText}><strong>{binding.source_id}</strong><small>{binding.account_id}</small></span></td>
-                  <td><code>{binding.upstream_model_id}</code></td>
-                  <td><ProtocolPill protocol={binding.protocol} /></td>
-                  <td><strong className={styles.mono}>{binding.priority}</strong></td>
-                  <td><RuntimeBindingSummary cells={runtimeCells} /></td>
-                  <td><StatusPill tone={statusTone(binding.status)}>{t(`values.status.${binding.status}`, { defaultValue: binding.status })}</StatusPill></td>
-                  <td onClick={(event) => event.stopPropagation()}><Toggle label={t('models.table.toggle_aria', { id: binding.id })} checked={binding.enabled} disabled={mutationBusy} onChange={(enabled) => void mutate(() => api.setModelBindingEnabled(binding.id, enabled), t(enabled ? 'models.table.binding_toggle_enabled' : 'models.table.binding_toggle_disabled', { name: binding.id }))} /></td>
-                  <td onClick={(event) => event.stopPropagation()}><div className={styles.rowActions}>
+                <Table.Tr key={binding.id} data-clickable="true" onClick={() => setDetailTarget({ kind: 'binding', record: binding })}>
+                  <Table.Td><code>#{binding.id}</code></Table.Td>
+                  <Table.Td><code>{binding.logical_model_id}</code></Table.Td>
+                  <Table.Td><span className={styles.primaryText}><strong>{binding.source_id}</strong><small>{binding.account_id}</small></span></Table.Td>
+                  <Table.Td><code>{binding.upstream_model_id}</code></Table.Td>
+                  <Table.Td><ProtocolPill protocol={binding.protocol} /></Table.Td>
+                  <Table.Td><strong className={styles.mono}>{binding.priority}</strong></Table.Td>
+                  <Table.Td><RuntimeBindingSummary cells={runtimeCells} /></Table.Td>
+                  <Table.Td><StatusPill tone={statusTone(binding.status)}>{t(`values.status.${binding.status}`, { defaultValue: binding.status })}</StatusPill></Table.Td>
+                  <Table.Td onClick={(event) => event.stopPropagation()}><Toggle label={t('models.table.toggle_aria', { id: binding.id })} checked={binding.enabled} disabled={mutationBusy} onChange={(enabled) => void mutate(() => api.setModelBindingEnabled(binding.id, enabled), t(enabled ? 'models.table.binding_toggle_enabled' : 'models.table.binding_toggle_disabled', { name: binding.id }))} /></Table.Td>
+                  <Table.Td onClick={(event) => event.stopPropagation()}><div className={styles.rowActions}>
                     <IconButton label={t('models.table.view_aria', { id: binding.id })} onClick={() => setDetailTarget({ kind: 'binding', record: binding })}><IconEye size={16} /></IconButton>
                     <IconButton label={t('models.table.edit_aria', { id: binding.id })} onClick={() => setEditor({ kind: 'binding', record: binding })}><IconPencil size={16} /></IconButton>
                     <IconButton label={binding.enabled ? t('models.table.disable_aria', { id: binding.id }) : t('models.table.enable_aria', { id: binding.id })} onClick={() => void mutate(() => api.setModelBindingEnabled(binding.id, !binding.enabled), t(binding.enabled ? 'models.table.binding_toggle_disabled' : 'models.table.binding_toggle_enabled', { name: binding.id }))}><IconPower size={16} /></IconButton>
                     <IconButton label={t('models.table.delete_aria', { id: binding.id })} className={styles.dangerIcon} onClick={() => setDeleteTarget({ kind: 'binding', record: binding })}><IconTrash2 size={16} /></IconButton>
-                  </div></td>
-                </tr>
+                  </div></Table.Td>
+                </Table.Tr>
               );
-            })}</tbody>
-          </table></TableScroll>
+            })}</Table.Tbody>
+          </Table></TableScroll>
         </Card>
       ))}
 
       {tab === 'routes' && (data.routes.length === 0 ? <EmptyTable title={t('models.empty.route_title')} description={t('models.empty.route_desc')} /> : (
         <Card variant="flush" title={t('models.card.route_title')}>
-          <TableScroll label={t('models.table.region_routes')}><table className={`${styles.table} ${styles.routesTable}`}>
-            <thead><tr><th>{t('models.field.route_id')}</th><th>{t('models.field.lm')}</th><th>{t('models.field.protocols')}</th><th>{t('models.field.strategy')}</th><th>{t('models.table.header_runtime_rows')}</th><th>{t('models.field.lossy_value')}</th><th>{t('models.table.header_enabled')}</th><th>{t('common.actions')}</th></tr></thead>
-            <tbody>{data.routes.map((route) => {
+          <TableScroll label={t('models.table.region_routes')}><Table className={`${styles.table} ${styles.routesTable}`}>
+            <Table.Thead><Table.Tr><Table.Th scope="col">{t('models.field.route_id')}</Table.Th><Table.Th scope="col">{t('models.field.lm')}</Table.Th><Table.Th scope="col">{t('models.field.protocols')}</Table.Th><Table.Th scope="col">{t('models.field.strategy')}</Table.Th><Table.Th scope="col">{t('models.table.header_runtime_rows')}</Table.Th><Table.Th scope="col">{t('models.field.lossy_value')}</Table.Th><Table.Th scope="col">{t('models.table.header_enabled')}</Table.Th><Table.Th scope="col">{t('common.actions')}</Table.Th></Table.Tr></Table.Thead>
+            <Table.Tbody>{data.routes.map((route) => {
               const runtimeRows = data.capabilities.data.filter((row) => row.route_id === route.id);
               const adapterCount = runtimeRows.flatMap((row) => row.protocols).filter((cell) => cell.status === 'routable' && cell.mode === 'adapter').length;
               return (
-                <tr key={route.id} data-clickable="true" onClick={() => setDetailTarget({ kind: 'route', record: route })}>
-                  <td><span className={styles.primaryText}><strong><code>{route.id}</code></strong><small>{route.public_name}</small></span></td>
-                  <td><code>{route.logical_model_id}</code></td>
-                  <td><span className={styles.inlineActions}>{route.protocols.map((protocol) => <ProtocolPill key={protocol} protocol={protocol} />)}</span></td>
-                  <td>{route.strategy === 'primary_then_weighted_fallback'
+                <Table.Tr key={route.id} data-clickable="true" onClick={() => setDetailTarget({ kind: 'route', record: route })}>
+                  <Table.Td><span className={styles.primaryText}><strong><code>{route.id}</code></strong><small>{route.public_name}</small></span></Table.Td>
+                  <Table.Td><code>{route.logical_model_id}</code></Table.Td>
+                  <Table.Td><span className={styles.inlineActions}>{route.protocols.map((protocol) => <ProtocolPill key={protocol} protocol={protocol} />)}</span></Table.Td>
+                  <Table.Td>{route.strategy === 'primary_then_weighted_fallback'
                     ? <code className={styles.routeStrategy} title={route.strategy}>{t('values.strategy.primary_then_weighted_fallback')}</code>
-                    : <StatusPill tone="danger">{t('models.table.runtime_unsupported', { strategy: route.strategy })}</StatusPill>}</td>
-                  <td><span className={styles.inlineActions}><StatusPill tone={runtimeRows.length > 0 ? 'success' : 'muted'}>{runtimeRows.length > 0 ? `${runtimeRows.length} ${t('models.state.published')}` : t('models.state.not_published')}</StatusPill>{adapterCount > 0 && <StatusPill tone="warning">{t('models.table.runtime_adapter_cells', { count: adapterCount })}</StatusPill>}</span></td>
-                  <td><StatusPill tone={route.allow_lossy_conversion ? 'warning' : 'muted'}>{route.allow_lossy_conversion ? t('models.state.lossy_allowed') : t('models.state.lossy_blocked')}</StatusPill></td>
-                  <td onClick={(event) => event.stopPropagation()}><Toggle label={t('models.table.toggle_aria', { id: route.id })} checked={route.enabled} disabled={mutationBusy} onChange={(enabled) => void mutate(() => api.setRouteEnabled(route.id, enabled), t(enabled ? 'models.table.route_toggle_enabled' : 'models.table.route_toggle_disabled', { name: route.id }))} /></td>
-                  <td onClick={(event) => event.stopPropagation()}><div className={styles.rowActions}>
+                    : <StatusPill tone="danger">{t('models.table.runtime_unsupported', { strategy: route.strategy })}</StatusPill>}</Table.Td>
+                  <Table.Td><span className={styles.inlineActions}><StatusPill tone={runtimeRows.length > 0 ? 'success' : 'muted'}>{runtimeRows.length > 0 ? `${runtimeRows.length} ${t('models.state.published')}` : t('models.state.not_published')}</StatusPill>{adapterCount > 0 && <StatusPill tone="warning">{t('models.table.runtime_adapter_cells', { count: adapterCount })}</StatusPill>}</span></Table.Td>
+                  <Table.Td><StatusPill tone={route.allow_lossy_conversion ? 'warning' : 'muted'}>{route.allow_lossy_conversion ? t('models.state.lossy_allowed') : t('models.state.lossy_blocked')}</StatusPill></Table.Td>
+                  <Table.Td onClick={(event) => event.stopPropagation()}><Toggle label={t('models.table.toggle_aria', { id: route.id })} checked={route.enabled} disabled={mutationBusy} onChange={(enabled) => void mutate(() => api.setRouteEnabled(route.id, enabled), t(enabled ? 'models.table.route_toggle_enabled' : 'models.table.route_toggle_disabled', { name: route.id }))} /></Table.Td>
+                  <Table.Td onClick={(event) => event.stopPropagation()}><div className={styles.rowActions}>
                     <IconButton label={t('models.table.view_aria', { id: route.id })} onClick={() => setDetailTarget({ kind: 'route', record: route })}><IconEye size={16} /></IconButton>
                     <IconButton label={t('models.table.edit_aria', { id: route.id })} onClick={() => setEditor({ kind: 'route', record: route })}><IconPencil size={16} /></IconButton>
                     <IconButton label={route.enabled ? t('models.table.disable_aria', { id: route.id }) : t('models.table.enable_aria', { id: route.id })} onClick={() => void mutate(() => api.setRouteEnabled(route.id, !route.enabled), t(route.enabled ? 'models.table.route_toggle_disabled' : 'models.table.route_toggle_enabled', { name: route.id }))}><IconPower size={16} /></IconButton>
                     <IconButton label={t('models.table.delete_aria', { id: route.id })} className={styles.dangerIcon} onClick={() => setDeleteTarget({ kind: 'route', record: route })}><IconTrash2 size={16} /></IconButton>
-                  </div></td>
-                </tr>
+                  </div></Table.Td>
+                </Table.Tr>
               );
-            })}</tbody>
-          </table></TableScroll>
+            })}</Table.Tbody>
+          </Table></TableScroll>
         </Card>
       ))}
 

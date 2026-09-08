@@ -1,6 +1,6 @@
 # Mantine 控制台迁移清单（#166）
 
-基线：2026-09-08，`main c99455e`（PR #168 已合并）。实施分支：`codex/166-mantine-console`。关联 [Issue #166](https://github.com/jianyun8023/my-ai-gateway/issues/166)，本清单随每批实现更新；未完成全部验收前不关闭总任务。
+初始基线：2026-09-08，`main c99455e`（PR #168 已合并）。当前第六批基线为 `main f3ff2a3`（PR #173 已合并），分支 `codex/166-mantine-tables`。关联 [Issue #166](https://github.com/jianyun8023/my-ai-gateway/issues/166)，本清单随每批实现更新；未完成全部验收前不关闭总任务。
 
 Issue 中 `de708e8` 的链接是历史调查依据。当前事件详情已位于 `features/usage/UsageEventDetails.tsx` 并复用公共 Modal；旧 Select、PortalTooltip、QuestionMarkHelp 等无调用实现已在 #168 删除，不再列为线上迁移对象。
 
@@ -14,19 +14,19 @@ Issue 中 `de708e8` 的链接是历史调查依据。当前事件详情已位于
 
 ## 页面与流程覆盖
 
-路径相对于 `web/src/`。首批已提交 [PR #169](https://github.com/jianyun8023/my-ai-gateway/pull/169)，第二批在 `codex/166-mantine-controls` 上承接；不将批次完成视为总任务完成。
+路径相对于 `web/src/`。前五批 PR #169、#170、#171、#172、#173 均已合并且 CI 通过；下表已按当前第六批更新。接入和代表性验证不等于该页完成全部验收。
 
 | 页面/流程 | 当前组件与实际入口 | 目标与保留项 | 迁移批次/PR | 验证证据与剩余工作 |
 | --- | --- | --- | --- | --- |
-| 应用壳 | `components/gateway/GatewayConsoleShell`：桌面侧栏、移动导航、连接、主题、语言、刷新 | 桌面导航保留 hash 语义；移动导航使用公共 Drawer；主题状态唯一 | 首批，#169 | 已验证关闭/返回焦点、窄屏和双主题；后续收敛工具栏控件 |
-| 总览 | `features/usage/UsageOverview`、`UsageFilters`、`charts.ts`：时间/模型过滤、KPI、Chart.js | 保留时间/Token 语义；字段、图例、轴与 canvas 主题接入 | 全局 Provider 首批；页面后续 | 后续验证有数据、空态、部分失败、刷新、主题和图表尺寸 |
-| 用量分析 | `UsageAnalysis`、`UsageFilters`：趋势、分布、价格与导出 | 保留 Chart.js 与格式化工具；统一图表容器和表格 | 全局 Provider 首批；页面后续 | 后续验证筛选/导出、missing 与 unknown、长文本 |
-| 请求事件 | `UsageEvents`、`UsageEventDetails`：TanStack Virtual、列设置、详情/重试、导出 | details → Popover；详情 → Mantine Drawer；保留虚拟化与查询取消 | 浮层首批；列表后续 | 首批列切换、详情关闭；后续密集数据滚动、刷新与列测量 |
-| 来源 | `SourcesPage`、`sources/SourceForm`、`AccountForm`、`SourceDetailDrawer` | 编辑/确认 → Modal，详情 → Drawer；保留接入、预设比较、连接测试 | 浮层首批；控件后续 | 首批代表性编辑/确认/详情关闭；后续表单全状态、实际提交与连接测试 |
-| 模型发现 | `ModelDiscoveryPage`、`discovery/*`：发现、筛选、批量选择、确认、元数据/能力编辑 | 编辑与确认使用 Modal；保留确认状态与能力语义 | 浮层首批；控件后续 | 后续发现/确认完整流程、禁用/失败/选择保持 |
-| 模型与路由 | `ModelsRoutesPage`、`models/*`：三类实体表格、编辑、详情、确认 | Modal/Drawer；保留 Binding、Route、逻辑模型区别 | 浮层首批；控件后续 | 后续三类实体各自核心流程、长 ID 与宽表 |
-| 能力矩阵 | `CapabilitiesPage`：筛选、三协议矩阵、详情 | 详情 → Drawer；保留 unknown/unsupported/degraded | 浮层首批；控件后续 | 后续多协议状态、过滤空态、详情长内容 |
-| 设置 | `SettingsPage`、`VirtualKeyForm`、`VirtualKeyRotationForm`：Key、导入/导出、运行信息 | Modal/确认；敏感值关闭立即清除，不为动画延长保存 | 浮层首批；控件后续 | 保留已有轮换测试；后续读取/复制/轮换/撤销和导入导出完整验收 |
+| 应用壳 | `GatewayConsoleShell`：桌面侧栏、移动导航、连接、主题、语言、刷新 | 保留 hash 与状态契约；公共 Drawer/字段/按钮 | #169、#170、#171 | 代表性窄屏导航、焦点、双主题与语言已验证；导航和工具栏整体收敛、全部嵌套组合待验收 |
+| 总览 | `UsageOverview`、`UsageFilters`、`UsageTrend` | Mantine 筛选/反馈/构成图；保留 Chart.js 与独立 Total | #169–#173 | 双主题趋势/精确表/单图构成、390px 已验证；KPI 与完整刷新/空错状态待收敛 |
+| 用量分析 | `UsageAnalysis`、`TokenDistribution`、`TokenComposition` | Progress 分布、Source 平均/P95 Table；完整值与 missing 保留 | #169–#173，第六批共享 Table 主题 | 代表性中英文、长字段、真实零值与缺失已验证；导出及全状态组合待验收 |
+| 请求事件 | `UsageEvents`、`UsageEventDetails` | Popover 列设置、公共 Drawer；保留 TanStack Virtual | #169–#172；列表待后续 | 详情/列设置/反馈已验证；窄屏行指针命中、密集滚动/列测量与刷新待验收 |
+| 来源 | `SourcesPage`、`SourceForm`、`AccountForm`、`SourceDetailDrawer` | 公共表单/浮层、Table 来源/账号/预设差异 | #169–#172，第六批表格 | 编辑隔离、键盘详情与返回焦点、窄屏预设差异滚动已验证；真实提交/连接测试待验收 |
+| 模型发现 | `ModelDiscoveryPage`、`discovery/*` | 公共过滤/Checkbox/反馈与 Mantine Table | #169–#172，第六批表格 | 可选范围、筛选清空、部分失败、批量选择已验证；发现/确认完整流程待验收 |
+| 模型与路由 | `ModelsRoutesPage`、`models/*` | 三实体 Mantine Table；保留 Binding/Route/逻辑模型与运行时链 | #169–#172，第六批表格 | 详情转编辑、宽表键盘滚动/访问操作列已验证；三实体真实提交与全部状态待验收 |
+| 能力矩阵 | `CapabilitiesPage` | 公共筛选、Mantine Table/Drawer；保留能力状态 | #169–#172，第六批表格 | 原生/降级/不可路由、筛选和长详情代表性验证；全部协议/主题/窄屏组合待验收 |
+| 设置 | `SettingsPage`、`VirtualKeyForm`、`VirtualKeyRotationForm` | 公共表单/确认、Mantine Key Table；保留敏感值边界 | #169–#172，第六批表格 | 原有 Key DOM 回归、英文窄屏列表与缺失时间已验证；真实密钥读写与导入导出完整验收待完成 |
 
 ## 组件处置清单
 
@@ -38,7 +38,7 @@ Issue 中 `de708e8` 的链接是历史调查依据。当前事件详情已位于
 | Button、IconButton、FormField、CheckboxField | 第二批迁移公共入口及其调用页面；字段下拉使用 Mantine NativeSelect，第三批收敛页面内筛选和 Shell 密钥输入 |
 | SegmentedTabs、LanguageSwitcher、Toggle | 第三批迁移到 Mantine Tabs、Button、Switch，保留面板/筛选语义和布尔值回调 |
 | Notice、LoadingState、LoadingSpinner、EmptyState、StatusPill | 第四批采用 Alert、Loader、Paper、ThemeIcon、Text、Badge，保留持久错误、部分失败与重试信息 |
-| Card、TableScroll、FormGrid、FilterBar、PageActions、DrawerSection | 第四批 Card 使用 Paper/Title/Text，样式归入 UI 层；其他领域组合继续保留，表格后续收敛 |
+| Card、TableScroll、FormGrid、FilterBar、PageActions、DrawerSection | 第四批 Card 使用 Paper/Title/Text，样式归入 UI 层；第六批 TableScroll 与 Mantine Table 共用 UI 样式，领域组合继续保留 |
 | Chart.js、TanStack Virtual、格式工具 | 保留专业实现；第五批统一趋势主题、数值表和缺失值，分布改用 Progress；代表性浏览器验收完成，运行时性能验证仍待完成 |
 | 已删除无调用组件 | #168 已清理旧 Input、Select、MainActionButton、PortalTooltip、QuestionMarkHelp、QuestionMarkHelpButton，不重新引入 |
 
@@ -157,3 +157,28 @@ DOM 回归覆盖错误重试到成功与关闭、单次加载播报转空态、�
 本批构建 JS 合计 901.50 kB（gzip 276.08 kB）、CSS 合计 154.22 kB（gzip 28.28 kB）；相对第四批增加 11.58/3.76 kB 与 7.68/1.25 kB（原始/gzip）。主入口 JS 为 495.91 kB（gzip 154.24 kB）；新增 Progress/Table 按需样式，无新增依赖包。该记录是构建体积，不是运行时性能基准。
 
 另通过本地生产构建复验授权管理端的总览与分析：既有用量已使用同一张输入/输出构成图，缓存/推理明细保留，未重算或写回用量。真实数据只用于当前浏览器检查，未保存为公开截图。
+
+## 第六批：控制面表格与滚动容器
+
+从 PR #173 合并后的 main `f3ff2a3` 开始，分支 `codex/166-mantine-tables`。同时将 #166 中已有完整依据的 23 项标为完成，保留其余 31 项复合范围与验收待办，并补齐前五批合并及验证记录。
+
+九张表采用 Mantine Table：来源、账号、逻辑模型、Binding、Route、模型发现目录、能力矩阵、Virtual Key 和来源预设差异。Table/Th/Td 等直接使用 Mantine 语义元素，不新增通用数据表包装或改变查询/排序/选择模型。所有控制面列标题声明 `scope="col"`；已有可点击行仍保持表格语义，通过独立查看按钮提供键盘入口，操作/开关单元格继续阻止事件冒泡。
+
+表头、单元格密度、行分隔线、悬停与操作按钮尺寸集中到 UI 的 `Table.module.scss`，主题默认纵向/横向间距为 10px/13px。TableScroll 保留带名称、可聚焦的原生横向滚动容器；移除控制面重复通用表格样式，保留各表最小宽度与领域列布局。窄屏状态文字保持一行，预设差异类型列保留 96px 最小宽度，避免短状态被挤成多行。图表数值表与来源延迟表也继承相同 Table 基础主题。
+
+新增一项实际来源表行为回归，覆盖表头/滚动区语义、编辑不误开详情、关闭后再点击数据单元格打开详情。既有发现选择/禁用、三实体 CRUD、状态区别及 Virtual Key 边界测试继续通过。
+
+浏览器使用挂载实际 Shell 和 GatewayManagementPage 的合成数据页面验证：
+
+| 范围 | 结果 |
+| --- | --- |
+| 桌面来源表 | 单元格内边距 10px/13px，操作按钮 36px；编辑只打开编辑框，模拟停用不打开详情；键盘 Enter 查看、Esc 关闭后焦点回到原查看按钮 |
+| 390px 深色 Binding 表 | 页面宽度与 scrollWidth 均为 390px；1260px 表在 364px 容器内滚动。方向键可横向滚动；键盘访问操作列后 scrollLeft 为 896px，焦点可达编辑按钮，四个操作按钮均为 44px |
+| 预设差异抽屉 | 390px Drawer 中的 1040px 表在 348px 局部区域滚动；差异路径、前后值完整保留；类型列 96px，状态标签保持约 21px 单行高度 |
+| 能力/发现/设置 | 浅深色表头与状态可读；原生、降级、不可路由保持区别；发现全选后待确认行被选中并启用批量确认。英文窄屏 Key 表不撑破页面，缺失最后使用时间保持 `—` |
+
+公开截图均为合成数据：[来源浅色](evidence/166/b6-sources-light.png)、[窄屏深色操作列](evidence/166/b6-bindings-mobile-dark.png)、[能力矩阵深色](evidence/166/b6-capabilities-dark.png)。临时验证页面已移出仓库。另用本地生产构建只读复验授权管理端来源列表，四条记录正常显示且无页面横向溢出；未执行真实管理写操作或模型请求。
+
+最终检查通过：`mise exec -- npm --prefix web run lint`（ESLint/Knip）、`typecheck`、`test`（30 个文件、146 项）、`build` 与 `git diff --check`。本批无后端、依赖或数据库变更，未运行后端/live Provider 测试。构建 JS 合计 902.43 kB（gzip 276.23 kB）、CSS 合计 154.17 kB（gzip 28.26 kB）；相对第五批分别变化 +0.93/+0.15 kB 与 -0.05/-0.02 kB（原始/gzip），主入口 JS 496.12 kB（gzip 154.34 kB）。
+
+尚未完成：虚拟事件列表窄屏指针命中、密集滚动/列测量与刷新性能；导航与页面模式最终收敛；全八页核心流程及状态/主题/语言/窄屏组合；已记录的真实写流程、全部嵌套浮层和减少动画实测。控制面表格完成不代表 #166 的表格与虚拟列表复合条目或八页验收全部完成。
