@@ -1,0 +1,35 @@
+.list {
+  min-width: 0;
+  margin: 0;
+
+  > div { min-width: 0; display: grid; }
+  dt { min-width: 0; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+  dd { min-width: 0; margin: 0; color: var(--fg); overflow-wrap: anywhere; }
+}
+
+.rows > div {
+  grid-template-columns: minmax(110px, 0.45fr) minmax(0, 1fr);
+  gap: 16px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+
+  > div {
+    gap: 4px;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg);
+  }
+  dd { font-family: var(--font-mono); font-size: 12px; }
+}
+
+@media (max-width: 600px) {
+  .rows > div { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .grid { grid-template-columns: minmax(0, 1fr); }
+}

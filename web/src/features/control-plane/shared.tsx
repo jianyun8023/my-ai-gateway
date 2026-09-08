@@ -1,3 +1,4 @@
+import { FilterPanel } from '@/components/ui/FilterPanel';
 import { Switch } from '@mantine/core';
 import type { AdminErrorShape, GatewayProtocol } from '@/admin-api';
 import { Button } from '@/components/ui/Button';
@@ -45,8 +46,8 @@ export function PageActions({ children }: PropsWithChildren) {
   return <div className={styles.pageActions}>{children}</div>;
 }
 
-export function FilterBar({ children }: PropsWithChildren) {
-  return <div className={styles.filterBar}>{children}</div>;
+export function FilterBar({ children, label }: PropsWithChildren<{ label: string }>) {
+  return <FilterPanel label={label} className={styles.filterBar}>{children}</FilterPanel>;
 }
 
 export function ErrorState({ error, onRetry }: { error: AdminErrorShape; onRetry?: () => void }) {
@@ -69,14 +70,6 @@ export function FormGrid({ children }: PropsWithChildren) {
 export function FormError({ message }: { message?: string }) {
   if (!message) return null;
   return <Notice>{message}</Notice>;
-}
-
-export function DetailList({ children }: PropsWithChildren) {
-  return <dl className={styles.detailList}>{children}</dl>;
-}
-
-export function DetailItem({ label, children }: PropsWithChildren<{ label: string }>) {
-  return <div><dt>{label}</dt><dd>{children}</dd></div>;
 }
 
 export function DrawerSection({ title, children }: PropsWithChildren<{ title: string }>) {

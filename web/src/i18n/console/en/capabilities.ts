@@ -1,5 +1,6 @@
 // 有效能力矩阵页文案(英文)——命名空间 console.capabilities
 export const capabilities = {
+  filters_aria: 'Capability matrix filters',
   // 单元格与状态短语
   cell: {
     contract_missing: 'contract missing',

@@ -1,3 +1,4 @@
+import { FormActions } from '@/components/ui/FormActions';
 import { clearOperationNotification, notifySuccess } from '@/components/ui/notifications';
 import { Table } from '@mantine/core';
 import { useOverlayState } from '@/components/ui/useOverlayState';
@@ -266,12 +267,9 @@ export function SourcesPage({ api, refreshRevision = 0, onBusyChange }: SourcesP
         closeDisabled={mutationBusy}
         width={680}
         footer={editor && (
-          <>
-            <Button variant="secondary" onClick={() => setEditor(undefined)} disabled={mutationBusy}>{t('common.cancel')}</Button>
-            <Button type="submit" form={editor.kind === 'source' ? 'source-editor-form' : 'account-editor-form'} loading={mutationBusy}>
-              {editor.record ? t('common.save_changes') : t('common.create')}
-            </Button>
-          </>
+          <FormActions form={editor.kind === 'source' ? 'source-editor-form' : 'account-editor-form'}
+            cancelLabel={t('common.cancel')} submitLabel={editor.record ? t('common.save_changes') : t('common.create')}
+            busy={mutationBusy} onCancel={() => setEditor(undefined)} />
         )}
       >
         {editor?.kind === 'source' && <SourceForm key={editor.record?.id ?? 'new-source'} record={editor.record} presets={data.presets} busy={mutationBusy} error={formErrorMessage} onSubmit={submitSource} />}

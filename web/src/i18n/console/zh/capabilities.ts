@@ -1,5 +1,6 @@
 // 有效能力矩阵页文案(简体中文)——命名空间 console.capabilities
 export const capabilities = {
+  filters_aria: '能力矩阵筛选',
   // 单元格与状态短语
   cell: {
     contract_missing: '契约缺失',

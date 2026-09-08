@@ -111,3 +111,10 @@ Shell 保留原生 CSS Grid/Flex 布局与现有 hash 导航、刷新版本及 s
 `GatewayUsageClient.summary` 每次并行读取 summary 与一条 `breakdown=usage_source`，共享完整 filters 和 AbortSignal，经 adapter 用 `key/logical_requests` 组装来源计数。两项都成功才发布 summary，任一失败进入既有错误/重试流程；组件、分页和导出不额外查询来源。`useUsageData` 继续丢弃已取消会话的迟到响应。前端同筛选、同轮发布不等于后端数据库事务快照一致。
 
 总览和分析的构成区域显示真实来源请求计数及 missing/estimated 解释。全部计数来源均缺失/未知且汇总为记账零时，KPI、构成和分布显示不可用说明与 `—`；混合来源保留已有汇总值，明确估算已计入、missing 未计入。独立 Total、Input/Output、推理和缓存语义不变，趋势仍展示原有记账数据，不依据来源重算 Token。
+
+## 筛选、编辑操作与详情组合
+
+- `FilterPanel` 以 Mantine Paper 提供命名 section、品牌表面/边框、12px 内边距与圆角，以及子项收缩边界。控制面的 `FilterBar` 只排列发现/能力字段；用量的 `FilterBar` 保留预设、普通/高级筛选布局与 draft/apply 回调。预设立即应用，普通字段显式应用，日期校验仍由用量功能层维护。
+- `FormActions` 返回取消/提交两个按钮的 Fragment，标签、可选提交图标、`form` ID、busy 和取消回调由页面传入。原生 `type="submit"` 关联现有表单；busy 禁用按钮。它不拥有表单值、校验、请求或浮层状态。页面仍传入 `closeDisabled`，执行防重复、退出清理与详情转编辑焦点契约。来源/账号、三种模型实体、发现编辑、Key 创建/轮换共用此组合；不改变敏感 Key 的即时清理。
+- UI 的 `DetailList` / `DetailItem` 统一 `dl/dt/dd`、标签/值、长字段换行和窄屏单列。默认行式用于来源、模型、能力、设置；`layout="grid"` 用于请求事件基本字段。Token 精确明细、来源质量和 attempt 列表由用量功能层维护。领域协议标签与转换链继续由调用方提供。
+- 已有 `FormGrid`、`DrawerSection` 和 `PageActions` 继续负责控制面表单布局、详情/长表单分区和页操作排列；新表单复用 `SourceForm` 中的字段与分区组合方式，不复制其 CRUD 或生命周期。通用 UI 不包含 schema、mutation/query、通知或浮层生命周期。
