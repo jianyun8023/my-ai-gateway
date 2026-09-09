@@ -133,6 +133,8 @@ Web Search、Tools、Thinking、Vision、Provider 扩展字段在原生透传路
 
 上游响应的 HTTP 压缩由网关协商：代理不转发客户端的 `Accept-Encoding`，共享 HTTP client 按已启用的解码能力协商 gzip，并在 JSON usage 解析、SSE 事件跟踪与转发前解压。解码后的响应移除原 `Content-Encoding` / `Content-Length`，保留解码后的正文内容及协议字段；gzip SSE 逐块解码，继续遵守首事件、空闲、总时限和取消约束。压缩体读取/校验失败按已有上游错误路径处理，不将压缩字节估算成成功请求 Token（#185）。
 
+SSE 用量按字段是否由上游提供进行合并：显式 `0` 覆盖旧值，缺失字段保留先前值；已知数值字段全部为零仍属于 `parsed`，不回退估算。缓存读写先分别合并，再计算 cached；input/output 发生更新且本帧未提供 total 时，使用合并后的 input + output，避免沿用较早事件的 total。当前帧明确提供的 total 保持上游值，缓存及 reasoning 不重复计入推导 total（#188）。
+
 ### 3.3 Kimi Code
 
 Kimi Code 官方于 2026-09 原生支持 OpenAI Responses（`POST /coding/v1/responses`，2026-09-06 实测返回标准 Responses 语义：reasoning item、流式 function_call 事件、`usage.input_tokens_details.cached_tokens`、`incomplete_details`），三协议全部按原生透传处理：

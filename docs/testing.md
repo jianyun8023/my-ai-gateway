@@ -188,6 +188,10 @@ TZ=America/New_York mise exec -- npm --prefix web test -- src/gateway-usage/filt
 启用时），因此 `mise run test` 已隐式覆盖这些测试。若只跑 Rust 部分，可直接执行
 `cargo test --workspace --features test-support -- --test-threads=1`。
 
+### SSE 用量字段合并回归
+
+SSE 用量字段合并回归（#188）在 `proxy::usage::tests` 中覆盖：Kimi 缓存命中末帧将 input 清零、缺失字段保留、显式零值与全零 usage、缓存读写拆分、嵌套缓存/推理字段，以及分段 input/output 合并后的 total。可单独运行 `cargo test --lib sse_usage_ -- --test-threads=1`。
+
 ### 上游 gzip 响应回归
 
 压缩响应回归（#185）包含在默认 Rust 单测中：三协议 JSON 验证解压后的正文、响应头和上游 usage；三协议 SSE 用分段压缩响应验证首事件在剩余响应发送前即可到达，并核对事件与 parsed usage；截断 gzip 验证 JSON 传输失败和 SSE 异常结束。可单独运行 `cargo test --lib gzip -- --test-threads=1`，无需 Provider 凭据。
