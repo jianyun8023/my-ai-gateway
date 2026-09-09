@@ -48,8 +48,21 @@ impl ControlPlane {
         self.events.clone()
     }
 
+    pub(crate) fn with_events(mut self, events: EventRepository) -> Self {
+        self.events = events;
+        self
+    }
+
     pub(super) async fn begin_write(&self) -> Result<Transaction<'_, Postgres>, ControlPlaneError> {
-        let mut tx = self.pool.begin().await?;
+        let mut tx = match self.pool.begin().await {
+            Ok(tx) => tx,
+            Err(error) => {
+                self.events
+                    .database_failed("control_plane.mutation", &error)
+                    .await;
+                return Err(error.into());
+            }
+        };
         sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
             .execute(&mut *tx)
             .await?;
@@ -96,6 +109,9 @@ impl ControlPlane {
             .await;
             return Err(error);
         }
+        self.events
+            .database_recovered("control_plane.mutation")
+            .await;
         Ok(snapshot)
     }
 
@@ -106,8 +122,10 @@ impl ControlPlane {
         error: &ControlPlaneError,
     ) {
         let database_failure = matches!(error, ControlPlaneError::Database(_));
-        if database_failure {
-            self.events.database_failed("runtime.snapshot").await;
+        if let ControlPlaneError::Database(database_error) = error {
+            self.events
+                .database_failed("control_plane.mutation", database_error)
+                .await;
         }
         let mut event = SystemEvent::new(
             "configuration",
@@ -138,6 +156,18 @@ impl ControlPlane {
     }
 
     pub(crate) async fn load_snapshot(&self) -> Result<RuntimeSnapshot, ControlPlaneError> {
+        let result = self.load_snapshot_inner().await;
+        match &result {
+            Ok(_) => self.events.database_recovered("runtime.snapshot").await,
+            Err(ControlPlaneError::Database(error)) => {
+                self.events.database_failed("runtime.snapshot", error).await
+            }
+            Err(_) => {}
+        }
+        result
+    }
+
+    async fn load_snapshot_inner(&self) -> Result<RuntimeSnapshot, ControlPlaneError> {
         let mut tx = self.pool.begin().await?;
         sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
             .execute(&mut *tx)

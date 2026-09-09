@@ -481,7 +481,11 @@ v1 响应 envelope 固定如下：summary 为 `{version, timezone, range, data}`
 | 模型发现运行 | `source_discovery_runs` | 全部 |
 | 数据面请求 | `usage_events` | 只投影失败、fallback 或 degraded 请求；普通成功请求留在 Request Events |
 
-`system_events` 固定字段为 UTC `occurred_at`、`category`、`event_type`、`level`、`subject_type/id`、`correlation_id`、短 `message` 和 metadata-only `details`。写入器限制长度、层级和字段数，递归移除 credential、token、Authorization、prompt/response、thinking/signature 等敏感内容；事件落库失败只告警，不能把本来成功的网关操作改成失败。数据库故障期间无法落库的首个 incident 暂存在进程内存中，数据库首次成功后按原发生时间补写失败事件，再写同一 `correlation_id` 的恢复事件；这不是跨进程可靠队列。
+`system_events` 固定字段为 UTC `occurred_at`、`category`、`event_type`、`level`、`subject_type/id`、`correlation_id`、短 `message` 和 metadata-only `details`。写入器与统一查询返回边界共用脱敏规则，限制长度、层级和字段数，递归移除 credential、token、Authorization、prompt/response、thinking/signature 等敏感内容。既有 audit actor、discovery requested_by 属于非必要且任意调用方可控的文本，在统一投影中无条件替换为 `[REDACTED]`，不能依赖供应商 Key 前缀识别；事件落库失败只告警，不能把本来成功的网关操作改成失败。
+
+连接事件使用共享 SQLx 分类：I/O、TLS、连接池不可用/获取超时、SQLSTATE `08` 和 PostgreSQL 停机/尚未可连接状态会打开 incident；缺表、权限、约束、解析等查询错误保持原业务错误，不伪装成连接异常。用量读写（写入含 SSE 结算）、Virtual Key 鉴权、健康状态与探测 metadata 读写、普通 Admin 控制面读取、控制面事务/snapshot、Admin 审计和事件查询接入该记录器。运行期数据库对象的克隆共享按组件区分的 incident 集合：每个组件只保留首个未恢复 incident，并由该组件后续成功按原发生时间补写失败事件、写入同一 `correlation_id` 的恢复事件并独立关闭；其他组件的失败不会被吞掉，成功或仅发布内存 snapshot 也不会错误关闭它。失败路径只在短内存临界区登记，不同步重试已经不可用的连接池；恢复路径在不持有 incident 集合锁时补写。此记录不依赖周期探测开启。
+
+初始 PostgreSQL 连接/迁移尚未成功时无可用事件仓储；进程终止前仍未恢复的 incident 也无法持久化。这些失败仍由启动错误/日志报告，内存补写不提供跨重启可靠性。
 
 `GET /admin/events` 在上述五张历史表上构建只读 `UNION ALL` 投影，支持 `from`、互斥的 `since`、`to`、`category`、`level`、`event_type`、`subject_type/id`、`correlation_id`（`operation_id` 为查询别名）、`source`、`limit` 和不透明 keyset `cursor`。`from` 使用闭边界、`since` 使用开边界、`to` 使用开边界；结果按 `(occurred_at DESC,event_id DESC)` 稳定分页。该 API 与“运行事件”页面用于关注项回看和跨表关联，不能替代各事实表的专用详情接口。
 

@@ -40,7 +40,7 @@ pub(crate) async fn list_sources(
         Ok(control_plane) => control_plane,
         Err(response) => return response,
     };
-    admin_result(control_plane.list_sources().await)
+    admin_result(&state, control_plane.list_sources().await).await
 }
 
 pub(crate) async fn get_source(
@@ -52,7 +52,7 @@ pub(crate) async fn get_source(
         Ok(control_plane) => control_plane,
         Err(response) => return response,
     };
-    admin_result(control_plane.get_source(&id).await)
+    admin_result(&state, control_plane.get_source(&id).await).await
 }
 
 pub(crate) async fn create_source(
@@ -140,7 +140,7 @@ pub(crate) async fn list_accounts(
         Ok(control_plane) => control_plane,
         Err(response) => return response,
     };
-    admin_result(control_plane.list_accounts().await)
+    admin_result(&state, control_plane.list_accounts().await).await
 }
 
 pub(crate) async fn get_account(
@@ -152,7 +152,7 @@ pub(crate) async fn get_account(
         Ok(control_plane) => control_plane,
         Err(response) => return response,
     };
-    admin_result(control_plane.get_account(&id).await)
+    admin_result(&state, control_plane.get_account(&id).await).await
 }
 
 pub(crate) async fn create_account(
@@ -240,7 +240,7 @@ pub(crate) async fn list_logical_models(
         Ok(control_plane) => control_plane,
         Err(response) => return response,
     };
-    admin_result(control_plane.list_logical_models().await)
+    admin_result(&state, control_plane.list_logical_models().await).await
 }
 
 pub(crate) async fn get_logical_model(
@@ -252,7 +252,7 @@ pub(crate) async fn get_logical_model(
         Ok(control_plane) => control_plane,
         Err(response) => return response,
     };
-    admin_result(control_plane.get_logical_model(&id).await)
+    admin_result(&state, control_plane.get_logical_model(&id).await).await
 }
 
 pub(crate) async fn create_logical_model(
@@ -342,7 +342,7 @@ pub(crate) async fn list_model_bindings(
         Ok(control_plane) => control_plane,
         Err(response) => return response,
     };
-    admin_result(control_plane.list_model_bindings().await)
+    admin_result(&state, control_plane.list_model_bindings().await).await
 }
 
 pub(crate) async fn get_model_binding(
@@ -354,7 +354,7 @@ pub(crate) async fn get_model_binding(
         Ok(control_plane) => control_plane,
         Err(response) => return response,
     };
-    admin_result(control_plane.get_model_binding(id).await)
+    admin_result(&state, control_plane.get_model_binding(id).await).await
 }
 
 pub(crate) async fn create_model_binding(
@@ -400,10 +400,12 @@ pub(crate) async fn list_source_model_capabilities(
         Err(response) => return response,
     };
     admin_result(
+        &state,
         control_plane
             .list_source_model_capabilities(&source_id, &upstream_model_id)
             .await,
     )
+    .await
 }
 
 pub(crate) async fn upsert_source_model_capability(
@@ -516,7 +518,7 @@ pub(crate) async fn list_routes(
         Ok(control_plane) => control_plane,
         Err(response) => return response,
     };
-    admin_result(control_plane.list_routes().await)
+    admin_result(&state, control_plane.list_routes().await).await
 }
 
 pub(crate) async fn get_route(
@@ -528,7 +530,7 @@ pub(crate) async fn get_route(
         Ok(control_plane) => control_plane,
         Err(response) => return response,
     };
-    admin_result(control_plane.get_route(&id).await)
+    admin_result(&state, control_plane.get_route(&id).await).await
 }
 
 pub(crate) async fn create_route(

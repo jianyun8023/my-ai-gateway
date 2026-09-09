@@ -242,7 +242,16 @@ impl Database {
         raw: &str,
         model: Option<&str>,
     ) -> Result<Option<(i64, String, String)>, sqlx::Error> {
-        self.authenticate_virtual_key_with_identity_scope(raw, model, VIRTUAL_KEY_INVOKE_SCOPE)
+        self.events
+            .observe(
+                "auth.virtual_key",
+                self.authenticate_virtual_key_with_identity_scope(
+                    raw,
+                    model,
+                    VIRTUAL_KEY_INVOKE_SCOPE,
+                )
+                .await,
+            )
             .await
     }
 

@@ -90,7 +90,6 @@ impl AppState {
             current_revision
         };
         let accepted = candidate_revision >= current_revision;
-        self.events.database_recovered("runtime.snapshot").await;
         let correlation_id = audit::current_context().map(|context| context.request_id);
         let mut built_event = events::SystemEvent::new(
             "configuration",

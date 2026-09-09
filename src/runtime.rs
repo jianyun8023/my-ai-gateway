@@ -33,7 +33,8 @@ pub(crate) async fn run() -> Result<(), Box<dyn std::error::Error>> {
         database.pool().clone(),
         &listen_addr,
         source_url_policy.clone(),
-    );
+    )
+    .with_events(database.event_repository());
     let should_import = force_import || initial_control_plane.is_empty().await?;
     let bootstrap = if should_import {
         match std::env::var("GATEWAY_CONFIG_JSON") {
@@ -59,7 +60,8 @@ pub(crate) async fn run() -> Result<(), Box<dyn std::error::Error>> {
         database.pool().clone(),
         &listen_addr,
         source_url_policy.clone(),
-    );
+    )
+    .with_events(database.event_repository());
     let events = control_plane.event_repository();
     let snapshot_result = match bootstrap {
         Some(config) => match control_plane
@@ -75,8 +77,10 @@ pub(crate) async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let snapshot = match snapshot_result {
         Ok(snapshot) => snapshot,
         Err(error) => {
-            if matches!(error, control_plane::ControlPlaneError::Database(_)) {
-                events.database_failed("runtime.snapshot.startup").await;
+            if let control_plane::ControlPlaneError::Database(ref database_error) = error {
+                events
+                    .database_failed("runtime.snapshot", database_error)
+                    .await;
             }
             events
                 .record(
@@ -94,7 +98,6 @@ pub(crate) async fn run() -> Result<(), Box<dyn std::error::Error>> {
             return Err(error.into());
         }
     };
-    events.database_recovered("runtime.snapshot.startup").await;
     events
         .record(
             SystemEvent::new(
@@ -122,10 +125,9 @@ pub(crate) async fn run() -> Result<(), Box<dyn std::error::Error>> {
         health::HealthConfig::from_env(),
     );
     if let Err(error) = health.restore().await {
-        events.database_failed("health.restore").await;
+        events.database_failed("health.read", &error).await;
         return Err(error.into());
     }
-    events.database_recovered("health.restore").await;
     let secrets = match secrets::SecretResolver::from_env() {
         Ok(secrets) => secrets,
         Err(error) => {
@@ -500,16 +502,9 @@ async fn run_health_probes_once(state: &AppState) {
         return;
     };
     let targets = match database.health_probe_targets().await {
-        Ok(targets) => {
-            state
-                .events
-                .database_recovered("health.probe_targets")
-                .await;
-            targets
-        }
+        Ok(targets) => targets,
         Err(error) => {
             tracing::warn!(%error, "failed to enumerate periodic health probes");
-            state.events.database_failed("health.probe_targets").await;
             return;
         }
     };
@@ -540,7 +535,6 @@ async fn run_health_probes_once(state: &AppState) {
             .await
         {
             Ok(outcome) => {
-                state.events.database_recovered("health.probe").await;
                 tracing::info!(
                     account_id = %outcome.account_id,
                     %protocol,
@@ -549,9 +543,6 @@ async fn run_health_probes_once(state: &AppState) {
                 )
             }
             Err(error) => {
-                if error.code() == "database_error" {
-                    state.events.database_failed("health.probe").await;
-                }
                 tracing::warn!(
                     account_id = %account_id,
                     %protocol,

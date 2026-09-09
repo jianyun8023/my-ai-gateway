@@ -114,12 +114,26 @@ pub(crate) fn control_plane_error(error: control_plane::ControlPlaneError) -> Re
     error_response(status, error.code(), &error.message())
 }
 
-pub(crate) fn admin_result<T: serde::Serialize>(
+pub(crate) async fn admin_result<T: serde::Serialize>(
+    state: &AppState,
     result: Result<T, control_plane::ControlPlaneError>,
 ) -> Response<Body> {
     match result {
-        Ok(record) => (StatusCode::OK, Json(json!({"data": record}))).into_response(),
-        Err(error) => control_plane_error(error),
+        Ok(record) => {
+            state.events.database_recovered("control_plane.read").await;
+            (StatusCode::OK, Json(json!({"data": record}))).into_response()
+        }
+        Err(error) => {
+            if let control_plane::ControlPlaneError::Database(ref database_error) = error {
+                state
+                    .events
+                    .database_failed("control_plane.read", database_error)
+                    .await;
+            } else {
+                state.events.database_recovered("control_plane.read").await;
+            }
+            control_plane_error(error)
+        }
     }
 }
 
@@ -140,8 +154,11 @@ pub(crate) async fn mutation_result<T: serde::Serialize>(
                 .into_response()
         }
         Err(error) => {
-            if matches!(error, control_plane::ControlPlaneError::Database(_)) {
-                state.events.database_failed("control_plane.mutation").await;
+            if let control_plane::ControlPlaneError::Database(ref database_error) = error {
+                state
+                    .events
+                    .database_failed("control_plane.mutation", database_error)
+                    .await;
             }
             control_plane_error(error)
         }
@@ -158,8 +175,11 @@ pub(crate) async fn delete_result(
             StatusCode::NO_CONTENT.into_response()
         }
         Err(error) => {
-            if matches!(error, control_plane::ControlPlaneError::Database(_)) {
-                state.events.database_failed("control_plane.delete").await;
+            if let control_plane::ControlPlaneError::Database(ref database_error) = error {
+                state
+                    .events
+                    .database_failed("control_plane.mutation", database_error)
+                    .await;
             }
             control_plane_error(error)
         }
@@ -171,8 +191,11 @@ pub(crate) async fn record_snapshot_build_failure(
     error: &control_plane::ControlPlaneError,
 ) {
     let database_failure = matches!(error, control_plane::ControlPlaneError::Database(_));
-    if database_failure {
-        state.events.database_failed("runtime.snapshot").await;
+    if let control_plane::ControlPlaneError::Database(database_error) = error {
+        state
+            .events
+            .database_failed("runtime.snapshot", database_error)
+            .await;
     }
     let mut event = SystemEvent::new(
         "configuration",

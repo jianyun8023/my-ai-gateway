@@ -281,7 +281,7 @@ async fn postgres_test_database() -> Option<Database> {
         .connect(&url)
         .await
         .expect("connect TEST_DATABASE_URL");
-    let database = Database { pool };
+    let database = Database::from_pool(pool);
     database.migrate().await.expect("apply test migrations");
     Some(database)
 }
@@ -926,7 +926,7 @@ async fn model_catalog_database_refresh_constraints_and_binding_states() {
         .connect(&url)
         .await
         .expect("connect model catalog test database");
-    let database = Database { pool: pool.clone() };
+    let database = Database::from_pool(pool.clone());
     database.migrate().await.expect("migrate test database");
     let repository = ModelCatalogRepository::new(pool.clone());
     let suffix = uuid::Uuid::new_v4().simple().to_string();

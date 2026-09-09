@@ -158,8 +158,8 @@ pub(crate) async fn list_events(
             )
                 .into_response()
         }
-        Err(_) => {
-            state.events.database_failed("events.query").await;
+        Err(error) => {
+            state.events.database_failed("events.query", &error).await;
             error_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "events_query_failed",

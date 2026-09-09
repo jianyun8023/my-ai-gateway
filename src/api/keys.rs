@@ -125,7 +125,10 @@ pub(crate) async fn rotate_account_credential(
         }
         Err(crate::control_plane::ControlPlaneError::Database(error)) => {
             tracing::warn!(%error, "account credential rotation failed");
-            state.events.database_failed("credential.rotation").await;
+            state
+                .events
+                .database_failed("control_plane.mutation", &error)
+                .await;
             error_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "database_error",

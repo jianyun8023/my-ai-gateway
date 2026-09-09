@@ -366,7 +366,9 @@ Content-Type: application/json
 }
 ```
 
-所有 `details` 都是 metadata-only，禁止包含 prompt/response 正文、Authorization、API Key、credential 或可逆正文编码。统一读模型用于时间线与关联检索；当前账号状态、请求详情和运维任务控制仍以各自专用接口为准。后台任务可用 `operation_id` + `since` 增量轮询，但完成、取消和 retry 不引入推送回调或 DB signal。
+所有 `details` 都是 metadata-only，禁止包含 prompt/response 正文、Authorization、API Key、credential 或可逆正文编码。返回边界会过滤所有来源的敏感文本、主体、关联字段及嵌套 metadata，不能依赖历史写入器已经完成脱敏；任意调用方可控且非必要的 audit actor 与 discovery requested_by 无论格式如何都固定返回 `[REDACTED]`，不靠已知 Key 前缀猜测。请求事件 ID 使用请求标识的摘要，分页游标不携带原始请求标识。统一读模型用于时间线与关联检索；当前账号状态、请求详情和运维任务控制仍以各自专用接口为准。后台任务可用 `operation_id` + `since` 增量轮询，但完成、取消和 retry 不引入推送回调或 DB signal。
+
+查询缺表、权限或解码错误仍返回 `events_query_failed`，不会生成 `database.connection_failed`。连接事件仅记录共享 SQLx 分类确认的连接/连接池故障；incident 按组件独立去重和恢复，对应组件后续操作成功才关闭自己的 incident，其他组件的失败不会被吞掉，成功也不代表该组件恢复。连接 incident 的失败登记不会为了写诊断再次同步等待已耗尽的连接池；成功恢复后才补写配对事件。
 
 ## 数据保留与恢复运维（Issue #53）
 

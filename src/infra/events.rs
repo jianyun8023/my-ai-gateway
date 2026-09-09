@@ -7,14 +7,37 @@
 use chrono::{DateTime, TimeZone, Utc};
 use serde::Serialize;
 use serde_json::{json, Map, Value};
-use sqlx::PgPool;
-use std::sync::Arc;
+use sqlx::{PgConnection, PgPool};
+use std::{
+    collections::BTreeMap,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
 const MAX_DETAILS_DEPTH: usize = 6;
 const MAX_DETAILS_FIELDS: usize = 64;
 const MAX_DETAILS_STRING: usize = 512;
+
+/// SQL/programming, constraint, permission and decoding failures do not imply
+/// lost connectivity. Pool exhaustion is included because callers cannot
+/// acquire a usable connection, even when the server itself is healthy.
+pub(crate) fn is_connection_error(error: &sqlx::Error) -> bool {
+    match error {
+        sqlx::Error::Io(_)
+        | sqlx::Error::Tls(_)
+        | sqlx::Error::PoolTimedOut
+        | sqlx::Error::PoolClosed
+        | sqlx::Error::WorkerCrashed => true,
+        sqlx::Error::Database(error) => error.code().is_some_and(|code| {
+            code.starts_with("08") || matches!(code.as_ref(), "57P01" | "57P02" | "57P03")
+        }),
+        _ => false,
+    }
+}
 
 const UNIFIED_EVENTS_SQL: &str = r#"
 WITH unified_events AS (
@@ -54,7 +77,7 @@ WITH unified_events AS (
         jsonb_strip_nulls(jsonb_build_object(
             'status', status,
             'result', result,
-            'actor', actor,
+            'actor', CASE WHEN actor IS NULL THEN NULL ELSE '[REDACTED]' END,
             'resource', resource,
             'error_code', error_code,
             'completed_at', completed_at,
@@ -110,7 +133,7 @@ WITH unified_events AS (
             'http_status', http_status,
             'latency_ms', latency_ms,
             'error_code', error_code,
-            'requested_by', requested_by
+            'requested_by', CASE WHEN requested_by IS NULL THEN NULL ELSE '[REDACTED]' END
         )) AS details,
         'source_discovery_runs'::text AS source
     FROM source_discovery_runs
@@ -118,7 +141,7 @@ WITH unified_events AS (
     UNION ALL
 
     SELECT
-        'request:' || request_id AS event_id,
+        'request:' || md5(request_id) AS event_id,
         created_at AS occurred_at,
         'request'::text AS category,
         CASE
@@ -290,19 +313,34 @@ struct DatabaseIncident {
     occurred_at: DateTime<Utc>,
     component: String,
     persisted: bool,
+    recovering: bool,
+    failure_during_recovery_at: Option<DateTime<Utc>>,
+}
+
+fn new_database_incident(component: String, occurred_at: DateTime<Utc>) -> DatabaseIncident {
+    DatabaseIncident {
+        id: Uuid::new_v4().to_string(),
+        occurred_at,
+        component,
+        persisted: false,
+        recovering: false,
+        failure_during_recovery_at: None,
+    }
 }
 
 #[derive(Clone)]
 pub(crate) struct EventRepository {
     pool: Option<PgPool>,
-    database_incident: Arc<Mutex<Option<DatabaseIncident>>>,
+    database_incidents: Arc<Mutex<BTreeMap<String, DatabaseIncident>>>,
+    has_database_incidents: Arc<AtomicBool>,
 }
 
 impl EventRepository {
     pub(crate) fn new(pool: PgPool) -> Self {
         Self {
             pool: Some(pool),
-            database_incident: Arc::new(Mutex::new(None)),
+            database_incidents: Arc::new(Mutex::new(BTreeMap::new())),
+            has_database_incidents: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -310,7 +348,8 @@ impl EventRepository {
     pub(crate) fn disabled() -> Self {
         Self {
             pool: None,
-            database_incident: Arc::new(Mutex::new(None)),
+            database_incidents: Arc::new(Mutex::new(BTreeMap::new())),
+            has_database_incidents: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -322,6 +361,14 @@ impl EventRepository {
         let Some(pool) = &self.pool else {
             return Ok(());
         };
+        let mut connection = pool.acquire().await?;
+        Self::insert_with_connection(&mut connection, event).await
+    }
+
+    async fn insert_with_connection(
+        connection: &mut PgConnection,
+        event: &SystemEvent,
+    ) -> Result<(), sqlx::Error> {
         let event = normalized_event(event);
         sqlx::query(
             "INSERT INTO system_events (occurred_at,category,event_type,level,subject_type,subject_id,correlation_id,message,details) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
@@ -335,7 +382,7 @@ impl EventRepository {
         .bind(event.correlation_id)
         .bind(event.message)
         .bind(event.details)
-        .execute(pool)
+        .execute(connection)
         .await?;
         Ok(())
     }
@@ -345,69 +392,65 @@ impl EventRepository {
     pub(crate) async fn record(&self, event: SystemEvent) {
         match self.insert(&event).await {
             Ok(()) => self.database_recovered("system_events.write").await,
-            Err(_) => {
+            Err(error) => {
                 tracing::warn!(event_type = %event.event_type, "failed to persist system event");
+                if is_connection_error(&error) {
+                    self.remember_database_failure("system_events.write").await;
+                }
+            }
+        }
+    }
+
+    /// Persist diagnostics emitted because a database-backed operation failed
+    /// only when a pooled connection is immediately available. The diagnostic
+    /// must not add another acquisition timeout to an already failed response,
+    /// and a successful insert is not proof that the original operation
+    /// recovered. A later successful domain operation closes the incident.
+    pub(crate) async fn record_during_database_incident(&self, event: SystemEvent) {
+        let Some(pool) = &self.pool else {
+            return;
+        };
+        let Some(mut connection) = pool.try_acquire() else {
+            return;
+        };
+        if let Err(error) = Self::insert_with_connection(&mut connection, &event).await {
+            tracing::warn!(event_type = %event.event_type, "failed to persist system event");
+            if is_connection_error(&error) {
                 self.remember_database_failure("system_events.write").await;
             }
         }
     }
 
-    /// Persist diagnostics emitted because a database-backed operation
-    /// failed without treating the diagnostic insert itself as proof that the
-    /// original operation recovered. A later successful domain operation
-    /// closes the incident through `database_recovered`.
-    pub(crate) async fn record_during_database_incident(&self, event: SystemEvent) {
-        if self.insert(&event).await.is_err() {
-            tracing::warn!(event_type = %event.event_type, "failed to persist system event");
-            self.remember_database_failure("system_events.write").await;
-        }
-    }
-
-    /// Remember one database outage in memory. If PostgreSQL is unavailable,
-    /// the failure row is backfilled with its original timestamp after the
-    /// first later success, followed by a recovery row with the same incident
-    /// correlation id.
-    pub(crate) async fn database_failed(&self, component: &str) {
-        if self.pool.is_none() {
+    /// Remember the first unresolved outage for each database-backed component
+    /// in memory. If PostgreSQL is unavailable, the failure row is backfilled
+    /// with its original timestamp after the first later success of that same
+    /// component, followed by a recovery row with the same incident correlation
+    /// id. Failures and successes from other components are tracked independently.
+    pub(crate) async fn database_failed(&self, component: &str, error: &sqlx::Error) {
+        if self.pool.is_none() || !is_connection_error(error) {
             return;
         }
-        let mut current = self.database_incident.lock().await;
-        if current.is_some() {
-            return;
-        }
-        let incident = DatabaseIncident {
-            id: Uuid::new_v4().to_string(),
-            occurred_at: Utc::now(),
-            component: safe_text(component, 64, "database"),
-            persisted: false,
-        };
-        *current = Some(incident.clone());
-        let mut event = SystemEvent::new(
-            "database",
-            "database.connection_failed",
-            "error",
-            "database",
-            "Database operation became unavailable",
-        )
-        .subject_id("postgresql")
-        .correlation_id(incident.id.clone())
-        .details(json!({
-            "component": incident.component,
-            "error_code": "database_unavailable",
-        }));
-        event.occurred_at = incident.occurred_at;
-        if self.insert(&event).await.is_ok() {
-            if let Some(current) = current.as_mut().filter(|value| value.id == incident.id) {
-                current.persisted = true;
-            }
-        }
+        self.remember_database_failure(component).await;
     }
 
     pub(crate) async fn database_recovered(&self, component: &str) {
-        let mut current = self.database_incident.lock().await;
-        let Some(mut incident) = current.clone() else {
+        if !self.has_database_incidents.load(Ordering::Acquire) {
             return;
+        }
+        let component = safe_text(component, 64, "database");
+        let incident = {
+            let mut incidents = self.database_incidents.lock().await;
+            let Some(incident) = incidents.get_mut(&component) else {
+                return;
+            };
+            if incident.recovering {
+                return;
+            }
+            incident.recovering = true;
+            incident.failure_during_recovery_at = None;
+            incident.clone()
         };
+        let mut persisted = incident.persisted;
         if !incident.persisted {
             let mut failure = SystemEvent::new(
                 "database",
@@ -425,12 +468,11 @@ impl EventRepository {
             }));
             failure.occurred_at = incident.occurred_at;
             if self.insert(&failure).await.is_err() {
+                self.release_database_recovery(&component, &incident.id, false)
+                    .await;
                 return;
             }
-            incident.persisted = true;
-            if let Some(current) = current.as_mut().filter(|value| value.id == incident.id) {
-                current.persisted = true;
-            }
+            persisted = true;
         }
         let recovery = SystemEvent::new(
             "database",
@@ -440,13 +482,37 @@ impl EventRepository {
             "Database operation recovered",
         )
         .subject_id("postgresql")
-        .correlation_id(incident.id)
+        .correlation_id(incident.id.clone())
         .details(json!({
-            "component": safe_text(component, 64, "database"),
+            "component": component,
         }));
         match self.insert(&recovery).await {
-            Ok(()) => *current = None,
-            Err(_) => tracing::warn!("failed to persist database recovery event"),
+            Ok(()) => {
+                let mut incidents = self.database_incidents.lock().await;
+                let reopened_at = incidents
+                    .get(&component)
+                    .filter(|current| current.id == incident.id)
+                    .and_then(|current| current.failure_during_recovery_at);
+                if let Some(occurred_at) = reopened_at {
+                    incidents.insert(
+                        component.clone(),
+                        new_database_incident(component, occurred_at),
+                    );
+                } else if incidents
+                    .get(&component)
+                    .is_some_and(|current| current.id == incident.id)
+                {
+                    incidents.remove(&component);
+                    if incidents.is_empty() {
+                        self.has_database_incidents.store(false, Ordering::Release);
+                    }
+                }
+            }
+            Err(_) => {
+                self.release_database_recovery(&component, &incident.id, persisted)
+                    .await;
+                tracing::warn!("failed to persist database recovery event");
+            }
         }
     }
 
@@ -454,15 +520,43 @@ impl EventRepository {
         if self.pool.is_none() {
             return;
         }
-        let mut current = self.database_incident.lock().await;
-        if current.is_none() {
-            *current = Some(DatabaseIncident {
-                id: Uuid::new_v4().to_string(),
-                occurred_at: Utc::now(),
-                component: safe_text(component, 64, "database"),
-                persisted: false,
-            });
+        let component = safe_text(component, 64, "database");
+        let mut incidents = self.database_incidents.lock().await;
+        if let Some(incident) = incidents.get_mut(&component) {
+            if incident.recovering && incident.failure_during_recovery_at.is_none() {
+                incident.failure_during_recovery_at = Some(Utc::now());
+            }
+            return;
         }
+        incidents.insert(
+            component.clone(),
+            new_database_incident(component, Utc::now()),
+        );
+        self.has_database_incidents.store(true, Ordering::Release);
+    }
+
+    async fn release_database_recovery(&self, component: &str, id: &str, persisted: bool) {
+        let mut incidents = self.database_incidents.lock().await;
+        if let Some(incident) = incidents
+            .get_mut(component)
+            .filter(|incident| incident.id == id)
+        {
+            incident.persisted |= persisted;
+            incident.recovering = false;
+            incident.failure_during_recovery_at = None;
+        }
+    }
+
+    pub(crate) async fn observe<T>(
+        &self,
+        component: &str,
+        result: Result<T, sqlx::Error>,
+    ) -> Result<T, sqlx::Error> {
+        match &result {
+            Ok(_) => self.database_recovered(component).await,
+            Err(error) => self.database_failed(component, error).await,
+        }
+        result
     }
 
     pub(crate) async fn list(
@@ -503,6 +597,14 @@ impl EventRepository {
             }
             .encode()
         });
+        for event in &mut data {
+            event.message = sanitize_detail_string(std::mem::take(&mut event.message));
+            event.event_type = safe_text(&event.event_type, 128, "event");
+            event.subject_type = safe_text(&event.subject_type, 64, "subject");
+            event.subject_id = event.subject_id.take().map(sanitize_detail_string);
+            event.correlation_id = event.correlation_id.take().map(sanitize_detail_string);
+            event.details = sanitize_details(std::mem::take(&mut event.details), 0);
+        }
         Ok(EventPage {
             data,
             next_cursor,
@@ -604,10 +706,26 @@ fn is_sensitive_key(key: &str) -> bool {
 fn looks_like_secret(value: &str) -> bool {
     let value = value.trim();
     let lower = value.to_ascii_lowercase();
-    (lower.starts_with("sk-") && value.len() >= 16)
-        || (lower.starts_with("sk_") && value.len() >= 16)
-        || (lower.starts_with("ghp_") && value.len() >= 20)
-        || (lower.starts_with("bearer ") && value.len() >= 20)
+    [
+        "sk-",
+        "sk_",
+        "ghp_",
+        "github_pat_",
+        "gw_",
+        "gwenc:",
+        "bearer ",
+    ]
+    .iter()
+    .any(|prefix| lower.contains(prefix) && value.len() >= 16)
+        || [
+            "authorization:",
+            "api_key=",
+            "api-key=",
+            "password=",
+            "credential=",
+        ]
+        .iter()
+        .any(|marker| lower.contains(marker))
 }
 
 fn sanitize_detail_string(value: String) -> String {
@@ -647,9 +765,15 @@ fn sanitize_details(value: Value, depth: usize) -> Value {
             let mut sanitized = Map::new();
             for (key, value) in object.into_iter().take(MAX_DETAILS_FIELDS) {
                 if is_sensitive_key(&key) {
-                    sanitized.insert(key, Value::String("[REDACTED]".into()));
+                    sanitized.insert(
+                        sanitize_detail_string(key),
+                        Value::String("[REDACTED]".into()),
+                    );
                 } else {
-                    sanitized.insert(key, sanitize_details(value, depth + 1));
+                    sanitized.insert(
+                        sanitize_detail_string(key),
+                        sanitize_details(value, depth + 1),
+                    );
                 }
             }
             Value::Object(sanitized)
@@ -696,10 +820,140 @@ mod tests {
     }
 
     #[test]
+    fn connection_classification_excludes_query_and_decode_errors() {
+        assert!(is_connection_error(&sqlx::Error::PoolTimedOut));
+        assert!(is_connection_error(&sqlx::Error::PoolClosed));
+        assert!(is_connection_error(&sqlx::Error::Io(std::io::Error::from(
+            std::io::ErrorKind::ConnectionReset,
+        ))));
+        assert!(!is_connection_error(&sqlx::Error::RowNotFound));
+        assert!(!is_connection_error(&sqlx::Error::Protocol(
+            "bad query result".into()
+        )));
+        assert!(!is_connection_error(&sqlx::Error::ColumnNotFound(
+            "actor".into()
+        )));
+    }
+
+    fn test_app(database: &Database) -> axum::Router {
+        let control =
+            crate::control_plane::ControlPlane::new(database.pool().clone(), "127.0.0.1:0")
+                .with_events(database.event_repository());
+        crate::app::application(AppState {
+            live: Arc::new(std::sync::RwLock::new(LiveConfig::legacy(Arc::new(
+                GatewayConfig {
+                    listen_addr: "127.0.0.1:0".into(),
+                    providers: vec![],
+                    accounts: vec![],
+                    routes: vec![],
+                },
+            )))),
+            http: crate::http::test_client().unwrap(),
+            db: Some(database.clone()),
+            control_plane: Some(control),
+            events: database.event_repository(),
+            health: HealthRegistry::with_database_config(database.clone(), Default::default()),
+            admin_auth: AdminAuth::test(),
+            secrets: SecretResolver::empty(),
+            prometheus_handle: observability::prometheus_handle(),
+        })
+    }
+
+    async fn admin_request(
+        app: &axum::Router,
+        method: &str,
+        path: &str,
+        actor: &str,
+    ) -> (StatusCode, Value) {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri(path)
+                    .header("authorization", format!("Bearer {TEST_ADMIN_KEY}"))
+                    .header("x-admin-actor", actor)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = response.status();
+        let body = to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
+        (status, serde_json::from_slice(&body).unwrap())
+    }
+
+    async fn verify_read_boundary_and_query_failure(database: &Database) {
+        let app = test_app(database);
+        let secret = "AIzaSyOpaqueCallerControlledValue123456789";
+        let (status, _) = admin_request(&app, "POST", "/admin/config/reload", secret).await;
+        assert_eq!(status, StatusCode::OK);
+        let raw_actor: String = sqlx::query_scalar(
+            "SELECT actor FROM audit_logs WHERE action='config.reload' ORDER BY id DESC LIMIT 1",
+        )
+        .fetch_one(database.pool())
+        .await
+        .unwrap();
+        assert_eq!(
+            raw_actor, secret,
+            "exercise the existing caller-controlled audit writer"
+        );
+        let (status, body) = admin_request(&app, "GET", "/admin/events", "test").await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(!body.to_string().contains(secret));
+        assert!(body["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["details"]["actor"] == "[REDACTED]"));
+
+        sqlx::query("ALTER TABLE source_discovery_runs RENAME TO unavailable_discovery_runs")
+            .execute(database.pool())
+            .await
+            .unwrap();
+        let (status, _) = admin_request(&app, "GET", "/admin/events", "test").await;
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        let error = database
+            .event_repository()
+            .list(&EventFilter::default(), 10, None)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error.as_database_error().unwrap().code().as_deref(),
+            Some("42P01")
+        );
+        assert!(!is_connection_error(&error));
+        assert_eq!(
+            admin_request(&app, "POST", "/admin/config/reload", "test")
+                .await
+                .0,
+            StatusCode::OK
+        );
+        assert_eq!(
+            admin_request(&app, "GET", "/admin/events", "test").await.0,
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+        let incidents: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM system_events WHERE category='database'")
+                .fetch_one(database.pool())
+                .await
+                .unwrap();
+        assert_eq!(
+            incidents, 0,
+            "SQL errors must not generate connection failure/recovery pairs"
+        );
+        sqlx::query("ALTER TABLE unavailable_discovery_runs RENAME TO source_discovery_runs")
+            .execute(database.pool())
+            .await
+            .unwrap();
+    }
+
+    #[test]
     fn details_redact_sensitive_values_and_unified_query_does_not_project_all_requests() {
         let value = sanitize_details(
             json!({
                 "credential": "plain-value",
+                "sk-secret-as-key-0123456789": "metadata",
                 "nested": {
                     "api_key": "sk-1234567890123456",
                     "session_token": "token-value",
@@ -711,6 +965,7 @@ mod tests {
             0,
         );
         assert_eq!(value["credential"], "[REDACTED]");
+        assert!(!value.to_string().contains("sk-secret-as-key-0123456789"));
         assert_eq!(value["nested"]["api_key"], "[REDACTED]");
         assert_eq!(value["nested"]["session_token"], "[REDACTED]");
         assert_eq!(value["nested"]["response_body"], "[REDACTED]");
@@ -757,6 +1012,7 @@ mod tests {
         let database = Database::from_test_pool(pool.clone())
             .await
             .expect("migrate unified event schema");
+        verify_read_boundary_and_query_failure(&database).await;
         let suffix = Uuid::new_v4().simple().to_string();
         let source_id = format!("event-source-{suffix}");
         let account_id = format!("event-account-{suffix}");
@@ -841,11 +1097,11 @@ mod tests {
         assert!(page
             .data
             .iter()
-            .any(|event| event.event_id == format!("request:{failed_request_id}")));
+            .any(|event| event.subject_id.as_deref() == Some(failed_request_id.as_str())));
         assert!(!page
             .data
             .iter()
-            .any(|event| event.event_id == format!("request:{successful_request_id}")));
+            .any(|event| event.subject_id.as_deref() == Some(successful_request_id.as_str())));
 
         let operation_page = repository
             .list(
@@ -925,7 +1181,35 @@ mod tests {
         assert_eq!(body["data"].as_array().unwrap().len(), 1);
         assert_eq!(body["data"][0]["source"], "audit_logs");
 
-        repository.database_failed("events.test").await;
+        let requested_by_secret = "opaque-high-entropy-requester-value-7f4a91c2d8e6";
+        let nested_secret = "gw_test_nested_metadata_0123456789";
+        sqlx::query("UPDATE source_discovery_runs SET requested_by=$1 WHERE source_id=$2")
+            .bind(requested_by_secret)
+            .bind(&source_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE audit_logs SET details=$1 WHERE operation_id=$2")
+            .bind(json!({"nested": {"label": nested_secret, "credential": "arbitrary-secret"}}))
+            .bind(&operation_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let (status, sanitized) =
+            admin_request(&test_app(&database), "GET", "/admin/events", "test").await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(!sanitized.to_string().contains(requested_by_secret));
+        assert!(!sanitized.to_string().contains(nested_secret));
+        assert!(!sanitized.to_string().contains("arbitrary-secret"));
+        assert!(sanitized["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["details"]["requested_by"] == "[REDACTED]"));
+
+        repository
+            .database_failed("events.test", &sqlx::Error::PoolTimedOut)
+            .await;
         repository
             .record_during_database_incident(SystemEvent::new(
                 "configuration",
@@ -935,7 +1219,10 @@ mod tests {
                 "Runtime snapshot build failed",
             ))
             .await;
-        repository.database_failed("events.duplicate").await;
+        repository
+            .database_failed("events.test", &sqlx::Error::PoolTimedOut)
+            .await;
+        repository.database_recovered("runtime.snapshot").await;
         let recoveries_before_success: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM system_events WHERE event_type='database.connection_recovered'",
         )
@@ -958,6 +1245,8 @@ mod tests {
         assert_eq!(incident_rows[1].0, "database.connection_recovered");
         assert_eq!(incident_rows[0].1, incident_rows[1].1);
 
+        verify_database_hooks(&url, &schema, &account_id).await;
+
         drop(database);
         pool.close().await;
         sqlx::query(&format!("DROP SCHEMA \"{schema}\" CASCADE"))
@@ -965,5 +1254,259 @@ mod tests {
             .await
             .expect("drop unified event test schema");
         admin.close().await;
+    }
+
+    async fn verify_database_hooks(url: &str, schema: &str, account_id: &str) {
+        let options = PgConnectOptions::from_str(url)
+            .unwrap()
+            .options([("search_path", schema)]);
+        let pool = PgPoolOptions::new()
+            .max_connections(1)
+            .acquire_timeout(Duration::from_millis(200))
+            .connect_with(options)
+            .await
+            .unwrap();
+        let database = Database::from_pool(pool.clone());
+        let events = database.event_repository();
+        let control = crate::control_plane::ControlPlane::new(pool.clone(), "127.0.0.1:0")
+            .with_events(events.clone());
+        let app = test_app(&database);
+        let mut usage = crate::infra::db::UsageEvent {
+            request_id: Uuid::new_v4().to_string(),
+            virtual_key_id: None,
+            provider_id: "custom".into(),
+            account_id: account_id.into(),
+            model: "test".into(),
+            logical_model: "test".into(),
+            upstream_model_id: None,
+            source_id: "test".into(),
+            client_source: "test".into(),
+            protocol_in: "openai_responses".into(),
+            protocol_upstream: "openai_responses".into(),
+            mode: "native".into(),
+            status_code: 503,
+            success: false,
+            retry_count: 0,
+            latency_ms: 0,
+            ttft_ms: None,
+            input_tokens: 0,
+            output_tokens: 0,
+            reasoning_tokens: 0,
+            cached_tokens: 0,
+            cache_read_tokens: 0,
+            cache_creation_tokens: 0,
+            total_tokens: 0,
+            usage_source: "missing".into(),
+            degraded: false,
+            route_id: None,
+            streamed: true,
+            error_summary: None,
+            fallback_reason: None,
+        };
+        for component in [
+            "auth.virtual_key",
+            "usage.write",
+            "health.write",
+            "health.read",
+            "usage.read",
+            "control_plane.read",
+            "runtime.snapshot",
+        ] {
+            let held = pool.acquire().await.unwrap();
+            match component {
+                "auth.virtual_key" => {
+                    let headers = axum::http::HeaderMap::from_iter([(
+                        axum::http::header::AUTHORIZATION,
+                        "Bearer gw_invalid_fixture".parse().unwrap(),
+                    )]);
+                    assert!(
+                        crate::auth::authorized_with_db(Some(&database), &headers, None)
+                            .await
+                            .is_none()
+                    );
+                }
+                "usage.write" => {
+                    assert!(database
+                        .insert_usage_with_attempts(&usage, &[])
+                        .await
+                        .is_err());
+                }
+                "health.write" => {
+                    assert!(database
+                        .record_account_health_success(
+                            account_id,
+                            Utc::now(),
+                            "passive",
+                            None,
+                            None
+                        )
+                        .await
+                        .is_err());
+                }
+                "health.read" => {
+                    assert!(database.account_health(account_id).await.is_err());
+                }
+                "usage.read" => {
+                    assert!(database
+                        .usage_aggregate(&crate::infra::db::UsageFilter::default())
+                        .await
+                        .is_err());
+                }
+                "control_plane.read" => {
+                    assert_eq!(
+                        admin_request(&app, "GET", "/admin/sources", "test").await.0,
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    );
+                }
+                _ => {
+                    assert!(control.load_snapshot().await.is_err());
+                }
+            }
+            assert_eq!(
+                events
+                    .database_incidents
+                    .lock()
+                    .await
+                    .get(component)
+                    .unwrap()
+                    .component,
+                component
+            );
+            drop(held);
+            events.database_recovered("unrelated.component").await;
+            assert!(events
+                .database_incidents
+                .lock()
+                .await
+                .contains_key(component));
+            match component {
+                "auth.virtual_key" => {
+                    assert!(database
+                        .authenticate_virtual_key_with_identity("invalid", None)
+                        .await
+                        .unwrap()
+                        .is_none());
+                }
+                "usage.write" => {
+                    database
+                        .insert_usage_with_attempts(&usage, &[])
+                        .await
+                        .unwrap();
+                }
+                "health.write" => {
+                    database
+                        .record_account_health_success(
+                            account_id,
+                            Utc::now(),
+                            "passive",
+                            None,
+                            None,
+                        )
+                        .await
+                        .unwrap();
+                }
+                "health.read" => {
+                    database.account_health(account_id).await.unwrap();
+                }
+                "usage.read" => {
+                    database
+                        .usage_aggregate(&crate::infra::db::UsageFilter::default())
+                        .await
+                        .unwrap();
+                }
+                "control_plane.read" => {
+                    assert_eq!(
+                        admin_request(&app, "GET", "/admin/sources", "test").await.0,
+                        StatusCode::OK
+                    );
+                }
+                _ => {
+                    control.load_snapshot().await.unwrap();
+                }
+            }
+            assert!(
+                !events
+                    .database_incidents
+                    .lock()
+                    .await
+                    .contains_key(component),
+                "{component} success closes its own incident"
+            );
+            let pair: Vec<(String, String)> = sqlx::query_as("SELECT event_type,correlation_id FROM system_events WHERE category='database' AND details->>'component'=$1 ORDER BY occurred_at,id")
+                .bind(component).fetch_all(&pool).await.unwrap();
+            assert_eq!(
+                pair.len(),
+                2,
+                "{component} must emit exactly one failure/recovery pair without a periodic probe"
+            );
+            assert_eq!(pair[0].0, "database.connection_failed");
+            assert_eq!(pair[1].0, "database.connection_recovered");
+            assert_eq!(pair[0].1, pair[1].1);
+        }
+
+        usage.request_id = Uuid::new_v4().to_string();
+        let held = pool.acquire().await.unwrap();
+        let headers = axum::http::HeaderMap::from_iter([(
+            axum::http::header::AUTHORIZATION,
+            "Bearer gw_invalid_fixture".parse().unwrap(),
+        )]);
+        tokio::time::timeout(
+            Duration::from_millis(100),
+            events.record_during_database_incident(SystemEvent::new(
+                "configuration",
+                "runtime.snapshot_build_failed",
+                "error",
+                "runtime_snapshot",
+                "Runtime snapshot build failed",
+            )),
+        )
+        .await
+        .expect("database failure diagnostics must not wait for the exhausted pool");
+        tokio::time::timeout(Duration::from_millis(350), async {
+            let (authorized, usage_result) = tokio::join!(
+                crate::auth::authorized_with_db(Some(&database), &headers, None),
+                database.insert_usage_with_attempts(&usage, &[]),
+            );
+            assert!(authorized.is_none());
+            assert!(usage_result.is_err());
+        })
+        .await
+        .expect("concurrent pool timeouts must not retry the unavailable pool or serialize on the incident mutex");
+        {
+            let incidents = events.database_incidents.lock().await;
+            assert!(incidents.contains_key("auth.virtual_key"));
+            assert!(incidents.contains_key("usage.write"));
+        }
+        drop(held);
+
+        database
+            .insert_usage_with_attempts(&usage, &[])
+            .await
+            .unwrap();
+        {
+            let incidents = events.database_incidents.lock().await;
+            assert!(incidents.contains_key("auth.virtual_key"));
+            assert!(!incidents.contains_key("usage.write"));
+        }
+        let usage_pair: Vec<(String, String)> = sqlx::query_as("SELECT event_type,correlation_id FROM system_events WHERE category='database' AND details->>'component'='usage.write' ORDER BY occurred_at,id")
+            .fetch_all(&pool).await.unwrap();
+        assert_eq!(usage_pair.len(), 4);
+        assert_eq!(usage_pair[2].0, "database.connection_failed");
+        assert_eq!(usage_pair[3].0, "database.connection_recovered");
+        assert_eq!(usage_pair[2].1, usage_pair[3].1);
+
+        assert!(database
+            .authenticate_virtual_key_with_identity("invalid", None)
+            .await
+            .unwrap()
+            .is_none());
+        assert!(events.database_incidents.lock().await.is_empty());
+        let auth_pair: Vec<(String, String)> = sqlx::query_as("SELECT event_type,correlation_id FROM system_events WHERE category='database' AND details->>'component'='auth.virtual_key' ORDER BY occurred_at,id")
+            .fetch_all(&pool).await.unwrap();
+        assert_eq!(auth_pair.len(), 4);
+        assert_eq!(auth_pair[2].0, "database.connection_failed");
+        assert_eq!(auth_pair[3].0, "database.connection_recovered");
+        assert_eq!(auth_pair[2].1, auth_pair[3].1);
+        pool.close().await;
     }
 }

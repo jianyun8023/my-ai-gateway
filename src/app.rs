@@ -261,11 +261,12 @@ async fn audit_middleware(
         if !context.was_recorded() {
             if let Some(pool) = &pool {
                 let status_str = response.status().as_u16().to_string();
-                if response.status().is_success() {
-                    let _ = audit::append_current_success_pool(pool).await;
+                let result = if response.status().is_success() {
+                    audit::append_current_success_pool(pool).await
                 } else {
-                    let _ = audit::append_current_failure_pool(pool, &status_str, None).await;
-                }
+                    audit::append_current_failure_pool(pool, &status_str, None).await
+                };
+                let _ = state.events.observe("audit.write", result).await;
             }
         }
         response

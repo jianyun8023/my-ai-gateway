@@ -28,11 +28,12 @@
 - **鉴权与运维**：PostgreSQL-backed Virtual Key 已实现创建、查询、轮换、撤销、模型白名单及 Admin 显式读取加密保存的 Key；已有 Secret Resolver、凭据信封加密、Admin 写审计、保留清理、控制面导入/导出。`GATEWAY_API_KEY` 仍有过渡静态入口实现，不能再把 Virtual Key 写成未来功能。
 - **可观测性**：Prometheus `/metrics` 已接入；OpenTelemetry OTLP/gRPC tracing 已由 [PR #80](https://github.com/jianyun8023/my-ai-gateway/pull/80) 实现，通过 `OTEL_EXPORTER_OTLP_ENDPOINT` 启用，未设置时仅本地 tracing 日志。是否在生产配置、采集成功需另外验证。
 - **事件与控制台**：#110 按方案 C 新增窄 `system_events`、统一 `/admin/events` 读模型与“运行事件”页；既有事实表不双写，普通成功请求不进入该时间线。`/admin/` 下共有总览、用量分析、请求事件、运行事件、来源、模型发现、模型与路由、能力矩阵、设置九个导航入口；前三项仍是用量主导航。
+- **前端治理**：#166 的 54 项原始范围与验收项已完成并关闭，PR #169–#182 已合并；逐批证据与边界保留在 `docs/mantine-migration.md`。这不替代 #110 第九页、真实 Provider、生产配置或性能验收。
 - **Provider / Adapter**：DeepSeek、MiniMax 最新内置 preset 为 `@3`，Kimi Code 为 `@4`；通用 `BUILTIN_PROVIDER_PRESET_VERSION` 仍为 `3`，Kimi 单独版本常量为 `4`。Kimi Responses 已改为原生 `/v1/responses`，迁移见 `0023_kimi_native_responses.sql`（[PR #158](https://github.com/jianyun8023/my-ai-gateway/pull/158)）。生产 Adapter 注册表为空，原 `crates/kimi-responses-adapter` 已删除；`cfg(test)` 中的旧名称用于框架测试，不代表生产支持。
 
 当前跟踪与验收边界：
 
-- 开放任务是 [#113 测试总计划](https://github.com/jianyun8023/my-ai-gateway/issues/113)、[#120 性能基线与故障注入](https://github.com/jianyun8023/my-ai-gateway/issues/120)、[#110 事件中心](https://github.com/jianyun8023/my-ai-gateway/issues/110)。#110 的方案 C 实现已进入本轮评审，但 Issue 在 CI、部署 migration/保留清理和协调验收前保持开放。[PR #159](https://github.com/jianyun8023/my-ai-gateway/pull/159) 已实现 `test-faults` / `test-load`，运行证据与覆盖边界见验收清单；不能将本地 Mock 性能视为生产性能或完整 live 验收。
+- [#113 测试总计划](https://github.com/jianyun8023/my-ai-gateway/issues/113)与 [#120 性能基线与故障注入](https://github.com/jianyun8023/my-ai-gateway/issues/120)仍需继续跟踪。[#110 事件中心](https://github.com/jianyun8023/my-ai-gateway/issues/110)的方案 C 由 [PR #183](https://github.com/jianyun8023/my-ai-gateway/pull/183) 承载；代码合入、Issue 协调验收和部署后的 migration/保留清理复核是不同事实，以对应实时记录为准。[PR #159](https://github.com/jianyun8023/my-ai-gateway/pull/159) 已实现 `test-faults` / `test-load`，运行证据与覆盖边界见验收清单；不能将本地 Mock 性能视为生产性能或完整 live 验收。
 - #1、#50 已关闭；本轮已修正 TODO / 设计文档中的 OTel 待办等过时描述。#96 / #97 / #98 已关闭，但验收清单的生产复验未勾选，#98 评论仍明确缺根因结论；不得据关闭状态宣称生产问题已经验证解决。
 - PR #159 已合并修复：SSE usage 提取失败日志仅记录元数据，移除 Base64 正文预览与正文指纹；Chat 缺少 `[DONE]` 时，只有所有已出现 choice 均提供 `finish_reason` 才补结束标记，否则报告流截断错误。
 - 尚无 GitHub Release 或 tag。已有验收记录早于 Kimi 原生切换；完整 live 覆盖、部署后的 migration / Provider 行为与生产数据复验应按实际证据报告，不由历史勾选推断。
