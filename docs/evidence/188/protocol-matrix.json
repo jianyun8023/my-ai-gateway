@@ -1,0 +1,1329 @@
+{
+  "schema_version": 1,
+  "baseline_tag": "v0.1.0-rc.2",
+  "build_profile": "release",
+  "revision": "4870b32a493c096cc5a427f1617232fc26ade257",
+  "dirty": false,
+  "started_at": "2026-09-09T03:32:39.933Z",
+  "scope": "Issue 188 fix verification: DeepSeek/MiniMax/Kimi, three native protocols, JSON/SSE, local release build with real Provider credentials, isolated local PostgreSQL, default compression negotiation, exact usage checks.",
+  "issues": [
+    188
+  ],
+  "result_policy": {
+    "high_cost_search": false,
+    "production_database_access": false,
+    "response_bodies_stored": false,
+    "secrets_stored": false
+  },
+  "results": [
+    {
+      "id": "deepseek.openai_chat_completions.json",
+      "provider": "deepseek",
+      "protocol": "openai_chat_completions",
+      "stream": false,
+      "model": "deepseek-v4-flash",
+      "http_status": 200,
+      "response_content_encoding": null,
+      "response_content_type": "application/json",
+      "decoded_response_bytes": 456,
+      "response_usage": {
+        "prompt_tokens": 9,
+        "completion_tokens": 2,
+        "total_tokens": 11,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 9
+      },
+      "terminated_normally": true,
+      "outcome": "passed",
+      "usage_event": {
+        "request_id": "cbfdba17-f51f-4b2d-8232-95c6dc865d6d",
+        "provider_id": "custom",
+        "source_id": "deepseek-live",
+        "account_id": "deepseek-live",
+        "protocol_in": "openai_chat_completions",
+        "protocol_upstream": "openai_chat_completions",
+        "mode": "native",
+        "status_code": 200,
+        "success": true,
+        "retry_count": 0,
+        "streamed": false,
+        "usage_source": "upstream",
+        "input_tokens": 9,
+        "output_tokens": 2,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_creation_tokens": 0,
+        "total_tokens": 11,
+        "attempts": [
+          {
+            "attempt_no": 0,
+            "provider_id": "custom",
+            "source_id": "deepseek-live",
+            "account_id": "deepseek-live",
+            "upstream_model_id": "deepseek-v4-flash",
+            "status_code": 200,
+            "success": true
+          }
+        ]
+      },
+      "mismatched_usage_fields": [],
+      "exact_usage_match": true,
+      "schema_cleaned": true,
+      "duration_ms": 2832
+    },
+    {
+      "id": "deepseek.openai_chat_completions.sse",
+      "provider": "deepseek",
+      "protocol": "openai_chat_completions",
+      "stream": true,
+      "model": "deepseek-v4-flash",
+      "http_status": 200,
+      "response_content_encoding": null,
+      "response_content_type": "text/event-stream; charset=utf-8",
+      "decoded_response_bytes": 1346,
+      "usage_frames": [
+        {
+          "event_type": null,
+          "usage": {
+            "prompt_tokens": 9,
+            "completion_tokens": 2,
+            "total_tokens": 11,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "prompt_cache_hit_tokens": 0,
+            "prompt_cache_miss_tokens": 9
+          }
+        }
+      ],
+      "event_count": 4,
+      "event_types": [],
+      "terminated_normally": true,
+      "response_usage": {
+        "prompt_tokens": 9,
+        "completion_tokens": 2,
+        "total_tokens": 11,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 9
+      },
+      "outcome": "passed",
+      "usage_event": {
+        "request_id": "2226680a-6840-4a7d-aebd-137bb4003a50",
+        "provider_id": "custom",
+        "source_id": "deepseek-live",
+        "account_id": "deepseek-live",
+        "protocol_in": "openai_chat_completions",
+        "protocol_upstream": "openai_chat_completions",
+        "mode": "native",
+        "status_code": 200,
+        "success": true,
+        "retry_count": 0,
+        "streamed": true,
+        "usage_source": "parsed",
+        "input_tokens": 9,
+        "output_tokens": 2,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_creation_tokens": 0,
+        "total_tokens": 11,
+        "attempts": [
+          {
+            "attempt_no": 0,
+            "provider_id": "custom",
+            "source_id": "deepseek-live",
+            "account_id": "deepseek-live",
+            "upstream_model_id": "deepseek-v4-flash",
+            "status_code": 200,
+            "success": true
+          }
+        ]
+      },
+      "mismatched_usage_fields": [],
+      "exact_usage_match": true,
+      "schema_cleaned": true,
+      "duration_ms": 1720
+    },
+    {
+      "id": "deepseek.openai_responses.json",
+      "provider": "deepseek",
+      "protocol": "openai_responses",
+      "stream": false,
+      "model": "deepseek-v4-flash",
+      "http_status": 200,
+      "response_content_encoding": null,
+      "response_content_type": "application/json",
+      "decoded_response_bytes": 1384,
+      "response_usage": {
+        "input_tokens": 88,
+        "input_tokens_details": {
+          "cached_tokens": 0
+        },
+        "output_tokens": 10,
+        "output_tokens_details": {
+          "reasoning_tokens": 8
+        },
+        "total_tokens": 98
+      },
+      "terminated_normally": true,
+      "outcome": "passed",
+      "usage_event": {
+        "request_id": "ad0c0d74-2da6-422c-9378-ee82a236a4b8",
+        "provider_id": "custom",
+        "source_id": "deepseek-live",
+        "account_id": "deepseek-live",
+        "protocol_in": "openai_responses",
+        "protocol_upstream": "openai_responses",
+        "mode": "native",
+        "status_code": 200,
+        "success": true,
+        "retry_count": 0,
+        "streamed": false,
+        "usage_source": "upstream",
+        "input_tokens": 88,
+        "output_tokens": 10,
+        "reasoning_tokens": 8,
+        "cached_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_creation_tokens": 0,
+        "total_tokens": 98,
+        "attempts": [
+          {
+            "attempt_no": 0,
+            "provider_id": "custom",
+            "source_id": "deepseek-live",
+            "account_id": "deepseek-live",
+            "upstream_model_id": "deepseek-v4-flash",
+            "status_code": 200,
+            "success": true
+          }
+        ]
+      },
+      "mismatched_usage_fields": [],
+      "exact_usage_match": true,
+      "schema_cleaned": true,
+      "duration_ms": 1665
+    },
+    {
+      "id": "deepseek.openai_responses.sse",
+      "provider": "deepseek",
+      "protocol": "openai_responses",
+      "stream": true,
+      "model": "deepseek-v4-flash",
+      "http_status": 200,
+      "response_content_encoding": null,
+      "response_content_type": "text/event-stream; charset=utf-8",
+      "decoded_response_bytes": 8439,
+      "usage_frames": [
+        {
+          "event_type": "response.completed",
+          "usage": {
+            "input_tokens": 88,
+            "input_tokens_details": {
+              "cached_tokens": 0
+            },
+            "output_tokens": 13,
+            "output_tokens_details": {
+              "reasoning_tokens": 11
+            },
+            "total_tokens": 101
+          }
+        }
+      ],
+      "event_count": 25,
+      "event_types": [
+        "response.created",
+        "response.in_progress",
+        "response.output_item.added",
+        "response.content_part.added",
+        "response.reasoning_text.delta",
+        "response.reasoning_text.done",
+        "response.content_part.done",
+        "response.output_item.done",
+        "response.output_text.delta",
+        "response.output_text.done",
+        "response.completed"
+      ],
+      "terminated_normally": true,
+      "response_usage": {
+        "input_tokens": 88,
+        "input_tokens_details": {
+          "cached_tokens": 0
+        },
+        "output_tokens": 13,
+        "output_tokens_details": {
+          "reasoning_tokens": 11
+        },
+        "total_tokens": 101
+      },
+      "sequence_monotonic": true,
+      "outcome": "passed",
+      "usage_event": {
+        "request_id": "cbb59c0d-30ea-4860-84b9-6cb584caced5",
+        "provider_id": "custom",
+        "source_id": "deepseek-live",
+        "account_id": "deepseek-live",
+        "protocol_in": "openai_responses",
+        "protocol_upstream": "openai_responses",
+        "mode": "native",
+        "status_code": 200,
+        "success": true,
+        "retry_count": 0,
+        "streamed": true,
+        "usage_source": "parsed",
+        "input_tokens": 88,
+        "output_tokens": 13,
+        "reasoning_tokens": 11,
+        "cached_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_creation_tokens": 0,
+        "total_tokens": 101,
+        "attempts": [
+          {
+            "attempt_no": 0,
+            "provider_id": "custom",
+            "source_id": "deepseek-live",
+            "account_id": "deepseek-live",
+            "upstream_model_id": "deepseek-v4-flash",
+            "status_code": 200,
+            "success": true
+          }
+        ]
+      },
+      "mismatched_usage_fields": [],
+      "exact_usage_match": true,
+      "schema_cleaned": true,
+      "duration_ms": 1950
+    },
+    {
+      "id": "deepseek.anthropic_messages.json",
+      "provider": "deepseek",
+      "protocol": "anthropic_messages",
+      "stream": false,
+      "model": "deepseek-v4-pro",
+      "http_status": 200,
+      "response_content_encoding": null,
+      "response_content_type": "application/json",
+      "decoded_response_bytes": 495,
+      "response_usage": {
+        "input_tokens": 88,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "output_tokens": 21,
+        "service_tier": "standard"
+      },
+      "terminated_normally": true,
+      "outcome": "passed",
+      "usage_event": {
+        "request_id": "d3f7847a-2fa8-41d6-978f-1f4455250997",
+        "provider_id": "custom",
+        "source_id": "deepseek-live",
+        "account_id": "deepseek-live",
+        "protocol_in": "anthropic_messages",
+        "protocol_upstream": "anthropic_messages",
+        "mode": "native",
+        "status_code": 200,
+        "success": true,
+        "retry_count": 0,
+        "streamed": false,
+        "usage_source": "upstream",
+        "input_tokens": 88,
+        "output_tokens": 21,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_creation_tokens": 0,
+        "total_tokens": 109,
+        "attempts": [
+          {
+            "attempt_no": 0,
+            "provider_id": "custom",
+            "source_id": "deepseek-live",
+            "account_id": "deepseek-live",
+            "upstream_model_id": "deepseek-v4-pro",
+            "status_code": 200,
+            "success": true
+          }
+        ]
+      },
+      "mismatched_usage_fields": [],
+      "exact_usage_match": true,
+      "schema_cleaned": true,
+      "duration_ms": 2093
+    },
+    {
+      "id": "deepseek.anthropic_messages.sse",
+      "provider": "deepseek",
+      "protocol": "anthropic_messages",
+      "stream": true,
+      "model": "deepseek-v4-pro",
+      "http_status": 200,
+      "response_content_encoding": null,
+      "response_content_type": "text/event-stream; charset=utf-8",
+      "decoded_response_bytes": 4168,
+      "usage_frames": [
+        {
+          "event_type": "message_start",
+          "usage": {
+            "input_tokens": 88,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0,
+            "output_tokens": 0,
+            "service_tier": "standard"
+          }
+        },
+        {
+          "event_type": "message_delta",
+          "usage": {
+            "input_tokens": 88,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0,
+            "output_tokens": 24,
+            "service_tier": "standard"
+          }
+        }
+      ],
+      "event_count": 32,
+      "event_types": [
+        "message_start",
+        "content_block_start",
+        "ping",
+        "content_block_delta",
+        "content_block_stop",
+        "message_delta",
+        "message_stop"
+      ],
+      "terminated_normally": true,
+      "response_usage": {
+        "input_tokens": 88,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "output_tokens": 24,
+        "service_tier": "standard"
+      },
+      "outcome": "passed",
+      "usage_event": {
+        "request_id": "b3dbd875-ae3f-4075-8e11-8296144436ee",
+        "provider_id": "custom",
+        "source_id": "deepseek-live",
+        "account_id": "deepseek-live",
+        "protocol_in": "anthropic_messages",
+        "protocol_upstream": "anthropic_messages",
+        "mode": "native",
+        "status_code": 200,
+        "success": true,
+        "retry_count": 0,
+        "streamed": true,
+        "usage_source": "parsed",
+        "input_tokens": 88,
+        "output_tokens": 24,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_creation_tokens": 0,
+        "total_tokens": 112,
+        "attempts": [
+          {
+            "attempt_no": 0,
+            "provider_id": "custom",
+            "source_id": "deepseek-live",
+            "account_id": "deepseek-live",
+            "upstream_model_id": "deepseek-v4-pro",
+            "status_code": 200,
+            "success": true
+          }
+        ]
+      },
+      "mismatched_usage_fields": [],
+      "exact_usage_match": true,
+      "schema_cleaned": true,
+      "duration_ms": 2270
+    },
+    {
+      "id": "minimax.openai_chat_completions.json",
+      "provider": "minimax",
+      "protocol": "openai_chat_completions",
+      "stream": false,
+      "model": "MiniMax-M3",
+      "http_status": 200,
+      "response_content_encoding": null,
+      "response_content_type": "application/json; charset=utf-8",
+      "decoded_response_bytes": 647,
+      "response_usage": {
+        "total_tokens": 204,
+        "total_characters": 0,
+        "prompt_tokens": 181,
+        "completion_tokens": 23,
+        "prompt_tokens_details": {
+          "cached_tokens": 128
+        }
+      },
+      "terminated_normally": true,
+      "outcome": "passed",
+      "usage_event": {
+        "request_id": "c58c8ec8-ddb4-4cd9-97a2-a8aed1a97edf",
+        "provider_id": "custom",
+        "source_id": "minimax-live",
+        "account_id": "minimax-live",
+        "protocol_in": "openai_chat_completions",
+        "protocol_upstream": "openai_chat_completions",
+        "mode": "native",
+        "status_code": 200,
+        "success": true,
+        "retry_count": 0,
+        "streamed": false,
+        "usage_source": "upstream",
+        "input_tokens": 181,
+        "output_tokens": 23,
+        "reasoning_tokens": 0,
+        "cached_tokens": 128,
+        "cache_read_tokens": 128,
+        "cache_creation_tokens": 0,
+        "total_tokens": 204,
+        "attempts": [
+          {
+            "attempt_no": 0,
+            "provider_id": "custom",
+            "source_id": "minimax-live",
+            "account_id": "minimax-live",
+            "upstream_model_id": "MiniMax-M3",
+            "status_code": 200,
+            "success": true
+          }
+        ]
+      },
+      "mismatched_usage_fields": [],
+      "exact_usage_match": true,
+      "schema_cleaned": true,
+      "duration_ms": 5965
+    },
+    {
+      "id": "minimax.openai_chat_completions.sse",
+      "provider": "minimax",
+      "protocol": "openai_chat_completions",
+      "stream": true,
+      "model": "MiniMax-M3",
+      "http_status": 200,
+      "response_content_encoding": null,
+      "response_content_type": "text/event-stream; charset=utf-8",
+      "decoded_response_bytes": 1378,
+      "usage_frames": [
+        {
+          "event_type": null,
+          "usage": {
+            "total_tokens": 210,
+            "total_characters": 0,
+            "prompt_tokens": 181,
+            "completion_tokens": 29,
+            "completion_tokens_details": {
+              "reasoning_tokens": 28
+            },
+            "prompt_tokens_details": {
+              "cached_tokens": 156
+            }
+          }
+        }
+      ],
+      "event_count": 3,
+      "event_types": [],
+      "terminated_normally": true,
+      "response_usage": {
+        "total_tokens": 210,
+        "total_characters": 0,
+        "prompt_tokens": 181,
+        "completion_tokens": 29,
+        "completion_tokens_details": {
+          "reasoning_tokens": 28
+        },
+        "prompt_tokens_details": {
+          "cached_tokens": 156
+        }
+      },
+      "outcome": "passed",
+      "usage_event": {
+        "request_id": "d98a6831-a41f-451a-80ca-57ab5ea3c36c",
+        "provider_id": "custom",
+        "source_id": "minimax-live",
+        "account_id": "minimax-live",
+        "protocol_in": "openai_chat_completions",
+        "protocol_upstream": "openai_chat_completions",
+        "mode": "native",
+        "status_code": 200,
+        "success": true,
+        "retry_count": 0,
+        "streamed": true,
+        "usage_source": "parsed",
+        "input_tokens": 181,
+        "output_tokens": 29,
+        "reasoning_tokens": 28,
+        "cached_tokens": 156,
+        "cache_read_tokens": 156,
+        "cache_creation_tokens": 0,
+        "total_tokens": 210,
+        "attempts": [
+          {
+            "attempt_no": 0,
+            "provider_id": "custom",
+            "source_id": "minimax-live",
+            "account_id": "minimax-live",
+            "upstream_model_id": "MiniMax-M3",
+            "status_code": 200,
+            "success": true
+          }
+        ]
+      },
+      "mismatched_usage_fields": [],
+      "exact_usage_match": true,
+      "schema_cleaned": true,
+      "duration_ms": 5718
+    },
+    {
+      "id": "minimax.openai_responses.json",
+      "provider": "minimax",
+      "protocol": "openai_responses",
+      "stream": false,
+      "model": "MiniMax-M3",
+      "http_status": 200,
+      "response_content_encoding": null,
+      "response_content_type": "application/json; charset=utf-8",
+      "decoded_response_bytes": 836,
+      "response_usage": {
+        "input_tokens": 168,
+        "output_tokens": 2,
+        "total_tokens": 170,
+        "input_tokens_details": {
+          "cached_tokens": 128
+        }
+      },
+      "terminated_normally": true,
+      "outcome": "passed",
+      "usage_event": {
+        "request_id": "02e808dc-accb-4a0d-884d-d5beb21c6688",
+        "provider_id": "custom",
+        "source_id": "minimax-live",
+        "account_id": "minimax-live",
+        "protocol_in": "openai_responses",
+        "protocol_upstream": "openai_responses",
+        "mode": "native",
+        "status_code": 200,
+        "success": true,
+        "retry_count": 0,
+        "streamed": false,
+        "usage_source": "upstream",
+        "input_tokens": 168,
+        "output_tokens": 2,
+        "reasoning_tokens": 0,
+        "cached_tokens": 128,
+        "cache_read_tokens": 128,
+        "cache_creation_tokens": 0,
+        "total_tokens": 170,
+        "attempts": [
+          {
+            "attempt_no": 0,
+            "provider_id": "custom",
+            "source_id": "minimax-live",
+            "account_id": "minimax-live",
+            "upstream_model_id": "MiniMax-M3",
+            "status_code": 200,
+            "success": true
+          }
+        ]
+      },
+      "mismatched_usage_fields": [],
+      "exact_usage_match": true,
+      "schema_cleaned": true,
+      "duration_ms": 2062
+    },
+    {
+      "id": "minimax.openai_responses.sse",
+      "provider": "minimax",
+      "protocol": "openai_responses",
+      "stream": true,
+      "model": "MiniMax-M3",
+      "http_status": 200,
+      "response_content_encoding": null,
+      "response_content_type": "text/event-stream; charset=utf-8",
+      "decoded_response_bytes": 3673,
+      "usage_frames": [
+        {
+          "event_type": "response.completed",
+          "usage": {
+            "input_tokens": 168,
+            "output_tokens": 2,
+            "total_tokens": 170,
+            "input_tokens_details": {
+              "cached_tokens": 128
+            }
+          }
+        }
+      ],
+      "event_count": 9,
+      "event_types": [
+        "response.created",
+        "response.in_progress",
+        "response.output_item.added",
+        "response.content_part.added",
+        "response.output_text.delta",
+        "response.output_text.done",
+        "response.content_part.done",
+        "response.output_item.done",
+        "response.completed"
+      ],
+      "terminated_normally": true,
+      "response_usage": {
+        "input_tokens": 168,
+        "output_tokens": 2,
+        "total_tokens": 170,
+        "input_tokens_details": {
+          "cached_tokens": 128
+        }
+      },
+      "sequence_monotonic": true,
+      "outcome": "passed",
+      "usage_event": {
+        "request_id": "a19e4426-2db2-4990-9519-adde14cf9218",
+        "provider_id": "custom",
+        "source_id": "minimax-live",
+        "account_id": "minimax-live",
+        "protocol_in": "openai_responses",
+        "protocol_upstream": "openai_responses",
+        "mode": "native",
+        "status_code": 200,
+        "success": true,
+        "retry_count": 0,
+        "streamed": true,
+        "usage_source": "parsed",
+        "input_tokens": 168,
+        "output_tokens": 2,
+        "reasoning_tokens": 0,
+        "cached_tokens": 128,
+        "cache_read_tokens": 128,
+        "cache_creation_tokens": 0,
+        "total_tokens": 170,
+        "attempts": [
+          {
+            "attempt_no": 0,
+            "provider_id": "custom",
+            "source_id": "minimax-live",
+            "account_id": "minimax-live",
+            "upstream_model_id": "MiniMax-M3",
+            "status_code": 200,
+            "success": true
+          }
+        ]
+      },
+      "mismatched_usage_fields": [],
+      "exact_usage_match": true,
+      "schema_cleaned": true,
+      "duration_ms": 1839
+    },
+    {
+      "id": "minimax.anthropic_messages.json",
+      "provider": "minimax",
+      "protocol": "anthropic_messages",
+      "stream": false,
+      "model": "MiniMax-M3",
+      "http_status": 200,
+      "response_content_encoding": null,
+      "response_content_type": "application/json; charset=utf-8",
+      "decoded_response_bytes": 343,
+      "response_usage": {
+        "input_tokens": 40,
+        "output_tokens": 2,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 128,
+        "service_tier": "standard"
+      },
+      "terminated_normally": true,
+      "outcome": "passed",
+      "usage_event": {
+        "request_id": "8dee3fc0-8039-4a7b-8db1-d53afef72578",
+        "provider_id": "custom",
+        "source_id": "minimax-live",
+        "account_id": "minimax-live",
+        "protocol_in": "anthropic_messages",
+        "protocol_upstream": "anthropic_messages",
+        "mode": "native",
+        "status_code": 200,
+        "success": true,
+        "retry_count": 0,
+        "streamed": false,
+        "usage_source": "upstream",
+        "input_tokens": 40,
+        "output_tokens": 2,
+        "reasoning_tokens": 0,
+        "cached_tokens": 128,
+        "cache_read_tokens": 128,
+        "cache_creation_tokens": 0,
+        "total_tokens": 42,
+        "attempts": [
+          {
+            "attempt_no": 0,
+            "provider_id": "custom",
+            "source_id": "minimax-live",
+            "account_id": "minimax-live",
+            "upstream_model_id": "MiniMax-M3",
+            "status_code": 200,
+            "success": true
+          }
+        ]
+      },
+      "mismatched_usage_fields": [],
+      "exact_usage_match": true,
+      "schema_cleaned": true,
+      "duration_ms": 4694
+    },
+    {
+      "id": "minimax.anthropic_messages.sse",
+      "provider": "minimax",
+      "protocol": "anthropic_messages",
+      "stream": true,
+      "model": "MiniMax-M3",
+      "http_status": 200,
+      "response_content_encoding": null,
+      "response_content_type": "text/event-stream; charset=utf-8",
+      "decoded_response_bytes": 895,
+      "usage_frames": [
+        {
+          "event_type": "message_start",
+          "usage": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "service_tier": "standard"
+          }
+        },
+        {
+          "event_type": "message_delta",
+          "usage": {
+            "input_tokens": 40,
+            "output_tokens": 2,
+            "cache_read_input_tokens": 128,
+            "service_tier": "standard"
+          }
+        }
+      ],
+      "event_count": 7,
+      "event_types": [
+        "message_start",
+        "ping",
+        "content_block_start",
+        "content_block_delta",
+        "content_block_stop",
+        "message_delta",
+        "message_stop"
+      ],
+      "terminated_normally": true,
+      "response_usage": {
+        "input_tokens": 40,
+        "output_tokens": 2,
+        "service_tier": "standard",
+        "cache_read_input_tokens": 128
+      },
+      "outcome": "passed",
+      "usage_event": {
+        "request_id": "0bdb2f67-7206-4857-aaf5-fc900480ab31",
+        "provider_id": "custom",
+        "source_id": "minimax-live",
+        "account_id": "minimax-live",
+        "protocol_in": "anthropic_messages",
+        "protocol_upstream": "anthropic_messages",
+        "mode": "native",
+        "status_code": 200,
+        "success": true,
+        "retry_count": 0,
+        "streamed": true,
+        "usage_source": "parsed",
+        "input_tokens": 40,
+        "output_tokens": 2,
+        "reasoning_tokens": 0,
+        "cached_tokens": 128,
+        "cache_read_tokens": 128,
+        "cache_creation_tokens": 0,
+        "total_tokens": 42,
+        "attempts": [
+          {
+            "attempt_no": 0,
+            "provider_id": "custom",
+            "source_id": "minimax-live",
+            "account_id": "minimax-live",
+            "upstream_model_id": "MiniMax-M3",
+            "status_code": 200,
+            "success": true
+          }
+        ]
+      },
+      "mismatched_usage_fields": [],
+      "exact_usage_match": true,
+      "runtime_events": {
+        "http_status": 200,
+        "count": 3
+      },
+      "schema_cleaned": true,
+      "duration_ms": 6082
+    },
+    {
+      "id": "kimi.openai_chat_completions.json",
+      "provider": "kimi",
+      "protocol": "openai_chat_completions",
+      "stream": false,
+      "model": "k3",
+      "http_status": 200,
+      "response_content_encoding": null,
+      "response_content_type": "application/json; charset=utf-8",
+      "decoded_response_bytes": 529,
+      "response_usage": {
+        "prompt_tokens": 91,
+        "completion_tokens": 41,
+        "total_tokens": 132,
+        "cached_tokens": 91,
+        "completion_tokens_details": {
+          "reasoning_tokens": 27
+        },
+        "prompt_tokens_details": {
+          "cached_tokens": 91
+        }
+      },
+      "terminated_normally": true,
+      "outcome": "passed",
+      "usage_event": {
+        "request_id": "3ab15008-93c2-4270-8edf-6d0f2202287e",
+        "provider_id": "custom",
+        "source_id": "kimi-live",
+        "account_id": "kimi-live",
+        "protocol_in": "openai_chat_completions",
+        "protocol_upstream": "openai_chat_completions",
+        "mode": "native",
+        "status_code": 200,
+        "success": true,
+        "retry_count": 0,
+        "streamed": false,
+        "usage_source": "upstream",
+        "input_tokens": 91,
+        "output_tokens": 41,
+        "reasoning_tokens": 27,
+        "cached_tokens": 91,
+        "cache_read_tokens": 91,
+        "cache_creation_tokens": 0,
+        "total_tokens": 132,
+        "attempts": [
+          {
+            "attempt_no": 0,
+            "provider_id": "custom",
+            "source_id": "kimi-live",
+            "account_id": "kimi-live",
+            "upstream_model_id": "k3",
+            "status_code": 200,
+            "success": true
+          }
+        ]
+      },
+      "mismatched_usage_fields": [],
+      "exact_usage_match": true,
+      "schema_cleaned": true,
+      "duration_ms": 8188
+    },
+    {
+      "id": "kimi.openai_chat_completions.sse",
+      "provider": "kimi",
+      "protocol": "openai_chat_completions",
+      "stream": true,
+      "model": "k3",
+      "http_status": 200,
+      "response_content_encoding": null,
+      "response_content_type": "text/event-stream;charset=utf-8",
+      "decoded_response_bytes": 8869,
+      "usage_frames": [
+        {
+          "event_type": null,
+          "usage": {
+            "prompt_tokens": 91,
+            "completion_tokens": 52,
+            "total_tokens": 143,
+            "cached_tokens": 91,
+            "completion_tokens_details": {
+              "reasoning_tokens": 38
+            },
+            "prompt_tokens_details": {
+              "cached_tokens": 91
+            }
+          }
+        }
+      ],
+      "event_count": 43,
+      "event_types": [],
+      "terminated_normally": true,
+      "response_usage": {
+        "prompt_tokens": 91,
+        "completion_tokens": 52,
+        "total_tokens": 143,
+        "cached_tokens": 91,
+        "completion_tokens_details": {
+          "reasoning_tokens": 38
+        },
+        "prompt_tokens_details": {
+          "cached_tokens": 91
+        }
+      },
+      "outcome": "passed",
+      "usage_event": {
+        "request_id": "a0a4cf01-0a09-4ea1-bd9a-da548cec1a9e",
+        "provider_id": "custom",
+        "source_id": "kimi-live",
+        "account_id": "kimi-live",
+        "protocol_in": "openai_chat_completions",
+        "protocol_upstream": "openai_chat_completions",
+        "mode": "native",
+        "status_code": 200,
+        "success": true,
+        "retry_count": 0,
+        "streamed": true,
+        "usage_source": "parsed",
+        "input_tokens": 91,
+        "output_tokens": 52,
+        "reasoning_tokens": 38,
+        "cached_tokens": 91,
+        "cache_read_tokens": 91,
+        "cache_creation_tokens": 0,
+        "total_tokens": 143,
+        "attempts": [
+          {
+            "attempt_no": 0,
+            "provider_id": "custom",
+            "source_id": "kimi-live",
+            "account_id": "kimi-live",
+            "upstream_model_id": "k3",
+            "status_code": 200,
+            "success": true
+          }
+        ]
+      },
+      "mismatched_usage_fields": [],
+      "exact_usage_match": true,
+      "schema_cleaned": true,
+      "duration_ms": 14080
+    },
+    {
+      "id": "kimi.openai_responses.json",
+      "provider": "kimi",
+      "protocol": "openai_responses",
+      "stream": false,
+      "model": "k3",
+      "http_status": 200,
+      "response_content_encoding": null,
+      "response_content_type": "application/json; charset=utf-8",
+      "decoded_response_bytes": 1549,
+      "response_usage": {
+        "input_tokens": 91,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 91
+        },
+        "output_tokens": 31,
+        "output_tokens_details": {
+          "reasoning_tokens": 17
+        },
+        "total_tokens": 122
+      },
+      "terminated_normally": true,
+      "outcome": "passed",
+      "usage_event": {
+        "request_id": "74e08f41-b126-4e5c-968a-c8ef21fe6222",
+        "provider_id": "custom",
+        "source_id": "kimi-live",
+        "account_id": "kimi-live",
+        "protocol_in": "openai_responses",
+        "protocol_upstream": "openai_responses",
+        "mode": "native",
+        "status_code": 200,
+        "success": true,
+        "retry_count": 0,
+        "streamed": false,
+        "usage_source": "upstream",
+        "input_tokens": 91,
+        "output_tokens": 31,
+        "reasoning_tokens": 17,
+        "cached_tokens": 91,
+        "cache_read_tokens": 91,
+        "cache_creation_tokens": 0,
+        "total_tokens": 122,
+        "attempts": [
+          {
+            "attempt_no": 0,
+            "provider_id": "custom",
+            "source_id": "kimi-live",
+            "account_id": "kimi-live",
+            "upstream_model_id": "k3",
+            "status_code": 200,
+            "success": true
+          }
+        ]
+      },
+      "mismatched_usage_fields": [],
+      "exact_usage_match": true,
+      "schema_cleaned": true,
+      "duration_ms": 13017
+    },
+    {
+      "id": "kimi.openai_responses.sse",
+      "provider": "kimi",
+      "protocol": "openai_responses",
+      "stream": true,
+      "model": "k3",
+      "http_status": 200,
+      "response_content_encoding": null,
+      "response_content_type": "text/event-stream;charset=utf-8",
+      "decoded_response_bytes": 6340,
+      "usage_frames": [
+        {
+          "event_type": "response.completed",
+          "usage": {
+            "input_tokens": 91,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 91
+            },
+            "output_tokens": 36,
+            "output_tokens_details": {
+              "reasoning_tokens": 22
+            },
+            "total_tokens": 127
+          }
+        }
+      ],
+      "event_count": 15,
+      "event_types": [
+        "response.created",
+        "response.in_progress",
+        "response.output_item.added",
+        "response.reasoning_summary_part.added",
+        "response.reasoning_summary_text.delta",
+        "response.reasoning_summary_text.done",
+        "response.reasoning_summary_part.done",
+        "response.output_item.done",
+        "response.content_part.added",
+        "response.output_text.delta",
+        "response.output_text.done",
+        "response.content_part.done",
+        "response.completed"
+      ],
+      "terminated_normally": true,
+      "response_usage": {
+        "input_tokens": 91,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 91
+        },
+        "output_tokens": 36,
+        "output_tokens_details": {
+          "reasoning_tokens": 22
+        },
+        "total_tokens": 127
+      },
+      "sequence_monotonic": true,
+      "outcome": "passed",
+      "usage_event": {
+        "request_id": "2c5d7599-8a83-4d99-8d7c-7c93edf59143",
+        "provider_id": "custom",
+        "source_id": "kimi-live",
+        "account_id": "kimi-live",
+        "protocol_in": "openai_responses",
+        "protocol_upstream": "openai_responses",
+        "mode": "native",
+        "status_code": 200,
+        "success": true,
+        "retry_count": 0,
+        "streamed": true,
+        "usage_source": "parsed",
+        "input_tokens": 91,
+        "output_tokens": 36,
+        "reasoning_tokens": 22,
+        "cached_tokens": 91,
+        "cache_read_tokens": 91,
+        "cache_creation_tokens": 0,
+        "total_tokens": 127,
+        "attempts": [
+          {
+            "attempt_no": 0,
+            "provider_id": "custom",
+            "source_id": "kimi-live",
+            "account_id": "kimi-live",
+            "upstream_model_id": "k3",
+            "status_code": 200,
+            "success": true
+          }
+        ]
+      },
+      "mismatched_usage_fields": [],
+      "exact_usage_match": true,
+      "schema_cleaned": true,
+      "duration_ms": 13492
+    },
+    {
+      "id": "kimi.anthropic_messages.json",
+      "provider": "kimi",
+      "protocol": "anthropic_messages",
+      "stream": false,
+      "model": "k3",
+      "http_status": 200,
+      "response_content_encoding": null,
+      "response_content_type": "application/json; charset=utf-8",
+      "decoded_response_bytes": 13488,
+      "response_usage": {
+        "input_tokens": 0,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 91,
+        "output_tokens": 37,
+        "output_tokens_details": {
+          "thinking_tokens": 23
+        },
+        "service_tier": "standard",
+        "inference_geo": "not_available"
+      },
+      "terminated_normally": true,
+      "outcome": "passed",
+      "usage_event": {
+        "request_id": "a2731442-6e64-4572-b494-1c8010e53253",
+        "provider_id": "custom",
+        "source_id": "kimi-live",
+        "account_id": "kimi-live",
+        "protocol_in": "anthropic_messages",
+        "protocol_upstream": "anthropic_messages",
+        "mode": "native",
+        "status_code": 200,
+        "success": true,
+        "retry_count": 0,
+        "streamed": false,
+        "usage_source": "upstream",
+        "input_tokens": 0,
+        "output_tokens": 37,
+        "reasoning_tokens": 0,
+        "cached_tokens": 91,
+        "cache_read_tokens": 91,
+        "cache_creation_tokens": 0,
+        "total_tokens": 37,
+        "attempts": [
+          {
+            "attempt_no": 0,
+            "provider_id": "custom",
+            "source_id": "kimi-live",
+            "account_id": "kimi-live",
+            "upstream_model_id": "k3",
+            "status_code": 200,
+            "success": true
+          }
+        ]
+      },
+      "mismatched_usage_fields": [],
+      "exact_usage_match": true,
+      "schema_cleaned": true,
+      "duration_ms": 12806
+    },
+    {
+      "id": "kimi.anthropic_messages.sse",
+      "provider": "kimi",
+      "protocol": "anthropic_messages",
+      "stream": true,
+      "model": "k3",
+      "http_status": 200,
+      "response_content_encoding": null,
+      "response_content_type": "text/event-stream;charset=utf-8",
+      "decoded_response_bytes": 8905,
+      "usage_frames": [
+        {
+          "event_type": "message_start",
+          "usage": {
+            "input_tokens": 91,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0,
+            "output_tokens": 0,
+            "service_tier": "standard",
+            "inference_geo": "not_available"
+          }
+        },
+        {
+          "event_type": "message_delta",
+          "usage": {
+            "input_tokens": 0,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 91,
+            "output_tokens": 40,
+            "output_tokens_details": {
+              "thinking_tokens": 26
+            }
+          }
+        }
+      ],
+      "event_count": 35,
+      "event_types": [
+        "message_start",
+        "content_block_start",
+        "content_block_delta",
+        "content_block_stop",
+        "message_delta",
+        "message_stop"
+      ],
+      "terminated_normally": true,
+      "response_usage": {
+        "input_tokens": 0,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 91,
+        "output_tokens": 40,
+        "service_tier": "standard",
+        "inference_geo": "not_available",
+        "output_tokens_details": {
+          "thinking_tokens": 26
+        }
+      },
+      "outcome": "passed",
+      "usage_event": {
+        "request_id": "6ef7c99d-9e47-417e-8ab0-c658ab755afc",
+        "provider_id": "custom",
+        "source_id": "kimi-live",
+        "account_id": "kimi-live",
+        "protocol_in": "anthropic_messages",
+        "protocol_upstream": "anthropic_messages",
+        "mode": "native",
+        "status_code": 200,
+        "success": true,
+        "retry_count": 0,
+        "streamed": true,
+        "usage_source": "parsed",
+        "input_tokens": 0,
+        "output_tokens": 40,
+        "reasoning_tokens": 0,
+        "cached_tokens": 91,
+        "cache_read_tokens": 91,
+        "cache_creation_tokens": 0,
+        "total_tokens": 40,
+        "attempts": [
+          {
+            "attempt_no": 0,
+            "provider_id": "custom",
+            "source_id": "kimi-live",
+            "account_id": "kimi-live",
+            "upstream_model_id": "k3",
+            "status_code": 200,
+            "success": true
+          }
+        ]
+      },
+      "mismatched_usage_fields": [],
+      "exact_usage_match": true,
+      "schema_cleaned": true,
+      "duration_ms": 15088
+    }
+  ],
+  "finished_at": "2026-09-09T03:34:35.507Z",
+  "summary": {
+    "passed": 18,
+    "failed": 0,
+    "provider_unavailable": 0
+  }
+}
