@@ -19,6 +19,7 @@ import { DetailItem, DetailList } from '@/components/ui/DetailList';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { FilterPanel } from '@/components/ui/FilterPanel';
 import { SelectField, TextField } from '@/components/ui/FormField';
+import { RemoteFilterField } from '@/components/ui/RemoteFilterField';
 import { IconButton } from '@/components/ui/IconButton';
 import { IconEye, IconRefreshCw } from '@/components/ui/icons';
 import { LoadingState } from '@/components/ui/LoadingState';
@@ -138,6 +139,10 @@ function EventDetails({ event, onClose }: { event: RuntimeEventRecord; onClose: 
 export function RuntimeEventsPage({ api, refreshRevision = 0, onBusyChange }: RuntimeEventsPageProps) {
   const { t } = useTranslation('console');
   const [draft, setDraft] = useState<DraftFilters>({ ...EMPTY_FILTERS });
+  const optionFrom = isoTimestamp(draft.from);
+  const optionTo = isoTimestamp(draft.to);
+  const loadEventTypes = useCallback((search: string, signal: AbortSignal) =>
+    api.eventTypeOptions({ from: optionFrom, to: optionTo }, search, signal), [api, optionFrom, optionTo]);
   const [filters, setFilters] = useState<RuntimeEventFilters>(() => appliedFilters(EMPTY_FILTERS));
   const [selected, setSelected] = useState<RuntimeEventRecord>();
   const [appended, setAppended] = useState<AppendedPageState>({ data: [], hasMore: false });
@@ -264,7 +269,7 @@ export function RuntimeEventsPage({ api, refreshRevision = 0, onBusyChange }: Ru
           ]}
           onChange={(source) => setDraft((current) => ({ ...current, source: source as DraftFilters['source'] }))}
         />
-        <TextField label={t('runtimeEvents.event_type')} value={draft.eventType} placeholder={t('runtimeEvents.event_type_placeholder')} onChange={(event) => setDraft((current) => ({ ...current, eventType: event.currentTarget.value }))} />
+        <RemoteFilterField label={t('runtimeEvents.event_type')} value={draft.eventType} loadOptions={loadEventTypes} contextKey={String(refreshRevision)} onChange={(eventType) => setDraft((current) => ({ ...current, eventType }))} />
         <TextField label={t('runtimeEvents.subject')} value={draft.subjectId} placeholder={t('runtimeEvents.subject_placeholder')} onChange={(event) => setDraft((current) => ({ ...current, subjectId: event.currentTarget.value }))} />
         <TextField label={t('runtimeEvents.correlation')} value={draft.correlationId} placeholder={t('runtimeEvents.correlation_placeholder')} onChange={(event) => setDraft((current) => ({ ...current, correlationId: event.currentTarget.value }))} />
         <TextField type="datetime-local" label={t('runtimeEvents.from')} value={draft.from} onChange={(event) => setDraft((current) => ({ ...current, from: event.currentTarget.value }))} />

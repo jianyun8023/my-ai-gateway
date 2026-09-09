@@ -8,6 +8,8 @@ import type {
   ConnectionTestResult,
   DiscoveryExecution,
   GatewayProtocol,
+  FilterOptionsRange,
+  FilterOptionsResponse,
   LatestDiscovery,
   LogicalModel,
   LogicalModelWriteInput,
@@ -323,6 +325,13 @@ export class GatewayAdminResources {
     }
     const query = search.toString();
     return this.transport.json(`/admin/events${query ? `?${query}` : ''}`, { signal });
+  }
+
+  eventTypeOptions(range: FilterOptionsRange, search: string, signal?: AbortSignal): Promise<FilterOptionsResponse> {
+    const params = new URLSearchParams({ field: 'event_type', q: search });
+    if (range.from) params.set('from', range.from);
+    if (range.to) params.set('to', range.to);
+    return this.transport.json(`/admin/events/filter-options?${params}`, { signal });
   }
 
   async virtualKeys(signal?: AbortSignal): Promise<VirtualKey[]> {

@@ -39,7 +39,7 @@ pub(crate) fn is_connection_error(error: &sqlx::Error) -> bool {
     }
 }
 
-const UNIFIED_EVENTS_SQL: &str = r#"
+const UNIFIED_EVENTS_CTE: &str = r#"
 WITH unified_events AS (
     SELECT
         'system:' || id::text AS event_id,
@@ -187,6 +187,9 @@ WITH unified_events AS (
     FROM usage_events
     WHERE NOT success OR fallback_reason IS NOT NULL OR degraded
 )
+"#;
+
+const EVENT_PAGE_SQL: &str = r#"
 SELECT event_id,occurred_at,category,event_type,level,subject_type,
        CASE
            WHEN redact_subject_id
@@ -576,6 +579,33 @@ impl EventRepository {
         result
     }
 
+    pub(crate) async fn event_type_options(
+        &self,
+        from: Option<DateTime<Utc>>,
+        to: Option<DateTime<Utc>>,
+        search: &str,
+        limit: i64,
+    ) -> Result<Vec<String>, sqlx::Error> {
+        let pool = self.pool.as_ref().ok_or(sqlx::Error::PoolClosed)?;
+        let sql = format!(
+            "{UNIFIED_EVENTS_CTE}
+             SELECT DISTINCT event_type COLLATE \"C\" AS value FROM unified_events
+             WHERE ($1::timestamptz IS NULL OR occurred_at >= $1)
+               AND ($2::timestamptz IS NULL OR occurred_at < $2)
+               AND event_type IS NOT NULL AND btrim(event_type) <> ''
+               AND strpos(lower(event_type), lower($3)) > 0
+             ORDER BY value LIMIT $4"
+        );
+        let result = sqlx::query_scalar(&sql)
+            .bind(from)
+            .bind(to)
+            .bind(search)
+            .bind(limit.clamp(1, 100) + 1)
+            .fetch_all(pool)
+            .await;
+        self.observe("events.filter_options", result).await
+    }
+
     pub(crate) async fn list(
         &self,
         filter: &EventFilter,
@@ -586,7 +616,8 @@ impl EventRepository {
         let limit = limit.clamp(1, 500);
         let cursor_time = cursor.map(|value| value.occurred_at);
         let cursor_id = cursor.map(|value| value.event_id.as_str());
-        let mut data = sqlx::query_as::<_, EventRecord>(UNIFIED_EVENTS_SQL)
+        let sql = format!("{UNIFIED_EVENTS_CTE}{EVENT_PAGE_SQL}");
+        let mut data = sqlx::query_as::<_, EventRecord>(&sql)
             .bind(filter.from)
             .bind(filter.since)
             .bind(filter.to)
@@ -1063,9 +1094,9 @@ mod tests {
             "source_discovery_runs",
             "usage_events",
         ] {
-            assert!(UNIFIED_EVENTS_SQL.contains(source));
+            assert!(UNIFIED_EVENTS_CTE.contains(source));
         }
-        assert!(UNIFIED_EVENTS_SQL
+        assert!(UNIFIED_EVENTS_CTE
             .contains("WHERE NOT success OR fallback_reason IS NOT NULL OR degraded"));
     }
 
@@ -1187,6 +1218,32 @@ mod tests {
             .data
             .iter()
             .any(|event| event.subject_id.as_deref() == Some(successful_request_id.as_str())));
+
+        let (status, options) = admin_request(
+            &test_app(&database),
+            "GET",
+            "/admin/events/filter-options?field=event_type",
+            "test",
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let expected_types = page
+            .data
+            .iter()
+            .map(|event| &event.event_type)
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(
+            options,
+            json!({ "data": expected_types, "has_more": false })
+        );
+        assert!(options["data"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("request.failed")));
+        assert!(!options["data"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("request.success")));
 
         let operation_page = repository
             .list(
@@ -1331,6 +1388,7 @@ mod tests {
         assert_eq!(incident_rows[0].1, incident_rows[1].1);
 
         verify_database_hooks(&url, &schema, &account_id).await;
+        verify_filter_options(&database).await;
 
         drop(database);
         pool.close().await;
@@ -1339,6 +1397,106 @@ mod tests {
             .await
             .expect("drop unified event test schema");
         admin.close().await;
+    }
+
+    async fn verify_filter_options(database: &Database) {
+        let app = test_app(database);
+        let pool = database.pool();
+        let key_id: i64 = sqlx::query_scalar("INSERT INTO virtual_keys (name,key_prefix,key_hash,enabled) VALUES ('historical-key','secret-prefix','secret-hash',FALSE) RETURNING id")
+            .fetch_one(pool).await.unwrap();
+        // Resources deliberately have no current Source/Account/LogicalModel row.
+        for (index, (model, timestamp, upstream)) in [
+            ("before", "2020-01-01T00:00:00Z", None),
+            ("Alpha", "2020-01-02T00:00:00Z", Some("upstream-old")),
+            ("Alpha", "2020-01-02T00:00:01Z", Some("upstream-old")),
+            ("Beta%_'", "2020-01-02T00:00:02Z", Some("")),
+            (" ", "2020-01-02T00:00:03Z", None),
+            ("after", "2020-01-03T00:00:00Z", None),
+        ]
+        .iter()
+        .enumerate()
+        {
+            sqlx::query("INSERT INTO usage_events (request_id,provider_id,account_id,model,logical_model,upstream_model_id,source_id,client_source,protocol_in,protocol_upstream,mode,status_code,success,created_at,virtual_key_id) VALUES ($1,'old-provider','old-account','model',$2,$3,'old-source','old-client','openai_responses','openai_responses','native',200,TRUE,$4,$5)")
+                .bind(format!("filter-option-{index}"))
+                .bind(model).bind(upstream)
+                .bind(DateTime::parse_from_rfc3339(timestamp).unwrap().with_timezone(&Utc))
+                .bind(key_id).execute(pool).await.unwrap();
+        }
+        let range = "from=2020-01-02T00%3A00%3A00Z&to=2020-01-03T00%3A00%3A00Z";
+        for (field, expected) in [
+            ("logical_model", json!(["Alpha", "Beta%_'"])),
+            ("upstream_model", json!(["upstream-old"])),
+            ("provider", json!(["old-provider"])),
+            ("source_id", json!(["old-source"])),
+            ("account", json!(["old-account"])),
+            ("client_source", json!(["old-client"])),
+            ("virtual_key", json!([key_id.to_string()])),
+        ] {
+            let path = format!("/admin/usage/filter-options?field={field}&{range}");
+            let (status, body) = admin_request(&app, "GET", &path, "test").await;
+            assert_eq!(status, StatusCode::OK, "{body}");
+            assert_eq!(body, json!({ "data": expected, "has_more": false }));
+        }
+        for (extra, expected, more) in [
+            ("limit=1", json!(["Alpha"]), true),
+            ("q=ALP", json!(["Alpha"]), false),
+            ("q=%25_%27", json!(["Beta%_'"]), false),
+            ("q=unmatched", json!([]), false),
+        ] {
+            let path = format!("/admin/usage/filter-options?field=logical_model&{range}&{extra}");
+            let (status, body) = admin_request(&app, "GET", &path, "test").await;
+            assert_eq!(status, StatusCode::OK);
+            assert_eq!(body, json!({"data": expected, "has_more": more}));
+        }
+        // Event type candidates use the same half-open bounds and never include
+        // normal successful requests. Duplicate types across facts collapse.
+        for (event_type, timestamp) in [
+            ("test.options", "2020-01-02T00:00:00Z"),
+            ("test.options", "2020-01-02T00:00:01Z"),
+            ("test.outside", "2020-01-03T00:00:00Z"),
+        ] {
+            sqlx::query("INSERT INTO system_events (event_type,occurred_at,category,level,subject_type,message,details) VALUES ($1,$2,'lifecycle','info','gateway','test','{}')")
+                .bind(event_type).bind(DateTime::parse_from_rfc3339(timestamp).unwrap().with_timezone(&Utc)).execute(pool).await.unwrap();
+        }
+        let (_, body) = admin_request(
+            &app,
+            "GET",
+            &format!("/admin/events/filter-options?field=event_type&{range}&q=OPTIONS"),
+            "test",
+        )
+        .await;
+        assert_eq!(body, json!({"data": ["test.options"], "has_more": false}));
+        let (_, body) = admin_request(
+            &app,
+            "GET",
+            "/admin/events/filter-options?field=event_type&limit=1",
+            "test",
+        )
+        .await;
+        assert_eq!(body["data"].as_array().unwrap().len(), 1);
+        assert_eq!(body["has_more"], true);
+        for path in [
+            "/admin/usage/filter-options?field=credential_env",
+            "/admin/usage/filter-options?field=provider&limit=101",
+            "/admin/events/filter-options?field=subject_id",
+            "/admin/events/filter-options?field=event_type&from=invalid",
+        ] {
+            assert_eq!(
+                admin_request(&app, "GET", path, "test").await.0,
+                StatusCode::BAD_REQUEST
+            );
+        }
+        for path in [
+            "/admin/usage/filter-options?field=provider",
+            "/admin/events/filter-options?field=event_type",
+        ] {
+            let response = app
+                .clone()
+                .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        }
     }
 
     async fn verify_database_hooks(url: &str, schema: &str, account_id: &str) {

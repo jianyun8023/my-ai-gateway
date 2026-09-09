@@ -36,6 +36,7 @@ Tech-Utility：冷灰底色、绿色强调、紧凑数据布局。使用固定�
 | `MetricCard` | Mantine Paper/Text 薄组合；标签、数值、辅助信息及可选精确值；精确值通过 title/可访问名称提供，网格列数由页面维护 |
 | `Button` / `IconButton` | Mantine Button/ActionIcon，主次操作、禁用、加载与可访问名称；图标提示用 Tooltip，提交按钮显式设置 `type="submit"` |
 | `TextField` / `SelectField` / `TextAreaField` | Mantine TextInput/Select/Textarea，共用 label、hint、error 关联；Select 接收 `data` 与受控字符串值，以字符串回调更新业务状态，不模拟原生 change 事件 |
+| `RemoteFilterField` | Mantine Combobox/TextInput，按需加载历史候选，支持搜索、键盘选择、清空和精确值输入；异步状态与当前筛选值独立，空值/失败/截断提供局部提示 |
 | `CheckboxField` | Mantine Checkbox 的表单组合，label/hint、禁用与布尔值回调；位于 UI 层，控制面共享入口仅转导出 |
 | `StatusPill` | Mantine Badge；success / warning / danger / accent / muted，页面负责业务映射；保留原始大小写、完整文本与长标签换行 |
 | `SegmentedTabs` | Mantine Tabs 负责内容面板键盘导航；`mode="group"` 使用 Mantine Button 保留 `aria-pressed` 筛选语义 |
@@ -49,7 +50,7 @@ Tech-Utility：冷灰底色、绿色强调、紧凑数据布局。使用固定�
 
 通用组件在 `web/src/components/ui`，不反向依赖 API 或控制面模块。浮层布局由 [Overlay.module.scss](web/src/components/ui/Overlay.module.scss) 管理，行为交给 Mantine；[ConsolePrimitives.module.scss](web/src/components/ui/ConsolePrimitives.module.scss) 仅保留 SegmentedTabs 的项目视觉，不再承担通用控件。`features/control-plane/shared.tsx` 保留协议标签、错误展示、确认流程和业务布局；协议常量、错误归一化与格式化分别由 `lib/protocols.ts`、`admin-api/errors.ts` 和 `utils/format.ts` 提供。分层约束见 [前端架构](docs/frontend-architecture.md)。
 
-按钮、图标和字段的品牌尺寸、状态样式集中在 [Controls.module.scss](web/src/components/ui/Controls.module.scss)，通过 Mantine Styles API 和语义变量接入。字段使用 Mantine Input.Wrapper 的 label/description/error；`attributes.input` 合并调用方描述 ID 与生成的 hint/error ID，不覆盖业务输入值。`SelectField` 采用 Mantine Select，`allowDeselect=false`，选项、禁用态、Portal、边缘定位和滚动由框架管理；当前产品不启用搜索。旧 `.btn`、手写字段框及控制面复选框样式已删除；页面操作布局按 `data-ui="button"` 定位，不能恢复旧按钮视觉类。
+按钮、图标和字段的品牌尺寸、状态样式集中在 [Controls.module.scss](web/src/components/ui/Controls.module.scss)，通过 Mantine Styles API 和语义变量接入。字段使用 Mantine Input.Wrapper 的 label/description/error；`attributes.input` 合并调用方描述 ID 与生成的 hint/error ID，不覆盖业务输入值。`SelectField` 采用 Mantine Select，`allowDeselect=false`，选项、禁用态、Portal、边缘定位和滚动由框架管理；固定枚举不启用搜索，动态筛选通过 `RemoteFilterField` 加载和搜索候选。旧 `.btn`、手写字段框及控制面复选框样式已删除；页面操作布局按 `data-ui="button"` 定位，不能恢复旧按钮视觉类。
 
 页面 SCSS 只维护布局与领域视觉。配置表格直接使用 Mantine Table 及其 Thead/Tbody/Tr/Th/Td，表头声明 `scope="col"`；基础视觉集中在 [Table.module.scss](web/src/components/ui/Table.module.scss)，默认单元格内边距为纵向 10px、横向 13px。TableScroll 保留原生、可聚焦的局部滚动，页面只指定领域列宽与最小宽度。可点击行仍保留表格语义，并提供可通过键盘访问的“查看”按钮；开关和操作单元格阻止事件冒泡，避免误开详情。事件虚拟列表也使用 Mantine Table 主题，继续由 TanStack Virtual 管理范围与行高：单一原生滚动区包含 sticky 表头和虚拟 tbody，以稳定事件标识缓存测量，通过 `measureElement`/`data-index` 响应尺寸变化。表头固定 44px，CSS 与 `scrollMargin` 共享同一常量，行位置扣除表头偏移。查看按钮放在首列供窄屏与键盘访问，数据单元格点击同样打开详情；虚拟表声明完整行索引，尚有下一页时总行数使用未知值。不要用全量 DOM 或第二套滚动容器替代此实现。
 

@@ -26,6 +26,11 @@ export const common = {
 
   // 通用标签
   all: '全部',
+  clear_filter: '清空{{label}}',
+  filter_options_loading: '正在加载候选…',
+  filter_options_failed: '候选加载失败，可重试或直接输入。',
+  filter_options_empty: '没有匹配候选，可直接输入。',
+  filter_options_more: '仅显示部分候选，请输入关键词缩小范围。',
   none: '无',
   status: '状态',
   actions: '操作',

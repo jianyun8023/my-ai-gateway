@@ -327,6 +327,25 @@ Content-Type: application/json
 
 `SourceModelCapability` 的 `pending`、`unknown`、`unsupported`、不可用或未确认状态不会进入 runtime snapshot。接口不会把这些缺失事实猜成 `native`、`adapter` 或 `unsupported`，而是保留 `mode=null` 的不可路由单元。缺 endpoint、未知 Adapter、非直接转换链或未经允许的 lossy 能力会在控制面事务构建候选 snapshot 时返回结构化校验错误；失败候选不会替换当前有效 snapshot。
 
+## 筛选候选列表（Issue #193）
+
+以下只读接口使用相同 Admin 鉴权，供用量与运行事件筛选自动补全：
+
+| 接口 | 必填 `field` | 事实来源 |
+| --- | --- | --- |
+| `GET /admin/usage/filter-options` | `logical_model`、`upstream_model`、`provider`、`source_id`、`account`、`client_source`、`virtual_key` 之一 | `usage_events` 的历史维度值，包含当前配置已不存在或停用的资源 |
+| `GET /admin/events/filter-options` | `event_type` | 与 `/admin/events` 共用五类事实的统一投影；普通成功请求不产生运行事件候选 |
+
+共同参数：可选 `from` / `to` 为 RFC3339 UTC 时间边界，范围为 `[from,to)`，省略的一侧不限制；同时提供时必须 `from < to`。`q` 为可选、忽略大小写的字面量子串（首尾空白忽略，最多 256 个可打印字符），`%` / `_` 没有通配符含义。`limit` 默认 50，允许 1–100。未知参数、非法字段、时间或上限返回 `400 invalid_filter_options_query`；无数据库返回 `503 database_unavailable`，查询失败返回 `500 filter_options_failed`。
+
+```json
+{"data":["k3-256k","kimi-for-coding"],"has_more":false}
+```
+
+结果按原始值去重、排除 NULL/空白值，并以 PostgreSQL `C` collation 确定性升序返回。`virtual_key` 仅返回历史记录中的 ID 字符串，不读取 Key 值、前缀、哈希或凭据。`has_more=true` 表示还有匹配值，客户端应缩小搜索范围；接口不提供游标。候选不依赖其他业务筛选，也不受结果列表当前页限制。接口仅查询维度，不计算 Token/延迟统计或返回正文；结果条数上限不代表数据库扫描条数上限，生产历史规模的查询性能仍需单独验收。
+
+控制台按草稿时间范围按需查询候选；其他条件仍在“应用”后作用于数据查询。列表为空、被截断或加载失败时可继续手输精确值；候选刷新不会清除输入。协议使用固定枚举，状态、用量来源、事件分类/级别/事实来源沿用原有枚举；对象/关联 ID 保持精确输入。
+
 ## 运行事件统一查询（Issue #110）
 
 `GET /admin/events` 返回 PostgreSQL 统一读模型。它不会把既有事实复制到 `system_events`：系统生命周期、配置/snapshot、数据库与凭据异常来自 `system_events`；Admin/运维、健康、发现分别投影 `audit_logs`、`account_health_events`、`source_discovery_runs`；请求只投影 `usage_events` 中失败、fallback 或 degraded 的行。普通成功请求仍只在 `/admin/usage/events`（Request Events）中查询。

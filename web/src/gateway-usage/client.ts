@@ -1,4 +1,5 @@
 import type { AdminTransport } from '@/admin-api/client';
+import type { FilterOptionsRange, FilterOptionsResponse } from '@/admin-api/types';
 import {
   adaptUsageBreakdown,
   adaptUsageEventAttempts,
@@ -18,6 +19,8 @@ import type {
 } from './types';
 
 const USAGE_API_ROOT = '/admin/usage';
+
+export type UsageOptionField = 'logical_model' | 'upstream_model' | 'provider' | 'source_id' | 'account' | 'client_source' | 'virtual_key';
 
 
 export interface EventPageRequest {
@@ -63,6 +66,13 @@ export const buildGatewayUsageURL = (
 
 export class GatewayUsageClient {
   constructor(private readonly transport: AdminTransport) {}
+
+  filterOptions(field: UsageOptionField, range: FilterOptionsRange, search: string, signal?: AbortSignal): Promise<FilterOptionsResponse> {
+    const params = new URLSearchParams({ field, q: search });
+    if (range.from) params.set('from', range.from);
+    if (range.to) params.set('to', range.to);
+    return this.transport.json(`${USAGE_API_ROOT}/filter-options?${params}`, { signal });
+  }
 
   private json(url: string, signal?: AbortSignal): Promise<unknown> {
     return this.transport.json(url, { signal });

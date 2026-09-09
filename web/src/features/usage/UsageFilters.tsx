@@ -1,13 +1,19 @@
 import { FilterPanel } from '@/components/ui/FilterPanel';
 import { TextField, SelectField } from '@/components/ui/FormField';
 import { Button } from '@/components/ui/Button';
+import { RemoteFilterField } from '@/components/ui/RemoteFilterField';
+import { GATEWAY_PROTOCOLS } from '@/admin-api';
+import type { GatewayUsageClient, UsageOptionField } from '@/gateway-usage/client';
+import { PROTOCOL_LABELS } from '@/lib/protocols';
 import styles from '@/features/usage/Usage.module.scss';
 import { type GatewayUsageFilters } from '@/gateway-usage';
 import {
   countActiveAdvancedFilters,
+  isValidTimeRange,
+  resolveFilterWindow,
 } from '@/gateway-usage/filterState';
 import type { UsageRelativePreset } from '@/gateway-usage/types';
-import { useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 const toLocalInputValue = (iso: string): string => {
@@ -31,6 +37,9 @@ const TIME_PRESETS: Array<{ key: UsageRelativePreset; labelKey: string }> = [
 ];
 
 interface FilterBarProps {
+  client: Pick<GatewayUsageClient, 'filterOptions'>;
+  authGeneration?: number;
+  refreshRevision?: number;
   draft: GatewayUsageFilters;
   onChange: (value: GatewayUsageFilters) => void;
   onApply: () => void;
@@ -39,9 +48,27 @@ interface FilterBarProps {
   loading: boolean;
 }
 
-export function FilterBar({ draft, onChange, onApply, onPresetSelect, onReset, loading }: FilterBarProps) {
+function UsageOption({ client, field, from, to, contextKey, ...props }: {
+  client: FilterBarProps['client']; field: UsageOptionField; from: string; to: string;
+  contextKey: string; label: string; value: string; onChange: (value: string) => void; inputMode?: 'numeric';
+}) {
+  const loadOptions = useCallback((search: string, signal: AbortSignal) => {
+    if (!isValidTimeRange(from, to)) return Promise.reject(new Error('invalid_time_range'));
+    return client.filterOptions(field, { from, to }, search, signal);
+  }, [client, field, from, to]);
+  return <RemoteFilterField {...props} className={styles.filterField} loadOptions={loadOptions} contextKey={contextKey} />;
+}
+
+export function FilterBar({ client, authGeneration = 0, refreshRevision = 0, draft, onChange, onApply, onPresetSelect, onReset, loading }: FilterBarProps) {
   const { t } = useTranslation('console');
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const { from, to, timeMode, relativePreset } = draft;
+  const optionScope = useMemo(() => ({
+    ...resolveFilterWindow({ from, to, timeMode, relativePreset }),
+    contextKey: JSON.stringify([authGeneration, refreshRevision]),
+  }), [from, to, timeMode, relativePreset, authGeneration, refreshRevision]);
+  const optionProps = { client, from: optionScope.from, to: optionScope.to, contextKey: optionScope.contextKey };
+  const protocols = [{ value: '', label: t('common.all') }, ...GATEWAY_PROTOCOLS.map((protocol) => ({ value: protocol, label: PROTOCOL_LABELS[protocol] }))];
   const advancedCount = countActiveAdvancedFilters(draft);
   const update = (field: keyof GatewayUsageFilters, value: string) => onChange({
     ...draft,
@@ -87,8 +114,8 @@ export function FilterBar({ draft, onChange, onApply, onPresetSelect, onReset, l
             <TextField className={styles.filterField} label={t('usage.filter.to')} type="datetime-local" value={toLocalInputValue(draft.to)} onChange={(event) => updateAbsoluteTime('to', event.target.value)} />
           </div>
         )}
-        <TextField className={styles.filterField} label={t('usage.field.logical_model')} value={draft.logicalModel ?? ''} onChange={(event) => update('logicalModel', event.target.value)} placeholder={t('common.all')} />
-        <TextField className={styles.filterField} label={t('usage.field.provider')} value={draft.provider ?? ''} onChange={(event) => update('provider', event.target.value)} placeholder={t('common.all')} />
+        <UsageOption {...optionProps} field="logical_model" label={t('usage.field.logical_model')} value={draft.logicalModel ?? ''} onChange={(value) => update('logicalModel', value)} />
+        <UsageOption {...optionProps} field="provider" label={t('usage.field.provider')} value={draft.provider ?? ''} onChange={(value) => update('provider', value)} />
         <SelectField
           className={styles.filterField}
           label={t('usage.field.status')}
@@ -108,13 +135,13 @@ export function FilterBar({ draft, onChange, onApply, onPresetSelect, onReset, l
       </div>
       {showAdvanced && (
         <div className={styles.advancedFilters}>
-          <TextField className={styles.filterField} label={t('usage.field.upstream_model')} value={draft.upstreamModel ?? ''} onChange={(event) => update('upstreamModel', event.target.value)} placeholder={t('common.all')} />
-          <TextField className={styles.filterField} label={t('usage.field.source_id')} value={draft.sourceId ?? ''} onChange={(event) => update('sourceId', event.target.value)} placeholder={t('common.all')} />
-          <TextField className={styles.filterField} label={t('usage.field.account')} value={draft.account ?? ''} onChange={(event) => update('account', event.target.value)} placeholder={t('common.all')} />
-          <TextField className={styles.filterField} label={t('usage.field.client_source')} value={draft.clientSource ?? ''} onChange={(event) => update('clientSource', event.target.value)} placeholder={t('common.all')} />
-          <TextField className={styles.filterField} label={t('usage.field.protocol_in')} value={draft.protocolIn ?? ''} onChange={(event) => update('protocolIn', event.target.value)} placeholder={t('common.all')} />
-          <TextField className={styles.filterField} label={t('usage.field.protocol_upstream')} value={draft.protocolUpstream ?? ''} onChange={(event) => update('protocolUpstream', event.target.value)} placeholder={t('common.all')} />
-          <TextField className={styles.filterField} label={t('usage.field.virtual_key_id')} inputMode="numeric" value={draft.virtualKey ?? ''} onChange={(event) => update('virtualKey', event.target.value)} placeholder={t('common.all')} />
+          <UsageOption {...optionProps} field="upstream_model" label={t('usage.field.upstream_model')} value={draft.upstreamModel ?? ''} onChange={(value) => update('upstreamModel', value)} />
+          <UsageOption {...optionProps} field="source_id" label={t('usage.field.source_id')} value={draft.sourceId ?? ''} onChange={(value) => update('sourceId', value)} />
+          <UsageOption {...optionProps} field="account" label={t('usage.field.account')} value={draft.account ?? ''} onChange={(value) => update('account', value)} />
+          <UsageOption {...optionProps} field="client_source" label={t('usage.field.client_source')} value={draft.clientSource ?? ''} onChange={(value) => update('clientSource', value)} />
+          <SelectField className={styles.filterField} label={t('usage.field.protocol_in')} value={draft.protocolIn ?? ''} data={protocols} onChange={(value) => update('protocolIn', value)} />
+          <SelectField className={styles.filterField} label={t('usage.field.protocol_upstream')} value={draft.protocolUpstream ?? ''} data={protocols} onChange={(value) => update('protocolUpstream', value)} />
+          <UsageOption {...optionProps} field="virtual_key" label={t('usage.field.virtual_key_id')} inputMode="numeric" value={draft.virtualKey ?? ''} onChange={(value) => update('virtualKey', value)} />
           <SelectField
             className={styles.filterField}
             label={t('usage.field.usage_source')}

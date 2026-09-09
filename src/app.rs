@@ -13,7 +13,7 @@ use tower_http::{services::ServeDir, trace::TraceLayer};
 use crate::{api, auth::AdminAuth, http::response::error_response, infra::audit, state::AppState};
 
 pub(crate) fn application(state: AppState) -> Router {
-    use api::{admin, discovery, events, health_admin, keys, ops, proxy, usage};
+    use api::{admin, discovery, events, filter_options, health_admin, keys, ops, proxy, usage};
 
     let discovery_router = discovery::auxiliary_router_with_health(
         state.db.clone(),
@@ -34,6 +34,10 @@ pub(crate) fn application(state: AppState) -> Router {
         .route("/admin/usage/timeseries", get(usage::usage_timeseries))
         .route("/admin/usage/breakdown", get(usage::usage_breakdown))
         .route("/admin/usage/events", get(usage::usage_events))
+        .route(
+            "/admin/usage/filter-options",
+            get(filter_options::usage_options),
+        )
         .route("/admin/usage/export", get(usage::usage_export))
         .route("/admin/usage/aggregate", get(usage::usage_aggregate))
         .route(
@@ -92,6 +96,10 @@ pub(crate) fn application(state: AppState) -> Router {
         .route("/admin/backup/import", post(ops::import_control_plane))
         .route("/admin/audit", get(ops::list_audit_logs))
         .route("/admin/events", get(events::list_events))
+        .route(
+            "/admin/events/filter-options",
+            get(filter_options::event_options),
+        )
         .route("/admin/backups/{id}", get(ops::get_backup_run))
         .route("/admin/backups", get(ops::list_backup_runs))
         .route("/admin/backup/{id}", get(ops::get_backup_run))

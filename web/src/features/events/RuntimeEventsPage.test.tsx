@@ -130,6 +130,29 @@ describe('RuntimeEventsPage', () => {
     );
   });
 
+  it('loads event types remotely and applies selection only after Apply', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.startsWith('/admin/events/filter-options')) {
+        return new Response(JSON.stringify({ data: ['request.failed', 'source.discovery.failed'], has_more: false }));
+      }
+      return new Response(JSON.stringify(response([event])));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await renderPage();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const id = [...container.querySelectorAll('label')].find((label) => label.textContent === '事件类型')!.htmlFor;
+    const input = document.getElementById(id) as HTMLInputElement;
+    act(() => input.click());
+    await waitFor(() => container.querySelector('[role="option"][value="request.failed"]') !== null);
+    await selectComboboxValue(input, 'request.failed');
+    expect(input.value).toBe('request.failed');
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).startsWith('/admin/events?'))).toHaveLength(1);
+    await act(async () => [...container.querySelectorAll('button')].find((button) => button.textContent === '应用')!.click());
+    await waitFor(() => fetchMock.mock.calls.some(([url]) => String(url).includes('event_type=request.failed')));
+    expect(fetchMock).toHaveBeenCalledWith('/admin/events?event_type=request.failed&limit=100', expect.any(Object));
+  });
+
   it('cancels an old cursor request when new filters are applied', async () => {
     let cursorSignal: AbortSignal | undefined;
     let finishCursor: (() => void) | undefined;

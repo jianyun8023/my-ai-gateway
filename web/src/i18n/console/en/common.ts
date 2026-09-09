@@ -26,6 +26,11 @@ export const common = {
 
   // 通用标签
   all: 'All',
+  clear_filter: 'Clear {{label}}',
+  filter_options_loading: 'Loading suggestions…',
+  filter_options_failed: 'Could not load suggestions. Retry or enter a value.',
+  filter_options_empty: 'No matching suggestions. You can enter a value.',
+  filter_options_more: 'Showing some suggestions. Type to narrow the results.',
   none: 'None',
   status: 'Status',
   actions: 'Actions',

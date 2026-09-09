@@ -4,7 +4,6 @@ export const runtimeEvents = {
   level: 'Level',
   source: 'Fact source',
   event_type: 'Event type',
-  event_type_placeholder: 'e.g. runtime.snapshot_switched',
   subject: 'Subject ID',
   subject_placeholder: 'Account, source, request…',
   correlation: 'Correlation / operation ID',
