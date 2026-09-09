@@ -6,7 +6,7 @@
 
 use axum::body::{Body, Bytes};
 use futures_util::{stream, StreamExt};
-use serde_json::Value;
+use serde_json::{Map, Value};
 use std::time::Instant;
 
 use super::stream::{is_gateway_heartbeat, SseEventTracker, StreamTermination, HEARTBEAT_MARKER};
@@ -286,14 +286,21 @@ fn i64_at(value: &Value, key: &str) -> i64 {
 
 /// Extract usage from a complete JSON response.
 pub(crate) fn extract_json(value: &Value) -> Option<UsageReport> {
+    let report = report_from_usage(usage_value(value)?);
+    report.is_present().then_some(report)
+}
+
+fn usage_value(value: &Value) -> Option<&Value> {
     // OpenAI Chat/Responses put usage at the top level.  Some adapters wrap
     // the actual response under `response`, so inspect that as a fallback.
-    let usage = value
+    value
         .get("usage")
         .or_else(|| value.get("response").and_then(|v| v.get("usage")))
         .or_else(|| value.get("message").and_then(|v| v.get("usage")))
-        .or_else(|| value.get("delta").and_then(|v| v.get("usage")))?;
+        .or_else(|| value.get("delta").and_then(|v| v.get("usage")))
+}
 
+fn report_from_usage(usage: &Value) -> UsageReport {
     let input = if usage.get("input_tokens").is_some() {
         i64_at(usage, "input_tokens")
     } else {
@@ -328,7 +335,7 @@ pub(crate) fn extract_json(value: &Value) -> Option<UsageReport> {
         .get("total_tokens")
         .and_then(Value::as_i64)
         .unwrap_or(input + output);
-    let report = UsageReport {
+    UsageReport {
         input_tokens: input,
         output_tokens: output,
         reasoning_tokens: reasoning,
@@ -337,8 +344,7 @@ pub(crate) fn extract_json(value: &Value) -> Option<UsageReport> {
         cache_creation_tokens: cache_creation,
         total_tokens: total,
         source: "upstream".into(),
-    };
-    report.is_present().then_some(report)
+    }
 }
 
 pub(crate) fn extract_json_bytes(bytes: &[u8]) -> Option<UsageReport> {
@@ -363,10 +369,62 @@ pub(crate) fn usage_for_json_response(
     })
 }
 
-/// Extract the last usage-bearing event from an SSE payload.  This handles
-/// `data: {...}` and ignores comments/keep-alives and `[DONE]`.
+/// Merge explicitly reported counters before deriving totals. Missing fields
+/// retain earlier values; zero is a reported value, not a missing field.
+fn merge_sse_usage(current: &mut Map<String, Value>, usage: &Value) {
+    // A total from an earlier snapshot is stale when input/output changes.
+    // A total explicitly supplied in this event remains authoritative.
+    if usage.get("total_tokens").and_then(Value::as_i64).is_none()
+        && [
+            "input_tokens",
+            "prompt_tokens",
+            "output_tokens",
+            "completion_tokens",
+        ]
+        .iter()
+        .any(|key| usage.get(key).and_then(Value::as_i64).is_some())
+    {
+        current.remove("total_tokens");
+    }
+    for key in [
+        "input_tokens",
+        "prompt_tokens",
+        "output_tokens",
+        "completion_tokens",
+        "total_tokens",
+        "reasoning_tokens",
+        "cached_tokens",
+        "cache_read_input_tokens",
+        "cache_creation_input_tokens",
+    ] {
+        if let Some(value) = usage.get(key).and_then(Value::as_i64) {
+            current.insert(key.into(), value.into());
+        }
+    }
+    // Retain only the numeric counters understood by the JSON normalizer.
+    // Empty details objects must not clear a previously reported counter.
+    for (details, key) in [
+        ("input_tokens_details", "cached_tokens"),
+        ("prompt_tokens_details", "cached_tokens"),
+        ("output_tokens_details", "reasoning_tokens"),
+        ("completion_tokens_details", "reasoning_tokens"),
+    ] {
+        if let Some(value) = usage
+            .get(details)
+            .and_then(|v| v.get(key))
+            .and_then(Value::as_i64)
+        {
+            current.insert(
+                details.into(),
+                Value::Object(Map::from_iter([(key.into(), value.into())])),
+            );
+        }
+    }
+}
+
+/// Extract cumulative usage from SSE, ignoring comments and `[DONE]`.
 pub(crate) fn extract_sse(text: &str) -> Option<UsageReport> {
-    let mut latest: Option<UsageReport> = None;
+    let mut counters = Map::new();
     for line in text.lines() {
         let Some(data) = line.strip_prefix("data:").map(str::trim) else {
             continue;
@@ -375,36 +433,13 @@ pub(crate) fn extract_sse(text: &str) -> Option<UsageReport> {
             continue;
         }
         if let Ok(value) = serde_json::from_str::<Value>(data) {
-            if let Some(report) = extract_json(&value) {
-                if let Some(current) = &mut latest {
-                    if report.input_tokens > 0 {
-                        current.input_tokens = report.input_tokens;
-                    }
-                    if report.output_tokens > 0 {
-                        current.output_tokens = report.output_tokens;
-                    }
-                    if report.reasoning_tokens > 0 {
-                        current.reasoning_tokens = report.reasoning_tokens;
-                    }
-                    if report.cached_tokens > 0 {
-                        current.cached_tokens = report.cached_tokens;
-                    }
-                    if report.cache_read_tokens > 0 {
-                        current.cache_read_tokens = report.cache_read_tokens;
-                    }
-                    if report.cache_creation_tokens > 0 {
-                        current.cache_creation_tokens = report.cache_creation_tokens;
-                    }
-                    if report.total_tokens > 0 {
-                        current.total_tokens = report.total_tokens;
-                    }
-                } else {
-                    latest = Some(report);
-                }
+            if let Some(usage) = usage_value(&value) {
+                merge_sse_usage(&mut counters, usage);
             }
         }
     }
-    latest.map(|mut report| {
+    (!counters.is_empty()).then(|| {
+        let mut report = report_from_usage(&Value::Object(counters));
         report.source = "parsed".into();
         report
     })
@@ -657,6 +692,112 @@ mod tests {
         assert_eq!(report.reasoning_tokens, 1);
         assert_eq!(report.cached_tokens, 2);
         assert_eq!(report.total_tokens, 11);
+    }
+
+    fn usage_events(values: &[Value]) -> String {
+        values
+            .iter()
+            .map(|value| format!("data: {value}\n\n"))
+            .collect()
+    }
+
+    #[test]
+    fn sse_usage_replaces_input_with_explicit_zero_on_cache_hit() {
+        let sse = usage_events(&[
+            json!({"message": {"usage": {"input_tokens": 91, "output_tokens": 0,
+                "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}}}),
+            json!({"usage": {"input_tokens": 0, "output_tokens": 37,
+                "cache_read_input_tokens": 91, "cache_creation_input_tokens": 0}}),
+        ]);
+        let report = usage_for_sse_response("zero-cache-hit", true, b"{}", sse.as_bytes());
+        assert_eq!(report.input_tokens, 0);
+        assert_eq!(report.output_tokens, 37);
+        assert_eq!(report.total_tokens, 37);
+        assert_eq!(report.cache_read_tokens, 91);
+        assert_eq!(report.cached_tokens, 91);
+        assert_eq!(report.source, "parsed");
+    }
+
+    #[test]
+    fn sse_usage_preserves_missing_fields_and_recomputes_derived_total() {
+        let sse = usage_events(&[
+            json!({"message": {"usage": {"input_tokens": 91, "cache_read_input_tokens": 10,
+                "cache_creation_input_tokens": 5}}}),
+            json!({"delta": {"usage": {"output_tokens": 37, "cache_creation_input_tokens": 0}}}),
+        ]);
+        let report = extract_sse(&sse).unwrap();
+        assert_eq!(report.input_tokens, 91);
+        assert_eq!(report.output_tokens, 37);
+        assert_eq!(report.total_tokens, 128);
+        assert_eq!(report.cache_read_tokens, 10);
+        assert_eq!(report.cache_creation_tokens, 0);
+        assert_eq!(report.cached_tokens, 10);
+    }
+
+    #[test]
+    fn sse_usage_keeps_explicit_zero_for_all_openai_token_fields() {
+        for (input, output, input_details, output_details) in [
+            (
+                "prompt_tokens",
+                "completion_tokens",
+                "prompt_tokens_details",
+                "completion_tokens_details",
+            ),
+            (
+                "input_tokens",
+                "output_tokens",
+                "input_tokens_details",
+                "output_tokens_details",
+            ),
+        ] {
+            let sse = usage_events(&[
+                json!({"response": {"usage": {input: 9, output: 3, "total_tokens": 12,
+                    input_details: {"cached_tokens": 7}, output_details: {"reasoning_tokens": 2}}}}),
+                json!({"response": {"usage": {input: 0, output: 0, "total_tokens": 0,
+                    input_details: {"cached_tokens": 0}, output_details: {"reasoning_tokens": 0}}}}),
+            ]);
+            let report = usage_for_sse_response("zero-usage", true, b"{}", sse.as_bytes());
+            assert_eq!(
+                report,
+                UsageReport {
+                    source: "parsed".into(),
+                    ..Default::default()
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn sse_usage_does_not_clear_missing_nested_counters() {
+        let sse = usage_events(&[
+            json!({"usage": {"input_tokens": 9, "output_tokens": 3, "total_tokens": 20,
+                "input_tokens_details": {"cached_tokens": 7},
+                "output_tokens_details": {"reasoning_tokens": 2}}}),
+            json!({"usage": {"input_tokens_details": {}, "output_tokens_details": {"other": 0}}}),
+            json!({"usage": {"input_tokens_details": {"cached_tokens": 0}}}),
+        ]);
+        let report = extract_sse(&sse).unwrap();
+        assert_eq!(report.input_tokens, 9);
+        assert_eq!(report.output_tokens, 3);
+        assert_eq!(report.reasoning_tokens, 2);
+        assert_eq!(report.cached_tokens, 0);
+        assert_eq!(report.total_tokens, 20);
+    }
+
+    #[test]
+    fn sse_usage_recomputes_total_after_partial_token_update() {
+        let sse = usage_events(&[
+            json!({"usage": {"input_tokens": 9, "output_tokens": 3, "total_tokens": 12,
+                "reasoning_tokens": 2, "cached_tokens": 7, "cache_read_input_tokens": 5}}),
+            json!({"usage": {"output_tokens": 0, "reasoning_tokens": 0, "cached_tokens": 0}}),
+        ]);
+        let report = extract_sse(&sse).unwrap();
+        assert_eq!(report.input_tokens, 9);
+        assert_eq!(report.output_tokens, 0);
+        assert_eq!(report.reasoning_tokens, 0);
+        assert_eq!(report.cached_tokens, 5);
+        assert_eq!(report.total_tokens, 9);
+        assert!(extract_sse(&usage_events(&[json!({"usage": {"other": 0}})])).is_none());
     }
 
     #[test]

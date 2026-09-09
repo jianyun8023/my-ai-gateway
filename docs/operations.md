@@ -184,7 +184,7 @@ cargo run -- ops control-plane-import --input control-plane.json --replace
 
 **计费口径**：跨厂商聚合需要 `input_tokens + output_tokens + cached_tokens`，把 `reasoning_tokens` 按厂商账单规则单算。下游报表若只读 `total_tokens`，对有缓存命中的长会话会大幅低估。CSV 导出（`/admin/usage/export`）与 JSON（`/admin/usage/events`、`/admin/usage/summary`）的 `total_tokens` 字段都按本约定。
 
-`usage_source` 标记 token 数来源：`upstream` 表示上游 usage 字段直接解析；`parsed` 表示从 SSE 流中最后一个含 usage 的事件解析；`estimated` 表示上游未报告，由 tiktoken 对请求体/响应体估算；`missing` 表示请求失败且无可用 usage。`estimated` 与 `missing` 行的 `total_tokens` 含义同上，但数值仅为粗估，**不可作为计费值**（Issue #98）。
+`usage_source` 标记 token 数来源：`upstream` 表示上游 usage 字段直接解析；`parsed` 表示按 SSE 事件顺序合并明确报告的 usage 字段（缺失字段保留，显式零值覆盖）；`estimated` 表示上游未报告，由 tiktoken 对请求体/响应体估算；`missing` 表示请求失败且无可用 usage。`estimated` 与 `missing` 行的 `total_tokens` 含义同上，但数值仅为粗估，**不可作为计费值**（Issue #98）。
 
 ## Usage 事件回退原因
 
