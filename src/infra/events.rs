@@ -52,7 +52,9 @@ WITH unified_events AS (
         correlation_id,
         message,
         details,
-        'system_events'::text AS source
+        'system_events'::text AS source,
+        FALSE AS redact_subject_id,
+        category = 'configuration' AND correlation_id IS NOT NULL AS redact_correlation_id
     FROM system_events
 
     UNION ALL
@@ -83,7 +85,9 @@ WITH unified_events AS (
             'completed_at', completed_at,
             'metadata', details
         )) AS details,
-        'audit_logs'::text AS source
+        'audit_logs'::text AS source,
+        NULLIF(request_id, '') IS NOT NULL AND resource_id IS NULL AS redact_subject_id,
+        NULLIF(request_id, '') IS NOT NULL AS redact_correlation_id
     FROM audit_logs
 
     UNION ALL
@@ -110,7 +114,9 @@ WITH unified_events AS (
             'connection_test_id', connection_test_id,
             'latency_ms', latency_ms
         )) AS details,
-        'account_health_events'::text AS source
+        'account_health_events'::text AS source,
+        FALSE AS redact_subject_id,
+        FALSE AS redact_correlation_id
     FROM account_health_events
 
     UNION ALL
@@ -135,7 +141,9 @@ WITH unified_events AS (
             'error_code', error_code,
             'requested_by', CASE WHEN requested_by IS NULL THEN NULL ELSE '[REDACTED]' END
         )) AS details,
-        'source_discovery_runs'::text AS source
+        'source_discovery_runs'::text AS source,
+        FALSE AS redact_subject_id,
+        FALSE AS redact_correlation_id
     FROM source_discovery_runs
 
     UNION ALL
@@ -173,12 +181,21 @@ WITH unified_events AS (
             'fallback_reason', fallback_reason,
             'error_summary', error_summary
         )) AS details,
-        'usage_events'::text AS source
+        'usage_events'::text AS source,
+        FALSE AS redact_subject_id,
+        FALSE AS redact_correlation_id
     FROM usage_events
     WHERE NOT success OR fallback_reason IS NOT NULL OR degraded
 )
-SELECT event_id,occurred_at,category,event_type,level,subject_type,subject_id,
-       correlation_id,message,details,source
+SELECT event_id,occurred_at,category,event_type,level,subject_type,
+       CASE
+           WHEN redact_subject_id
+             OR (redact_correlation_id AND subject_id IS NOT NULL AND subject_id = correlation_id)
+           THEN '[REDACTED]'
+           ELSE subject_id
+       END AS subject_id,
+       CASE WHEN redact_correlation_id THEN '[REDACTED]' ELSE correlation_id END AS correlation_id,
+       message,details,source
 FROM unified_events
 WHERE ($1::timestamptz IS NULL OR occurred_at >= $1)
   AND ($2::timestamptz IS NULL OR occurred_at > $2)
@@ -865,17 +882,27 @@ mod tests {
         path: &str,
         actor: &str,
     ) -> (StatusCode, Value) {
+        admin_request_with_request_id(app, method, path, actor, None).await
+    }
+
+    async fn admin_request_with_request_id(
+        app: &axum::Router,
+        method: &str,
+        path: &str,
+        actor: &str,
+        request_id: Option<&str>,
+    ) -> (StatusCode, Value) {
+        let mut request = Request::builder()
+            .method(method)
+            .uri(path)
+            .header("authorization", format!("Bearer {TEST_ADMIN_KEY}"))
+            .header("x-admin-actor", actor);
+        if let Some(request_id) = request_id {
+            request = request.header("x-request-id", request_id);
+        }
         let response = app
             .clone()
-            .oneshot(
-                Request::builder()
-                    .method(method)
-                    .uri(path)
-                    .header("authorization", format!("Bearer {TEST_ADMIN_KEY}"))
-                    .header("x-admin-actor", actor)
-                    .body(Body::empty())
-                    .unwrap(),
-            )
+            .oneshot(request.body(Body::empty()).unwrap())
             .await
             .unwrap();
         let status = response.status();
@@ -885,27 +912,85 @@ mod tests {
 
     async fn verify_read_boundary_and_query_failure(database: &Database) {
         let app = test_app(database);
-        let secret = "AIzaSyOpaqueCallerControlledValue123456789";
-        let (status, _) = admin_request(&app, "POST", "/admin/config/reload", secret).await;
-        assert_eq!(status, StatusCode::OK);
-        let raw_actor: String = sqlx::query_scalar(
-            "SELECT actor FROM audit_logs WHERE action='config.reload' ORDER BY id DESC LIMIT 1",
+        let actor_secret = "AIzaSyOpaqueCallerControlledActor123456789";
+        let external_correlation = "AIzaSyOpaqueCallerCorrelation987654321";
+        let (status, _) = admin_request_with_request_id(
+            &app,
+            "POST",
+            "/admin/config/reload",
+            actor_secret,
+            Some(external_correlation),
         )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let (raw_actor, raw_request_id, raw_operation_id): (String, Option<String>, String) =
+            sqlx::query_as(
+                "SELECT actor,request_id,operation_id FROM audit_logs WHERE action='config.reload' ORDER BY id DESC LIMIT 1",
+            )
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+        assert_eq!(
+            raw_actor, actor_secret,
+            "exercise the existing caller-controlled audit writer"
+        );
+        assert_eq!(raw_request_id.as_deref(), Some(external_correlation));
+        assert_eq!(raw_operation_id, external_correlation);
+        let correlated_system_events: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM system_events WHERE category='configuration' AND correlation_id=$1",
+        )
+        .bind(external_correlation)
         .fetch_one(database.pool())
         .await
         .unwrap();
-        assert_eq!(
-            raw_actor, secret,
-            "exercise the existing caller-controlled audit writer"
-        );
+        assert!(correlated_system_events > 0);
+
         let (status, body) = admin_request(&app, "GET", "/admin/events", "test").await;
         assert_eq!(status, StatusCode::OK);
-        assert!(!body.to_string().contains(secret));
-        assert!(body["data"]
-            .as_array()
-            .unwrap()
+        let serialized = body.to_string();
+        assert!(!serialized.contains(actor_secret));
+        assert!(!serialized.contains(external_correlation));
+        let rows = body["data"].as_array().unwrap();
+        let audit_row = rows
             .iter()
-            .any(|row| row["details"]["actor"] == "[REDACTED]"));
+            .find(|row| row["source"] == "audit_logs" && row["event_type"] == "config.reload")
+            .unwrap();
+        assert_eq!(audit_row["details"]["actor"], "[REDACTED]");
+        assert_eq!(audit_row["subject_id"], "[REDACTED]");
+        assert_eq!(audit_row["correlation_id"], "[REDACTED]");
+        assert!(rows
+            .iter()
+            .filter(|row| {
+                row["source"] == "system_events" && row["category"] == "configuration"
+            })
+            .any(|row| row["correlation_id"] == "[REDACTED]"));
+
+        let (status, correlated) = admin_request(
+            &app,
+            "GET",
+            &format!("/admin/events?correlation_id={external_correlation}"),
+            "test",
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(!correlated.to_string().contains(external_correlation));
+        let correlated_rows = correlated["data"].as_array().unwrap();
+        assert!(!correlated_rows.is_empty());
+        assert!(correlated_rows
+            .iter()
+            .all(|row| row["correlation_id"] == "[REDACTED]"));
+
+        let (status, subject) = admin_request(
+            &app,
+            "GET",
+            &format!("/admin/events?source=audit_logs&subject_id={external_correlation}"),
+            "test",
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(subject["data"].as_array().unwrap().len(), 1);
+        assert_eq!(subject["data"][0]["subject_id"], "[REDACTED]");
+        assert!(!subject.to_string().contains(external_correlation));
 
         sqlx::query("ALTER TABLE source_discovery_runs RENAME TO unavailable_discovery_runs")
             .execute(database.pool())

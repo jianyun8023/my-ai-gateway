@@ -481,7 +481,7 @@ v1 响应 envelope 固定如下：summary 为 `{version, timezone, range, data}`
 | 模型发现运行 | `source_discovery_runs` | 全部 |
 | 数据面请求 | `usage_events` | 只投影失败、fallback 或 degraded 请求；普通成功请求留在 Request Events |
 
-`system_events` 固定字段为 UTC `occurred_at`、`category`、`event_type`、`level`、`subject_type/id`、`correlation_id`、短 `message` 和 metadata-only `details`。写入器与统一查询返回边界共用脱敏规则，限制长度、层级和字段数，递归移除 credential、token、Authorization、prompt/response、thinking/signature 等敏感内容。既有 audit actor、discovery requested_by 属于非必要且任意调用方可控的文本，在统一投影中无条件替换为 `[REDACTED]`，不能依赖供应商 Key 前缀识别；事件落库失败只告警，不能把本来成功的网关操作改成失败。
+`system_events` 固定字段为 UTC `occurred_at`、`category`、`event_type`、`level`、`subject_type/id`、`correlation_id`、短 `message` 和 metadata-only `details`。写入器与统一查询返回边界共用脱敏规则，限制长度、层级和字段数，递归移除 credential、token、Authorization、prompt/response、thinking/signature 等敏感内容。既有 audit actor、discovery requested_by 属于非必要且任意调用方可控的文本，在统一投影中无条件替换为 `[REDACTED]`，不能依赖供应商 Key 前缀识别。通用 Admin 请求可自带的 `X-Request-ID` 只保留为服务端筛选键：audit 的主体/关联输出和复用该值的配置类 system event 关联输出固定脱敏，避免普通事件响应反射外部关联值；专用运维任务的 `operation_id` 仍是可返回、可轮询的领域资源标识。事件落库失败只告警，不能把本来成功的网关操作改成失败。
 
 连接事件使用共享 SQLx 分类：I/O、TLS、连接池不可用/获取超时、SQLSTATE `08` 和 PostgreSQL 停机/尚未可连接状态会打开 incident；缺表、权限、约束、解析等查询错误保持原业务错误，不伪装成连接异常。用量读写（写入含 SSE 结算）、Virtual Key 鉴权、健康状态与探测 metadata 读写、普通 Admin 控制面读取、控制面事务/snapshot、Admin 审计和事件查询接入该记录器。运行期数据库对象的克隆共享按组件区分的 incident 集合：每个组件只保留首个未恢复 incident，并由该组件后续成功按原发生时间补写失败事件、写入同一 `correlation_id` 的恢复事件并独立关闭；其他组件的失败不会被吞掉，成功或仅发布内存 snapshot 也不会错误关闭它。失败路径只在短内存临界区登记，不同步重试已经不可用的连接池；恢复路径在不持有 incident 集合锁时补写。此记录不依赖周期探测开启。
 
