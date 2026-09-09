@@ -341,17 +341,22 @@ export function strictlyIncreasing(numbers) {
 
 function responseUsage(usage) {
   if (!usage || typeof usage !== 'object') return null
+  const input = usage.input_tokens ?? usage.prompt_tokens ?? 0
+  const output = usage.output_tokens ?? usage.completion_tokens ?? 0
+  const inputDetails = usage.input_tokens_details ?? usage.prompt_tokens_details
+  const outputDetails = usage.output_tokens_details ?? usage.completion_tokens_details
+  const cacheRead = inputDetails
+    ? (inputDetails.cached_tokens ?? 0)
+    : (usage.cache_read_input_tokens ?? 0) + (usage.cached_tokens ?? 0)
+  const cacheCreation = inputDetails ? 0 : (usage.cache_creation_input_tokens ?? 0)
   return {
-    input_tokens: usage.input_tokens || usage.prompt_tokens || 0,
-    output_tokens: usage.output_tokens || usage.completion_tokens || 0,
-    total_tokens: usage.total_tokens || 0,
-    cached_tokens: usage.input_tokens_details?.cached_tokens
-      || usage.prompt_tokens_details?.cached_tokens
-      || usage.cache_read_input_tokens
-      || 0,
-    reasoning_tokens: usage.output_tokens_details?.reasoning_tokens
-      || usage.completion_tokens_details?.reasoning_tokens
-      || 0,
+    input_tokens: input,
+    output_tokens: output,
+    total_tokens: usage.total_tokens ?? input + output,
+    cached_tokens: cacheRead + cacheCreation,
+    cache_read_tokens: cacheRead,
+    cache_creation_tokens: cacheCreation,
+    reasoning_tokens: outputDetails ? (outputDetails.reasoning_tokens ?? 0) : (usage.reasoning_tokens ?? 0),
   }
 }
 
@@ -374,6 +379,8 @@ function eventMetadata(detail) {
     output_tokens: event.output_tokens || 0,
     reasoning_tokens: event.reasoning_tokens || 0,
     cached_tokens: event.cached_tokens || 0,
+    cache_read_tokens: event.cache_read_tokens || 0,
+    cache_creation_tokens: event.cache_creation_tokens || 0,
     total_tokens: event.total_tokens || 0,
     attempts: (detail?.attempts || []).map((attempt) => ({
       attempt_no: attempt.attempt_no,
@@ -661,25 +668,90 @@ async function nativeWebSearch(context, testCase, provider) {
   }
 }
 
+function kimiResponseBody(options) {
+  return {
+    model: 'k3',
+    reasoning: { effort: 'low' },
+    ...(options.tools ? { tool_choice: 'auto' } : {}),
+    max_output_tokens: 512,
+    stream: false,
+    ...options,
+  }
+}
+
+function checkKimiUsage(usage, event, streamed, phase) {
+  const expected = responseUsage(usage)
+  if (!expected) {
+    check(
+      event.usage_source !== 'missing' && event.total_tokens > 0,
+      'Kimi response has no persisted usage',
+      { phase, usage_event: event },
+    )
+    return
+  }
+  const expectedSource = streamed ? 'parsed' : 'upstream'
+  const mismatchedFields = Object.keys(expected).filter((field) => event[field] !== expected[field])
+  check(
+    event.usage_source === expectedSource && mismatchedFields.length === 0,
+    'Kimi reported usage does not match the persisted usage event',
+    {
+      phase,
+      expected_usage_source: expectedSource,
+      usage_source: event.usage_source,
+      mismatched_fields: mismatchedFields,
+      response_usage: expected,
+      usage_event: event,
+    },
+  )
+}
+
+function checkKimiFunctionCall(payload) {
+  check(payload?.status === 'completed', 'Kimi function response did not complete')
+  const functionCalls = payload.output?.filter((item) => item.type === 'function_call') || []
+  check(functionCalls.length === 1, 'Kimi response has no single function call')
+  const functionCall = functionCalls[0]
+  check(functionCall.name === 'lookup_weather', 'Kimi called the wrong tool')
+  check(functionCall.status == null || functionCall.status === 'completed', 'Kimi function call did not complete')
+  check(typeof functionCall.call_id === 'string' && functionCall.call_id.length > 0, 'Kimi function call has no call_id')
+  let args
+  try { args = JSON.parse(functionCall.arguments) } catch {}
+  check(
+    args && typeof args === 'object' && !Array.isArray(args)
+      && typeof args.city === 'string' && args.city.trim().length > 0,
+    'Kimi tool arguments do not match the expected JSON schema',
+  )
+  return functionCall
+}
+
+function checkKimiStream(events) {
+  const sequence = events.map((event) => event.sequence_number)
+  check(
+    sequence.length > 0 && sequence.every(Number.isInteger) && strictlyIncreasing(sequence),
+    'Kimi SSE sequence is not monotonic or is missing sequence numbers',
+  )
+  check(
+    events[0]?.type === 'response.created'
+      && events.filter((event) => event.type === 'response.created').length === 1
+      && events.at(-1)?.type === 'response.completed'
+      && events.filter((event) => event.type === 'response.completed').length === 1
+      && !events.some((event) => ['error', 'response.failed', 'response.incomplete'].includes(event.type)),
+    'Kimi SSE did not preserve a complete response lifecycle',
+  )
+  const finalResponse = completedResponse(events)
+  check(finalResponse?.status === 'completed', 'Kimi SSE final response did not complete')
+  return finalResponse
+}
+
 async function kimiFunctionRoundTrip(context, testCase) {
   const user = 'Call lookup_weather for Tokyo. Do not answer directly.'
   const tools = [toolDefinitionResponses()]
   const firstSource = clientSource(context, testCase, 'first')
-  const first = await postGatewayJson(context, '/v1/responses', {
-    model: 'k3',
+  const first = await postGatewayJson(context, '/v1/responses', kimiResponseBody({
     input: user,
     tools,
-    tool_choice: { type: 'function', name: 'lookup_weather' },
     parallel_tool_calls: false,
-    reasoning: { effort: 'minimal' },
-    max_output_tokens: 512,
-    stream: false,
-  }, firstSource)
-  const functionCall = first.payload.output?.find((item) => item.type === 'function_call')
-  check(functionCall?.name === 'lookup_weather', 'Kimi native Responses emitted no expected function call')
-  try { check(typeof JSON.parse(functionCall.arguments) === 'object', 'Kimi tool arguments are not an object') } catch {
-    throw new SmokeFailure('Kimi tool arguments are not valid JSON')
-  }
+  }), firstSource)
+  const functionCall = checkKimiFunctionCall(first.payload)
 
   const conversation = [
     { type: 'message', role: 'user', content: [{ type: 'input_text', text: user }] },
@@ -691,30 +763,20 @@ async function kimiFunctionRoundTrip(context, testCase) {
     },
   ]
   const secondSource = clientSource(context, testCase, 'second')
-  const second = await postGatewayJson(context, '/v1/responses', {
-    model: 'k3',
+  const second = await postGatewayJson(context, '/v1/responses', kimiResponseBody({
     instructions: 'Use the supplied tool result and answer briefly. Do not call the tool again.',
     input: conversation,
     tools,
-    tool_choice: 'auto',
     parallel_tool_calls: false,
-    reasoning: { effort: 'minimal' },
-    max_output_tokens: 512,
-    stream: false,
-  }, secondSource)
+  }), secondSource)
   check(second.payload.status === 'completed', 'Kimi tool result response did not complete')
   check(second.payload.output?.some((item) => item.type === 'message'), 'Kimi returned no final message')
   check(!second.payload.output?.some((item) => item.type === 'function_call'), 'Kimi repeated the function call')
 
   const firstEvent = await usageEvent(context, firstSource)
   const secondEvent = await usageEvent(context, secondSource)
-  const knownIssueChecks = [
-    {
-      id: 'kimi_nonstream_usage_persisted',
-      issue: 62,
-      passed: secondEvent.usage_source !== 'missing' && secondEvent.total_tokens > 0,
-    },
-  ]
+  checkKimiUsage(first.payload.usage, firstEvent, false, 'first')
+  checkKimiUsage(second.payload.usage, secondEvent, false, 'second')
   return {
     tool_name: functionCall.name,
     arguments_valid: true,
@@ -722,7 +784,6 @@ async function kimiFunctionRoundTrip(context, testCase) {
     second_duration_ms: second.duration_ms,
     response_usage: [responseUsage(first.payload.usage), responseUsage(second.payload.usage)],
     usage_events: [firstEvent, secondEvent],
-    known_issue_checks: knownIssueChecks,
   }
 }
 
@@ -732,55 +793,61 @@ function completedResponse(events) {
 
 async function kimiFunctionStream(context, testCase) {
   const source = clientSource(context, testCase, 'request')
-  const response = await postGatewaySse(context, '/v1/responses', {
-    model: 'k3',
+  const response = await postGatewaySse(context, '/v1/responses', kimiResponseBody({
     input: 'Call lookup_weather for Tokyo. Do not answer directly.',
     tools: [toolDefinitionResponses()],
-    tool_choice: { type: 'function', name: 'lookup_weather' },
     parallel_tool_calls: false,
-    reasoning: { effort: 'minimal' },
-    max_output_tokens: 512,
     stream: true,
-  }, source)
-  const sequence = response.events.map((event) => event.sequence_number).filter(Number.isInteger)
-  const finalResponse = completedResponse(response.events)
+  }), source)
+  const finalResponse = checkKimiStream(response.events)
+  const functionCall = checkKimiFunctionCall(finalResponse)
   const argumentDeltas = response.events.filter(
     (event) => event.type === 'response.function_call_arguments.delta',
   )
-  const functionCalls = finalResponse?.output?.filter((item) => item.type === 'function_call') || []
-  check(sequence.length > 0 && strictlyIncreasing(sequence), 'Kimi function SSE sequence is not monotonic')
+  const argumentsDone = response.events.filter(
+    (event) => event.type === 'response.function_call_arguments.done',
+  )
   check(argumentDeltas.length > 0, 'Kimi emitted no function argument deltas')
-  check(functionCalls.length === 1, 'Kimi final response has no single function call')
-  try { check(typeof JSON.parse(functionCalls[0].arguments) === 'object', 'Kimi final arguments are not an object') } catch {
-    throw new SmokeFailure('Kimi final function arguments are not valid JSON')
-  }
+  check(argumentsDone.length === 1, 'Kimi emitted no single function arguments done event')
+  const done = argumentsDone[0]
+  check(
+    typeof functionCall.id === 'string' && functionCall.id.length > 0
+      && [...argumentDeltas, done].every((event) => event.item_id === functionCall.id
+        && event.output_index === finalResponse.output.indexOf(functionCall)),
+    'Kimi function argument events reference the wrong output item',
+  )
+  check(
+    argumentDeltas.every((event) => typeof event.delta === 'string'
+      && event.sequence_number < done.sequence_number)
+      && argumentDeltas.map((event) => event.delta).join('') === functionCall.arguments
+      && done.arguments === functionCall.arguments,
+    'Kimi function argument deltas, done event and final arguments disagree',
+  )
+  const event = await usageEvent(context, source)
+  checkKimiUsage(finalResponse.usage, event, true, 'request')
   return {
     duration_ms: response.duration_ms,
     event_count: response.events.length,
     sequence_monotonic: true,
     argument_delta_events: argumentDeltas.length,
-    arguments_done_events: response.events.filter(
-      (event) => event.type === 'response.function_call_arguments.done',
-    ).length,
-    tool_name: functionCalls[0].name,
+    arguments_done_events: argumentsDone.length,
+    arguments_valid: true,
+    tool_name: functionCall.name,
     usage: responseUsage(finalResponse?.usage),
-    usage_event: await usageEvent(context, source),
+    usage_event: event,
   }
 }
 
 async function kimiWebSearch(context, testCase, streaming) {
   const source = clientSource(context, testCase, 'request')
-  const body = {
-    model: 'k3',
+  const body = kimiResponseBody({
     input: streaming
       ? 'Use web search to find the official MiniMax Server Tools documentation page. Return a concise answer with a source.'
       : 'Use web search to find the current stable Rust release from an official Rust source. Return a concise answer with a source.',
     tools: [{ type: 'web_search' }],
-    tool_choice: 'auto',
-    reasoning: { effort: 'minimal' },
     max_output_tokens: 1024,
     stream: streaming,
-  }
+  })
   if (!streaming) {
     const response = await postGatewayJson(context, '/v1/responses', body, source)
     const metadata = responseSearchMetadata(response.payload)
@@ -789,52 +856,46 @@ async function kimiWebSearch(context, testCase, streaming) {
     // Native Responses citation/source visibility is unverified (preset keeps
     // it unknown), so source_count is reported as evidence, not asserted.
     const event = await usageEvent(context, source)
+    checkKimiUsage(response.payload.usage, event, false, 'request')
     return {
       duration_ms: response.duration_ms,
       ...metadata,
       usage_event: event,
-      known_issue_checks: [
-        {
-          id: 'kimi_nonstream_usage_persisted',
-          issue: 62,
-          passed: event.usage_source !== 'missing' && event.total_tokens > 0,
-        },
-      ],
     }
   }
 
   const response = await postGatewaySse(context, '/v1/responses', body, source)
-  const sequence = response.events.map((event) => event.sequence_number).filter(Number.isInteger)
-  const finalResponse = completedResponse(response.events)
+  const finalResponse = checkKimiStream(response.events)
   const metadata = responseSearchMetadata(finalResponse || {})
   const keyEventOrder = []
   for (const event of response.events) {
     if (!keyEventOrder.includes(event.type)) keyEventOrder.push(event.type)
   }
-  check(sequence.length > 0 && strictlyIncreasing(sequence), 'Kimi search SSE sequence is not monotonic')
   check(response.events.filter((event) => event.type === 'response.web_search_call.in_progress').length === 1, 'missing search in_progress event')
   check(response.events.filter((event) => event.type === 'response.web_search_call.searching').length === 1, 'missing search searching event')
   check(response.events.filter((event) => event.type === 'response.web_search_call.completed').length === 1, 'missing search completed event')
+  const event = await usageEvent(context, source)
+  checkKimiUsage(finalResponse.usage, event, true, 'request')
   return {
     duration_ms: response.duration_ms,
     event_count: response.events.length,
     sequence_monotonic: true,
     key_event_order: keyEventOrder.filter((type) => /^(response\.(created|in_progress|output_item|web_search_call|completed))/.test(type)),
     ...metadata,
-    usage_event: await usageEvent(context, source),
+    usage_event: event,
   }
 }
 
 async function kimiReasoningSignature(context, testCase) {
   const user = 'Solve carefully: how many trailing zeros are in 100 factorial? Give a concise final answer.'
   const firstSource = clientSource(context, testCase, 'first')
-  const first = await postGatewayJson(context, '/v1/responses', {
-    model: 'k3',
+  const first = await postGatewayJson(context, '/v1/responses', kimiResponseBody({
     input: user,
     reasoning: { effort: 'high' },
     max_output_tokens: 2048,
-    stream: false,
-  }, firstSource)
+  }), firstSource)
+  const firstEvent = await usageEvent(context, firstSource)
+  checkKimiUsage(first.payload.usage, firstEvent, false, 'first')
   const reasoning = first.payload.output?.find(
     (item) => item.type === 'reasoning' && (item.encrypted_content || '').length > 0,
   )
@@ -844,7 +905,7 @@ async function kimiReasoningSignature(context, testCase) {
       reason: 'upstream emitted no thinking/signature block',
       duration_ms: first.duration_ms,
       response_usage: responseUsage(first.payload.usage),
-      usage_event: await usageEvent(context, firstSource),
+      usage_event: firstEvent,
     }
   }
 
@@ -854,14 +915,14 @@ async function kimiReasoningSignature(context, testCase) {
     ...first.payload.output,
     { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Acknowledge the prior result briefly.' }] },
   ]
-  const second = await postGatewayJson(context, '/v1/responses', {
-    model: 'k3',
+  const second = await postGatewayJson(context, '/v1/responses', kimiResponseBody({
     input: conversation,
     reasoning: { effort: 'high' },
     max_output_tokens: 2048,
-    stream: false,
-  }, secondSource)
+  }), secondSource)
   check(second.payload.status === 'completed', 'Kimi signed reasoning follow-up did not complete')
+  const secondEvent = await usageEvent(context, secondSource)
+  checkKimiUsage(second.payload.usage, secondEvent, false, 'second')
   return {
     outcome: 'passed',
     encrypted_content_present: true,
@@ -869,7 +930,7 @@ async function kimiReasoningSignature(context, testCase) {
     first_duration_ms: first.duration_ms,
     second_duration_ms: second.duration_ms,
     response_usage: [responseUsage(first.payload.usage), responseUsage(second.payload.usage)],
-    usage_events: [await usageEvent(context, firstSource), await usageEvent(context, secondSource)],
+    usage_events: [firstEvent, secondEvent],
   }
 }
 
@@ -907,7 +968,7 @@ async function fallbackDeepSeekBai(context, testCase) {
   }
 }
 
-async function runCase(context, testCase) {
+export async function runCase(context, testCase) {
   switch (testCase.id) {
     case 'deepseek.function': return chatFunctionRoundTrip(context, testCase, 'deepseek')
     case 'deepseek.web_search': return nativeWebSearch(context, testCase, 'deepseek')

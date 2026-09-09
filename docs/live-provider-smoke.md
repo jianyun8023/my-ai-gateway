@@ -2,7 +2,7 @@
 
 真实 Provider Smoke 用于验证上游当前契约，补充默认 CI 中的 mock 回归。它会产生真实外部请求和 Token 消耗，因此默认关闭，也不由 Pull Request CI 自动运行。
 
-问题与验收范围跟踪在 [Issue #62](https://github.com/jianyun8023/my-ai-gateway/issues/62)。Kimi 非流式 Adapter Usage 与已验证能力声明的回归检查属于该 Issue 的收口门禁。
+历史工具与用量验收记录见 [Issue #62](https://github.com/jianyun8023/my-ai-gateway/issues/62)。Kimi 当前使用原生 Responses；RC 回归发现的压缩响应用量解析与 smoke 参数问题分别跟踪在 [Issue #185](https://github.com/jianyun8023/my-ai-gateway/issues/185)、[Issue #186](https://github.com/jianyun8023/my-ai-gateway/issues/186)。
 
 ## 两层测试
 
@@ -88,13 +88,31 @@ Runner 在发出 Provider 请求前会检查 Gateway binary 与 `psql` 客户端
 1. 保持 case ID 稳定，格式为 `provider.behavior`；
 2. 在 manifest 声明 `provider`、`kind`、`cost` 和最小 `required_env`；
 3. Runner 只断言协议元数据，不把完整正文写入结果；
-4. 为参数解析、配置生成或 SSE 解析增加 Node 确定性单测；
+4. 为请求构造、响应断言和 SSE 解析增加 Node 确定性单测，包括应当失败的响应；
 5. Provider 行为变化先更新 Issue/ProviderPreset 版本，不静默放宽断言；
 6. 搜索、thinking 等高 Token 案例必须标记 `cost=high`；
 7. 暂时无法由上游触发的能力使用 `not_triggered`，不能记作通过。
 
-当 Kimi 非流式响应包含 `usage` 时，runner 会同时核对响应 Usage 与网关
-`UsageEvent` 的 `usage_source`/Token 字段；`--strict-known-issues` 应在该检查失败时返回非零。
+Kimi 工具与搜索请求共用 `reasoning.effort=low`、`tool_choice=auto`；2026-09-09 的 RC
+诊断中，原生 Responses 拒绝 `minimal`，thinking 模式也拒绝强制指定 function。工具 case
+仍要求实际调用 `lookup_weather`、参数为符合工具 schema 的 JSON，并在回传
+`function_call_output` 后生成最终消息；没有触发工具仍判失败。流式 case 还核对工具名、
+参数 delta/done 与最终参数一致性、输出 item 关联、sequence 和完整终止。
+
+Kimi JSON 响应或 SSE 最终响应包含 `usage` 时，runner 核对各阶段网关 `UsageEvent`：
+JSON 必须为 `usage_source=upstream`，SSE 必须为 `parsed`；`input_tokens`、`output_tokens`、
+`total_tokens`、`cached_tokens`、`cache_read_tokens`、`cache_creation_tokens`、`reasoning_tokens`
+均须与上游报告一致。沿用网关契约：缺失 total 时使用 input + output，reasoning 不重复加到
+total，cached 为 cache read + creation。`estimated`、`missing` 或任一 Token 不符均直接
+判失败并返回非零，不受 `--strict-known-issues` 控制。失败 artifact 只保留来源、Token、
+不匹配字段与阶段等元数据。
+上游未提供 usage 时允许网关估算，但持久化 Usage 仍须为非 missing 且 total 为正数。
+
+正式 runner 使用普通 HTTP 压缩协商，不设置 `Accept-Encoding: identity` 来规避压缩解析问题。
+默认仍只选择低成本 case；搜索与高 reasoning 的现场验收需要单独显式选择。
+Node 测试通过本机 HTTP fixture 执行实际 case 请求与响应处理，不调用真实 Provider，
+因此这些测试通过不能视为高成本 case 的现场验收完成。
+
 Provider 能力声明通过新增不可变 ProviderPreset 版本更新，既有 Source 的 `@1` 快照不会被
 静默改写。
 
