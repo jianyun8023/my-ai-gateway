@@ -465,6 +465,8 @@ impl Database {
 
 #[cfg(test)]
 mod config;
+mod filter_options;
+pub(crate) use filter_options::UsageOptionField;
 mod health;
 mod usage;
 mod virtual_keys;

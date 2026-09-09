@@ -1,6 +1,7 @@
 pub(crate) mod admin;
 pub(crate) mod discovery;
 pub(crate) mod events;
+pub(crate) mod filter_options;
 pub(crate) mod health_admin;
 pub(crate) mod helpers;
 pub(crate) mod keys;

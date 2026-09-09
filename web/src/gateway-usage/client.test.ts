@@ -21,6 +21,16 @@ const filters: GatewayUsageFilters = {
 };
 
 describe('GatewayUsageClient', () => {
+  it('fetches only candidate values with encoded literal search, time scope and cancellation', async () => {
+    const json = vi.fn().mockResolvedValue({ data: ['a%_'], has_more: true });
+    const client = new GatewayUsageClient({ json, blob: vi.fn() });
+    const signal = new AbortController().signal;
+    expect(await client.filterOptions('logical_model', filters, 'a%_&', signal)).toEqual({ data: ['a%_'], has_more: true });
+    const [url, init] = json.mock.calls[0];
+    const params = new URL(url, 'http://local').searchParams;
+    expect(Object.fromEntries(params)).toEqual({ field: 'logical_model', q: 'a%_&', from: filters.from, to: filters.to });
+    expect(init.signal).toBe(signal);
+  });
   it('serializes the complete combination filter contract', () => {
     const url = buildGatewayUsageURL('events', filters, { cursor: 'next', limit: 100 });
     expect(url).toContain('/admin/usage/events?');

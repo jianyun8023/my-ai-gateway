@@ -5,6 +5,16 @@ export const GATEWAY_PROTOCOLS = [
 ] as const;
 
 export type GatewayProtocol = typeof GATEWAY_PROTOCOLS[number];
+
+export interface FilterOptionsResponse {
+  data: string[];
+  has_more: boolean;
+}
+
+export interface FilterOptionsRange {
+  from?: string;
+  to?: string;
+}
 export type CatalogStatus = 'pending' | 'confirmed' | 'unavailable';
 export type CatalogAvailability = 'unknown' | 'available' | 'unavailable';
 export type MetadataSource = 'upstream' | 'preset' | 'user' | 'unknown';

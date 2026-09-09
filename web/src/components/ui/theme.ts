@@ -40,6 +40,10 @@ export const consoleTheme = createTheme({
       defaultProps: { withinPortal: true, shadow: 'md', radius: 'md', zIndex: 1200, returnFocus: true },
       styles: { dropdown: { background: 'var(--surface)', borderColor: 'var(--border)', color: 'var(--fg)' } },
     },
+    Combobox: {
+      defaultProps: { withinPortal: true, zIndex: 1200, middlewares: { flip: true, shift: true } },
+      classNames: { dropdown: controls.selectDropdown, option: controls.selectOption },
+    },
     Select: {
       defaultProps: {
         comboboxProps: {

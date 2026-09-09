@@ -62,6 +62,8 @@ App → GatewayManagementPage → features/events → useAdminQuery / 游标合�
 
 ## 组件与布局
 
+用量筛选与运行事件类型复用 `RemoteFilterField`（#193）。该通用组件只接收异步候选加载函数，不依赖业务 API；端点与时间范围由 `GatewayUsageClient` / `GatewayAdminResources` 和功能组件提供。展开时按需请求、搜索防抖 250ms，关闭/卸载或变更搜索/时间/身份时取消旧请求；响应发布前检查取消信号，渲染时按查询上下文隐藏旧候选。输入与候选数据独立，失败可重试或手输，清空代表全部，选择只修改草稿。候选不写入持久化存储。Mantine Combobox 负责 Portal、键盘选项导航和滚动，固定枚举继续使用 `SelectField`。
+
 请求事件与运行事件详情复用 `Modal` drawer，统一关闭、Escape、焦点约束与恢复。宽表通过 `TableScroll` 或事件列表自己的滚动容器滚动；控制台 flex / grid 子项必须允许收缩，不能让表格撑宽整页。日期预设在窄屏换行。
 
 删除没有生产调用方的旧组件、图标、路由辅助函数与独占样式。测试夹具统一放在 `src/test/fixtures/`，不混入生产数据层。保留 CPA Usage Keeper 的 MIT 许可与来源说明。

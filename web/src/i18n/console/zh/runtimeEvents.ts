@@ -4,7 +4,6 @@ export const runtimeEvents = {
   level: '级别',
   source: '事实来源',
   event_type: '事件类型',
-  event_type_placeholder: '例如 runtime.snapshot_switched',
   subject: '主体 ID',
   subject_placeholder: '账号、来源、请求等',
   correlation: '关联 / 操作 ID',

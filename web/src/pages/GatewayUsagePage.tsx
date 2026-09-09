@@ -59,6 +59,9 @@ export function GatewayUsagePage({ activeTab, getAdminKey, authGeneration, refre
   return (
     <section className={styles.content} data-od-id={`page-${activeTab}`}>
       <FilterBar
+        client={client}
+        authGeneration={authGeneration}
+        refreshRevision={refreshRevision}
         draft={filterState.draft}
         onChange={filterState.setDraft}
         onApply={filterState.apply}
