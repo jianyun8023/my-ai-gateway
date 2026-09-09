@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { spawn } from 'node:child_process'
+import { createServer } from 'node:http'
+import { once } from 'node:events'
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
@@ -165,7 +168,7 @@ test('Codex output files are reduced to owner-only permissions', () => {
   }
 })
 
-test('search and skip-git-repo-check flags are placed after the exec subcommand', () => {
+test('search is global and skip-git-repo-check belongs to exec', () => {
   const args = buildCodexArgs({
     model: 'k3',
     workspace: '/tmp/codex-workspace',
@@ -174,11 +177,8 @@ test('search and skip-git-repo-check flags are placed after the exec subcommand'
     search: true,
     skipGitRepoCheck: true,
   })
-  // Codex CLI >=0.149 rejects global flags placed before the subcommand.
-  // `--search` and `--skip-git-repo-check` must come right after `exec`,
-  // before the per-subcommand flag set (`--strict-config`, ...).
-  assert.equal(args[0], 'exec')
-  assert.equal(args[1], '--search')
+  assert.equal(args[0], '--search')
+  assert.equal(args[1], 'exec')
   assert.equal(args[2], '--skip-git-repo-check')
   assert.equal(args[3], '--strict-config')
   assert.ok(args.includes('--strict-config'))
@@ -329,3 +329,90 @@ test('multi-turn tool prompt reuse is invariant across calls', () => {
     multiTurnToolTurn2Prompt('  spaced  '),
   )
 })
+
+for (const scenario of ['passed', 'recall_mismatch', 'missing_command', 'missing_usage']) {
+  test(`multi-turn ${scenario} serializes only metadata through the CLI artifact path`, async () => {
+    const directory = mkdtempSync(path.join(os.tmpdir(), 'codex-e2e-artifact-'))
+    const sentinel = 'PRIVATE_MODEL_BODY_SENTINEL'.repeat(256)
+    const fakeCli = path.join(directory, 'fake-codex.mjs')
+    const output = path.join(directory, 'results')
+    const workspace = path.join(directory, 'workspace')
+    let usageQueries = 0
+    const server = createServer((request, response) => {
+      response.setHeader('content-type', 'application/json')
+      if (request.url === '/v1/models') response.end(JSON.stringify({ data: [{ id: 'test-model' }] }))
+      else if (request.url.startsWith('/admin/routes/')) response.end('{}')
+      else if (request.url.startsWith('/admin/usage/events?')) {
+        usageQueries += 1
+        response.end(JSON.stringify({ data: [{
+          status_code: 200, success: true, total_tokens: scenario === 'missing_usage' ? 0 : 10,
+          usage_source: 'parsed', mode: 'native', streamed: true,
+        }] }))
+      } else { response.statusCode = 404; response.end('{}') }
+    })
+    try {
+      await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+      // Execute a real child CLI twice: turn 2 must receive turn 1's text,
+      // while neither text may survive serialization to the result artifact.
+      writeFileSync(fakeCli, `#!${process.execPath}
+import { readFileSync, writeFileSync } from 'node:fs'
+import path from 'node:path'
+const args = process.argv.slice(2)
+const output = args[args.indexOf('--output-last-message') + 1]
+const canary = readFileSync(path.join(process.cwd(), 'CANARY.txt'), 'utf8').trim()
+const first = output.includes('turn-1')
+const body = ${JSON.stringify(sentinel)}
+if (!first && !args.at(-1).includes(body + canary)) process.exit(3)
+writeFileSync(output, first ? body + canary : ${JSON.stringify(scenario)} === 'recall_mismatch' ? body + canary : 'CODEX_GATEWAY_E2E_OK:' + canary)
+if (first && ${JSON.stringify(scenario)} !== 'missing_command') console.log(JSON.stringify({ type: 'item.completed', item: { type: 'command_execution', exit_code: 0, aggregated_output: canary } }))
+console.log(JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 6, output_tokens: 4 } }))
+`, { mode: 0o700 })
+      writeFileSync(path.join(directory, 'empty.env'), '')
+      const child = spawn(process.execPath, [
+        '--',
+        new URL('./codex-e2e-smoke.mjs', import.meta.url).pathname,
+        '--case', 'codex.multi_turn_tool', '--model', 'test-model', '--codex', fakeCli,
+        '--env-file', path.join(directory, 'empty.env'), '--home', path.join(directory, 'home'),
+        '--workspace', workspace, '--output-dir', output,
+      ], {
+        env: {
+          PATH: process.env.PATH,
+          CODEX_E2E_TESTS: '1',
+          CODEX_GATEWAY_BASE_URL: `http://127.0.0.1:${server.address().port}/v1`,
+          CODEX_GATEWAY_API_KEY: 'fake-data-key', CODEX_GATEWAY_ADMIN_KEY: 'fake-admin-key',
+        },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      })
+      let diagnostics = ''
+      child.stdout.on('data', (chunk) => { diagnostics += chunk })
+      child.stderr.on('data', (chunk) => { diagnostics += chunk })
+      const [code] = await once(child, 'close')
+      assert.equal(code, scenario === 'passed' ? 0 : 1, diagnostics)
+      assert.equal(usageQueries, 1)
+      const files = readdirSync(output)
+      assert.equal(files.length, 1)
+      const serialized = readFileSync(path.join(output, files[0]), 'utf8')
+      const canary = readFileSync(path.join(workspace, 'CANARY.txt'), 'utf8').trim()
+      assert.ok(!serialized.includes(sentinel))
+      assert.ok(!serialized.includes(canary))
+      assert.doesNotMatch(serialized, /"(?:expected|final_text)"/)
+      const artifact = JSON.parse(serialized)
+      const result = artifact.results[0]
+      assert.equal(result.outcome, scenario === 'passed' ? 'passed' : 'failed')
+      const metadata = result.failure || result
+      assert.equal(metadata.evaluation.passed, scenario !== 'recall_mismatch')
+      assert.equal(metadata.evaluation.final_exact, scenario !== 'recall_mismatch')
+      assert.equal(typeof metadata.evaluation.final_text_length, 'number')
+      if (scenario !== 'passed') {
+        assert.equal(metadata.turn_1.exit_code, 0)
+        assert.equal(metadata.turn_2.exit_code, 0)
+        assert.equal(metadata.turn_1.final_text_length, sentinel.length + canary.length)
+        assert.equal(metadata.turn_1.event_summary.canary_seen, scenario !== 'missing_command')
+        assert.equal(metadata.usage.passed, scenario !== 'missing_usage')
+      }
+    } finally {
+      await new Promise((resolve) => server.close(resolve))
+      rmSync(directory, { recursive: true, force: true })
+    }
+  })
+}

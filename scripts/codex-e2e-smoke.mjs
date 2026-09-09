@@ -200,13 +200,8 @@ export function buildCodexConfig({ model, baseUrl, clientSource }) {
 }
 
 export function buildCodexArgs({ model, workspace, outputPath, prompt, search = false, skipGitRepoCheck = false }) {
-  // Codex CLI >=0.149 rejects global flags placed before the subcommand
-  // (`error: unexpected argument '--skip-git-repo-check' found` with
-  // `tip: 'exec --skip-git-repo-check' exists`).  Place every global
-  // flag (--search, --skip-git-repo-check) immediately after `exec`,
-  // before the per-subcommand flag set.
-  const args = ['exec']
-  if (search) args.push('--search')
+  // Search is global; skip-git-repo-check belongs to exec.
+  const args = search ? ['--search', 'exec'] : ['exec']
   if (skipGitRepoCheck) args.push('--skip-git-repo-check')
   args.push(
     '--strict-config',
@@ -516,8 +511,8 @@ export function evaluateMultiTurnToolResult(finalText, canary) {
   const passed = finalText.trim() === expected
   return {
     passed,
-    expected,
-    final_text: finalText,
+    final_exact: passed,
+    final_text_length: finalText.length,
     reason: passed ? 'multi-turn recall matched the canary' : 'multi-turn recall did not match the canary',
   }
 }
@@ -676,7 +671,7 @@ async function runMultiTurnToolCase(context, testCase, options, runId, canary) {
       process_error: turn1Process.error,
       invalid_json_lines: turn1Parsed.invalidLines,
       event_summary: turn1Summary,
-      final_text: turn1Final,
+      final_text_length: turn1Final.length,
     },
     turn_2: {
       exit_code: turn2Process.code,
@@ -685,7 +680,7 @@ async function runMultiTurnToolCase(context, testCase, options, runId, canary) {
       process_error: turn2Process.error,
       invalid_json_lines: turn2Parsed.invalidLines,
       event_summary: turn2Summary,
-      final_text: turn2Final,
+      final_text_length: turn2Final.length,
     },
     evaluation,
     usage,

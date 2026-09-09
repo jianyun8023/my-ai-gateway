@@ -127,7 +127,9 @@ canary 和最终文本不匹配。
 结果写入 Git ignored 的 `target/codex-e2e/results/<run-id>.json`，只保存 commit、case、
 事件类型/数量、断言布尔值、Usage 汇总和安全的 Usage 元数据，不保存 prompt、完整模型
 输出、命令输出、Authorization 或 API Key。最终消息文件默认在断言后删除；只有显式传入
-`--keep-output` 才会保留以便调试。
+`--keep-output` 才会保留以便调试。多轮工具用例的成功结果与失败 diagnostics 均仅记录
+精确匹配布尔值、消息长度和事件统计，不写入期望答案、canary 或最终消息正文；内部比较
+和第二轮上下文注入仍使用完整文本。
 
 Artifact schema v2 将 Usage 中的 403/429 归类为 `provider_unavailable`；CLI/Gateway/Usage 都成功但模型未触发 shell 或 search item 时归类为 `not_triggered`；命令已触发却执行失败、canary/最终结果错误等仍为 `failed`。只有真正的 `failed` 令命令返回非零。
 
