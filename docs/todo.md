@@ -8,15 +8,20 @@
 | --- | --- | --- |
 | [#113 测试总计划](https://github.com/jianyun8023/my-ai-gateway/issues/113) | Contract、SDK、差分框架与本地外部扫描已接入 | 补齐 Kimi 原生切换后的真实 Provider 覆盖与生产复验，再核对总体验收 |
 | [#120 性能与故障验证](https://github.com/jianyun8023/my-ai-gateway/issues/120) | [PR #159](https://github.com/jianyun8023/my-ai-gateway/pull/159) 已合并故障测试、压测工具和 Mock 性能基线 | 明确含 PostgreSQL 写入、实际网络与部署资源的性能验收范围 |
-| [#110 事件中心](https://github.com/jianyun8023/my-ai-gateway/issues/110) | 方案 C 已收敛；[PR #183](https://github.com/jianyun8023/my-ai-gateway/pull/183) 承载窄 `system_events`、统一查询 API、恢复语义矩阵、运行事件页及评审修复 | 合入前以 PR 的最新 head 完成独立复审和 CI；合入后仍需在部署环境复核 migration、保留清理与历史数据规模下的查询，不把本地 PostgreSQL 或 Mock 结果当作生产验收 |
 
 ## 发布前
 
-1. 在部署环境确认 migration、Provider preset 和 Kimi 原生 Responses 行为，按 [live smoke](live-provider-smoke.md) 执行真实 Provider 验证。
+1. 在部署环境确认 migration（含 #110 的 `0024_system_events.sql`）、Provider preset 和 Kimi 原生 Responses 行为，按 [live smoke](live-provider-smoke.md) 执行真实 Provider 验证。
 2. 补齐 #96/#97/#98 的生产数据证据，尤其是 #98 的 estimated usage 根因。它们已关闭，但现有验收记录未完成生产复验。
-3. 验证生产 OTel collector 接收、数据保留与恢复流程；完成验收后再创建版本 tag / Release。
+3. 验证生产 OTel collector 接收、数据保留与恢复流程（含 `system_events`），以及历史生产数据规模下的 `/admin/events` 查询性能；完成验收后再创建版本 tag / Release。
 
 PR #159 的本地结果包括 24 组 Mock 性能矩阵，报告见 [性能基线](../tests/load/baselines/2026-09-07-m3-max/README.md)。这些结果不含 PostgreSQL 用量写入和生产网络开销。
+
+## 已完成实现（生产验收另行跟踪）
+
+[#110 事件中心](https://github.com/jianyun8023/my-ai-gateway/issues/110) 已按方案 C 由 [PR #183](https://github.com/jianyun8023/my-ai-gateway/pull/183) 合并实现（main 合并提交 `e3c9e24`）：新增窄 `system_events`、统一查询 API、恢复语义矩阵和“运行事件”页。最终精确 head 的独立评审与 CI 已通过，7/7 项代码验收完成，Issue 已关闭。
+
+上述结论不包含真实 Provider / live Codex E2E、生产部署后的 migration / retention，或历史生产数据规模下的查询性能；这些边界继续按上方发布前项目及 #113 / #120 跟踪。
 
 ## 已完成的控制台治理（历史证据）
 

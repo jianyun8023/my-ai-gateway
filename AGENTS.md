@@ -21,7 +21,7 @@
 
 ## 2. 当前实现快照
 
-以下在 **2026-09-09、main `668fde2`（本轮起点）** 核对；用于避免重复实现，后续任务仍需检查自己的分支。
+以下在 **2026-09-09、main `e3c9e24`（PR #183 合并提交）** 核对；用于避免重复实现，后续任务仍需检查自己的分支。
 
 - **数据面**：三协议 JSON/SSE 原生转发、首选账号与跨 Source/Provider fallback、健康冷却/主动探测、SSE 心跳/取消/超时、请求及 attempt 用量记录均已接入。
 - **控制面**：启动必须配置 PostgreSQL；Source / Account / LogicalModel / ModelBinding / Route CRUD、模型发现与确认、模型级协议能力声明、有效能力矩阵、runtime snapshot 更新已实现。
@@ -33,7 +33,7 @@
 
 当前跟踪与验收边界：
 
-- [#113 测试总计划](https://github.com/jianyun8023/my-ai-gateway/issues/113)与 [#120 性能基线与故障注入](https://github.com/jianyun8023/my-ai-gateway/issues/120)仍需继续跟踪。[#110 事件中心](https://github.com/jianyun8023/my-ai-gateway/issues/110)的方案 C 由 [PR #183](https://github.com/jianyun8023/my-ai-gateway/pull/183) 承载；代码合入、Issue 协调验收和部署后的 migration/保留清理复核是不同事实，以对应实时记录为准。[PR #159](https://github.com/jianyun8023/my-ai-gateway/pull/159) 已实现 `test-faults` / `test-load`，运行证据与覆盖边界见验收清单；不能将本地 Mock 性能视为生产性能或完整 live 验收。
+- 当前开放任务是 [#113 测试总计划](https://github.com/jianyun8023/my-ai-gateway/issues/113)与 [#120 性能基线与故障注入](https://github.com/jianyun8023/my-ai-gateway/issues/120)。[#110 事件中心](https://github.com/jianyun8023/my-ai-gateway/issues/110)的方案 C 已由 [PR #183](https://github.com/jianyun8023/my-ai-gateway/pull/183) 合并实现，7/7 项代码验收完成并关闭 Issue；这不代表部署后的 migration / 保留清理、生产历史规模查询或真实 Provider / live 验收已完成。[PR #159](https://github.com/jianyun8023/my-ai-gateway/pull/159) 已实现 `test-faults` / `test-load`，运行证据与覆盖边界见验收清单；不能将本地 Mock 性能视为生产性能或完整 live 验收。
 - #1、#50 已关闭；本轮已修正 TODO / 设计文档中的 OTel 待办等过时描述。#96 / #97 / #98 已关闭，但验收清单的生产复验未勾选，#98 评论仍明确缺根因结论；不得据关闭状态宣称生产问题已经验证解决。
 - PR #159 已合并修复：SSE usage 提取失败日志仅记录元数据，移除 Base64 正文预览与正文指纹；Chat 缺少 `[DONE]` 时，只有所有已出现 choice 均提供 `finish_reason` 才补结束标记，否则报告流截断错误。
 - 尚无 GitHub Release 或 tag。已有验收记录早于 Kimi 原生切换；完整 live 覆盖、部署后的 migration / Provider 行为与生产数据复验应按实际证据报告，不由历史勾选推断。
