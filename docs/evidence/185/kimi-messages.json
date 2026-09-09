@@ -1,0 +1,84 @@
+{
+  "schema_version": 1,
+  "revision": "68b849d6f0549ca46c884af85b5735bd46b0a547",
+  "dirty": true,
+  "started_at": "2026-09-09T02:59:36.656Z",
+  "scope": "Issue 185 fix: local current gateway binary, real Kimi credentials, dedicated local PostgreSQL schema, ordinary compression negotiation, exact token persistence checks.",
+  "issues": [
+    185,
+    186
+  ],
+  "result_policy": {
+    "high_cost_search": false,
+    "production_database_access": false,
+    "response_bodies_stored": false,
+    "secrets_stored": false
+  },
+  "results": [
+    {
+      "id": "kimi.anthropic_messages.json",
+      "provider": "kimi",
+      "protocol": "anthropic_messages",
+      "stream": false,
+      "model": "k3",
+      "http_status": 200,
+      "response_content_encoding": null,
+      "response_content_type": "application/json; charset=utf-8",
+      "decoded_response_bytes": 13483,
+      "response_usage": {
+        "input_tokens": 0,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 91,
+        "output_tokens": 36,
+        "output_tokens_details": {
+          "thinking_tokens": 22
+        },
+        "service_tier": "standard",
+        "inference_geo": "not_available"
+      },
+      "terminated_normally": true,
+      "outcome": "passed",
+      "usage_event": {
+        "request_id": "db342a9b-3e30-4dd1-a088-f1375460b551",
+        "provider_id": "custom",
+        "source_id": "kimi-live",
+        "account_id": "kimi-live",
+        "protocol_in": "anthropic_messages",
+        "protocol_upstream": "anthropic_messages",
+        "mode": "native",
+        "status_code": 200,
+        "success": true,
+        "retry_count": 0,
+        "streamed": false,
+        "usage_source": "upstream",
+        "input_tokens": 0,
+        "output_tokens": 36,
+        "reasoning_tokens": 0,
+        "cached_tokens": 91,
+        "cache_read_tokens": 91,
+        "cache_creation_tokens": 0,
+        "total_tokens": 36,
+        "attempts": [
+          {
+            "attempt_no": 0,
+            "provider_id": "custom",
+            "source_id": "kimi-live",
+            "account_id": "kimi-live",
+            "upstream_model_id": "k3",
+            "status_code": 200,
+            "success": true
+          }
+        ]
+      },
+      "exact_usage_match": true,
+      "schema_cleaned": true,
+      "duration_ms": 6137
+    }
+  ],
+  "finished_at": "2026-09-09T02:59:42.794Z",
+  "summary": {
+    "passed": 1,
+    "failed": 0,
+    "provider_unavailable": 0
+  }
+}

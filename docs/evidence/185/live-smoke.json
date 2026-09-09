@@ -1,0 +1,487 @@
+{
+  "schema_version": 2,
+  "run_id": "2026-09-09T02-58-07-307Z-becc2a00",
+  "git": {
+    "revision": "d69724dfae41005c8ec145856224332b5999d54f",
+    "branch": "codex/185-rc1-live-regressions",
+    "dirty": false
+  },
+  "started_at": "2026-09-09T02:58:07.308Z",
+  "finished_at": "2026-09-09T03:01:10.044Z",
+  "selected_cases": [
+    "deepseek.function",
+    "minimax.function",
+    "kimi.function",
+    "kimi.function_stream",
+    "fallback.deepseek_bai"
+  ],
+  "result_policy": {
+    "live_opt_in": true,
+    "high_cost_included": false,
+    "response_bodies_stored": false,
+    "known_issues_are_strict": true,
+    "transient_retries": 1
+  },
+  "preflight": {
+    "gateway_binary": true,
+    "psql": true,
+    "case_isolation": true,
+    "data_plane_auth": "database_virtual_key"
+  },
+  "summary": {
+    "passed": 5,
+    "not_triggered": 0,
+    "provider_unavailable": 0,
+    "failed": 0,
+    "known_issue_failures": 0
+  },
+  "known_issue_failures": [],
+  "results": [
+    {
+      "id": "deepseek.function",
+      "provider": "deepseek",
+      "cost": "low",
+      "outcome": "passed",
+      "duration_ms": 5103,
+      "metadata": {
+        "provider": "deepseek",
+        "tool_name": "lookup_weather",
+        "arguments_valid": true,
+        "first_duration_ms": 1416,
+        "second_duration_ms": 912,
+        "response_usage": [
+          {
+            "input_tokens": 294,
+            "output_tokens": 38,
+            "total_tokens": 332,
+            "cached_tokens": 256,
+            "cache_read_tokens": 256,
+            "cache_creation_tokens": 0,
+            "reasoning_tokens": 0
+          },
+          {
+            "input_tokens": 83,
+            "output_tokens": 14,
+            "total_tokens": 97,
+            "cached_tokens": 0,
+            "cache_read_tokens": 0,
+            "cache_creation_tokens": 0,
+            "reasoning_tokens": 0
+          }
+        ],
+        "usage_events": [
+          {
+            "request_id": "b9b3ac16-1522-4b31-b33f-a7f45d85345d",
+            "provider_id": "custom",
+            "source_id": "deepseek-live",
+            "account_id": "deepseek-live",
+            "protocol_in": "openai_chat_completions",
+            "protocol_upstream": "openai_chat_completions",
+            "mode": "native",
+            "status_code": 200,
+            "success": true,
+            "retry_count": 0,
+            "streamed": false,
+            "usage_source": "upstream",
+            "input_tokens": 294,
+            "output_tokens": 38,
+            "reasoning_tokens": 0,
+            "cached_tokens": 256,
+            "cache_read_tokens": 256,
+            "cache_creation_tokens": 0,
+            "total_tokens": 332,
+            "attempts": [
+              {
+                "attempt_no": 0,
+                "provider_id": "custom",
+                "source_id": "deepseek-live",
+                "account_id": "deepseek-live",
+                "upstream_model_id": "deepseek-v4-flash",
+                "status_code": 200,
+                "success": true
+              }
+            ]
+          },
+          {
+            "request_id": "5b663be4-d4d1-410e-9ec7-cd3d3b193f46",
+            "provider_id": "custom",
+            "source_id": "deepseek-live",
+            "account_id": "deepseek-live",
+            "protocol_in": "openai_chat_completions",
+            "protocol_upstream": "openai_chat_completions",
+            "mode": "native",
+            "status_code": 200,
+            "success": true,
+            "retry_count": 0,
+            "streamed": false,
+            "usage_source": "upstream",
+            "input_tokens": 83,
+            "output_tokens": 14,
+            "reasoning_tokens": 0,
+            "cached_tokens": 0,
+            "cache_read_tokens": 0,
+            "cache_creation_tokens": 0,
+            "total_tokens": 97,
+            "attempts": [
+              {
+                "attempt_no": 0,
+                "provider_id": "custom",
+                "source_id": "deepseek-live",
+                "account_id": "deepseek-live",
+                "upstream_model_id": "deepseek-v4-flash",
+                "status_code": 200,
+                "success": true
+              }
+            ]
+          }
+        ]
+      },
+      "attempts": [
+        {
+          "attempt_no": 0,
+          "outcome": "passed"
+        }
+      ]
+    },
+    {
+      "id": "minimax.function",
+      "provider": "minimax",
+      "cost": "low",
+      "outcome": "passed",
+      "duration_ms": 18223,
+      "metadata": {
+        "provider": "minimax",
+        "tool_name": "lookup_weather",
+        "arguments_valid": true,
+        "first_duration_ms": 13963,
+        "second_duration_ms": 3151,
+        "response_usage": [
+          {
+            "input_tokens": 415,
+            "output_tokens": 134,
+            "total_tokens": 549,
+            "cached_tokens": 128,
+            "cache_read_tokens": 128,
+            "cache_creation_tokens": 0,
+            "reasoning_tokens": 106
+          },
+          {
+            "input_tokens": 349,
+            "output_tokens": 67,
+            "total_tokens": 416,
+            "cached_tokens": 128,
+            "cache_read_tokens": 128,
+            "cache_creation_tokens": 0,
+            "reasoning_tokens": 51
+          }
+        ],
+        "usage_events": [
+          {
+            "request_id": "3bb5f335-edc2-4dde-a67b-bade674d7492",
+            "provider_id": "custom",
+            "source_id": "minimax-live",
+            "account_id": "minimax-live",
+            "protocol_in": "openai_chat_completions",
+            "protocol_upstream": "openai_chat_completions",
+            "mode": "native",
+            "status_code": 200,
+            "success": true,
+            "retry_count": 0,
+            "streamed": false,
+            "usage_source": "upstream",
+            "input_tokens": 415,
+            "output_tokens": 134,
+            "reasoning_tokens": 106,
+            "cached_tokens": 128,
+            "cache_read_tokens": 128,
+            "cache_creation_tokens": 0,
+            "total_tokens": 549,
+            "attempts": [
+              {
+                "attempt_no": 0,
+                "provider_id": "custom",
+                "source_id": "minimax-live",
+                "account_id": "minimax-live",
+                "upstream_model_id": "MiniMax-M3",
+                "status_code": 200,
+                "success": true
+              }
+            ]
+          },
+          {
+            "request_id": "37eb45c4-e5af-42b2-ac35-2e6d92946e17",
+            "provider_id": "custom",
+            "source_id": "minimax-live",
+            "account_id": "minimax-live",
+            "protocol_in": "openai_chat_completions",
+            "protocol_upstream": "openai_chat_completions",
+            "mode": "native",
+            "status_code": 200,
+            "success": true,
+            "retry_count": 0,
+            "streamed": false,
+            "usage_source": "upstream",
+            "input_tokens": 349,
+            "output_tokens": 67,
+            "reasoning_tokens": 51,
+            "cached_tokens": 128,
+            "cache_read_tokens": 128,
+            "cache_creation_tokens": 0,
+            "total_tokens": 416,
+            "attempts": [
+              {
+                "attempt_no": 0,
+                "provider_id": "custom",
+                "source_id": "minimax-live",
+                "account_id": "minimax-live",
+                "upstream_model_id": "MiniMax-M3",
+                "status_code": 200,
+                "success": true
+              }
+            ]
+          }
+        ]
+      },
+      "attempts": [
+        {
+          "attempt_no": 0,
+          "outcome": "passed"
+        }
+      ]
+    },
+    {
+      "id": "kimi.function",
+      "provider": "kimi",
+      "cost": "low",
+      "outcome": "passed",
+      "duration_ms": 25274,
+      "metadata": {
+        "tool_name": "lookup_weather",
+        "arguments_valid": true,
+        "first_duration_ms": 14453,
+        "second_duration_ms": 9820,
+        "response_usage": [
+          {
+            "input_tokens": 176,
+            "output_tokens": 97,
+            "total_tokens": 273,
+            "cached_tokens": 176,
+            "cache_read_tokens": 176,
+            "cache_creation_tokens": 0,
+            "reasoning_tokens": 46
+          },
+          {
+            "input_tokens": 341,
+            "output_tokens": 96,
+            "total_tokens": 437,
+            "cached_tokens": 0,
+            "cache_read_tokens": 0,
+            "cache_creation_tokens": 0,
+            "reasoning_tokens": 72
+          }
+        ],
+        "usage_events": [
+          {
+            "request_id": "45bbbac1-dd97-457f-b718-7887ca566ba5",
+            "provider_id": "custom",
+            "source_id": "kimi-live",
+            "account_id": "kimi-live",
+            "protocol_in": "openai_responses",
+            "protocol_upstream": "openai_responses",
+            "mode": "native",
+            "status_code": 200,
+            "success": true,
+            "retry_count": 0,
+            "streamed": false,
+            "usage_source": "upstream",
+            "input_tokens": 176,
+            "output_tokens": 97,
+            "reasoning_tokens": 46,
+            "cached_tokens": 176,
+            "cache_read_tokens": 176,
+            "cache_creation_tokens": 0,
+            "total_tokens": 273,
+            "attempts": [
+              {
+                "attempt_no": 0,
+                "provider_id": "custom",
+                "source_id": "kimi-live",
+                "account_id": "kimi-live",
+                "upstream_model_id": "k3",
+                "status_code": 200,
+                "success": true
+              }
+            ]
+          },
+          {
+            "request_id": "66b92dda-8b56-41bc-88cf-86566ad24531",
+            "provider_id": "custom",
+            "source_id": "kimi-live",
+            "account_id": "kimi-live",
+            "protocol_in": "openai_responses",
+            "protocol_upstream": "openai_responses",
+            "mode": "native",
+            "status_code": 200,
+            "success": true,
+            "retry_count": 0,
+            "streamed": false,
+            "usage_source": "upstream",
+            "input_tokens": 341,
+            "output_tokens": 96,
+            "reasoning_tokens": 72,
+            "cached_tokens": 0,
+            "cache_read_tokens": 0,
+            "cache_creation_tokens": 0,
+            "total_tokens": 437,
+            "attempts": [
+              {
+                "attempt_no": 0,
+                "provider_id": "custom",
+                "source_id": "kimi-live",
+                "account_id": "kimi-live",
+                "upstream_model_id": "k3",
+                "status_code": 200,
+                "success": true
+              }
+            ]
+          }
+        ]
+      },
+      "attempts": [
+        {
+          "attempt_no": 0,
+          "outcome": "passed"
+        }
+      ]
+    },
+    {
+      "id": "kimi.function_stream",
+      "provider": "kimi",
+      "cost": "low",
+      "outcome": "passed",
+      "duration_ms": 16762,
+      "metadata": {
+        "duration_ms": 15756,
+        "event_count": 36,
+        "sequence_monotonic": true,
+        "argument_delta_events": 6,
+        "arguments_done_events": 1,
+        "arguments_valid": true,
+        "tool_name": "lookup_weather",
+        "usage": {
+          "input_tokens": 176,
+          "output_tokens": 77,
+          "total_tokens": 253,
+          "cached_tokens": 176,
+          "cache_read_tokens": 176,
+          "cache_creation_tokens": 0,
+          "reasoning_tokens": 26
+        },
+        "usage_event": {
+          "request_id": "0e5dd78f-0f52-449e-86a4-7817676867ee",
+          "provider_id": "custom",
+          "source_id": "kimi-live",
+          "account_id": "kimi-live",
+          "protocol_in": "openai_responses",
+          "protocol_upstream": "openai_responses",
+          "mode": "native",
+          "status_code": 200,
+          "success": true,
+          "retry_count": 0,
+          "streamed": true,
+          "usage_source": "parsed",
+          "input_tokens": 176,
+          "output_tokens": 77,
+          "reasoning_tokens": 26,
+          "cached_tokens": 176,
+          "cache_read_tokens": 176,
+          "cache_creation_tokens": 0,
+          "total_tokens": 253,
+          "attempts": [
+            {
+              "attempt_no": 0,
+              "provider_id": "custom",
+              "source_id": "kimi-live",
+              "account_id": "kimi-live",
+              "upstream_model_id": "k3",
+              "status_code": 200,
+              "success": true
+            }
+          ]
+        }
+      },
+      "attempts": [
+        {
+          "attempt_no": 0,
+          "outcome": "passed"
+        }
+      ]
+    },
+    {
+      "id": "fallback.deepseek_bai",
+      "provider": "fallback",
+      "cost": "low",
+      "outcome": "passed",
+      "duration_ms": 117326,
+      "metadata": {
+        "duration_ms": 116419,
+        "response_usage": {
+          "input_tokens": 5,
+          "output_tokens": 3,
+          "total_tokens": 8,
+          "cached_tokens": 0,
+          "cache_read_tokens": 0,
+          "cache_creation_tokens": 0,
+          "reasoning_tokens": 3
+        },
+        "usage_event": {
+          "request_id": "b8430a12-f606-4923-92cf-ccfbf367afae",
+          "provider_id": "custom",
+          "source_id": "bai-live",
+          "account_id": "bai-live",
+          "protocol_in": "openai_chat_completions",
+          "protocol_upstream": "openai_chat_completions",
+          "mode": "native",
+          "status_code": 200,
+          "success": true,
+          "retry_count": 1,
+          "streamed": false,
+          "usage_source": "upstream",
+          "input_tokens": 5,
+          "output_tokens": 3,
+          "reasoning_tokens": 3,
+          "cached_tokens": 0,
+          "cache_read_tokens": 0,
+          "cache_creation_tokens": 0,
+          "total_tokens": 8,
+          "attempts": [
+            {
+              "attempt_no": 0,
+              "provider_id": "custom",
+              "source_id": "deepseek-failure-live",
+              "account_id": "deepseek-failure-live",
+              "upstream_model_id": "deepseek-v4-flash",
+              "status_code": 503,
+              "success": false
+            },
+            {
+              "attempt_no": 1,
+              "provider_id": "custom",
+              "source_id": "bai-live",
+              "account_id": "bai-live",
+              "upstream_model_id": "deepseek-v4-flash",
+              "status_code": 200,
+              "success": true
+            }
+          ]
+        }
+      },
+      "attempts": [
+        {
+          "attempt_no": 0,
+          "outcome": "passed"
+        }
+      ]
+    }
+  ]
+}

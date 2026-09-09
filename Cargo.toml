@@ -15,7 +15,7 @@ bytes = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 futures-util = "0.3"
 ipnet = "2"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "gzip"] }
 ring = "0.17"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -40,6 +40,7 @@ tracing-opentelemetry = "0.33"
 test-support = []
 
 [dev-dependencies]
+flate2 = "1"
 http-body-util = "0.1"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 tower = { version = "0.5", features = ["util"] }

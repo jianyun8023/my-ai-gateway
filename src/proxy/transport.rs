@@ -357,10 +357,15 @@ pub(crate) async fn forward_url_with_config(
         .and_then(|v| v.get("stream").and_then(serde_json::Value::as_bool))
         .unwrap_or(false);
     let mut request = client.post(url).map_err(TransportError::from)?.body(body);
+    // The gateway parses both JSON usage and SSE events, so it owns upstream
+    // content-encoding negotiation. Let the shared client advertise the gzip
+    // decoder it actually supports instead of forwarding a caller's br/zstd
+    // preferences. Reqwest decodes the body and removes its encoding/length
+    // headers before either parsing or forwarding the response.
     for (name, value) in request_headers {
         if !matches!(
             name.as_str(),
-            "host" | "content-length" | "authorization" | "x-api-key"
+            "host" | "content-length" | "authorization" | "x-api-key" | "accept-encoding"
         ) {
             request = request.header(name, value);
         }
@@ -506,6 +511,7 @@ mod tests {
         Router,
     };
     use futures_util::stream;
+    use std::io::Write;
     use std::{
         collections::HashMap,
         sync::{Arc, Mutex},
@@ -581,6 +587,218 @@ mod tests {
             capabilities: None,
             model_overrides: HashMap::new(),
             model_map: HashMap::new(),
+        }
+    }
+
+    fn gzip(bytes: &[u8]) -> Vec<u8> {
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(bytes).unwrap();
+        encoder.finish().unwrap()
+    }
+
+    #[tokio::test]
+    async fn gzip_json_is_decoded_before_usage_parsing_for_all_protocols() {
+        for (protocol, usage, accepted_encoding) in [
+            (
+                Protocol::OpenAiChatCompletions,
+                serde_json::json!({"prompt_tokens": 91, "completion_tokens": 48, "total_tokens": 139}),
+                "gzip, deflate, br, zstd",
+            ),
+            (
+                Protocol::OpenAiResponses,
+                serde_json::json!({"input_tokens": 91, "output_tokens": 48, "total_tokens": 139}),
+                "br",
+            ),
+            (
+                Protocol::AnthropicMessages,
+                serde_json::json!({"input_tokens": 91, "output_tokens": 48}),
+                "identity",
+            ),
+        ] {
+            let payload = serde_json::json!({
+                "usage": usage,
+                "provider_extension": {"preserved": true},
+                "content": [{"type": "thinking", "signature": "synthetic-signature"}],
+            })
+            .to_string();
+            let compressed = gzip(payload.as_bytes());
+            let recorded_encoding = Arc::new(Mutex::new(None));
+            let encoding = recorded_encoding.clone();
+            let upstream = spawn_router(Router::new().fallback(move |headers: HeaderMap| {
+                let compressed = compressed.clone();
+                *encoding.lock().unwrap() = headers.get(header::ACCEPT_ENCODING).cloned();
+                async move {
+                    Response::builder()
+                        .header(header::CONTENT_TYPE, "application/json")
+                        .header(header::CONTENT_ENCODING, "gzip")
+                        .header(header::CONTENT_LENGTH, compressed.len())
+                        .header("x-upstream-response", "preserved")
+                        .body(Body::from(compressed))
+                        .unwrap()
+                }
+            }))
+            .await;
+            let headers = HeaderMap::from_iter([(
+                header::ACCEPT_ENCODING,
+                HeaderValue::from_static(accepted_encoding),
+            )]);
+            let response = forward_url(
+                &test_client().unwrap(),
+                &upstream,
+                &account(),
+                None,
+                protocol,
+                &headers,
+                Bytes::from_static(br#"{"model":"m","stream":false}"#),
+            )
+            .await
+            .expect("decode gzip JSON");
+            let report = usage_from_response(&response).unwrap();
+            assert_eq!(report.source, "upstream");
+            assert_eq!(report.input_tokens, 91);
+            assert_eq!(report.output_tokens, 48);
+            assert_eq!(report.total_tokens, 139);
+            assert!(!response.headers().contains_key(header::CONTENT_ENCODING));
+            assert!(!response.headers().contains_key(header::CONTENT_LENGTH));
+            assert_eq!(response.headers()["x-upstream-response"], "preserved");
+            assert_eq!(
+                to_bytes(response.into_body(), 1024 * 1024).await.unwrap(),
+                payload.as_bytes(),
+            );
+            assert_eq!(
+                recorded_encoding.lock().unwrap().as_ref(),
+                Some(&HeaderValue::from_static("gzip")),
+                "upstream encoding negotiation belongs to the gateway",
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn gzip_sse_is_decoded_incrementally_before_tracking_and_usage() {
+        use futures_util::StreamExt;
+
+        for (protocol, first, last) in [
+            (
+                Protocol::OpenAiChatCompletions,
+                "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"OK\"},\"finish_reason\":null}]}\n\n",
+                "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":91,\"completion_tokens\":48,\"total_tokens\":139}}\n\ndata: [DONE]\n\n",
+            ),
+            (
+                Protocol::OpenAiResponses,
+                "event: response.created\ndata: {\"type\":\"response.created\",\"sequence_number\":0}\n\n",
+                "event: response.completed\ndata: {\"type\":\"response.completed\",\"sequence_number\":1,\"response\":{\"status\":\"completed\",\"usage\":{\"input_tokens\":91,\"output_tokens\":48,\"total_tokens\":139}}}\n\n",
+            ),
+            (
+                Protocol::AnthropicMessages,
+                "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":91}}}\n\n",
+                "event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":48}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
+            ),
+        ] {
+            let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+            encoder.write_all(first.as_bytes()).unwrap();
+            encoder.flush().unwrap();
+            let first_len = encoder.get_ref().len();
+            encoder.write_all(last.as_bytes()).unwrap();
+            let compressed = encoder.finish().unwrap();
+            let (sender, receiver) = tokio::sync::mpsc::channel::<Bytes>(2);
+            sender.send(Bytes::copy_from_slice(&compressed[..first_len])).await.unwrap();
+            let receiver = Arc::new(Mutex::new(Some(receiver)));
+            let upstream = spawn_router(Router::new().fallback(move || {
+                let receiver = receiver.lock().unwrap().take().unwrap();
+                async move {
+                    let body = stream::unfold(receiver, |mut receiver| async {
+                        receiver.recv().await.map(|bytes| (Ok::<_, std::io::Error>(bytes), receiver))
+                    });
+                    Response::builder()
+                        .header(header::CONTENT_TYPE, "text/event-stream")
+                        .header(header::CONTENT_ENCODING, "gzip")
+                        .body(Body::from_stream(body))
+                        .unwrap()
+                }
+            }))
+            .await;
+            let response = forward_url(
+                &test_client().unwrap(),
+                &upstream,
+                &account(),
+                None,
+                protocol,
+                &HeaderMap::new(),
+                Bytes::from_static(br#"{"model":"m","stream":true}"#),
+            )
+            .await
+            .unwrap();
+            assert!(!response.headers().contains_key(header::CONTENT_ENCODING));
+            let mut body = response.into_body().into_data_stream();
+            let first_chunk = tokio::time::timeout(Duration::from_secs(1), body.next())
+                .await
+                .expect("a decoded event must arrive before the remaining gzip body")
+                .unwrap()
+                .unwrap();
+            assert_eq!(first_chunk.as_ref(), first.as_bytes());
+            sender.send(Bytes::copy_from_slice(&compressed[first_len..])).await.unwrap();
+            drop(sender);
+            let remaining = tokio::time::timeout(Duration::from_secs(1), body.try_collect::<Vec<_>>())
+                .await
+                .unwrap()
+                .unwrap();
+            let mut decoded = first_chunk.to_vec();
+            for chunk in remaining { decoded.extend_from_slice(&chunk); }
+            assert_eq!(decoded, format!("{first}{last}").as_bytes());
+            let report = crate::proxy::usage::usage_for_sse_response("gzip-sse", true, b"{}", &decoded);
+            assert_eq!(report.source, "parsed");
+            assert_eq!(report.input_tokens, 91);
+            assert_eq!(report.output_tokens, 48);
+        }
+    }
+
+    #[tokio::test]
+    async fn truncated_gzip_is_an_error_for_json_and_sse() {
+        for streaming in [false, true] {
+            let mut compressed = gzip(if streaming {
+                b"event: response.created\ndata: {\"type\":\"response.created\"}\n\n"
+            } else {
+                br#"{"usage":{"input_tokens":91,"output_tokens":48}}"#
+            });
+            compressed.truncate(compressed.len() - 8);
+            let upstream = spawn_router(Router::new().fallback(move || {
+                let compressed = compressed.clone();
+                async move {
+                    Response::builder()
+                        .header(
+                            header::CONTENT_TYPE,
+                            if streaming {
+                                "text/event-stream"
+                            } else {
+                                "application/json"
+                            },
+                        )
+                        .header(header::CONTENT_ENCODING, "gzip")
+                        .body(Body::from(compressed))
+                        .unwrap()
+                }
+            }))
+            .await;
+            let response = forward_url(
+                &test_client().unwrap(),
+                &upstream,
+                &account(),
+                None,
+                Protocol::OpenAiResponses,
+                &HeaderMap::new(),
+                Bytes::from(format!(r#"{{"model":"m","stream":{streaming}}}"#)),
+            )
+            .await;
+            if streaming {
+                let bytes = to_bytes(response.unwrap().into_body(), 1024 * 1024)
+                    .await
+                    .unwrap();
+                let text = String::from_utf8(bytes.to_vec()).unwrap();
+                assert!(text.contains("gateway_upstream_error"));
+                assert!(!text.contains("response.completed"));
+            } else {
+                assert!(matches!(response, Err(TransportError::Request)));
+            }
         }
     }
 

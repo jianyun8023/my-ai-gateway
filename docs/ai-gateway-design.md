@@ -131,6 +131,8 @@ MiniMax、DeepSeek 等 Provider 如果同时提供三种协议接口，则为每
 
 Web Search、Tools、Thinking、Vision、Provider 扩展字段在原生透传路径中保持原始 JSON 和 SSE 语义。
 
+上游响应的 HTTP 压缩由网关协商：代理不转发客户端的 `Accept-Encoding`，共享 HTTP client 按已启用的解码能力协商 gzip，并在 JSON usage 解析、SSE 事件跟踪与转发前解压。解码后的响应移除原 `Content-Encoding` / `Content-Length`，保留解码后的正文内容及协议字段；gzip SSE 逐块解码，继续遵守首事件、空闲、总时限和取消约束。压缩体读取/校验失败按已有上游错误路径处理，不将压缩字节估算成成功请求 Token（#185）。
+
 ### 3.3 Kimi Code
 
 Kimi Code 官方于 2026-09 原生支持 OpenAI Responses（`POST /coding/v1/responses`，2026-09-06 实测返回标准 Responses 语义：reasoning item、流式 function_call 事件、`usage.input_tokens_details.cached_tokens`、`incomplete_details`），三协议全部按原生透传处理：

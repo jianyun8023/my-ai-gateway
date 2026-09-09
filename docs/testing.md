@@ -188,6 +188,10 @@ TZ=America/New_York mise exec -- npm --prefix web test -- src/gateway-usage/filt
 启用时），因此 `mise run test` 已隐式覆盖这些测试。若只跑 Rust 部分，可直接执行
 `cargo test --workspace --features test-support -- --test-threads=1`。
 
+### 上游 gzip 响应回归
+
+压缩响应回归（#185）包含在默认 Rust 单测中：三协议 JSON 验证解压后的正文、响应头和上游 usage；三协议 SSE 用分段压缩响应验证首事件在剩余响应发送前即可到达，并核对事件与 parsed usage；截断 gzip 验证 JSON 传输失败和 SSE 异常结束。可单独运行 `cargo test --lib gzip -- --test-threads=1`，无需 Provider 凭据。
+
 ### `test-faults` / `test-load` 运行方式
 
 #120 的故障入口和本地负载工具已实现，详见 [负载/故障说明](../tests/load/README.md)。`test-faults` 运行 Router 故障回归、SSE 生命周期和 attempt 归因；`test-load` 使用固定 k6 + xk6-sse 对比 Direct/Gateway，默认覆盖四类请求与六档并发。先运行 `mise run build-load-tools`，结果写入 `target/test-reports/load/`。真实 Provider 压测要求独立的 `LOAD_TESTS=1` 显式启用。
