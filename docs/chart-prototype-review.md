@@ -1,6 +1,6 @@
 # 用量图表与原型核对（#166，第五批）
 
-2026-09-08；实现基线为 `main ab5dad0`（PR #172）。原型依据是 [归档说明](prototypes/README.md)指定的 [2026-08-31 HTML 原型](prototypes/ai-gateway-prototype.html)，重点核对总览与用量分析。原型用于交互和视觉参考，数值为示意；当前 API、Token 语义和领域约束仍是实际行为依据。
+2026-09-08；实现基线为 `main ab5dad0`（PR #172）。原型依据是 [归档说明](prototypes/README.md)指定的 [2026-08-31 HTML 原型](prototypes/ai-gateway-prototype.html)，重点核对总览与用量分析。原型用于交互和视觉参考，数值为示意；当前 API、Token 语义和领域约束仍是实际行为依据。本文是 #166 第五批历史快照；其中“未增加事件中心”仅描述该批范围，#110 后续已另行实现运行事件入口。
 
 ## 差距与本批处理
 

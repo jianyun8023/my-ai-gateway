@@ -1,6 +1,6 @@
 # 前端架构与治理
 
-控制台是 React + TypeScript + Vite 应用，通过 `/admin/` 提供八个导航入口。本文约定代码职责、共享能力与检查门禁；领域与协议基线仍以 [设计文档](ai-gateway-design.md) 为准，视觉与交互遵循 [design.md](../design.md)。
+控制台是 React + TypeScript + Vite 应用，通过 `/admin/` 提供九个导航入口。本文约定代码职责、共享能力与检查门禁；领域与协议基线仍以 [设计文档](ai-gateway-design.md) 为准，视觉与交互遵循 [design.md](../design.md)。
 
 本轮沿用后端治理的分层、共享能力收敛、死代码清理和门禁方式，实现位于 `codex/frontend-architecture-governance`。起点为 2026-09-08 的 `main` `de708e8`，完成后整合已合并后端治理的 `main` `efeb445`。
 
@@ -11,8 +11,8 @@
 | 层 | 入口与职责 |
 | --- | --- |
 | 应用装配 | `main.tsx` 初始化与挂载；`Root.tsx` 同步主题；`App.tsx` 接入连接状态、导航和页面 |
-| 导航与页面 | `lib/consoleNavigation.ts` 定义八个 hash 入口；`pages/` 组合功能与刷新状态 |
-| 业务功能 | `features/usage/` 组织筛选、总览、分析、事件与详情；`features/control-plane/` 组织来源、发现、模型路由、能力矩阵与设置 |
+| 导航与页面 | `lib/consoleNavigation.ts` 定义九个 hash 入口；`pages/` 组合功能与刷新状态 |
+| 业务功能 | `features/usage/` 组织筛选、总览、分析、请求事件与详情；`features/events/` 组织统一运行事件时间线；`features/control-plane/` 组织来源、发现、模型路由、能力矩阵与设置 |
 | 资源与数据 | `admin-api/resources.ts` 封装控制面资源；`gateway-usage/` 封装用量查询、过滤、游标合并及响应适配 |
 | HTTP 传输 | `admin-api/client.ts` 是管理请求的统一入口；`admin-api/errors.ts` 提供错误归一化 |
 | 共享能力 | `hooks/` 提供查询生命周期；`lib/` 管理导航、协议与偏好存储；`utils/` 提供格式化和下载 |
@@ -26,6 +26,9 @@ App → GatewayUsagePage → features/usage → GatewayUsageClient
 
 App → GatewayManagementPage → features/control-plane → useAdminQuery / 资源操作
     → AdminApi 资源 → AdminClient → /admin/*
+
+App → GatewayManagementPage → features/events → useAdminQuery / 游标合并
+    → GatewayAdminResources → AdminClient → /admin/events
 ```
 
 页面负责组合，表单、详情和局部展示放到所属功能目录。来源与账号、模型发现与确认、逻辑模型与 Binding/Route 的职责保持分离；拆组件不能改变提交字段或能力判断。
@@ -55,35 +58,28 @@ App → GatewayManagementPage → features/control-plane → useAdminQuery / 资
 
 相对时间只保存预设，不保存过期的绝对窗口。每轮首次查询、刷新或重试重新解析时间，同一轮的统计、分页和导出使用固定窗口，避免滚动时间导致页面间边界漂移。页面跨日后在刷新时切换自然日窗口。
 
-`useUsageData` 为每轮查询持有 AbortController、有效筛选与游标。切换筛选、页面、粒度或刷新时取消旧查询；即使底层在取消后返回，也不发布旧结果。分页在请求发起前同步加锁，按事件 ID 去重，避免滚动回调重复请求同一游标。`useAdminQuery` 为控制面和事件详情复用取消、加载、失败与重试流程。
+`useUsageData` 为每轮查询持有 AbortController、有效筛选与游标。切换筛选、页面、粒度或刷新时取消旧查询；即使底层在取消后返回，也不发布旧结果。分页在请求发起前同步加锁，按事件 ID 去重，避免滚动回调重复请求同一游标。`useAdminQuery` 为控制面、运行事件首屏和事件详情复用取消、加载、失败与重试流程；运行事件的后续页另外绑定首屏响应身份、取消旧请求并按 namespaced `event_id` 去重，筛选切换后不会拼入旧页。
 
 ## 组件与布局
 
-事件详情复用 `Modal` drawer，统一关闭、Escape、焦点约束与恢复。宽表通过 `TableScroll` 或事件列表自己的滚动容器滚动；控制台 flex / grid 子项必须允许收缩，不能让表格撑宽整页。日期预设在窄屏换行。
+请求事件与运行事件详情复用 `Modal` drawer，统一关闭、Escape、焦点约束与恢复。宽表通过 `TableScroll` 或事件列表自己的滚动容器滚动；控制台 flex / grid 子项必须允许收缩，不能让表格撑宽整页。日期预设在窄屏换行。
 
 删除没有生产调用方的旧组件、图标、路由辅助函数与独占样式。测试夹具统一放在 `src/test/fixtures/`，不混入生产数据层。保留 CPA Usage Keeper 的 MIT 许可与来源说明。
 
 ## 与 Mantine 全局治理 #166 的衔接
 
-2026-09-08 后续实施：#166 已从 `main c99455e` 开始，首批接入 Mantine 9.6.0 的 Provider、Modal/Drawer、移动导航和列偏好 Popover。以下表格保留 #168 交接时的历史范围；当前组件职责及逐页证据以 [design.md](../design.md) 与 [迁移清单](mantine-migration.md) 为准。首批不代表 #166 全页面治理与验收完成。
+截至 2026-09-09，[#166](https://github.com/jianyun8023/my-ai-gateway/issues/166) 的 54 项原始范围与验收项已完成并关闭，PR [#169](https://github.com/jianyun8023/my-ai-gateway/pull/169)–[#182](https://github.com/jianyun8023/my-ai-gateway/pull/182) 均已合并。当前组件职责与规则以 [design.md](../design.md) 和本文为准；逐批迁移、构建体积、实际 App + 合成 API 浏览器矩阵、截图及未执行边界保留在 [迁移清单](mantine-migration.md)。
 
-[#166](https://github.com/jianyun8023/my-ai-gateway/issues/166) 负责采用 Mantine 统一八个页面的设计系统；本轮架构治理不改变这项决策，也不完成其全页面 UI 迁移与验收。该 Issue 的调查链接固定在旧提交，后续清单应按本轮的新入口更新。
+最终证据索引：
 
-以下路径相对于 `web/src/`：
+- PR #169–#173：主题、浮层、字段、筛选、反馈与图表基础；
+- PR #174–#179：控制面表格、虚拟请求表、应用壳、通知、KPI 与页面组合；
+- PR #180–#182：[查询生命周期](mantine-migration.md#第十二批页面状态与查询生命周期验收)、[最终组件/交互审计](mantine-migration.md#第十三批最终组件审计与适用交互收尾)与[逐页业务状态闭环](mantine-migration.md#第十四批逐页业务状态证据闭环)；
+- 54 项的最终归并依据见[原始未勾项映射](mantine-migration.md#对-166-原始未勾项的最终映射)。
 
-| #166 涉及范围 | 本轮影响 | 后续接入点与剩余工作 |
-| --- | --- | --- |
-| 应用入口与主题 | 主题初始化组件从 `main.tsx` 拆到 `Root.tsx`；全局样式加载顺序保持不变 | 在新入口装配 MantineProvider；统一 `useThemeStore`、CSS 变量、Portal 与图表主题，不能假定本轮已经完成主题迁移 |
-| 事件详情 | 从 `pages/GatewayUsagePage.tsx` 移到 `features/usage/UsageEventDetails.tsx`，改为复用公共 `Modal` drawer | 与控制面一同迁移公共 Modal/Drawer；当前公共组件仍保留手写焦点、滚动锁和动画逻辑 |
-| 控制面表单与详情 | 拆入 `features/control-plane/sources/`、`models/`、`discovery/` 与 `VirtualKeyForm.tsx` | 对新文件迁移控件；来源、实体和能力详情仍有外部关闭计时器，需要随 Mantine 生命周期一并收敛 |
-| 列设置、图表与虚拟列表 | 分别位于 `features/usage/UsageEvents.tsx`、`UsageOverview.tsx`、`UsageAnalysis.tsx`、`charts.ts` | 列设置仍是原生 `details`；Popover、图表主题与虚拟列表布局验收仍由 #166 完成 |
-| 旧公共组件 | 删除无生产调用的 Input、Select、MainActionButton、PortalTooltip、QuestionMarkHelp、QuestionMarkHelpButton 及独占样式 | 从“待迁移”清单移除这些遗留实现；活跃 FormField、Button、IconButton 等仍需接入体系 |
-| 应用壳与时间筛选 | 修正主内容收缩约束；八个实际 hash 入口不变；新增今天/昨天并固定同轮查询窗口 | 保留表格内部滚动、自然日/滚动时间与查询取消契约；移动侧栏的手写浮层行为仍需迁移和组合验收 |
-| 门禁与依赖 | 新增开发依赖及分层、Fast Refresh、测试类型和 Knip 检查；没有引入运行时 UI 库 | Mantine 外部导入不被分层规则禁止；共享主题与组合组件应放在公共层，新增示例须有实际入口，移除被替代实现后通过门禁 |
+#166 覆盖当时的八个页面。#110 后续新增的第九个“运行事件”入口复用相同公共组件、布局和查询取消约束，但必须使用自己的测试与浏览器记录验收；不能把 #166 的八页证据外推为第九页证据，也不能外推为真实 Provider、生产配置、屏幕阅读器人工朗读或帧耗时基准。
 
-两个任务会共同修改 `main.tsx`、`Root.tsx`、`components/ui/`、页面样式、`package.json` / 锁文件和 `design.md`。建议 #166 从本轮 PR 合并后的主线开始实现；已开始的分支先整合本轮提交，再按新路径迁移，避免重新建立旧页面内实现。依赖合并应保留两边所需的依赖与检查脚本，并通过 npm 重新生成一致的锁文件。
-
-本轮的桌面/窄屏局部检查不能替代 #166 要求的八页面、双主题、嵌套浮层、滚动与性能验收；本轮 PR 只关联 #166，不关闭它。
+PR #168 交接时关于 MantineProvider、公共 Modal/Drawer、字段、Popover、图表、虚拟列表和旧样式的“后续接入”描述只是首批历史快照，相关代码迁移与适用交互已经由上述后续批次收敛，不再作为当前待办。新增页面继续从 `components/ui` 与既有功能组合复用，不恢复已删除的手写 Portal、浮层、字段或重复主题状态。
 
 ## 持续检查
 

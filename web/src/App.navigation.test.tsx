@@ -46,7 +46,7 @@ describe('App console routing', () => {
     vi.unstubAllGlobals();
   });
 
-  it('flat sidebar shows all 8 navigation pages', async () => {
+  it('flat sidebar shows all 9 navigation pages', async () => {
     window.location.hash = '#overview';
     await act(async () => {
       root.render(<App />);
@@ -54,11 +54,12 @@ describe('App console routing', () => {
     });
 
     const navButtons = container.querySelectorAll('nav[aria-label="主导航"] button');
-    expect(navButtons).toHaveLength(8);
+    expect(navButtons).toHaveLength(9);
     expect(Array.from(navButtons).map((b) => b.textContent)).toEqual(expect.arrayContaining([
       expect.stringContaining('总览'),
       expect.stringContaining('用量分析'),
       expect.stringContaining('请求事件'),
+      expect.stringContaining('运行事件'),
       expect.stringContaining('来源管理'),
       expect.stringContaining('模型发现'),
       expect.stringContaining('模型与路由'),

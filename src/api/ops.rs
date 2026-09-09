@@ -397,7 +397,7 @@ pub(crate) async fn import_control_plane(
         Ok(result) => {
             let revision = result.snapshot.revision;
             let generated_at = result.snapshot.generated_at;
-            state.reload_snapshot(result.snapshot);
+            state.reload_snapshot(result.snapshot).await;
             (
                 StatusCode::OK,
                 Json(json!({

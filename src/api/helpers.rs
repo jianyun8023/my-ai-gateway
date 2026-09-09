@@ -10,7 +10,7 @@ use serde_json::json;
 use crate::{
     control_plane,
     http::response::error_response,
-    infra::{db, health, ops},
+    infra::{db, events::SystemEvent, health, ops},
     state::AppState,
 };
 
@@ -114,16 +114,30 @@ pub(crate) fn control_plane_error(error: control_plane::ControlPlaneError) -> Re
     error_response(status, error.code(), &error.message())
 }
 
-pub(crate) fn admin_result<T: serde::Serialize>(
+pub(crate) async fn admin_result<T: serde::Serialize>(
+    state: &AppState,
     result: Result<T, control_plane::ControlPlaneError>,
 ) -> Response<Body> {
     match result {
-        Ok(record) => (StatusCode::OK, Json(json!({"data": record}))).into_response(),
-        Err(error) => control_plane_error(error),
+        Ok(record) => {
+            state.events.database_recovered("control_plane.read").await;
+            (StatusCode::OK, Json(json!({"data": record}))).into_response()
+        }
+        Err(error) => {
+            if let control_plane::ControlPlaneError::Database(ref database_error) = error {
+                state
+                    .events
+                    .database_failed("control_plane.read", database_error)
+                    .await;
+            } else {
+                state.events.database_recovered("control_plane.read").await;
+            }
+            control_plane_error(error)
+        }
     }
 }
 
-pub(crate) fn mutation_result<T: serde::Serialize>(
+pub(crate) async fn mutation_result<T: serde::Serialize>(
     state: &AppState,
     status: StatusCode,
     result: Result<control_plane::Mutation<T>, control_plane::ControlPlaneError>,
@@ -132,27 +146,73 @@ pub(crate) fn mutation_result<T: serde::Serialize>(
         Ok(mutation) => {
             let revision = mutation.snapshot.revision;
             let generated_at = mutation.snapshot.generated_at;
-            state.reload_snapshot(mutation.snapshot);
+            state.reload_snapshot(mutation.snapshot).await;
             (
                 status,
                 Json(json!({"data": mutation.record, "snapshot_revision": revision, "snapshot_generated_at": generated_at})),
             )
                 .into_response()
         }
-        Err(error) => control_plane_error(error),
+        Err(error) => {
+            if let control_plane::ControlPlaneError::Database(ref database_error) = error {
+                state
+                    .events
+                    .database_failed("control_plane.mutation", database_error)
+                    .await;
+            }
+            control_plane_error(error)
+        }
     }
 }
 
-pub(crate) fn delete_result(
+pub(crate) async fn delete_result(
     state: &AppState,
     result: Result<control_plane::RuntimeSnapshot, control_plane::ControlPlaneError>,
 ) -> Response<Body> {
     match result {
         Ok(snapshot) => {
-            state.reload_snapshot(snapshot);
+            state.reload_snapshot(snapshot).await;
             StatusCode::NO_CONTENT.into_response()
         }
-        Err(error) => control_plane_error(error),
+        Err(error) => {
+            if let control_plane::ControlPlaneError::Database(ref database_error) = error {
+                state
+                    .events
+                    .database_failed("control_plane.mutation", database_error)
+                    .await;
+            }
+            control_plane_error(error)
+        }
+    }
+}
+
+pub(crate) async fn record_snapshot_build_failure(
+    state: &AppState,
+    error: &control_plane::ControlPlaneError,
+) {
+    let database_failure = matches!(error, control_plane::ControlPlaneError::Database(_));
+    if let control_plane::ControlPlaneError::Database(database_error) = error {
+        state
+            .events
+            .database_failed("runtime.snapshot", database_error)
+            .await;
+    }
+    let mut event = SystemEvent::new(
+        "configuration",
+        "runtime.snapshot_build_failed",
+        "error",
+        "runtime_snapshot",
+        "Runtime snapshot build failed",
+    )
+    .subject_id("candidate")
+    .details(json!({"error_code": error.code()}));
+    if let Some(context) = crate::infra::audit::current_context() {
+        event = event.correlation_id(context.request_id);
+    }
+    if database_failure {
+        state.events.record_during_database_incident(event).await;
+    } else {
+        state.events.record(event).await;
     }
 }
 

@@ -8,6 +8,7 @@ use std::{fmt, time::Duration};
 #[derive(Clone)]
 pub(crate) struct Database {
     pool: PgPool,
+    events: crate::infra::events::EventRepository,
 }
 
 /// Persisted account health row. `health_updated_at` is independent of the
@@ -332,14 +333,14 @@ impl Database {
             .max_connections(10)
             .connect(url)
             .await?;
-        let db = Self { pool };
+        let db = Self::from_pool(pool);
         db.migrate().await?;
         Ok(db)
     }
 
     #[cfg(test)]
     pub(crate) async fn from_test_pool(pool: PgPool) -> Result<Self, sqlx::Error> {
-        let db = Self { pool };
+        let db = Self::from_pool(pool);
         db.migrate().await?;
         Ok(db)
     }
@@ -394,6 +395,9 @@ impl Database {
         sqlx::raw_sql(include_str!("../../migrations/0012_health_persistence.sql"))
             .execute(&mut *tx)
             .await?;
+        sqlx::raw_sql(include_str!("../../migrations/0014_admin_audit.sql"))
+            .execute(&mut *tx)
+            .await?;
         sqlx::raw_sql(include_str!(
             "../../migrations/0015_virtual_key_lifecycle.sql"
         ))
@@ -437,11 +441,25 @@ impl Database {
         ))
         .execute(&mut *tx)
         .await?;
+        sqlx::raw_sql(include_str!("../../migrations/0024_system_events.sql"))
+            .execute(&mut *tx)
+            .await?;
         tx.commit().await
     }
 
     pub(crate) fn pool(&self) -> &PgPool {
         &self.pool
+    }
+
+    pub(crate) fn from_pool(pool: PgPool) -> Self {
+        Self {
+            events: crate::infra::events::EventRepository::new(pool.clone()),
+            pool,
+        }
+    }
+
+    pub(crate) fn event_repository(&self) -> crate::infra::events::EventRepository {
+        self.events.clone()
     }
 }
 

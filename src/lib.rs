@@ -47,6 +47,7 @@ pub mod test_support {
             http: crate::http::test_client().expect("test HTTP client"),
             db: None,
             control_plane: None,
+            events: crate::infra::events::EventRepository::disabled(),
             health: crate::infra::health::HealthRegistry::new(std::time::Duration::from_secs(30)),
             admin_auth: crate::auth::AdminAuth::from_key(None),
             secrets: crate::infra::secrets::SecretResolver::empty(),

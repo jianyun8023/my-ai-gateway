@@ -500,6 +500,79 @@ export interface RuntimeReloadResult {
   snapshot_generated_at: string;
 }
 
+export const RUNTIME_EVENT_CATEGORIES = [
+  'lifecycle',
+  'configuration',
+  'database',
+  'security',
+  'request',
+  'health',
+  'operation',
+  'admin',
+  'discovery',
+] as const;
+
+export const RUNTIME_EVENT_LEVELS = ['info', 'warning', 'error'] as const;
+
+export const RUNTIME_EVENT_SOURCES = [
+  'system_events',
+  'usage_events',
+  'account_health_events',
+  'audit_logs',
+  'source_discovery_runs',
+] as const;
+
+export type RuntimeEventCategory = typeof RUNTIME_EVENT_CATEGORIES[number];
+export type RuntimeEventLevel = typeof RUNTIME_EVENT_LEVELS[number];
+export type RuntimeEventSource = typeof RUNTIME_EVENT_SOURCES[number];
+
+export interface RuntimeEventRecord {
+  event_id: string;
+  occurred_at: string;
+  category: RuntimeEventCategory;
+  event_type: string;
+  level: RuntimeEventLevel;
+  subject_type: string;
+  subject_id?: string | null;
+  correlation_id?: string | null;
+  message: string;
+  details: JsonObject;
+  source: RuntimeEventSource;
+}
+
+export interface RuntimeEventFilters {
+  from?: string;
+  since?: string;
+  to?: string;
+  category?: RuntimeEventCategory;
+  level?: RuntimeEventLevel;
+  event_type?: string;
+  subject_type?: string;
+  subject_id?: string;
+  correlation_id?: string;
+  source?: RuntimeEventSource;
+  limit?: number;
+  cursor?: string;
+}
+
+export interface RuntimeEventResponse {
+  version: 'v1' | string;
+  timezone: 'UTC' | string;
+  fact_source: 'postgresql_unified_read_model' | string;
+  range: {
+    from?: string | null;
+    since?: string | null;
+    to?: string | null;
+    boundary: string;
+  };
+  data: RuntimeEventRecord[];
+  page: {
+    limit: number;
+    has_more: boolean;
+    next_cursor?: string | null;
+  };
+}
+
 export interface SanitizedConfigurationExport {
   version: 'v1';
   exported_at: string;

@@ -76,7 +76,7 @@ cargo test --workspace -- --include-ignored --test-threads=1
 '''
 
 [tasks.ops-retention-dry-run]
-description = "预览四类历史数据的保留清理候选"
+description = "预览五类历史数据的保留清理候选"
 run = "cargo run -- ops retention-cleanup --dry-run"
 
 [tasks.ops-control-plane-export]

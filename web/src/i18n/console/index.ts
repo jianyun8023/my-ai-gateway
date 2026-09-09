@@ -8,6 +8,7 @@ import { usage as enUsage } from './en/usage';
 import { sources as enSources } from './en/sources';
 import { models as enModels } from './en/models';
 import { discovery as enDiscovery } from './en/discovery';
+import { runtimeEvents as enRuntimeEvents } from './en/runtimeEvents';
 import { capabilities as enCapabilities } from './en/capabilities';
 import { settings as enSettings } from './en/settings';
 import { values as enValues } from './en/values';
@@ -18,6 +19,7 @@ import { usage as zhUsage } from './zh/usage';
 import { sources as zhSources } from './zh/sources';
 import { models as zhModels } from './zh/models';
 import { discovery as zhDiscovery } from './zh/discovery';
+import { runtimeEvents as zhRuntimeEvents } from './zh/runtimeEvents';
 import { capabilities as zhCapabilities } from './zh/capabilities';
 import { settings as zhSettings } from './zh/settings';
 import { values as zhValues } from './zh/values';
@@ -30,6 +32,7 @@ const en = {
   sources: enSources,
   models: enModels,
   discovery: enDiscovery,
+  runtimeEvents: enRuntimeEvents,
   capabilities: enCapabilities,
   settings: enSettings,
   values: enValues,
@@ -43,6 +46,7 @@ const zh = {
   sources: zhSources,
   models: zhModels,
   discovery: zhDiscovery,
+  runtimeEvents: zhRuntimeEvents,
   capabilities: zhCapabilities,
   settings: zhSettings,
   values: zhValues,

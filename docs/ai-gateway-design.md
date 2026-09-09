@@ -468,6 +468,37 @@ v1 响应 envelope 固定如下：summary 为 `{version, timezone, range, data}`
 - diff 只保留字段名和类型，不保留标量值；敏感字段（credential、token、prompt 等 14 类）自动标记并排除；
 - Admin 路由中间件已接入，自动从请求方法、路径和 payload 推导 `action`、`resource_type` 和 `resource_id`。
 
+### 运行事件中心与恢复语义（#110）
+
+事件中心采用方案 C（窄系统表 + 统一读侧），不复制既有事实，也不建立第二套状态机。`migrations/0024_system_events.sql` 新增 `system_events`，只保存原本仅存在于进程日志的生命周期、配置、数据库和安全事件；账号当前健康仍以 `accounts` 为准，请求/attempt、健康转换、Admin/运维审计和模型发现仍分别以原表为准：
+
+| 事件类别 | 权威存储 | 统一时间线范围 |
+| --- | --- | --- |
+| 进程启动/优雅关闭、config reload、runtime snapshot 构建/切换 | `system_events` | 全部 |
+| 数据库连接异常/恢复、master key 或账号凭据解析失败 | `system_events` | 全部；仅记录组件、主体和稳定错误码 |
+| Admin 写入与后台运维生命周期 | `audit_logs` | 全部 |
+| 账号健康转换 | `account_health_events` | 全部；当前状态仍读取 `accounts` |
+| 模型发现运行 | `source_discovery_runs` | 全部 |
+| 数据面请求 | `usage_events` | 只投影失败、fallback 或 degraded 请求；普通成功请求留在 Request Events |
+
+`system_events` 固定字段为 UTC `occurred_at`、`category`、`event_type`、`level`、`subject_type/id`、`correlation_id`、短 `message` 和 metadata-only `details`。写入器与统一查询返回边界共用脱敏规则，限制长度、层级和字段数，递归移除 credential、token、Authorization、prompt/response、thinking/signature 等敏感内容。既有 audit actor、discovery requested_by 属于非必要且任意调用方可控的文本，在统一投影中无条件替换为 `[REDACTED]`，不能依赖供应商 Key 前缀识别。通用 Admin 请求可自带的 `X-Request-ID` 只保留为服务端筛选键：audit 的主体/关联输出和复用该值的配置类 system event 关联输出固定脱敏，避免普通事件响应反射外部关联值；专用运维任务的 `operation_id` 仍是可返回、可轮询的领域资源标识。事件落库失败只告警，不能把本来成功的网关操作改成失败。
+
+连接事件使用共享 SQLx 分类：I/O、TLS、连接池不可用/获取超时、SQLSTATE `08` 和 PostgreSQL 停机/尚未可连接状态会打开 incident；缺表、权限、约束、解析等查询错误保持原业务错误，不伪装成连接异常。用量读写（写入含 SSE 结算）、Virtual Key 鉴权、健康状态与探测 metadata 读写、普通 Admin 控制面读取、控制面事务/snapshot、Admin 审计和事件查询接入该记录器。运行期数据库对象的克隆共享按组件区分的 incident 集合：每个组件只保留首个未恢复 incident，并由该组件后续成功按原发生时间补写失败事件、写入同一 `correlation_id` 的恢复事件并独立关闭；其他组件的失败不会被吞掉，成功或仅发布内存 snapshot 也不会错误关闭它。失败路径只在短内存临界区登记，不同步重试已经不可用的连接池；恢复路径在不持有 incident 集合锁时补写。此记录不依赖周期探测开启。
+
+初始 PostgreSQL 连接/迁移尚未成功时无可用事件仓储；进程终止前仍未恢复的 incident 也无法持久化。这些失败仍由启动错误/日志报告，内存补写不提供跨重启可靠性。
+
+`GET /admin/events` 在上述五张历史表上构建只读 `UNION ALL` 投影，支持 `from`、互斥的 `since`、`to`、`category`、`level`、`event_type`、`subject_type/id`、`correlation_id`（`operation_id` 为查询别名）、`source`、`limit` 和不透明 keyset `cursor`。`from` 使用闭边界、`since` 使用开边界、`to` 使用开边界；结果按 `(occurred_at DESC,event_id DESC)` 稳定分页。该 API 与“运行事件”页面用于关注项回看和跨表关联，不能替代各事实表的专用详情接口。
+
+恢复/继续时机维持现有成功驱动模型，不引入通知总线、进程内 broadcast 或 PostgreSQL signal：
+
+| 场景 | 谁继续 | 恢复/继续条件 | 观察方式 |
+| --- | --- | --- | --- |
+| 账号健康恢复 | 路由候选与健康状态机 | cooldown 到期只变为可尝试的 `unhealthy`；下一次真实请求或默认 60 秒周期探测成功后才写回 `healthy` | `accounts` 当前状态 + `account_health_events` |
+| fallback 回主 | 下一次逻辑请求 | 主账号只有在上述成功将其恢复为 `healthy` 后才重新固定优先；既有 fallback 请求不会重放 | `usage_events.fallback_reason` + 健康事实 |
+| 后台任务完成/重试 | Admin 客户端或调度器 | 继续轮询任务 GET；需要关注跨表事实时以 `operation_id` + 上次时间作为 `/admin/events?since=...` 增量查询，取消/retry 仍调用任务专用端点 | 任务资源 + `audit_logs` 统一投影 |
+
+Prometheus 保持实时、可聚合、低基数职责：请求量、耗时、Token、活跃流、冷却次数和 snapshot revision 不逐条复制进 `system_events`。落库事件负责逐条回看、主体与 `correlation_id` 关联和脱敏 metadata；高吞吐普通成功请求只进入 Usage 事实与指标，不进入运行事件时间线。
+
 ### Prometheus 与 OpenTelemetry 可观测性
 
 - `GET /metrics` 返回 Prometheus 文本格式指标；
@@ -510,11 +541,11 @@ PostgreSQL 回归测试只连接显式的 `TEST_DATABASE_URL`，不会复用运�
 
 ProviderPreset/模型发现回归使用真实 PostgreSQL 与 mock 上游，覆盖 DeepSeek、MiniMax、Kimi Code 的成功、失败、空列表、重复刷新、模型消失、confirmed/user 覆盖保留、批量确认、版本差异和日志脱敏。非流式 JSON 响应与流式 SSE 都必须把上游 usage 映射到统一 `UsageReport`；缺失 usage 才按既有 `estimated/missing` 规则处理。
 
-账号健康持久化、主动探测和无正文转换历史已由 #52 完成；统一 Admin 写操作审计日志（#48）仍需独立实现。#53 已补齐运维操作自身的审计记录，不把普通应用日志当作审计事实。
+账号健康持久化、主动探测和无正文转换历史已由 #52 完成；统一 Admin 写操作审计日志（#48）已接入。#53 已补齐运维操作自身的审计记录，不把普通应用日志当作审计事实；#110 只为无既有事实表的系统事件补窄表，并在读侧聚合这些事实。
 
 ### 7.2.1 数据保留、清理、备份与恢复（#53）
 
-`migrations/0011_retention_backup.sql` 新增 `retention_policies`、`retention_cleanup_runs`、`audit_logs`、`backup_runs`、`gateway_schema_migrations` 和 `gateway_schema_metadata`；`migrations/0012_health_persistence.sql` 追加健康状态字段、`account_health_events` 和迁移版本 12。四类历史（logical UsageEvent、UsageAttempt、连接测试/健康/运维 audit、discovery run）分别按 UTC `retention_days` 管理。`POST /admin/retention/cleanup` 在运行开始时固定策略和 cut-off，每个批次独立提交并记录 scanned/deleted/progress；同一 `operation_id` 可重复提交、取消和 retry。逻辑事件只有在不会级联删除仍在保留期内的 attempt 时才删除。
+`migrations/0011_retention_backup.sql` 新增 `retention_policies`、`retention_cleanup_runs`、`audit_logs`、`backup_runs`、`gateway_schema_migrations` 和 `gateway_schema_metadata`；`migrations/0012_health_persistence.sql` 追加健康状态字段与 `account_health_events`；`migrations/0024_system_events.sql` 增加窄系统事件表和对应清理计数。五类策略（logical UsageEvent、UsageAttempt、连接测试/健康/运维 audit、discovery run、system event）分别按 UTC `retention_days` 管理。`POST /admin/retention/cleanup` 在运行开始时固定策略和 cut-off，每个批次独立提交并记录 scanned/deleted/progress；同一 `operation_id` 可重复提交、取消和 retry。逻辑事件只有在不会级联删除仍在保留期内的 attempt 时才删除。
 
 控制面可通过 `GET /admin/control-plane/export` 导出脱敏 JSON，包含恢复路由所需的 Source/Account/模型/Binding/Route、schema/migration 版本和 runtime fingerprint，不包含 usage 正文、Authorization、API Key、Virtual Key hash/recovery ciphertext 或账号凭据 ciphertext。`POST /admin/control-plane/import` 在显式 `replace=true` 时按 FK 顺序恢复到新库，重置序列并重新构建 snapshot；fingerprint 不一致时标记恢复失败。完整 pg_dump、Compose 和本地 CLI 步骤见 [`operations.md`](operations.md)。
 
@@ -528,7 +559,7 @@ Provider 与 Source 已使用独立运行时身份：Provider 按 Source 固化�
 
 ### 7.4 控制台
 
-控制台提供总览、用量分析、请求事件、来源管理、模型发现、模型与路由、能力矩阵、系统设置八个入口。用量页面通过 `/admin/usage/*` 查询统计与请求明细；管理页面通过对应 `/admin/*` 资源完成接入、模型确认、路由和 Virtual Key 管理。
+控制台提供总览、用量分析、请求事件、运行事件、来源管理、模型发现、模型与路由、能力矩阵、系统设置九个入口。前三项继续由 `/admin/usage/*` 提供用量统计与请求明细；“运行事件”通过 `/admin/events` 展示跨子系统关注项；其他管理页面通过对应 `/admin/*` 资源完成接入、模型确认、路由和 Virtual Key 管理。
 
 `GatewayConsoleShell` 统一导航与 Admin Key 连接。用量视图与管理视图分别由 `GatewayUsagePage`、`GatewayManagementPage` 接入，公共组件位于 `web/src/components/ui`。视觉与交互规范见 [design.md](../design.md)，目录与开发命令见 [前端 README](../web/README.md)，分层、共享 Admin 传输与时间窗口规则见 [前端架构](frontend-architecture.md)。
 

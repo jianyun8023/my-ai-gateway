@@ -281,7 +281,7 @@ async fn postgres_test_database() -> Option<Database> {
         .connect(&url)
         .await
         .expect("connect TEST_DATABASE_URL");
-    let database = Database { pool };
+    let database = Database::from_pool(pool);
     database.migrate().await.expect("apply test migrations");
     Some(database)
 }
@@ -897,6 +897,19 @@ fn retention_schema_declares_independent_policies_and_operation_state() {
             "missing migration marker: {marker}"
         );
     }
+    let system_event_schema = include_str!("../../../migrations/0024_system_events.sql");
+    for marker in [
+        "VALUES (24, 'system_events')",
+        "CREATE TABLE IF NOT EXISTS system_events",
+        "'system_events'",
+        "scanned_system_events BIGINT",
+        "deleted_system_events BIGINT",
+    ] {
+        assert!(
+            system_event_schema.contains(marker),
+            "missing system-event retention marker: {marker}"
+        );
+    }
 }
 
 /// Set TEST_DATABASE_URL to run the PostgreSQL constraint and repository
@@ -913,7 +926,7 @@ async fn model_catalog_database_refresh_constraints_and_binding_states() {
         .connect(&url)
         .await
         .expect("connect model catalog test database");
-    let database = Database { pool: pool.clone() };
+    let database = Database::from_pool(pool.clone());
     database.migrate().await.expect("migrate test database");
     let repository = ModelCatalogRepository::new(pool.clone());
     let suffix = uuid::Uuid::new_v4().simple().to_string();

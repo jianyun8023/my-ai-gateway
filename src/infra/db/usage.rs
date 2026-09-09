@@ -11,6 +11,19 @@ impl Database {
         event: &UsageEvent,
         attempts: &[UsageAttempt],
     ) -> Result<(), sqlx::Error> {
+        self.events
+            .observe(
+                "usage.write",
+                self.insert_usage_with_attempts_inner(event, attempts).await,
+            )
+            .await
+    }
+
+    async fn insert_usage_with_attempts_inner(
+        &self,
+        event: &UsageEvent,
+        attempts: &[UsageAttempt],
+    ) -> Result<(), sqlx::Error> {
         let now: DateTime<Utc> = Utc::now();
         let mut tx = self.pool.begin().await?;
         sqlx::query("INSERT INTO usage_events (request_id, virtual_key_id, provider_id, account_id, model, logical_model, upstream_model_id, source_id, client_source, protocol_in, protocol_upstream, mode, status_code, success, retry_count, latency_ms, ttft_ms, input_tokens, output_tokens, reasoning_tokens, cached_tokens, cache_read_tokens, cache_creation_tokens, total_tokens, usage_source, degraded, route_id, streamed, error_summary, fallback_reason, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31) ON CONFLICT (request_id) DO NOTHING")
@@ -32,6 +45,18 @@ impl Database {
         tx.commit().await
     }
     pub(crate) async fn list_usage_events_page(
+        &self,
+        filter: &UsageFilter,
+        limit: i64,
+        cursor: Option<&UsageCursor>,
+    ) -> Result<UsageEventPage, sqlx::Error> {
+        let result = self
+            .list_usage_events_page_inner(filter, limit, cursor)
+            .await;
+        self.events.observe("usage.read", result).await
+    }
+
+    async fn list_usage_events_page_inner(
         &self,
         filter: &UsageFilter,
         limit: i64,
@@ -90,30 +115,33 @@ impl Database {
         );
         let mut q = sqlx::query_as::<_, UsageEventRecord>(&query);
         q = bind_filter(q, binds);
-        q.bind(limit).fetch_all(&self.pool).await
+        let result = q.bind(limit).fetch_all(&self.pool).await;
+        self.events.observe("usage.read", result).await
     }
 
     pub(crate) async fn get_usage_event_detail(
         &self,
         request_id: &str,
     ) -> Result<Option<UsageEventRecord>, sqlx::Error> {
-        sqlx::query_as::<_, UsageEventRecord>(&format!(
+        let result = sqlx::query_as::<_, UsageEventRecord>(&format!(
             "{} WHERE request_id = $1",
             usage_event_select()
         ))
         .bind(request_id)
         .fetch_optional(&self.pool)
-        .await
+        .await;
+        self.events.observe("usage.read", result).await
     }
 
     pub(crate) async fn list_attempts_for_event(
         &self,
         request_id: &str,
     ) -> Result<Vec<UsageAttemptRecord>, sqlx::Error> {
-        sqlx::query_as::<_, UsageAttemptRecord>("SELECT attempt_no,provider_id,source_id,account_id,upstream_model_id,status_code,success,latency_ms,created_at FROM usage_event_attempts WHERE request_id=$1 ORDER BY attempt_no")
+        let result = sqlx::query_as::<_, UsageAttemptRecord>("SELECT attempt_no,provider_id,source_id,account_id,upstream_model_id,status_code,success,latency_ms,created_at FROM usage_event_attempts WHERE request_id=$1 ORDER BY attempt_no")
             .bind(request_id)
             .fetch_all(&self.pool)
-            .await
+            .await;
+        self.events.observe("usage.read", result).await
     }
 
     #[cfg(test)]
@@ -138,7 +166,8 @@ impl Database {
         );
         let mut q = sqlx::query_as::<_, UsageAggregate>(&query);
         q = bind_filter(q, binds);
-        q.fetch_one(&self.pool).await
+        let result = q.fetch_one(&self.pool).await;
+        self.events.observe("usage.read", result).await
     }
 
     pub(crate) async fn usage_timeseries(
@@ -161,7 +190,8 @@ impl Database {
         );
         let mut q = sqlx::query_as::<_, UsageTimeBucket>(&query);
         q = bind_filter(q, binds);
-        q.fetch_all(&self.pool).await
+        let result = q.fetch_all(&self.pool).await;
+        self.events.observe("usage.read", result).await
     }
 
     pub(crate) async fn usage_breakdown(
@@ -192,7 +222,8 @@ impl Database {
         );
         let mut q = sqlx::query_as::<_, UsageBreakdown>(&query);
         q = bind_filter(q, binds);
-        q.fetch_all(&self.pool).await
+        let result = q.fetch_all(&self.pool).await;
+        self.events.observe("usage.read", result).await
     }
 }
 

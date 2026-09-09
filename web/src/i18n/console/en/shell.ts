@@ -22,6 +22,7 @@ export const shell = {
     overview: 'Overview',
     analysis: 'Analysis',
     events: 'Request Events',
+    'runtime-events': 'Runtime Events',
     sources: 'Sources',
     discovery: 'Model Discovery',
     models: 'Models & Routes',

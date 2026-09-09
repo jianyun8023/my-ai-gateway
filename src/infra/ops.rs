@@ -20,15 +20,21 @@ use std::{
 };
 use uuid::Uuid;
 
-pub(crate) const CURRENT_SCHEMA_VERSION: i32 = 23;
-pub(crate) const CURRENT_MIGRATION_VERSION: i32 = 23;
+pub(crate) const CURRENT_SCHEMA_VERSION: i32 = 24;
+pub(crate) const CURRENT_MIGRATION_VERSION: i32 = 24;
 pub(crate) const DEFAULT_BATCH_SIZE: i32 = 500;
 pub(crate) const DEFAULT_MAX_BATCHES: i32 = 1_000;
 pub(crate) const MAX_BATCH_SIZE: i32 = 10_000;
 pub(crate) const MAX_MAX_BATCHES: i32 = 100_000;
 pub(crate) const MAX_EXPORT_ROWS: usize = 100_000;
 
-const RETENTION_KEYS: [&str; 4] = ["usage_events", "usage_attempts", "audit", "discovery"];
+const RETENTION_KEYS: [&str; 5] = [
+    "usage_events",
+    "usage_attempts",
+    "audit",
+    "discovery",
+    "system_events",
+];
 
 #[derive(Debug)]
 pub(crate) enum OpsError {
@@ -488,13 +494,14 @@ impl OpsRepository {
             "candidates": counts,
         });
         sqlx::query(
-            "UPDATE retention_cleanup_runs SET status='completed',scanned_usage_events=$2,scanned_usage_attempts=$3,scanned_audit=$4,scanned_discovery=$5,progress=$6,finished_at=clock_timestamp(),updated_at=clock_timestamp() WHERE id=$1 AND status NOT IN ('completed','cancelled')",
+            "UPDATE retention_cleanup_runs SET status='completed',scanned_usage_events=$2,scanned_usage_attempts=$3,scanned_audit=$4,scanned_discovery=$5,scanned_system_events=$6,progress=$7,finished_at=clock_timestamp(),updated_at=clock_timestamp() WHERE id=$1 AND status NOT IN ('completed','cancelled')",
         )
         .bind(&run.id)
         .bind(counts.usage_events)
         .bind(counts.usage_attempts)
         .bind(counts.audit)
         .bind(counts.discovery)
+        .bind(counts.system_events)
         .bind(&progress)
         .execute(&self.pool)
         .await?;
@@ -582,6 +589,10 @@ impl OpsRepository {
             deleted.discovery =
                 delete_discovery_batch(&mut tx, policy.cutoff, run.batch_size).await?;
         }
+        if let Some(policy) = policies.get("system_events").filter(|p| p.enabled) {
+            deleted.system_events =
+                delete_system_events_batch(&mut tx, policy.cutoff, run.batch_size).await?;
+        }
         let next_progress = json!({
             "phase":"batch",
             "batch": batch_number + 1,
@@ -590,13 +601,14 @@ impl OpsRepository {
             "updated_at": Utc::now(),
         });
         sqlx::query(
-            "UPDATE retention_cleanup_runs SET scanned_usage_events=scanned_usage_events+$2,deleted_usage_events=deleted_usage_events+$2,scanned_usage_attempts=scanned_usage_attempts+$3,deleted_usage_attempts=deleted_usage_attempts+$3,scanned_audit=scanned_audit+$4,deleted_audit=deleted_audit+$4,scanned_discovery=scanned_discovery+$5,deleted_discovery=deleted_discovery+$5,batches_completed=batches_completed+1,progress=$6,updated_at=clock_timestamp() WHERE id=$1",
+            "UPDATE retention_cleanup_runs SET scanned_usage_events=scanned_usage_events+$2,deleted_usage_events=deleted_usage_events+$2,scanned_usage_attempts=scanned_usage_attempts+$3,deleted_usage_attempts=deleted_usage_attempts+$3,scanned_audit=scanned_audit+$4,deleted_audit=deleted_audit+$4,scanned_discovery=scanned_discovery+$5,deleted_discovery=deleted_discovery+$5,scanned_system_events=scanned_system_events+$6,deleted_system_events=deleted_system_events+$6,batches_completed=batches_completed+1,progress=$7,updated_at=clock_timestamp() WHERE id=$1",
         )
         .bind(&run.id)
         .bind(deleted.usage_events)
         .bind(deleted.usage_attempts)
         .bind(deleted.audit)
         .bind(deleted.discovery)
+        .bind(deleted.system_events)
         .bind(&next_progress)
         .execute(&mut *tx)
         .await?;
@@ -620,6 +632,7 @@ impl OpsRepository {
             deleted_usage_attempts = deleted.usage_attempts,
             deleted_audit = deleted.audit,
             deleted_discovery = deleted.discovery,
+            deleted_system_events = deleted.system_events,
             "retention cleanup batch completed"
         );
 
@@ -767,6 +780,14 @@ impl OpsRepository {
         if let Some(policy) = policies.get("discovery").filter(|p| p.enabled) {
             counts.discovery = sqlx::query_scalar(
                 "SELECT COUNT(*)::BIGINT FROM source_discovery_runs WHERE completed_at < $1",
+            )
+            .bind(policy.cutoff)
+            .fetch_one(&self.pool)
+            .await?;
+        }
+        if let Some(policy) = policies.get("system_events").filter(|p| p.enabled) {
+            counts.system_events = sqlx::query_scalar(
+                "SELECT COUNT(*)::BIGINT FROM system_events WHERE occurred_at < $1",
             )
             .bind(policy.cutoff)
             .fetch_one(&self.pool)
@@ -1137,6 +1158,8 @@ pub(crate) struct CleanupRun {
     pub(crate) deleted_audit: i64,
     pub(crate) scanned_discovery: i64,
     pub(crate) deleted_discovery: i64,
+    pub(crate) scanned_system_events: i64,
+    pub(crate) deleted_system_events: i64,
     pub(crate) batches_completed: i32,
     pub(crate) progress: Value,
     pub(crate) last_error_code: Option<String>,
@@ -1248,11 +1271,12 @@ struct CleanupCounts {
     usage_attempts: i64,
     audit: i64,
     discovery: i64,
+    system_events: i64,
 }
 
 impl CleanupCounts {
     fn total(self) -> i64 {
-        self.usage_events + self.usage_attempts + self.audit + self.discovery
+        self.usage_events + self.usage_attempts + self.audit + self.discovery + self.system_events
     }
 }
 
@@ -1279,8 +1303,8 @@ fn attempt_guard(policies: &BTreeMap<String, PolicyState>) -> AttemptGuard {
 
 fn cleanup_select(filter: Option<&str>) -> &'static str {
     match filter {
-        Some(_) => "SELECT id,status,dry_run,batch_size,max_batches,requested_by,policy_snapshot,cutoff_snapshot,scanned_usage_events,deleted_usage_events,scanned_usage_attempts,deleted_usage_attempts,scanned_audit,deleted_audit,scanned_discovery,deleted_discovery,batches_completed,progress,last_error_code,last_error_message,cancel_requested,created_at,started_at,finished_at,updated_at FROM retention_cleanup_runs WHERE id=$1",
-        None => "SELECT id,status,dry_run,batch_size,max_batches,requested_by,policy_snapshot,cutoff_snapshot,scanned_usage_events,deleted_usage_events,scanned_usage_attempts,deleted_usage_attempts,scanned_audit,deleted_audit,scanned_discovery,deleted_discovery,batches_completed,progress,last_error_code,last_error_message,cancel_requested,created_at,started_at,finished_at,updated_at FROM retention_cleanup_runs ORDER BY created_at DESC,id DESC LIMIT $1",
+        Some(_) => "SELECT id,status,dry_run,batch_size,max_batches,requested_by,policy_snapshot,cutoff_snapshot,scanned_usage_events,deleted_usage_events,scanned_usage_attempts,deleted_usage_attempts,scanned_audit,deleted_audit,scanned_discovery,deleted_discovery,scanned_system_events,deleted_system_events,batches_completed,progress,last_error_code,last_error_message,cancel_requested,created_at,started_at,finished_at,updated_at FROM retention_cleanup_runs WHERE id=$1",
+        None => "SELECT id,status,dry_run,batch_size,max_batches,requested_by,policy_snapshot,cutoff_snapshot,scanned_usage_events,deleted_usage_events,scanned_usage_attempts,deleted_usage_attempts,scanned_audit,deleted_audit,scanned_discovery,deleted_discovery,scanned_system_events,deleted_system_events,batches_completed,progress,last_error_code,last_error_message,cancel_requested,created_at,started_at,finished_at,updated_at FROM retention_cleanup_runs ORDER BY created_at DESC,id DESC LIMIT $1",
     }
 }
 
@@ -1570,6 +1594,21 @@ async fn delete_discovery_batch(
 ) -> Result<i64, OpsError> {
     Ok(sqlx::query(
         "DELETE FROM source_discovery_runs WHERE id IN (SELECT id FROM source_discovery_runs WHERE completed_at < $1 ORDER BY id LIMIT $2)",
+    )
+    .bind(cutoff)
+    .bind(batch_size)
+    .execute(&mut **tx)
+    .await?
+    .rows_affected() as i64)
+}
+
+async fn delete_system_events_batch(
+    tx: &mut Transaction<'_, Postgres>,
+    cutoff: DateTime<Utc>,
+    batch_size: i32,
+) -> Result<i64, OpsError> {
+    Ok(sqlx::query(
+        "DELETE FROM system_events WHERE id IN (SELECT id FROM system_events WHERE occurred_at < $1 ORDER BY id LIMIT $2)",
     )
     .bind(cutoff)
     .bind(batch_size)
@@ -2270,6 +2309,19 @@ mod tests {
             .execute(&pool)
             .await
             .expect("insert old audit fixture");
+        let old_system_event = format!("old-system-{}", Uuid::new_v4());
+        let fresh_system_event = format!("fresh-system-{}", Uuid::new_v4());
+        for (correlation_id, age) in [
+            (&old_system_event, "2 days"),
+            (&fresh_system_event, "0 seconds"),
+        ] {
+            sqlx::query("INSERT INTO system_events (occurred_at,category,event_type,level,subject_type,subject_id,correlation_id,message,details) VALUES (NOW()-$2::interval,'lifecycle','gateway.test','info','gateway','test',$1,'Retention fixture','{}')")
+                .bind(correlation_id)
+                .bind(age)
+                .execute(&pool)
+                .await
+                .expect("insert system-event retention fixture");
+        }
 
         let dry = repository
             .start_cleanup(&CleanupRequest {
@@ -2284,6 +2336,9 @@ mod tests {
             .expect("dry-run cleanup");
         assert_eq!(dry.status, "completed");
         assert!(dry.progress["candidates"]["usage_events"]
+            .as_i64()
+            .is_some_and(|count| count >= 1));
+        assert!(dry.progress["candidates"]["system_events"]
             .as_i64()
             .is_some_and(|count| count >= 1));
         let old_count: i64 =
@@ -2339,6 +2394,22 @@ mod tests {
                 .await
                 .expect("check cleaned attempt");
         assert_eq!(orphan_attempts, 0);
+        assert!(run.scanned_system_events >= 1);
+        assert!(run.deleted_system_events >= 1);
+        let old_system_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM system_events WHERE correlation_id=$1")
+                .bind(&old_system_event)
+                .fetch_one(&pool)
+                .await
+                .expect("check cleaned system event");
+        let fresh_system_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM system_events WHERE correlation_id=$1")
+                .bind(&fresh_system_event)
+                .fetch_one(&pool)
+                .await
+                .expect("check fresh system event");
+        assert_eq!(old_system_count, 0);
+        assert_eq!(fresh_system_count, 1);
 
         let config: GatewayConfig = serde_json::from_value(json!({
             "listen_addr":"127.0.0.1:0",

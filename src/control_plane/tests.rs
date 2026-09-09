@@ -229,6 +229,7 @@ async fn postgres_credential_rotation_commits_and_rolls_back_atomically() {
         http: crate::http::test_client().unwrap(),
         db: Some(database.clone()),
         control_plane: Some(control.clone()),
+        events: control.event_repository(),
         health: HealthRegistry::new(Duration::from_secs(30)),
         admin_auth: AdminAuth::test(),
         secrets: resolver,
@@ -296,6 +297,13 @@ async fn postgres_credential_rotation_commits_and_rolls_back_atomically() {
             .as_ref(),
         Some(rotated)
     );
+    let snapshot_failures: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM system_events WHERE event_type='runtime.snapshot_build_failed'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(snapshot_failures, 1);
 
     let (status, body) = rotate(&app, "missing-account").await;
     assert_eq!(status, StatusCode::NOT_FOUND);
@@ -305,6 +313,17 @@ async fn postgres_credential_rotation_commits_and_rolls_back_atomically() {
     let (status, body) = rotate(&app, "account-a").await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(body["error"]["code"], "no_ciphertext");
+    let snapshot_failures_after_precondition_errors: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM system_events WHERE event_type='runtime.snapshot_build_failed'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        snapshot_failures_after_precondition_errors,
+        snapshot_failures,
+        "precondition failures must remain Admin audit facts, not pretend that snapshot construction ran"
+    );
 
     drop(app);
     drop(state);
@@ -758,12 +777,13 @@ async fn postgres_db_first_crud_rollback_snapshot_and_models_contract() {
         http: crate::http::test_client().expect("HTTP client"),
         db: Some(database.clone()),
         control_plane: Some(control_plane.clone()),
+        events: control_plane.event_repository(),
         health: health.clone(),
         admin_auth: crate::auth::AdminAuth::test(),
         secrets: crate::infra::secrets::SecretResolver::empty(),
         prometheus_handle: crate::infra::observability::prometheus_handle(),
     };
-    state.reload_snapshot(stable_snapshot.clone());
+    state.reload_snapshot(stable_snapshot.clone()).await;
     assert_eq!(state.snapshot().revision, active_revision);
 
     let capability_response =

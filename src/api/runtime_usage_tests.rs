@@ -192,11 +192,16 @@ fn named_route(
 
 fn state(config: GatewayConfig, database: Option<db::Database>) -> AppState {
     let config = Arc::new(config);
+    let events = database
+        .as_ref()
+        .map(|database| crate::infra::events::EventRepository::new(database.pool().clone()))
+        .unwrap_or_else(crate::infra::events::EventRepository::disabled);
     AppState {
         live: Arc::new(std::sync::RwLock::new(LiveConfig::legacy(config))),
         http: http::test_client().expect("runtime HTTP client"),
         db: database,
         control_plane: None,
+        events,
         health: health::HealthRegistry::new(Duration::from_secs(1)),
         admin_auth: AdminAuth::test(),
         secrets: secrets::SecretResolver::empty(),
@@ -449,6 +454,7 @@ async fn transport_error_path_uses_fallback_and_records_its_actual_model() {
     let (response, attempts) = try_fallback_error(
         &config,
         &secrets::SecretResolver::empty(),
+        &crate::infra::events::EventRepository::disabled(),
         &health::HealthRegistry::new(Duration::from_secs(1)),
         &http::test_client().unwrap(),
         &resolved,
@@ -494,6 +500,7 @@ async fn fallback_transport_failure_is_retained_as_the_final_actual_attempt() {
     let (response, attempts) = try_fallback_error(
         &config,
         &secrets::SecretResolver::empty(),
+        &crate::infra::events::EventRepository::disabled(),
         &health::HealthRegistry::new(Duration::from_secs(1)),
         &http::test_client().unwrap(),
         &resolved,
@@ -876,6 +883,7 @@ async fn postgres_db_first_source_attribution_covers_primary_fallback_stream_and
         http: http::test_client().expect("runtime HTTP client"),
         db: Some(database.clone()),
         control_plane: None,
+        events: crate::infra::events::EventRepository::new(database.pool().clone()),
         health: health::HealthRegistry::with_config(health::HealthConfig {
             cooldown: Duration::from_secs(30),
             failure_threshold: 1,
