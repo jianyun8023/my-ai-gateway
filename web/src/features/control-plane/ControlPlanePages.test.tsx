@@ -639,9 +639,10 @@ describe('production control-plane pages', () => {
     expect(table.textContent).toContain('Account A');
     expect(table.textContent).toContain('upstream-a');
     expect(table.textContent).toContain('主线路');
-    expect(table.textContent).toContain('Chat Completions');
-    expect(table.textContent).toContain('Responses');
-    expect(table.textContent).toContain('Messages');
+    const protocolPills = [...table.querySelectorAll('tbody td:nth-child(2) [data-ui="status-pill"]')];
+    expect(protocolPills.map((pill) => pill.textContent)).toEqual(['Chat', 'Responses', 'Messages']);
+    expect(protocolPills.map((pill) => pill.getAttribute('data-tone'))).toEqual(['success', 'muted', 'muted']);
+    expect(protocolPills[0].getAttribute('title')).toBe('Chat Completions · 原生');
     expect(table.textContent).not.toContain('route-a');
     expect(table.textContent).not.toContain('选择 #');
     expect(table.textContent).not.toContain('绑定 ID');

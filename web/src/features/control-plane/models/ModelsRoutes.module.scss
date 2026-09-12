@@ -14,10 +14,10 @@
 }
 
 .protocols {
-  display: grid;
-  gap: 8px;
-
-  > span { min-width: 0; display: flex; gap: 4px; flex-wrap: wrap; }
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
 }
 
 .actions {
