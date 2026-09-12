@@ -1,13 +1,15 @@
 // @vitest-environment happy-dom
 import { act } from 'react';
 import { createRoot } from '@/test/render';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import { GatewayAdminResources, type VirtualKey } from '@/admin-api';
+import type { AdminTransport } from '@/admin-api/client';
 import { setTestLanguage } from '@/test/setup';
 import { SettingsPage } from './SettingsPage';
 import { formatDateTime } from '@/utils/format';
 
 const secret = 'test-rotated-key';
+type RotateResult = { old_id: number; new_id: number; key_prefix: string; key: string; overlap_until: string | null };
 const baseKey: VirtualKey = {
   id: 9, name: 'editor', key_prefix: 'gw_test', key_recoverable: false,
   allowed_models: ['model-a'], enabled: true, created_at: '2026-09-01T00:00:00Z',
@@ -18,8 +20,8 @@ describe('Virtual Key rotation', () => {
   let root: ReturnType<typeof createRoot>;
   let keys: VirtualKey[];
   let overlapUntil: string | null;
-  let rotate: ReturnType<typeof vi.fn>;
-  let json: ReturnType<typeof vi.fn>;
+  let rotate: Mock<(init?: RequestInit) => Promise<RotateResult>>;
+  let json: Mock<AdminTransport['json']>;
 
   beforeEach(async () => {
     await setTestLanguage('zh');
@@ -29,7 +31,7 @@ describe('Virtual Key rotation', () => {
     root = createRoot(container);
     keys = [{ ...baseKey }];
     overlapUntil = new Date(Date.now() + 3600000).toISOString();
-    rotate = vi.fn(async () => {
+    rotate = vi.fn<(init?: RequestInit) => Promise<RotateResult>>(async () => {
       keys = [{ ...baseKey, replaced_by_id: 10, overlap_until: overlapUntil }, { ...baseKey, id: 10, key_recoverable: true }];
       return { old_id: 9, new_id: 10, key_prefix: 'gw_new', key: secret, overlap_until: overlapUntil };
     });
@@ -38,7 +40,7 @@ describe('Virtual Key rotation', () => {
       if (path === '/admin/capabilities') return { data: [], fact_source: 'runtime_snapshot', snapshot_revision: 1, snapshot_generated_at: baseKey.created_at };
       if (path === '/admin/keys/9/rotate') return rotate(init);
       throw new Error(`Unexpected request ${path}`);
-    });
+    }) as unknown as Mock<AdminTransport['json']>;
   });
 
   afterEach(() => {
@@ -49,7 +51,7 @@ describe('Virtual Key rotation', () => {
   });
 
   const render = async () => {
-    await act(async () => root.render(<SettingsPage api={new GatewayAdminResources({ json })} adminKeyConfigured onClearAdminKey={() => {}} />));
+    await act(async () => root.render(<SettingsPage api={new GatewayAdminResources({ json: json as AdminTransport['json'] })} adminKeyConfigured onClearAdminKey={() => {}} />));
   };
   const button = (label: string) => {
     const result = Array.from(document.body.querySelectorAll('button')).find((el) => el.getAttribute('aria-label') === label || el.textContent === label);
@@ -164,7 +166,7 @@ describe('Virtual Key rotation', () => {
   });
 
   it('blocks duplicate submissions and dismissal while rotation is pending', async () => {
-    let finish!: (value: unknown) => void;
+    let finish!: (value: RotateResult) => void;
     rotate.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
     await open();
     await submit();
