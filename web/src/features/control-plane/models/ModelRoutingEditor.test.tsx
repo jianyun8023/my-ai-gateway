@@ -4,6 +4,7 @@ import type {
   GatewayAdminResources,
   GatewayProtocol,
   ModelRoutingConfiguration,
+  ModelRoutingWriteInput,
   Source,
   SourceModel,
   SourceModelCapability,
@@ -14,7 +15,7 @@ import { act } from 'react';
 import { createRoot } from '@/test/render';
 import { selectComboboxValue } from '@/test/interactions';
 import { setTestLanguage } from '@/test/setup';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 
 const date = '2026-09-12T00:00:00Z';
 const chat: GatewayProtocol = 'openai_chat_completions';
@@ -89,7 +90,7 @@ describe('model routing editor', () => {
   let root: ReturnType<typeof createRoot>;
   let api: ReturnType<typeof makeApi>;
   let data: CatalogData;
-  let onSubmit: ReturnType<typeof vi.fn>;
+  let onSubmit: Mock<(id: string | undefined, input: ModelRoutingWriteInput) => void>;
 
   beforeEach(async () => {
     globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -99,7 +100,7 @@ describe('model routing editor', () => {
     root = createRoot(container);
     api = makeApi();
     data = catalog();
-    onSubmit = vi.fn();
+    onSubmit = vi.fn<(id: string | undefined, input: ModelRoutingWriteInput) => void>();
   });
   afterEach(() => {
     act(() => root.unmount());

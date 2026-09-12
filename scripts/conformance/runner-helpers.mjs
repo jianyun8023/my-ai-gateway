@@ -41,6 +41,18 @@ export function optionalEnv(name, fallback) {
   return process.env[name] || fallback
 }
 
+// Mask values of sensitive flags (e.g. --api-key) before printing a command
+// line to logs; the real argv must still be passed to the child process.
+export function redactSensitiveArgs(argv, sensitiveFlags = ['--api-key']) {
+  const redacted = [...argv]
+  for (let i = 0; i < redacted.length - 1; i += 1) {
+    if (sensitiveFlags.includes(redacted[i])) {
+      redacted[i + 1] = '***'
+    }
+  }
+  return redacted
+}
+
 // ── Report directory ────────────────────────────────────────────────────────
 
 export function ensureReportDir(subdir) {
