@@ -59,6 +59,7 @@ export function ErrorState({ error, onRetry }: { error: AdminErrorShape; onRetry
     <Notice action={onRetry && <Button size="sm" variant="secondary" onClick={onRetry}><IconRefreshCw size={14} />{t('common.retry')}</Button>}>
       <strong>{unauthorized ? t('errors.admin_key_invalid') : t('errors.admin_api_failed')}</strong>
       {error.code && <code>{error.code}</code>}
+      {error.message && <small>{error.message}</small>}
     </Notice>
   );
 }
