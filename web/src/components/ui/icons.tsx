@@ -115,15 +115,6 @@ export function IconTrash2({ size = 20, ...props }: IconProps) {
   );
 }
 
-export function IconSearch({ size = 20, ...props }: IconProps) {
-  return (
-    <svg {...baseSvgProps} width={size} height={size} {...props}>
-      <path d="m21 21-4.34-4.34" />
-      <circle cx="11" cy="11" r="8" />
-    </svg>
-  );
-}
-
 export function IconMenu({ size = 20, ...props }: IconProps) {
   return (
     <svg {...baseSvgProps} width={size} height={size} {...props}>
@@ -175,15 +166,6 @@ export function IconPlus({ size = 20, ...props }: IconProps) {
     <svg {...baseSvgProps} width={size} height={size} {...props}>
       <path d="M5 12h14" />
       <path d="M12 5v14" />
-    </svg>
-  );
-}
-
-export function IconPower({ size = 20, ...props }: IconProps) {
-  return (
-    <svg {...baseSvgProps} width={size} height={size} {...props}>
-      <path d="M12 2v10" />
-      <path d="M18.4 6.6a9 9 0 1 1-12.77.04" />
     </svg>
   );
 }

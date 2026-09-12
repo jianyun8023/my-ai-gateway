@@ -51,7 +51,7 @@ export const models = {
       select_model: 'Select a confirmed upstream model',
       no_sources: 'No sources yet. Add a source first',
       no_accounts: 'No accounts for this source',
-      no_confirmed_models: 'No confirmed models. Confirm one in Model Discovery first',
+      no_confirmed_models: 'No confirmed models. Confirm one from Sources → Model Update Review first',
       loading_models: 'Loading confirmed models…',
       loading_capabilities: 'Loading protocol capabilities…',
       request_settings: 'Request settings',

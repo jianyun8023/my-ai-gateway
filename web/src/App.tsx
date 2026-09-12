@@ -12,17 +12,20 @@ import {
   IconDatabase,
   IconFileText,
   IconLayers,
-  IconSearch,
   IconSettings,
   IconSlidersHorizontal,
   IconSunAsterisk,
 } from './components/ui/icons';
 import {
+  canonicalConsoleHash,
   consolePageHash,
   isUsagePage,
-  resolveConsolePage,
+  resolveConsoleRoute,
+  sourceRouteHash,
   type ConsoleNavSection,
   type ConsolePage,
+  type ConsoleRoute,
+  type SourceSection,
 } from './lib/consoleNavigation';
 
 const GatewayManagementPage = lazy(async () => {
@@ -41,7 +44,6 @@ const PAGE_ICONS: Record<ConsolePage, React.ReactNode> = {
   events: <IconFileText size={18} />,
   'runtime-events': <IconDatabase size={18} />,
   sources: <IconLayers size={18} />,
-  discovery: <IconSearch size={18} />,
   models: <IconSunAsterisk size={18} />,
   capabilities: <IconSlidersHorizontal size={18} />,
   settings: <IconSettings size={18} />,
@@ -49,22 +51,29 @@ const PAGE_ICONS: Record<ConsolePage, React.ReactNode> = {
 
 function App() {
   const { t, i18n } = useTranslation('console');
-  const [page, setPage] = useState<ConsolePage>(() => resolveConsolePage(window.location.hash));
+  const [route, setRoute] = useState<ConsoleRoute>(() => resolveConsoleRoute(window.location.hash));
+  const page = route.page;
 
   const navigateTo = useCallback((nextPage: ConsolePage) => {
     const nextHash = consolePageHash(nextPage);
     if (window.location.hash !== nextHash) window.location.hash = nextHash;
-    setPage(nextPage);
+    setRoute({ page: nextPage });
+  }, []);
+
+  const navigateToSource = useCallback((sourceId: string, section?: SourceSection) => {
+    const nextHash = sourceRouteHash(sourceId, section);
+    if (window.location.hash !== nextHash) window.location.hash = nextHash;
+    setRoute({ page: 'sources', sourceId, section });
   }, []);
 
   useEffect(() => {
     const syncRoute = () => {
-      const nextPage = resolveConsolePage(window.location.hash);
-      const canonicalHash = consolePageHash(nextPage);
+      const nextRoute = resolveConsoleRoute(window.location.hash);
+      const canonicalHash = canonicalConsoleHash(window.location.hash);
       if (window.location.hash !== canonicalHash) {
         window.history.replaceState(null, '', canonicalHash);
       }
-      setPage(nextPage);
+      setRoute(nextRoute);
     };
     syncRoute();
     window.addEventListener('hashchange', syncRoute);
@@ -80,7 +89,7 @@ function App() {
   // page headers and <title> follow the active language.
   const navigationSections: readonly ConsoleNavSection[] = [
     { label: t('shell.section.monitor'), pages: ['overview', 'analysis', 'events', 'runtime-events'] },
-    { label: t('shell.section.config'), pages: ['sources', 'discovery', 'models', 'capabilities'] },
+    { label: t('shell.section.config'), pages: ['sources', 'models', 'capabilities'] },
     { label: t('shell.section.system'), pages: ['settings'] },
   ];
 
@@ -90,16 +99,23 @@ function App() {
     { id: 'events', label: t('shell.nav.events'), icon: PAGE_ICONS.events },
     { id: 'runtime-events', label: t('shell.nav.runtime-events'), icon: PAGE_ICONS['runtime-events'] },
     { id: 'sources', label: t('shell.nav.sources'), icon: PAGE_ICONS.sources },
-    { id: 'discovery', label: t('shell.nav.discovery'), icon: PAGE_ICONS.discovery },
     { id: 'models', label: t('shell.nav.models'), icon: PAGE_ICONS.models },
     { id: 'capabilities', label: t('shell.nav.capabilities'), icon: PAGE_ICONS.capabilities },
     { id: 'settings', label: t('shell.nav.settings'), icon: PAGE_ICONS.settings },
   ];
 
+  const pageTitle = route.page === 'sources' && route.sourceId
+    ? t(route.section === 'edit'
+      ? 'shell.title.source_edit'
+      : route.section === 'review'
+        ? 'shell.title.source_review'
+        : 'shell.title.source_detail')
+    : t(`shell.nav.${page}`);
+
   useEffect(() => {
     document.documentElement.lang = i18n.language === 'zh' ? 'zh' : 'en';
-    document.title = `${t(`shell.nav.${page}`)} · ${t('shell.brand_name')}`;
-  }, [i18n.language, page, t]);
+    document.title = `${pageTitle} · ${t('shell.brand_name')}`;
+  }, [i18n.language, pageTitle, t]);
 
   return (
     <div className="app-frame">
@@ -109,7 +125,7 @@ function App() {
           navigationSections={navigationSections}
           navigationItems={navigationItems}
           onNavigate={navigate}
-          title={t(`shell.nav.${page}`)}
+          title={pageTitle}
           refreshable
         >
           {({ getAdminKey, adminKeyConfigured, authGeneration, clearAdminKey, refreshRevision, setRefreshing }) => (
@@ -127,6 +143,9 @@ function App() {
                 : (
                     <GatewayManagementPage
                       page={page}
+                      route={route}
+                      onOpenSource={navigateToSource}
+                      onNavigatePage={navigateTo}
                       getAdminKey={getAdminKey}
                       adminKeyConfigured={adminKeyConfigured}
                       clearAdminKey={clearAdminKey}

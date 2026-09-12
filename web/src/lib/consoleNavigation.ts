@@ -1,20 +1,58 @@
 export const CONSOLE_PAGES = [
   'overview', 'analysis', 'events', 'runtime-events',
-  'sources', 'discovery', 'models', 'capabilities', 'settings',
+  'sources', 'models', 'capabilities', 'settings',
 ] as const;
 
 export type ConsolePage = typeof CONSOLE_PAGES[number];
 export type GatewayUsageTab = Extract<ConsolePage, 'overview' | 'analysis' | 'events'>;
 export type GatewayManagementPage = Exclude<ConsolePage, GatewayUsageTab>;
+export type SourceSection = 'edit' | 'review';
 export interface ConsoleNavSection { label: string; pages: readonly ConsolePage[] }
+
+/** 来源管理工作区内的子页面：来源详情 / 编辑来源 / 模型更新审核。 */
+export interface ConsoleRoute {
+  page: ConsolePage;
+  /** page === 'sources' 时存在；'new' 表示新增来源工作流。 */
+  sourceId?: string;
+  /** sourceId 对应的子页面，缺省为来源详情。 */
+  section?: SourceSection;
+}
 
 export function isUsagePage(page: ConsolePage): page is GatewayUsageTab {
   return page === 'overview' || page === 'analysis' || page === 'events';
 }
 
-export const resolveConsolePage = (hash: string): ConsolePage => {
-  const normalized = hash.trim().replace(/^#/, '').replace(/^\/+/, '').replace(/\/+$/, '');
-  return CONSOLE_PAGES.includes(normalized as ConsolePage) ? normalized as ConsolePage : 'overview';
+const normalizeHash = (hash: string): string[] => hash
+  .trim()
+  .replace(/^#/, '')
+  .replace(/^\/+/, '')
+  .replace(/\/+$/, '')
+  .split('/')
+  .filter(Boolean)
+  .map((segment) => decodeURIComponent(segment));
+
+export const resolveConsoleRoute = (hash: string): ConsoleRoute => {
+  const segments = normalizeHash(hash);
+  const head = segments[0] as ConsolePage | undefined;
+  if (!head || !CONSOLE_PAGES.includes(head)) return { page: 'overview' };
+  if (head === 'sources' && segments[1]) {
+    const section = segments[2] === 'edit' || segments[2] === 'review' ? segments[2] : undefined;
+    return { page: 'sources', sourceId: segments[1], section };
+  }
+  return { page: head };
 };
 
+export const resolveConsolePage = (hash: string): ConsolePage => resolveConsoleRoute(hash).page;
+
 export const consolePageHash = (page: ConsolePage): string => '#' + page;
+
+export const sourceRouteHash = (sourceId: string, section?: SourceSection): string => (
+  `#sources/${encodeURIComponent(sourceId)}${section ? `/${section}` : ''}`
+);
+
+/** 将任意 hash 归一化为规范形式，无法识别时回退到总览。 */
+export const canonicalConsoleHash = (hash: string): string => {
+  const route = resolveConsoleRoute(hash);
+  if (route.page === 'sources' && route.sourceId) return sourceRouteHash(route.sourceId, route.section);
+  return consolePageHash(route.page);
+};

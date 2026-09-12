@@ -111,7 +111,7 @@ kubectl -n apps rollout status deployment/my-ai-gateway --timeout=5m
 清单不会自动把 Provider、Account、模型或 Fallback Route 写入数据库。Gateway Ready 后，通过受控的 Admin API 完成以下步骤：
 
 1. 创建或确认 Source、Account 及其 `credential_env`；
-2. 执行模型发现并确认 SourceModel/Capability；
+2. 在来源管理中执行模型更新检查并审核确认 SourceModel/Capability；
 3. 显式创建 LogicalModel、ModelBinding 和 Route；
 4. 用 `/admin/capabilities` 和 `/admin/routes` 检查 native/adapter、primary/fallback 以及不可路由状态；
 5. 为下游客户端签发 PostgreSQL-backed Virtual Key。

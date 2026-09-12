@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import type { GatewayManagementPage as PageId } from '@/lib/consoleNavigation';
+import type { ConsoleRoute, GatewayManagementPage as PageId, SourceSection } from '@/lib/consoleNavigation';
 import { GatewayManagementPage } from '@/pages/GatewayManagementPage';
 import { SourceForm } from './sources/SourceForm';
 import { Toggle } from './shared';
@@ -223,6 +223,10 @@ const baseHandler = async (input: RequestInfo | URL) => {
   if (url === '/admin/model-bindings') return jsonResponse({ data: [binding] });
   if (url === '/admin/routes') return jsonResponse({ data: [route] });
   if (url.startsWith('/admin/sources/source-a/models')) return jsonResponse({ data: [url.includes('confirmation_status=confirmed') ? { ...sourceModel, confirmation_status: 'confirmed' } : sourceModel] });
+  if (url === '/admin/sources/source-a/preset-diff') return jsonResponse({ data: {
+    source_id: 'source-a', provider_preset_id: 'preset-a', source_version: 1, latest_version: 1, changes: [],
+  } });
+  if (url.startsWith('/admin/events?')) return jsonResponse({ version: 'v1', timezone: 'UTC', fact_source: 'postgresql_unified_read_model', data: [], page: { limit: 6, has_more: false } });
   if (url === '/admin/sources/source-a/discoveries/latest') return jsonResponse({
     data: {
       id: 3,
@@ -270,15 +274,25 @@ describe('production control-plane pages', () => {
     vi.restoreAllMocks();
   });
 
-  const renderPage = async (page: PageId, options: { adminKeyConfigured?: boolean } = {}) => {
+  const renderPage = async (
+    page: PageId,
+    options: {
+      adminKeyConfigured?: boolean;
+      route?: ConsoleRoute;
+      onOpenSource?: (sourceId: string, section?: SourceSection) => void;
+      refreshRevision?: number;
+    } = {},
+  ) => {
     await act(async () => {
       root.render(
         <GatewayManagementPage
           page={page}
+          route={options.route}
+          onOpenSource={options.onOpenSource}
           getAdminKey={() => ''}
           adminKeyConfigured={options.adminKeyConfigured ?? false}
           clearAdminKey={() => {}}
-          refreshRevision={0}
+          refreshRevision={options.refreshRevision ?? 0}
           onLoadingChange={() => {}}
         />,
       );
@@ -286,17 +300,24 @@ describe('production control-plane pages', () => {
     });
   };
 
+  const renderReview = (options: Parameters<typeof renderPage>[1] = {}) => (
+    renderPage('sources', { ...options, route: { page: 'sources', sourceId: 'source-a', section: 'review' } })
+  );
+
   it('renders Source facts and never renders the credential environment reference', async () => {
     await renderPage('sources');
 
     expect(container.textContent).toContain('Source A');
+    expect(container.textContent).toContain('source-a');
     expect(container.textContent).toContain('原生');
     expect(container.textContent).toContain('转换');
     expect(container.textContent).toContain('不支持');
+    expect(container.textContent).toContain('Account A');
+    expect(container.textContent).not.toContain('PROVIDER_REFERENCE_ENV');
 
-    const accountsTab = Array.from(container.querySelectorAll<HTMLButtonElement>('[role="tab"]'))
-      .find((button) => button.textContent?.includes('账号'));
-    await act(async () => accountsTab?.click());
+    // 账号管理下沉到编辑来源页，凭据环境变量同样不回显。
+    await renderPage('sources', { route: { page: 'sources', sourceId: 'source-a', section: 'edit' } });
+    expect(container.textContent).toContain('账号绑定');
     expect(container.textContent).toContain('Account A');
     expect(container.textContent).toContain('已配置');
     expect(container.textContent).not.toContain('PROVIDER_REFERENCE_ENV');
@@ -306,13 +327,12 @@ describe('production control-plane pages', () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       if (String(input).startsWith('/admin/sources/source-a/models')) {
         const models = [sourceModel, { ...sourceModel, upstream_model_id: 'unknown-model', availability_status: 'unknown' }];
-        const availability = new URL(String(input), 'http://localhost').searchParams.get('availability_status');
-        return jsonResponse({ data: models.filter(model => !availability || model.availability_status === availability) });
+        return jsonResponse({ data: models });
       }
       return baseHandler(input);
     }));
-    await renderPage('discovery');
-    expect(container.querySelector('section[aria-label="模型发现筛选"]')).not.toBeNull();
+    await renderReview();
+    expect(container.querySelector('section[aria-label="模型更新审核筛选"]')).not.toBeNull();
     const checkbox = (name: string) => container.querySelector<HTMLInputElement>(`input[aria-label="${name}"]`)!;
     expect(checkbox('选择 unknown-model').disabled).toBe(true);
     act(() => checkbox('选择全部可确认模型').click());
@@ -326,6 +346,29 @@ describe('production control-plane pages', () => {
     expect([...container.querySelectorAll('button')].find(button => button.textContent?.includes('批量确认'))!.disabled).toBe(true);
   });
 
+  it('shows confirmed models by default instead of misleading an empty pending-only page', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).startsWith('/admin/sources/source-a/models')) {
+        return jsonResponse({ data: [
+          { ...sourceModel, upstream_model_id: 'confirmed-model', confirmation_status: 'confirmed' },
+          sourceModel,
+        ] });
+      }
+      return baseHandler(input);
+    }));
+    await renderReview();
+    const row = (id: string) => [...container.querySelectorAll('tbody tr')].find(tr => tr.textContent?.includes(id));
+    expect(row('confirmed-model')).toBeDefined();
+    expect(row('upstream-a')).toBeDefined();
+    expect(container.textContent).not.toContain('当前筛选没有来源模型');
+    // 切到“待审核”页签后已确认模型被过滤。
+    const pendingTab = [...container.querySelectorAll<HTMLButtonElement>('button[aria-pressed]')].find(tab => tab.textContent?.includes('待审核'))!;
+    expect(pendingTab.getAttribute('aria-pressed')).toBe('false');
+    await act(async () => pendingTab.click());
+    expect(row('confirmed-model')).toBeUndefined();
+    expect(row('upstream-a')).toBeDefined();
+  });
+
   it('reports boolean toggle changes and ignores disabled activation', () => {
     const onChange = vi.fn();
     act(() => root.render(<Toggle label="来源启用" checked onChange={onChange} />));
@@ -337,22 +380,44 @@ describe('production control-plane pages', () => {
     expect(onChange).toHaveBeenCalledTimes(1);
   });
 
-  it('returns focus to the source row after switching from details to editing', async () => {
-    await renderPage('sources');
-    const trigger = container.querySelector<HTMLButtonElement>('button[aria-label="查看 source-a"]')!;
-    await act(async () => { trigger.focus(); trigger.click(); });
-    const edit = [...container.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find(button => button.textContent === '编辑来源')!;
-    act(() => { edit.focus(); edit.click(); });
-    await act(async () => { await new Promise(resolve => setTimeout(resolve, 250)); });
-    expect(container.querySelector('#source-editor-form')).not.toBeNull();
-    const close = container.querySelector<HTMLButtonElement>('[role="dialog"] button[aria-label="关闭"]')!;
-    act(() => { close.focus(); close.click(); });
-    await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)); });
-    expect(document.activeElement).toBe(trigger);
+  it('navigates from the source list through details to editing and review via route callbacks', async () => {
+    const onOpenSource = vi.fn();
+    await renderPage('sources', { onOpenSource });
+
+    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="查看 source-a"]')!.click());
+    expect(onOpenSource).toHaveBeenLastCalledWith('source-a', undefined);
+
+    await renderPage('sources', { route: { page: 'sources', sourceId: 'source-a' }, onOpenSource });
+    expect(container.textContent).toContain('基本信息');
+    expect(container.textContent).toContain('账号与连接');
+    expect(container.textContent).toContain('上游模型同步');
+    await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent === '编辑来源')!.click());
+    expect(onOpenSource).toHaveBeenLastCalledWith('source-a', 'edit');
+
+    await renderPage('sources', { route: { page: 'sources', sourceId: 'source-a', section: 'review' }, onOpenSource });
+    expect(container.textContent).toContain('模型更新审核');
+    await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent === '前往模型与路由')!.click());
   });
 
-  it('keeps source table actions separate from row details and preserves column semantics', async () => {
-    await renderPage('sources');
+  it('routes a completed check-updates action into the review page', async () => {
+    let ran = false;
+    const onOpenSource = vi.fn();
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith('/discoveries') && init?.method === 'POST') {
+        ran = true;
+        return jsonResponse({ data: { run: { status: 'succeeded', id: 5, discovered_model_count: 1 }, diff: { added: [], changed: [], missing: [] } } });
+      }
+      return baseHandler(input);
+    }));
+    await renderPage('sources', { onOpenSource });
+    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="检查 source-a 的模型更新"]')!.click());
+    expect(ran).toBe(true);
+    expect(onOpenSource).toHaveBeenLastCalledWith('source-a', 'review');
+  });
+
+  it('keeps source table actions separate from row navigation and preserves column semantics', async () => {
+    const onOpenSource = vi.fn();
+    await renderPage('sources', { onOpenSource });
     const table = container.querySelector('table')!;
     expect([...table.querySelectorAll('thead th')].every(cell => cell.getAttribute('scope') === 'col')).toBe(true);
     const region = table.closest('[role="region"]')!;
@@ -360,17 +425,12 @@ describe('production control-plane pages', () => {
     expect(region.getAttribute('tabindex')).toBe('0');
     expect(table.querySelector('tbody tr')!.getAttribute('role')).toBeNull();
 
-    // The edit button bubbles through its cell, but must not also open row details.
+    // 行内编辑按钮直接进入编辑工作流，与行点击进入详情互不串扰。
     await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="编辑 source-a"]')!.click());
-    expect(container.querySelector('#source-editor-form')).not.toBeNull();
-    expect(container.querySelectorAll('[role="dialog"]')).toHaveLength(1);
-    act(() => container.querySelector<HTMLButtonElement>('[role="dialog"] button[aria-label="关闭"]')!.click());
-    await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)); });
-    expect(container.querySelector('[role="dialog"]')).toBeNull();
+    expect(onOpenSource).toHaveBeenLastCalledWith('source-a', 'edit');
 
     await act(async () => table.querySelector<HTMLTableCellElement>('tbody td')!.click());
-    expect(container.querySelector('[role="dialog"]')).not.toBeNull();
-    expect(container.querySelector('#source-editor-form')).toBeNull();
+    expect(onOpenSource).toHaveBeenLastCalledWith('source-a', undefined);
   });
 
   it('keeps source field validation, native selection, checkbox state and external submit behavior', async () => {
@@ -413,15 +473,13 @@ describe('production control-plane pages', () => {
     expect(onSubmit).toHaveBeenCalledTimes(1);
   });
 
-  it('shows unsupported discovery and pending SourceModel field provenance', async () => {
-    await renderPage('discovery');
+  it('shows unsupported discovery and pending SourceModel review state', async () => {
+    await renderReview();
 
-    expect(container.textContent).toContain('unsupported');
+    expect(container.textContent).toContain('不支持');
     expect(container.textContent).toContain('discovery_unsupported');
     expect(container.textContent).toContain('upstream-a');
-    expect(container.textContent).toContain('预设 1');
-    expect(container.textContent).toContain('上游 1');
-    expect(container.textContent).toContain('未知 1');
+    expect(container.textContent).toContain('待审核');
     expect(container.querySelector('[role="status"]')?.textContent).toContain('discovery_unsupported');
   });
 
@@ -434,8 +492,8 @@ describe('production control-plane pages', () => {
       if (String(input) === '/admin/sources/source-a' && init?.method === 'PUT') return save(init);
       return baseHandler(input);
     }));
-    await renderPage('sources');
-    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="编辑 source-a"]')!.click());
+    const onOpenSource = vi.fn();
+    await renderPage('sources', { route: { page: 'sources', sourceId: 'source-a', section: 'edit' }, onOpenSource });
     const form = container.querySelector('#source-editor-form')!;
     const name = [...form.querySelectorAll('input')].find(el => el.value === 'Source A')!;
     act(() => {
@@ -444,7 +502,7 @@ describe('production control-plane pages', () => {
     });
     const submit = () => container.querySelector<HTMLButtonElement>('button[form="source-editor-form"]')!.click();
     await act(async () => { submit(); });
-    expect(form.querySelector('[role="alert"]')).not.toBeNull();
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('source_conflict');
     expect(name.value).toBe('Edited source');
     expect(container.querySelector('.mantine-Notification-root')).toBeNull();
     failSave = false;
@@ -452,7 +510,7 @@ describe('production control-plane pages', () => {
     expect(save).toHaveBeenCalledTimes(2);
     expect(container.querySelectorAll('.mantine-Notification-root[role="status"]')).toHaveLength(1);
     expect(container.querySelector('[role="alert"]')).toBeNull();
-    expect(container.querySelector('[role="dialog"]')).toBeNull();
+    expect(onOpenSource).toHaveBeenLastCalledWith('source-a', undefined);
   });
 
   it('retains discovery failure details alongside the existing model catalog', async () => {
@@ -465,7 +523,7 @@ describe('production control-plane pages', () => {
       latest.data.error_message = 'Catalog request timed out';
       return jsonResponse(latest);
     }));
-    await renderPage('discovery');
+    await renderReview();
     const alert = container.querySelector('[role="alert"]')!;
     expect(alert.textContent).toContain('upstream_timeout');
     expect(alert.textContent).toContain('Catalog request timed out');
@@ -479,13 +537,13 @@ describe('production control-plane pages', () => {
       }
       return baseHandler(input);
     }));
-    await renderPage('discovery');
+    await renderReview();
     expect(container.querySelector('[role="alert"]')?.textContent).toContain('catalog_unavailable');
     expect(container.textContent).not.toContain('当前筛选没有来源模型');
-    expect(container.textContent).not.toContain('该来源不支持自动发现');
+    expect(container.textContent).not.toContain('该来源不支持自动检查模型更新');
   });
 
-  it('isolates a slow Source switch and ignores the old Source response even when fetch ignores abort', async () => {
+  it('ignores a stale review response after the route changes to another source', async () => {
     const sourceB = { ...source, id: 'source-b', display_name: 'Source B' };
     const accountB = { ...account, id: 'account-b', source_id: 'source-b', display_name: 'Account B' };
     const modelB = { ...sourceModel, source_id: 'source-b', upstream_model_id: 'upstream-b' };
@@ -500,24 +558,21 @@ describe('production control-plane pages', () => {
       if (url.startsWith('/admin/sources/source-b/models')) return jsonResponse({ data: [modelB] });
       return baseHandler(input);
     }));
-    await renderPage('discovery');
-    const sourceLabel = [...container.querySelectorAll('label')].find((label) => label.textContent === '来源')!;
-    const sourceSelect = document.getElementById(sourceLabel.htmlFor) as HTMLInputElement;
-    await selectComboboxValue(sourceSelect, 'source-b');
-    expect(container.textContent).not.toContain('upstream-a');
+    await renderReview();
     expect(container.textContent).not.toContain('当前筛选没有来源模型');
     expect(container.textContent).toContain('正在加载来源模型');
     const latestB = await (await baseHandler('/admin/sources/source-a/discoveries/latest')).json();
     latestB.data.source_id = 'source-b';
     latestB.data.account_id = 'account-b';
     await act(async () => newLatest.resolve(jsonResponse(latestB)));
+    await renderPage('sources', { route: { page: 'sources', sourceId: 'source-b', section: 'review' } });
     expect(container.querySelector('tbody')?.textContent).toContain('upstream-b');
     await act(async () => oldLatest.resolve(await baseHandler('/admin/sources/source-a/discoveries/latest')));
     expect(container.querySelector('tbody')?.textContent).toContain('upstream-b');
     expect(container.textContent).not.toContain('upstream-a');
   });
 
-  it('keeps a confirmed no-Source state visible when its background refresh fails', async () => {
+  it('keeps a confirmed missing-source state visible when its background refresh fails', async () => {
     let failRefresh = false;
     const fetchRequest = vi.fn(async (input: RequestInfo | URL) => {
       if (String(input) === '/admin/sources') {
@@ -529,19 +584,12 @@ describe('production control-plane pages', () => {
       return baseHandler(input);
     });
     vi.stubGlobal('fetch', fetchRequest);
-    const render = async (refreshRevision: number) => {
-      await act(async () => {
-        root.render(<GatewayManagementPage page="discovery" getAdminKey={() => ''} adminKeyConfigured={false}
-          clearAdminKey={() => {}} refreshRevision={refreshRevision} onLoadingChange={() => {}} />);
-        await new Promise((resolve) => setTimeout(resolve, 20));
-      });
-    };
-    await render(0);
-    expect(container.textContent).toContain('没有可用于模型发现的来源');
+    await renderPage('sources', { route: { page: 'sources', sourceId: 'ghost', section: 'review' } });
+    expect(container.textContent).toContain('来源 ghost 不存在');
     failRefresh = true;
-    await render(1);
+    await renderPage('sources', { route: { page: 'sources', sourceId: 'ghost', section: 'review' }, refreshRevision: 1 });
     expect(container.querySelector('[role="alert"]')?.textContent).toContain('source_refresh_failed');
-    expect(container.textContent).toContain('没有可用于模型发现的来源');
+    expect(container.textContent).toContain('来源 ghost 不存在');
     expect([...container.querySelectorAll('button')].some((button) => button.textContent?.includes('重试'))).toBe(true);
   });
 
@@ -557,8 +605,8 @@ describe('production control-plane pages', () => {
       if (String(input).endsWith('/discoveries/latest') && ran) return jsonResponse(latest);
       return baseHandler(input);
     }));
-    await renderPage('discovery');
-    await act(async () => [...container.querySelectorAll('button')].find(el => el.textContent === '运行发现')!.click());
+    await renderReview();
+    await act(async () => [...container.querySelectorAll('button')].find(el => el.textContent === '重新检查')!.click());
     expect(ran).toBe(true);
     expect(container.querySelectorAll(status === 'failed' ? '[role="alert"]' : '[role="status"]')).toHaveLength(1);
     expect(container.textContent?.split('catalog_unavailable')).toHaveLength(2);
@@ -577,8 +625,8 @@ describe('production control-plane pages', () => {
       if (ran && failRefresh && String(input).endsWith('/discoveries/latest')) return jsonResponse({ error: { code: 'refresh_unavailable', message: 'Refresh failed' } }, 503);
       return baseHandler(input);
     }));
-    await renderPage('discovery');
-    await act(async () => [...container.querySelectorAll('button')].find(el => el.textContent === '运行发现')!.click());
+    await renderReview();
+    await act(async () => [...container.querySelectorAll('button')].find(el => el.textContent === '重新检查')!.click());
     expect(container.querySelector('[role="alert"]')?.textContent).toContain('refresh_unavailable');
     expect(container.querySelector('tbody')?.textContent).toContain('upstream-a');
     expect(container.querySelector('.mantine-Notification-root')).toBeNull();
@@ -598,8 +646,8 @@ describe('production control-plane pages', () => {
       if (path.endsWith('/models/upstream-a/capabilities')) return jsonResponse({ data: [] });
       return baseHandler(input);
     }));
-    await renderPage('discovery');
-    await act(async () => [...container.querySelectorAll('button')].find(el => el.textContent === '协议能力')!.click());
+    await renderReview();
+    await act(async () => [...container.querySelectorAll('button')].find(el => el.textContent === '编辑能力')!.click());
     const dialog = container.querySelector('[role="dialog"]')!;
     const mode = dialog.querySelector<HTMLInputElement>('[role="combobox"]')!;
     await selectComboboxValue(mode, 'native');

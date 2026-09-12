@@ -1,29 +1,11 @@
 import type {
-  Account,
   DiscoveryDiff,
   LatestDiscovery,
-  ProviderPresetDefinition,
-  Source,
   SourceModel
 } from '@/admin-api';
+import type { TFunction } from 'i18next';
 
-export interface DiscoveryContext {
-  sources: Source[];
-  accounts: Account[];
-}
-
-export interface DiscoveryView {
-  latest: LatestDiscovery | null;
-  models: SourceModel[];
-}
-
-export const emptyDiff = (): DiscoveryDiff => ({ added: [], changed: [], missing: [] });
-
-export const sourceDiscoveryDefinition = (source?: Source) => {
-  if (!source?.provider_preset_snapshot || typeof source.provider_preset_snapshot !== 'object') return undefined;
-  const definition = source.provider_preset_snapshot as Partial<ProviderPresetDefinition>;
-  return definition.discovery;
-};
+const emptyDiff = (): DiscoveryDiff => ({ added: [], changed: [], missing: [] });
 
 export const statusTone = (status: string) => {
   if (status === 'succeeded' || status === 'confirmed' || status === 'available') return 'success' as const;
@@ -32,17 +14,55 @@ export const statusTone = (status: string) => {
   return 'accent' as const;
 };
 
-export const metadataSummary = (model: SourceModel): string => {
-  const displayName = typeof model.metadata.display_name === 'string' ? model.metadata.display_name : '';
-  const logicalName = typeof model.metadata.logical_model_name === 'string' ? model.metadata.logical_model_name : '';
-  return displayName || logicalName;
+/** 单个来源的模型同步汇总，全部来自真实 API 数据（latest run diff + source model 列表）。 */
+export interface SourceSyncStats {
+  latest: LatestDiscovery | null;
+  models: SourceModel[];
+  pendingCount: number;
+  addedCount: number;
+  changedCount: number;
+  missingCount: number;
+  unchangedCount: number;
+  lastSyncAt: string | null;
+}
+
+export const buildSyncStats = (latest: LatestDiscovery | null, models: SourceModel[]): SourceSyncStats => {
+  const diff = latest?.diff ?? latest?.run.diff ?? emptyDiff();
+  const changedIds = new Set(
+    [...diff.added, ...diff.changed, ...diff.missing].map((entry) => entry.upstream_model_id),
+  );
+  return {
+    latest,
+    models,
+    pendingCount: models.filter((model) => model.confirmation_status === 'pending').length,
+    addedCount: diff.added.length,
+    changedCount: diff.changed.length,
+    missingCount: diff.missing.length,
+    unchangedCount: models.filter((model) => !changedIds.has(model.upstream_model_id)).length,
+    lastSyncAt: latest?.last_discovered_at ?? latest?.run.completed_at ?? null,
+  };
 };
 
-export const metadataSourcesSummary = (model: SourceModel, sourceLabel: (source: string) => string): string => {
-  const counts = new Map<string, number>();
-  for (const source of Object.values(model.field_sources)) {
-    if (source) counts.set(source, (counts.get(source) ?? 0) + 1);
+/** 模型能力摘要：上下文长度 + 已声明的关键能力，只展示真实元数据。 */
+export const capabilitySummary = (model: SourceModel, t: TFunction): string => {
+  const parts: string[] = [];
+  const context = model.metadata.context_window;
+  if (typeof context === 'number' && context > 0) parts.push(`${Math.round(context / 1000)}K`);
+  for (const feature of ['tools', 'thinking', 'web_search', 'structured_output'] as const) {
+    const value = model.metadata[feature];
+    if (value === true || value === 'native') parts.push(t(`discovery.feature.${feature}`));
   }
-  const parts = [...counts.entries()].map(([source, count]) => `${sourceLabel(source)} ${count}`);
-  return parts.length > 0 ? parts.join(' · ') : sourceLabel('unknown');
+  return parts.join(' · ');
+};
+
+/** 最近一次发现中每个模型的变化类型。 */
+export type DiscoveryChangeKind = 'added' | 'changed' | 'missing';
+
+export const diffChangeMap = (latest: LatestDiscovery | null): Map<string, { kind: DiscoveryChangeKind; changedFields: string[] }> => {
+  const map = new Map<string, { kind: DiscoveryChangeKind; changedFields: string[] }>();
+  const diff = latest?.diff ?? latest?.run.diff ?? emptyDiff();
+  for (const entry of diff.added) map.set(entry.upstream_model_id, { kind: 'added', changedFields: entry.changed_fields });
+  for (const entry of diff.changed) map.set(entry.upstream_model_id, { kind: 'changed', changedFields: entry.changed_fields });
+  for (const entry of diff.missing) map.set(entry.upstream_model_id, { kind: 'missing', changedFields: entry.changed_fields });
+  return map;
 };
