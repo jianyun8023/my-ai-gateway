@@ -164,6 +164,262 @@ fn bootstrap_config(base_url: &str) -> GatewayConfig {
 
 #[tokio::test]
 #[ignore = "requires isolated PostgreSQL via TEST_DATABASE_URL"]
+async fn postgres_model_routing_saves_atomically_and_preserves_order_and_metadata() {
+    use super::types::ModelRoutingWrite;
+    let (database, admin, schema) = isolated_database().await;
+    let control_plane = ControlPlane::new(database.pool().clone(), "127.0.0.1:0");
+    let mut config = bootstrap_config("https://ordered.example");
+    for id in ["account-b", "account-c"] {
+        let mut account = config.accounts[0].clone();
+        account.id = id.to_owned();
+        account.display_name = id.to_owned();
+        config.accounts.push(account);
+    }
+    config.routes[0].fallback_accounts = vec!["account-b".to_owned(), "account-c".to_owned()];
+    let initial = control_plane
+        .initialize_from_config(&config, false)
+        .await
+        .unwrap()
+        .unwrap();
+    let model = control_plane.list_logical_models().await.unwrap().remove(0);
+    sqlx::query("UPDATE logical_models SET metadata=$2,field_sources=$3 WHERE id=$1")
+        .bind(&model.id)
+        .bind(json!({"context_window":128000}))
+        .bind(json!({"context_window":"user"}))
+        .execute(database.pool())
+        .await
+        .unwrap();
+    let existing = control_plane.get_model_routing(&model.id).await.unwrap();
+    assert_eq!(existing.strategy, "primary_then_weighted_fallback");
+    assert_eq!(
+        existing
+            .lines
+            .iter()
+            .map(|line| line.account_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["account-a", "account-b", "account-c"]
+    );
+    let mut input: ModelRoutingWrite = serde_json::from_value(json!({
+        "public_name":"renamed-model","display_name":"Preserved display","enabled":true,
+        "lines":[
+            {"source_id":"source-a","account_id":"account-c","upstream_model_id":"logical-a"},
+            {"source_id":"source-a","account_id":"account-a","upstream_model_id":"logical-a"},
+            {"source_id":"source-a","account_id":"account-b","upstream_model_id":"logical-a"}
+        ],
+        "request_timeout_ms":2500,"max_retries":null
+    }))
+    .unwrap();
+    let saved = control_plane
+        .put_model_routing(&model.id, &input)
+        .await
+        .unwrap();
+    assert_eq!(saved.snapshot.revision, initial.revision + 1);
+    assert_eq!(
+        saved.record.logical_model.metadata,
+        json!({"context_window":128000})
+    );
+    assert_eq!(
+        saved.record.logical_model.field_sources,
+        json!({"context_window":"user"})
+    );
+    assert_eq!(saved.record.strategy, "ordered_fallback");
+    assert_eq!(
+        saved
+            .record
+            .lines
+            .iter()
+            .map(|line| line.account_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["account-c", "account-a", "account-b"]
+    );
+    assert_eq!(
+        saved.record.protocols,
+        vec![Protocol::OpenAiChatCompletions]
+    );
+    let resolved = saved
+        .snapshot
+        .resolver
+        .resolve_detailed(Protocol::OpenAiChatCompletions, "renamed-model")
+        .unwrap();
+    assert_eq!(resolved.primary_account_id, "account-c");
+    assert_eq!(resolved.fallback_accounts, vec!["account-a", "account-b"]);
+    assert_eq!(resolved.request_timeout_ms, Some(2500));
+    assert_eq!(resolved.max_retries, None);
+    let saved_bindings: Vec<i64> = control_plane
+        .list_model_bindings()
+        .await
+        .unwrap()
+        .iter()
+        .map(|binding| binding.id)
+        .collect();
+    let mut invalid = input.clone();
+    invalid.public_name = "must-roll-back".to_owned();
+    invalid.request_timeout_ms = Some(9999);
+    invalid.lines[2].upstream_model_id = "unconfirmed-model".to_owned();
+    assert!(control_plane
+        .put_model_routing(&model.id, &invalid)
+        .await
+        .is_err());
+    let after = control_plane.get_model_routing(&model.id).await.unwrap();
+    assert_eq!(after.logical_model.public_name, "renamed-model");
+    assert_eq!(after.request_timeout_ms, Some(2500));
+    assert_eq!(
+        control_plane.load_snapshot().await.unwrap().revision,
+        saved.snapshot.revision
+    );
+    assert_eq!(
+        control_plane
+            .list_model_bindings()
+            .await
+            .unwrap()
+            .iter()
+            .map(|binding| binding.id)
+            .collect::<Vec<_>>(),
+        saved_bindings
+    );
+
+    input.enabled = false;
+    let disabled = control_plane
+        .put_model_routing(&model.id, &input)
+        .await
+        .unwrap();
+    assert!(disabled
+        .snapshot
+        .resolver
+        .resolve_detailed(Protocol::OpenAiChatCompletions, "renamed-model")
+        .is_err());
+    assert_eq!(disabled.record.lines.len(), 3);
+    let enabled = control_plane
+        .set_logical_model_enabled(&model.id, true)
+        .await
+        .unwrap();
+    assert_eq!(
+        enabled
+            .snapshot
+            .resolver
+            .resolve_detailed(Protocol::OpenAiChatCompletions, "renamed-model")
+            .unwrap()
+            .primary_account_id,
+        "account-c"
+    );
+    control_plane
+        .set_account_enabled("account-c", false)
+        .await
+        .unwrap();
+    let unavailable = control_plane.get_model_routing(&model.id).await.unwrap();
+    assert!(unavailable.lines[0].protocols.is_empty());
+    assert!(!unavailable.lines[1].protocols.is_empty());
+    assert!(control_plane
+        .put_model_routing(&model.id, &input)
+        .await
+        .is_err());
+    control_plane
+        .set_account_enabled("account-c", true)
+        .await
+        .unwrap();
+
+    // Creation assigns an ID independently of the public model name.
+    input.public_name = "created-model".to_owned();
+    input.enabled = true;
+    input.max_retries = Some(0);
+    let created = control_plane.create_model_routing(&input).await.unwrap();
+    let created_id = created.record.logical_model.id.clone();
+    assert_ne!(created_id, input.public_name);
+    let listed = control_plane
+        .list_logical_models()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|model| model.id == created_id)
+        .unwrap();
+    assert_eq!(listed.request_timeout_ms, Some(2500));
+    assert_eq!(listed.max_retries, Some(0));
+    assert_eq!(
+        created.record.logical_model.status,
+        CatalogStatus::Confirmed
+    );
+    assert_eq!(
+        created
+            .snapshot
+            .resolver
+            .resolve_detailed(Protocol::OpenAiChatCompletions, "created-model")
+            .unwrap()
+            .max_retries,
+        Some(0)
+    );
+    sqlx::query("UPDATE logical_models SET status='unavailable',unavailable_at=NOW() WHERE id=$1")
+        .bind(&created_id)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    let mut rejected_reconfirmation = input.clone();
+    rejected_reconfirmation.lines[0].upstream_model_id = "missing".to_owned();
+    assert!(control_plane
+        .put_model_routing(&created_id, &rejected_reconfirmation)
+        .await
+        .is_err());
+    assert_eq!(
+        control_plane
+            .get_logical_model(&created_id)
+            .await
+            .unwrap()
+            .status,
+        CatalogStatus::Unavailable
+    );
+    let mut paused = input.clone();
+    paused.enabled = false;
+    paused.lines.clear();
+    paused.public_name = "paused-model".to_owned();
+    let saved_paused = control_plane
+        .put_model_routing(&created_id, &paused)
+        .await
+        .unwrap();
+    assert_eq!(
+        saved_paused.record.logical_model.status,
+        CatalogStatus::Unavailable
+    );
+    assert!(!saved_paused.record.logical_model.enabled);
+    assert!(saved_paused.record.lines.is_empty());
+    let reconfirmed = control_plane
+        .put_model_routing(&created_id, &input)
+        .await
+        .unwrap();
+    assert_eq!(
+        reconfirmed.record.logical_model.status,
+        CatalogStatus::Confirmed
+    );
+    assert!(reconfirmed.record.logical_model.unavailable_at.is_none());
+    assert!(reconfirmed
+        .snapshot
+        .resolver
+        .resolve_detailed(Protocol::OpenAiChatCompletions, "created-model")
+        .is_ok());
+    control_plane
+        .delete_logical_model(&created_id)
+        .await
+        .unwrap();
+    assert!(control_plane
+        .list_routes()
+        .await
+        .unwrap()
+        .iter()
+        .all(|route| route.logical_model_id != created_id));
+    assert!(control_plane
+        .list_model_bindings()
+        .await
+        .unwrap()
+        .iter()
+        .all(|binding| binding.logical_model_id != created_id));
+    database.pool().close().await;
+    sqlx::query(&format!("DROP SCHEMA \"{schema}\" CASCADE"))
+        .execute(&admin)
+        .await
+        .unwrap();
+    admin.close().await;
+}
+
+#[tokio::test]
+#[ignore = "requires isolated PostgreSQL via TEST_DATABASE_URL"]
 async fn postgres_credential_rotation_commits_and_rolls_back_atomically() {
     use crate::{
         auth::AdminAuth,

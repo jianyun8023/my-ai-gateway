@@ -126,10 +126,49 @@ pub(crate) struct LogicalModelView {
     pub(crate) metadata: Value,
     pub(crate) field_sources: Value,
     pub(crate) enabled: bool,
+    pub(crate) request_timeout_ms: Option<i64>,
+    pub(crate) max_retries: Option<i32>,
     pub(crate) confirmed_at: Option<DateTime<Utc>>,
     pub(crate) unavailable_at: Option<DateTime<Utc>>,
     pub(crate) created_at: DateTime<Utc>,
     pub(crate) updated_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ModelRoutingWrite {
+    pub(crate) public_name: String,
+    pub(crate) display_name: String,
+    pub(crate) enabled: bool,
+    pub(crate) lines: Vec<ModelRoutingLineWrite>,
+    pub(crate) request_timeout_ms: Option<i64>,
+    pub(crate) max_retries: Option<i32>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ModelRoutingLineWrite {
+    pub(crate) source_id: String,
+    pub(crate) account_id: String,
+    pub(crate) upstream_model_id: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub(crate) struct ModelRoutingLineView {
+    pub(crate) source_id: String,
+    pub(crate) account_id: String,
+    pub(crate) upstream_model_id: String,
+    pub(crate) protocols: Vec<Protocol>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub(crate) struct ModelRoutingView {
+    pub(crate) logical_model: LogicalModelView,
+    pub(crate) lines: Vec<ModelRoutingLineView>,
+    pub(crate) protocols: Vec<Protocol>,
+    pub(crate) strategy: String,
+    pub(crate) request_timeout_ms: Option<i64>,
+    pub(crate) max_retries: Option<i32>,
 }
 
 #[derive(Clone, Debug, Deserialize)]

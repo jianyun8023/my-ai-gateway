@@ -30,7 +30,7 @@ pub(crate) async fn proxy(
     protocol: Protocol,
 ) -> Response<Body> {
     let started = Instant::now();
-    let stream_config = stream::StreamConfig::from_env();
+    let mut stream_config = stream::StreamConfig::from_env();
     let request_id = Uuid::new_v4().to_string();
     tracing::Span::current().record("request_id", request_id.as_str());
     let live = state.snapshot();
@@ -137,6 +137,27 @@ pub(crate) async fn proxy(
         }
     };
     warn_degraded_route(&request_id, &route);
+    if let Some(timeout_ms) = route.request_timeout_ms {
+        stream_config.total_timeout = std::time::Duration::from_millis(timeout_ms as u64);
+    }
+    if route.strategy == "ordered_fallback" {
+        return super::ordered::proxy_ordered(
+            &state,
+            &config,
+            &route,
+            &headers,
+            body,
+            protocol,
+            model,
+            &request_id,
+            virtual_key_id,
+            client_source_from_headers(&headers, Some(&auth_identity)),
+            is_streamed,
+            &stream_config,
+            started,
+        )
+        .await;
+    }
     // The route only becomes dispatchable when its source resolves, so this
     // guard protects against a stale snapshot rather than normal traffic.
     if config.provider(&route.source_id).is_none() {
@@ -704,7 +725,7 @@ pub(crate) async fn proxy(
     finish_proxy(protocol, model, started, is_streamed, response)
 }
 
-fn finish_proxy(
+pub(super) fn finish_proxy(
     protocol: Protocol,
     model: &str,
     started: Instant,

@@ -444,6 +444,11 @@ impl Database {
         sqlx::raw_sql(include_str!("../../migrations/0024_system_events.sql"))
             .execute(&mut *tx)
             .await?;
+        sqlx::raw_sql(include_str!(
+            "../../migrations/0025_logical_model_request_settings.sql"
+        ))
+        .execute(&mut *tx)
+        .await?;
         tx.commit().await
     }
 

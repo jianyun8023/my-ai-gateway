@@ -26,18 +26,20 @@ export function Toggle({
   onChange,
   label,
   disabled = false,
+  showLabel = true,
 }: {
   checked: boolean;
   onChange: (checked: boolean) => void;
   label: string;
   disabled?: boolean;
+  showLabel?: boolean;
 }) {
   const { t } = useTranslation('console');
   return (
     <Switch className={styles.toggle} aria-label={label}
       checked={checked} disabled={disabled}
       onChange={(event) => onChange(event.currentTarget.checked)}
-      label={t(checked ? 'common.enabled' : 'common.disabled')}
+      label={showLabel ? t(checked ? 'common.enabled' : 'common.disabled') : undefined}
     />
   );
 }

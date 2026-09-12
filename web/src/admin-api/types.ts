@@ -330,6 +330,8 @@ export interface LogicalModel {
   metadata: ModelMetadataValues;
   field_sources: Partial<Record<ModelMetadataField, MetadataSource>>;
   enabled: boolean;
+  request_timeout_ms: number | null;
+  max_retries: number | null;
   confirmed_at?: string | null;
   unavailable_at?: string | null;
   created_at: string;
@@ -344,6 +346,30 @@ export interface LogicalModelWriteInput {
   metadata: ModelMetadataValues;
   field_sources: Partial<Record<ModelMetadataField, MetadataSource>>;
   enabled: boolean;
+}
+
+export interface ModelRoutingLineInput {
+  source_id: string;
+  account_id: string;
+  upstream_model_id: string;
+}
+
+export interface ModelRoutingWriteInput {
+  public_name: string;
+  display_name: string;
+  enabled: boolean;
+  lines: ModelRoutingLineInput[];
+  request_timeout_ms: number | null;
+  max_retries: number | null;
+}
+
+export interface ModelRoutingConfiguration {
+  logical_model: LogicalModel;
+  lines: Array<ModelRoutingLineInput & { protocols: GatewayProtocol[] }>;
+  protocols: GatewayProtocol[];
+  strategy: string;
+  request_timeout_ms: number | null;
+  max_retries: number | null;
 }
 
 export interface ModelBinding {

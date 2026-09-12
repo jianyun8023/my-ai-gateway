@@ -35,6 +35,9 @@ pub(crate) struct RuntimeRoute {
     pub(crate) route_id: String,
     pub(crate) model: String,
     pub(crate) protocol: Protocol,
+    pub(crate) strategy: String,
+    pub(crate) request_timeout_ms: Option<i64>,
+    pub(crate) max_retries: Option<i32>,
     pub(crate) allow_lossy_conversion: bool,
     pub(crate) bindings: Vec<RuntimeBinding>,
 }
@@ -43,6 +46,9 @@ pub(crate) struct RuntimeRoute {
 #[derive(Clone, Debug, Serialize)]
 pub(crate) struct ResolvedRoute {
     pub(crate) route_id: String,
+    pub(crate) strategy: String,
+    pub(crate) request_timeout_ms: Option<i64>,
+    pub(crate) max_retries: Option<i32>,
     /// Backward-compatible alias for `protocol_in`.
     pub(crate) protocol: Protocol,
     pub(crate) protocol_in: Protocol,
@@ -372,6 +378,9 @@ impl RouteResolver {
         })?;
         Ok(ResolvedRoute {
             route_id: route.id.clone(),
+            strategy: route.strategy.clone(),
+            request_timeout_ms: None,
+            max_retries: None,
             protocol,
             protocol_in: protocol,
             protocol_upstream: upstream,
@@ -436,6 +445,9 @@ fn resolve_runtime_route(
         .collect::<Vec<_>>();
     Ok(ResolvedRoute {
         route_id: route.route_id.clone(),
+        strategy: route.strategy.clone(),
+        request_timeout_ms: route.request_timeout_ms,
+        max_retries: route.max_retries,
         protocol,
         protocol_in: protocol,
         protocol_upstream: primary.protocol_upstream,

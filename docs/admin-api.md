@@ -82,6 +82,35 @@ Virtual Key 鉴权时，默认使用 key 的 `name`；若 `name` 为空则回退
 
 Source 生命周期还提供 `GET/PUT/DELETE /admin/sources/:source_id` 和 `PUT /admin/sources/:source_id/enabled`。Account、LogicalModel、ModelBinding 与 Route 使用相同的集合 `GET/POST`、单资源 `GET/PUT/DELETE` 和独立 enabled 路径约定；发现确认只更新 SourceModel，仍不会隐式创建这些运行时资源。
 
+### 模型与有序上游线路
+
+`GET /admin/logical-models/:id/routing` 读取模型的完整线路配置；`PUT` 同路径只替换已存在模型的配置，不存在时返回 `404`。`POST /admin/model-routings` 原子创建模型和线路，由服务端生成独立于公开名称的模型 ID，成功返回 `201`；公开名称重复返回 `409`，不会覆盖已有模型。创建和编辑共用以下请求体，协议由服务端从确认后的 SourceModelCapability 推导，不接受手动协议映射：
+
+```json
+{
+  "public_name": "deepseek-v4-flash",
+  "display_name": "DeepSeek V4 Flash",
+  "enabled": true,
+  "lines": [
+    { "source_id": "deepseek-primary", "account_id": "deepseek-main", "upstream_model_id": "deepseek-v4-flash" },
+    { "source_id": "deepseek-backup", "account_id": "deepseek-backup-account", "upstream_model_id": "deepseek-v4-flash" }
+  ],
+  "request_timeout_ms": null,
+  "max_retries": null
+}
+```
+
+`lines` 的数组顺序就是 `ordered_fallback` 的实际尝试顺序。服务端先按请求协议筛选线路，再跳过停用或冷却的账号；HTTP 408、429、5xx 或传输错误时继续下一条，每条最多尝试一次。其他 HTTP 错误直接返回；响应开始向客户端发送后（包括 SSE）不再回退。该策略不按账号权重抽样，不进行同账号 `Retry-After` 重放。旧 `primary_then_weighted_fallback` 路由行为保留，使用此 PUT 保存时才显式转为顺序策略。
+
+- `request_timeout_ms`：正整数毫秒，限制整次逻辑请求，包括所有回退、非流式响应读取和 SSE；`null` 继承 `GATEWAY_SSE_TOTAL_TIMEOUT_MS`。连接、首事件与空闲超时仍使用全局设置。总时限用尽后不继续发送备用请求。
+- `max_retries`：非负整数，限制首次实际尝试之后的额外尝试数；`0` 最多发送一次，`null` 尝试全部可用线路。因停用、冷却或协议不匹配跳过的线路不消耗次数。
+- 每条线路必须引用启用的 Source/Account、`confirmed + available` 的 SourceModel 及至少一个 `confirmed` 的 native/已注册 adapter 协议能力；保留同一 Provider family 的既有 Binding 校验。重复线路、unknown/unsupported 能力和非法 Adapter 会被拒绝。
+- 启用模型必须至少有一条线路。模型停用时仍保存线路意图，之后可用原 enabled 接口恢复；保存不会覆盖已有 `metadata`、`field_sources`、preset 或 ID。创建模型默认 confirmed；对既有 unavailable 模型提交完整可用线路视为用户重新确认，事务内依次执行 unavailable → pending → confirmed 并重新验证所有线路，任何失败整体回滚。停用且清空线路的保存保留既有目录状态，允许重命名而不错误地宣称恢复可用。
+
+响应 `data` 为 `{logical_model, lines, protocols, strategy, request_timeout_ms, max_retries}`；`logical_model` 使用完整 LogicalModel 响应，返回的每条 `line` 在上述三个 ID 之外增加只读 `protocols`。LogicalModel 列表、详情和写入响应也包含 `request_timeout_ms`、`max_retries`（未设置为 `null`），使列表能表达实际尝试次数限制，无需逐模型查询。GET 按 `priority DESC, binding id` 稳定重建线路，仅将已启用并确认、来源模型可用且已发布 Route 覆盖的协议记为可用；停用或 pending 绑定保留在结果中但不宣称支持。旧配置的策略如实返回，存在不同策略时为 `mixed`。
+
+POST 和 PUT 均在一个 SERIALIZABLE 事务内保存模型和请求设置、写入该模型的 Binding/Route、验证完整协议链并构建候选 snapshot，成功提交后只发布一次，响应包含 `snapshot_revision`。任一线路或 snapshot 校验失败时整体回滚，不留下部分模型、半套线路或新设置。旧资源 CRUD API 继续保留；`DELETE /admin/logical-models/:id` 通过外键级联清理该模型从属的 Binding/Route。
+
 连接测试和发现必须选择一个已经关联到该 Source、处于 enabled 状态且配置了 `credential_env` 的 Account。凭据只在进程内从环境变量读取，不在请求响应、审计表或日志中回显。Account/Source 的完整生命周期由 PostgreSQL 控制面 API 管理。
 
 ## 按协议连接测试
@@ -443,7 +472,7 @@ dry-run 只统计候选，不删除数据。正式清理按 attempt → logical 
 
 `POST /admin/control-plane/import` 接受导出 JSON，或 `{ "data": <export>, "replace": true, "requested_by": "..." }` 包装。非空目标必须显式 `replace=true`。导入按 FK 顺序恢复并重置 serial sequence；提交后重新构建 snapshot，只有 fingerprint 与导出一致才返回 `verified=true` 和新的 `snapshot_revision`。目标环境必须自行注入导出中列出的 Secret。
 
-`GET /admin/ops/schema`（`/admin/schema` 为同义入口）返回当前 `schema_version`、`migration_version`、应用版本和 UTC 更新时间。网关启动时会顺序应用仓库中的迁移；当前版本为 24，`migrations/0024_system_events.sql` 增加窄系统事件表、第五类 retention policy 及清理计数。
+`GET /admin/ops/schema`（`/admin/schema` 为同义入口）返回当前 `schema_version`、`migration_version`、应用版本和 UTC 更新时间。网关启动时会顺序应用仓库中的迁移；当前版本为 25，`migrations/0025_logical_model_request_settings.sql` 增加逻辑模型总请求超时与重试设置。控制面导出包含这些字段，runtime snapshot fingerprint 同时覆盖策略和请求设置。
 
 完整的 PostgreSQL `pg_dump`、新库恢复、Docker Compose 和本地 CLI 步骤见 [`docs/operations.md`](./operations.md)。物理 dump 可能包含数据库内的加密凭据和全部历史，必须按高敏感备份保护；脱敏迁移请使用控制面 JSON 导出。
 

@@ -562,6 +562,9 @@ mod tests {
         };
         let routes = vec![
             RuntimeRoute {
+                strategy: "primary_then_weighted_fallback".into(),
+                request_timeout_ms: None,
+                max_retries: None,
                 route_id: "route-a".into(),
                 model: "logical-a".into(),
                 protocol: Protocol::OpenAiChatCompletions,
@@ -592,6 +595,9 @@ mod tests {
                 ],
             },
             RuntimeRoute {
+                strategy: "primary_then_weighted_fallback".into(),
+                request_timeout_ms: None,
+                max_retries: None,
                 route_id: "route-a".into(),
                 model: "logical-a".into(),
                 protocol: Protocol::OpenAiResponses,
@@ -609,6 +615,9 @@ mod tests {
                 )],
             },
             RuntimeRoute {
+                strategy: "primary_then_weighted_fallback".into(),
+                request_timeout_ms: None,
+                max_retries: None,
                 route_id: "route-a".into(),
                 model: "logical-a".into(),
                 protocol: Protocol::AnthropicMessages,
@@ -626,6 +635,9 @@ mod tests {
                 )],
             },
             RuntimeRoute {
+                strategy: "primary_then_weighted_fallback".into(),
+                request_timeout_ms: None,
+                max_retries: None,
                 route_id: "route-partial".into(),
                 model: "logical-partial".into(),
                 protocol: Protocol::OpenAiChatCompletions,

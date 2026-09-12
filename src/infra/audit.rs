@@ -333,6 +333,7 @@ fn classify_path(
         "sources" => nested_resource(parts, "source"),
         "accounts" => nested_resource(parts, "account"),
         "logical-models" => nested_resource(parts, "logical_model"),
+        "model-routings" => nested_resource(parts, "logical_model"),
         "model-bindings" => nested_resource(parts, "model_binding"),
         "routes" => nested_resource(parts, "route"),
         "keys" => nested_resource(parts, "virtual_key"),

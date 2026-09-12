@@ -1,0 +1,10 @@
+.paths, .path, .pool { min-width: 0; display: grid; gap: 8px; }
+.chain, .step, .badges, .lineHeader { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.chain { align-items: flex-start; }
+.step { flex-wrap: nowrap; align-items: stretch; }
+.line { min-width: 0; width: 128px; max-width: 100%; flex: 0 1 128px; display: grid; align-content: start; gap: 4px; padding: 8px; }
+.lineHeader { flex-wrap: nowrap; justify-content: space-between; gap: 4px; }
+.lineHeader > [data-ui='status-pill'] { flex-shrink: 0; }
+.metadata { min-width: 0; display: grid; gap: 0; overflow-wrap: anywhere; }
+.wrap { min-width: 0; overflow-wrap: anywhere; }
+.arrow { flex: 0 0 12px; align-self: center; text-align: center; }

@@ -5,6 +5,7 @@ mod accounts;
 mod bindings;
 mod error;
 mod import;
+mod model_routing;
 mod models;
 mod repository;
 mod routes;
@@ -18,8 +19,8 @@ pub(crate) use error::ControlPlaneError;
 pub(crate) use service::ControlPlane;
 pub(crate) use snapshot::RuntimeSnapshot;
 pub(crate) use types::{
-    AccountWrite, EnabledWrite, LogicalModelWrite, ModelBindingWrite, Mutation, RouteWrite,
-    SourceCreateWrite, SourceWrite,
+    AccountWrite, EnabledWrite, LogicalModelWrite, ModelBindingWrite, ModelRoutingWrite, Mutation,
+    RouteWrite, SourceCreateWrite, SourceWrite,
 };
 
 #[cfg(test)]

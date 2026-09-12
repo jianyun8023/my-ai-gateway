@@ -149,6 +149,8 @@ const logicalModel = {
   metadata: {},
   field_sources: {},
   enabled: true,
+  request_timeout_ms: null,
+  max_retries: null,
   confirmed_at: '2026-08-31T00:00:00Z',
   unavailable_at: null,
   created_at: '2026-08-31T00:00:00Z',
@@ -208,9 +210,19 @@ const baseHandler = async (input: RequestInfo | URL) => {
   if (url === '/admin/provider-presets') return jsonResponse({ data: [{ id: 'preset-a', version: 1, display_name: 'Synthetic preset', definition: source.provider_preset_snapshot, created_at: source.created_at }] });
   if (url === '/admin/capabilities') return jsonResponse(capabilityResponse);
   if (url === '/admin/logical-models') return jsonResponse({ data: [logicalModel] });
+  if (url === '/admin/logical-models/logical-a/routing') return jsonResponse({ data: {
+    logical_model: logicalModel,
+    lines: [{ source_id: 'source-a', account_id: 'account-a', upstream_model_id: 'upstream-a', protocols: ['openai_chat_completions'] }],
+    protocols: ['openai_chat_completions'], strategy: 'primary_then_weighted_fallback',
+    request_timeout_ms: null, max_retries: null,
+  } });
+  if (url === '/admin/sources/source-a/models/upstream-a/capabilities') return jsonResponse({ data: [{
+    source_id: 'source-a', upstream_model_id: 'upstream-a', protocol: 'openai_chat_completions',
+    status: 'confirmed', mode: 'native', feature_capabilities: {}, field_source: 'user',
+  }] });
   if (url === '/admin/model-bindings') return jsonResponse({ data: [binding] });
   if (url === '/admin/routes') return jsonResponse({ data: [route] });
-  if (url.startsWith('/admin/sources/source-a/models')) return jsonResponse({ data: [sourceModel] });
+  if (url.startsWith('/admin/sources/source-a/models')) return jsonResponse({ data: [url.includes('confirmation_status=confirmed') ? { ...sourceModel, confirmation_status: 'confirmed' } : sourceModel] });
   if (url === '/admin/sources/source-a/discoveries/latest') return jsonResponse({
     data: {
       id: 3,
@@ -617,34 +629,100 @@ describe('production control-plane pages', () => {
     expect(container.textContent).toContain('route_not_found');
   });
 
-  it('keeps LogicalModel, ModelBinding, and Route as separate CRUD views', async () => {
+  it('shows one model row with protocols and its line without implementation tabs or IDs', async () => {
     await renderPage('models');
-    expect(container.textContent).toContain('Model A');
-
-    const tabs = () => Array.from(container.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
-    await act(async () => tabs().find((button) => button.textContent?.includes('绑定'))?.click());
-    expect(container.textContent).toContain('upstream-a');
-
-    await act(async () => tabs().find((button) => button.textContent?.includes('路由规则'))?.click());
-    expect(container.textContent).toContain('固定主选 → 加权回退');
-    expect(container.textContent).not.toMatch(/Random|Round-Robin/);
+    const table = container.querySelector('table')!;
+    expect(table.querySelectorAll('tbody tr')).toHaveLength(1);
+    expect(container.querySelector('[role="tab"]')).toBeNull();
+    expect(table.textContent).toContain('model-public');
+    expect(table.textContent).toContain('Source A');
+    expect(table.textContent).toContain('Account A');
+    expect(table.textContent).toContain('upstream-a');
+    expect(table.textContent).toContain('主线路');
+    expect(table.textContent).toContain('Chat Completions');
+    expect(table.textContent).toContain('Responses');
+    expect(table.textContent).toContain('Messages');
+    expect(table.textContent).not.toContain('route-a');
+    expect(table.textContent).not.toContain('选择 #');
+    expect(table.textContent).not.toContain('绑定 ID');
+    expect(table.textContent).not.toContain('固定主选');
   });
 
-
-  it.each([
-    { tab: '逻辑模型', edit: '编辑 logical-a', path: '/admin/logical-models/logical-a', expected: { id: 'logical-a', public_name: 'model-public' } },
-    { tab: '绑定', edit: '编辑 1', path: '/admin/model-bindings/1', expected: { logical_model_id: 'logical-a', source_id: 'source-a', account_id: 'account-a', upstream_model_id: 'upstream-a' } },
-    { tab: '路由规则', edit: '编辑 route-a', path: '/admin/routes/route-a', expected: { id: 'route-a', logical_model_id: 'logical-a', strategy: 'primary_then_weighted_fallback' } },
-  ])('submits the $tab editor through its footer and retains values while saving', async ({ tab, edit, path, expected }) => {
-    let finish!: () => void;
-    const save = vi.fn(() => new Promise<Response>(resolve => { finish = () => resolve(jsonResponse({ data: {} })); }));
+  it('creates through POST, retains a conflicting draft, and never treats a model name as an update ID', async () => {
+    const writes = vi.fn(async (path: string, init: RequestInit) => {
+      expect(path).toBe('/admin/model-routings');
+      expect(init.method).toBe('POST');
+      return JSON.parse(String(init.body)).public_name === logicalModel.public_name
+        ? jsonResponse({ error: { code: 'conflict', message: 'Model name already exists' } }, 409)
+        : jsonResponse({ data: {} }, 201);
+    });
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      if (String(input) === path && init?.method === 'PUT') { expect(JSON.parse(String(init.body))).toMatchObject(expected); return save(); }
+      if (init?.method === 'POST' || init?.method === 'PUT') return writes(String(input), init);
       return baseHandler(input);
     }));
     await renderPage('models');
-    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(button => button.textContent?.includes(tab))!.click());
-    await act(async () => container.querySelector<HTMLButtonElement>(`button[aria-label="${edit}"]`)!.click());
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === '新增模型')!.click());
+    const name = container.querySelector<HTMLInputElement>('#model-routing-editor-form input')!;
+    const setName = (value: string) => act(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(name, value);
+      name.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    setName(logicalModel.public_name);
+    await selectComboboxValue(container.querySelector<HTMLInputElement>('input[aria-label="主线路 · 来源"]')!, 'source-a');
+    await waitFor(() => !container.querySelector<HTMLInputElement>('input[aria-label="主线路 · 上游模型"]')!.disabled);
+    await selectComboboxValue(container.querySelector<HTMLInputElement>('input[aria-label="主线路 · 上游模型"]')!, 'upstream-a');
+    const submit = container.querySelector<HTMLButtonElement>('[role="dialog"] button[type="submit"]')!;
+    await act(async () => submit.click());
+    expect(writes).toHaveBeenCalledOnce();
+    expect(container.querySelector('[role="dialog"] [role="alert"]')?.textContent).toContain('409');
+    expect(name.value).toBe(logicalModel.public_name);
+    setName(logicalModel.id);
+    await act(async () => submit.click());
+    expect(writes).toHaveBeenCalledTimes(2);
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it.each([0, 1, null])('shows the retry limit %s without promising unlimited fallback', async (maxRetries) => {
+    const accounts = ['a', 'b', 'c'].map((id) => ({ ...account, id: `account-${id}` }));
+    const bindings = accounts.map((item, index) => ({ ...binding, id: index + 1, account_id: item.id }));
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/admin/logical-models') return jsonResponse({ data: [{ ...logicalModel, max_retries: maxRetries }] });
+      if (url === '/admin/accounts') return jsonResponse({ data: accounts });
+      if (url === '/admin/model-bindings') return jsonResponse({ data: bindings });
+      if (url === '/admin/routes') return jsonResponse({ data: [{ ...route, strategy: 'ordered_fallback' }] });
+      if (url === '/admin/capabilities') return jsonResponse({ ...capabilityResponse, data: bindings.map((item, index) => ({
+        ...capabilityResponse.data[0], account: { account_id: item.account_id, enabled: true },
+        protocols: [{ ...capabilityResponse.data[0].protocols[0], binding_id: item.id, selection: index === 0 ? 'primary' : 'fallback', selection_rank: index }],
+      })) });
+      return baseHandler(input);
+    }));
+    await renderPage('models');
+    const table = container.querySelector('table')!;
+    expect(table.querySelectorAll('[role="img"][aria-label="失败后"]')).toHaveLength(maxRetries === null ? 2 : 0);
+    if (maxRetries !== null) {
+      expect(table.textContent).toContain(maxRetries === 0 ? '仅尝试首条可用线路，请求失败后不再回退' : '最多尝试 2 条可用线路');
+      expect(table.textContent).toContain('不占尝试次数');
+    }
+    expect(table.textContent).toContain('备用线路 2');
+  });
+
+  it('submits the complete model configuration once and prevents close or duplicate submission while saving', async () => {
+    let finish!: () => void;
+    const save = vi.fn(() => new Promise<Response>(resolve => { finish = () => resolve(jsonResponse({ data: {} })); }));
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === '/admin/logical-models/logical-a/routing' && init?.method === 'PUT') {
+        expect(JSON.parse(String(init.body))).toEqual({
+          public_name: 'model-public', display_name: 'Model A', enabled: true,
+          lines: [{ source_id: 'source-a', account_id: 'account-a', upstream_model_id: 'upstream-a' }],
+          request_timeout_ms: null, max_retries: null,
+        });
+        return save();
+      }
+      return baseHandler(input);
+    }));
+    await renderPage('models');
+    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="编辑 model-public"]')!.click());
     const submit = container.querySelector<HTMLButtonElement>('[role="dialog"] button[type="submit"]')!;
     await act(async () => submit.click());
     expect(save).toHaveBeenCalledOnce();
@@ -656,6 +734,30 @@ describe('production control-plane pages', () => {
     expect(container.querySelector('[role="dialog"]')).not.toBeNull();
     await act(async () => finish());
     expect(container.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it('retains the drawer draft on a failed save and permits retry', async () => {
+    let failSave = true;
+    const save = vi.fn(async () => failSave
+      ? jsonResponse({ error: { code: 'save_conflict', message: 'Try saving again' } }, 409)
+      : jsonResponse({ data: {} }));
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith('/logical-a/routing') && init?.method === 'PUT') return save();
+      return baseHandler(input);
+    }));
+    await renderPage('models');
+    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="编辑 model-public"]')!.click());
+    const submit = container.querySelector<HTMLButtonElement>('[role="dialog"] button[type="submit"]')!;
+    await act(async () => submit.click());
+    expect(save).toHaveBeenCalledOnce();
+    expect(container.querySelector('[role="dialog"] [role="alert"]')).not.toBeNull();
+    expect(container.querySelector<HTMLInputElement>('#model-routing-editor-form input')?.value).toBe('model-public');
+    expect(container.querySelector('.mantine-Notification-root')).toBeNull();
+    failSave = false;
+    await act(async () => submit.click());
+    expect(save).toHaveBeenCalledTimes(2);
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+    expect(container.querySelectorAll('.mantine-Notification-root')).toHaveLength(1);
   });
 
   it('filters capabilities and exposes the selected protocol chain as labeled details', async () => {

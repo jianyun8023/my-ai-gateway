@@ -1,0 +1,124 @@
+.form,
+.sectionContent {
+  min-width: 0;
+  display: grid;
+  gap: 16px;
+}
+
+.basicInfo {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 16px;
+}
+
+.enabled {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.enabled > span {
+  color: var(--fg);
+  font-size: var(--fs-meta);
+  font-weight: 650;
+}
+
+.hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-meta);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.lines {
+  display: grid;
+  gap: 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.lines > li,
+.lineCard {
+  min-width: 0;
+}
+
+.lines > li[data-dragging] {
+  opacity: 0.55;
+}
+
+.lineTitle,
+.lineActions,
+.inline {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.lineTitle > span {
+  overflow-wrap: anywhere;
+}
+
+.lineActions [draggable='true'] {
+  cursor: grab;
+}
+
+.lineActions [draggable='true']:active {
+  cursor: grabbing;
+}
+
+.fullWidth {
+  grid-column: 1 / -1;
+}
+
+.protocols {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+
+.protocol {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.runtime {
+  margin: 0;
+  max-width: 100%;
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (max-width: 600px) {
+  .basicInfo {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .lineActions {
+    width: 100%;
+  }
+
+  .fullWidth {
+    grid-column: auto;
+  }
+}
