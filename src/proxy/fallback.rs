@@ -24,17 +24,20 @@ pub(super) struct FallbackCandidate<'a> {
     pub(super) degraded_features: Vec<String>,
 }
 
-pub(super) async fn select_fallback_candidate<'a>(
+pub(super) async fn available_fallback_candidates<'a>(
     config: &'a GatewayConfig,
     health: &health::HealthRegistry,
     route: &ResolvedRoute,
     model: &str,
     protocol: Protocol,
-) -> Option<FallbackCandidate<'a>> {
+) -> Vec<FallbackCandidate<'a>> {
     let mut available = Vec::new();
     if !route.fallback_bindings.is_empty() {
         for binding in &route.fallback_bindings {
-            if binding.account_id == route.primary_account_id {
+            if binding.account_id == route.primary_account_id
+                && (route.strategy != "ordered_fallback"
+                    || binding.upstream_model_id == route.upstream_model_id)
+            {
                 continue;
             }
             let Some(account) = config.account(&binding.account_id) else {
@@ -58,7 +61,9 @@ pub(super) async fn select_fallback_candidate<'a>(
                 degraded_features: binding.degraded_features.clone(),
             });
         }
-        if available.iter().any(|candidate| candidate.mode == "native") {
+        if route.strategy != "ordered_fallback"
+            && available.iter().any(|candidate| candidate.mode == "native")
+        {
             available.retain(|candidate| candidate.mode == "native");
         }
     } else {
@@ -103,6 +108,17 @@ pub(super) async fn select_fallback_candidate<'a>(
             });
         }
     }
+    available
+}
+
+pub(super) async fn select_fallback_candidate<'a>(
+    config: &'a GatewayConfig,
+    health: &health::HealthRegistry,
+    route: &ResolvedRoute,
+    model: &str,
+    protocol: Protocol,
+) -> Option<FallbackCandidate<'a>> {
+    let mut available = available_fallback_candidates(config, health, route, model, protocol).await;
     if available.is_empty() {
         return None;
     }

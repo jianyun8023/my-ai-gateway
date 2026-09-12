@@ -16,6 +16,28 @@ const transportWith = (handler: (path: string, init?: RequestInit) => Promise<un
 };
 
 describe('GatewayAdminResources', () => {
+  it('loads and atomically saves model routing with encoded names and cancellation', async () => {
+    const configuration = { logical_model: { id: 'family/model' }, lines: [] };
+    const transport = transportWith(async () => ({ data: configuration, snapshot_revision: 8 }));
+    const api = new GatewayAdminResources(transport);
+    const controller = new AbortController();
+    await expect(api.modelRouting('family/model', controller.signal)).resolves.toEqual(configuration);
+    expect(transport.json).toHaveBeenLastCalledWith('/admin/logical-models/family%2Fmodel/routing', { signal: controller.signal });
+    const input = {
+      public_name: 'family/model', display_name: 'Model', enabled: true,
+      lines: [
+        { source_id: 'source-b', account_id: 'account-b', upstream_model_id: 'upstream-b' },
+        { source_id: 'source-a', account_id: 'account-a', upstream_model_id: 'upstream-a' },
+      ],
+      request_timeout_ms: 60000, max_retries: null,
+    };
+    await api.saveModelRouting('family/model', input, controller.signal);
+    expect(transport.json).toHaveBeenLastCalledWith('/admin/logical-models/family%2Fmodel/routing', expect.objectContaining({
+      method: 'PUT', signal: controller.signal, body: JSON.stringify(input),
+    }));
+    expect(transport.json).toHaveBeenCalledTimes(2);
+  });
+
   it('sends typed source mutations to encoded Admin resource paths', async () => {
     const transport = transportWith(async () => ({
       data: {},

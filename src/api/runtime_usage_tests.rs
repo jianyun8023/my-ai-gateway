@@ -680,6 +680,314 @@ async fn runtime_request(
 }
 
 #[tokio::test]
+#[ignore = "requires isolated PostgreSQL via TEST_DATABASE_URL"]
+async fn postgres_ordered_routing_api_records_each_attempt_once_and_deadline_exhaustion() {
+    use tower::ServiceExt;
+    let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL");
+    let admin = PgPoolOptions::new()
+        .max_connections(2)
+        .connect(&url)
+        .await
+        .unwrap();
+    let schema = format!("ordered_usage_{}", Uuid::new_v4().simple());
+    sqlx::query(&format!("CREATE SCHEMA \"{schema}\""))
+        .execute(&admin)
+        .await
+        .unwrap();
+    let options = PgConnectOptions::from_str(&url)
+        .unwrap()
+        .options([("search_path", schema.as_str())]);
+    let pool = PgPoolOptions::new()
+        .max_connections(5)
+        .connect_with(options)
+        .await
+        .unwrap();
+    let database = db::Database::from_test_pool(pool.clone()).await.unwrap();
+    let (upstream_url, requests) = spawn_upstream(|request| {
+        let success =
+            request.body["model"] == "upstream-c" && request.body["scenario"] != "all-failed";
+        Response::builder()
+            .status(if success {
+                StatusCode::OK
+            } else {
+                StatusCode::SERVICE_UNAVAILABLE
+            })
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                if success {
+                    json!({"model":"upstream-c","usage":{"input_tokens":2,"output_tokens":3}})
+                } else {
+                    json!({"error":"unavailable"})
+                }
+                .to_string(),
+            ))
+            .unwrap()
+    })
+    .await;
+    let mut ordered_route = named_route(
+        "ordered-route",
+        "logical-model",
+        "source-a",
+        "account-a",
+        "account-b",
+    );
+    ordered_route.fallback_accounts.push("account-c".to_owned());
+    let config = GatewayConfig {
+        listen_addr: "127.0.0.1:0".to_owned(),
+        providers: ["source-a", "source-b", "source-c"]
+            .iter()
+            .map(|source| named_provider(source, upstream_url.clone(), &["logical-model"]))
+            .collect(),
+        accounts: [
+            ("account-a", "source-a", "upstream-a"),
+            ("account-b", "source-b", "upstream-b"),
+            ("account-c", "source-c", "upstream-c"),
+        ]
+        .iter()
+        .map(|(account, source, upstream)| {
+            named_account(account, source, &[("logical-model", upstream)])
+        })
+        .collect(),
+        routes: vec![ordered_route],
+    };
+    let control_plane = control_plane::ControlPlane::with_url_policy(
+        database.pool().clone(),
+        "127.0.0.1:0",
+        crate::source_url::test_policy(),
+    );
+    let initial = control_plane
+        .initialize_from_config(&config, false)
+        .await
+        .unwrap()
+        .unwrap();
+    let id = control_plane
+        .list_logical_models()
+        .await
+        .unwrap()
+        .remove(0)
+        .id;
+    let state = AppState {
+        live: Arc::new(std::sync::RwLock::new(LiveConfig::from_snapshot(initial))),
+        http: http::test_client().unwrap(),
+        db: Some(database.clone()),
+        control_plane: Some(control_plane.clone()),
+        events: database.event_repository(),
+        health: health::HealthRegistry::with_database_config(
+            database.clone(),
+            health::HealthConfig {
+                failure_threshold: 100,
+                ..Default::default()
+            },
+        ),
+        admin_auth: AdminAuth::test(),
+        secrets: secrets::SecretResolver::empty(),
+        prometheus_handle: observability::prometheus_handle(),
+    };
+    let app = crate::app::application(state.clone());
+    let uri = format!("/admin/logical-models/{id}/routing");
+    let mut payload = json!({"public_name":"logical-model","display_name":"Logical model","enabled":true,
+        "lines":[
+            {"source_id":"source-a","account_id":"account-a","upstream_model_id":"upstream-a"},
+            {"source_id":"source-b","account_id":"account-b","upstream_model_id":"upstream-b"},
+            {"source_id":"source-c","account_id":"account-c","upstream_model_id":"upstream-c"}
+        ],"request_timeout_ms":null,"max_retries":null});
+    let admin_request = |method: &str, body: Body| {
+        axum::http::Request::builder()
+            .method(method)
+            .uri(&uri)
+            .header(
+                header::AUTHORIZATION,
+                format!("Bearer {}", crate::test_helpers::TEST_ADMIN_KEY),
+            )
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(body)
+            .unwrap()
+    };
+    let unauthorized = app
+        .clone()
+        .oneshot(
+            axum::http::Request::builder()
+                .uri(&uri)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+    let saved = app
+        .clone()
+        .oneshot(admin_request("PUT", Body::from(payload.to_string())))
+        .await
+        .unwrap();
+    assert_eq!(saved.status(), StatusCode::OK);
+    let saved: Value = serde_json::from_slice(&drain(saved).await).unwrap();
+    assert_eq!(saved["data"]["strategy"], "ordered_fallback");
+    assert_eq!(saved["snapshot_revision"], state.snapshot().revision);
+    let read = app
+        .clone()
+        .oneshot(admin_request("GET", Body::empty()))
+        .await
+        .unwrap();
+    assert_eq!(read.status(), StatusCode::OK);
+    let read: Value = serde_json::from_slice(&drain(read).await).unwrap();
+    assert_eq!(read["data"]["lines"].as_array().unwrap().len(), 3);
+    let (key_id, key) = database
+        .create_virtual_key("ordered-test", &[])
+        .await
+        .unwrap();
+    for (client, scenario, expected) in [
+        ("ordered-success", "success", StatusCode::OK),
+        (
+            "ordered-failed",
+            "all-failed",
+            StatusCode::SERVICE_UNAVAILABLE,
+        ),
+    ] {
+        let response = runtime_request(
+            &state,
+            &key,
+            client,
+            json!({"model":"logical-model","input":"hello","scenario":scenario}),
+        )
+        .await;
+        assert_eq!(response.status(), expected);
+        drain(response).await;
+    }
+    let filter = db::UsageFilter {
+        virtual_key_id: Some(key_id),
+        ..Default::default()
+    };
+    let events = database
+        .list_usage_events_page(&filter, 10, None)
+        .await
+        .unwrap()
+        .data;
+    assert_eq!(events.len(), 2);
+    for event in &events {
+        assert_eq!(event.source_id.as_deref(), Some("source-c"));
+        assert_eq!(event.provider_id, "custom");
+        assert_eq!(event.account_id, "account-c");
+        assert_eq!(event.upstream_model_id.as_deref(), Some("upstream-c"));
+        assert_eq!(event.logical_model, "logical-model");
+        assert_eq!(event.retry_count, 2);
+        assert_eq!(event.fallback_reason.as_deref(), Some("upstream_http_503"));
+        let attempts = database
+            .list_attempts_for_event(&event.request_id)
+            .await
+            .unwrap();
+        assert_eq!(
+            attempts
+                .iter()
+                .map(|attempt| attempt.attempt_no)
+                .collect::<Vec<_>>(),
+            vec![0, 1, 2]
+        );
+        assert_eq!(
+            attempts
+                .iter()
+                .map(|attempt| attempt.source_id.as_deref())
+                .collect::<Vec<_>>(),
+            vec![Some("source-a"), Some("source-b"), Some("source-c")]
+        );
+        assert_eq!(
+            attempts
+                .iter()
+                .map(|attempt| attempt.upstream_model_id.as_deref())
+                .collect::<Vec<_>>(),
+            vec![Some("upstream-a"), Some("upstream-b"), Some("upstream-c")]
+        );
+        assert_eq!(event.total_tokens, if event.success { 5 } else { 0 });
+        assert_eq!(
+            attempts.iter().filter(|attempt| attempt.success).count(),
+            usize::from(event.success)
+        );
+    }
+    assert_eq!(
+        database
+            .usage_aggregate(&filter)
+            .await
+            .unwrap()
+            .logical_requests,
+        2
+    );
+    assert_eq!(
+        requests
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|request| request.body["model"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        vec![
+            "upstream-a",
+            "upstream-b",
+            "upstream-c",
+            "upstream-a",
+            "upstream-b",
+            "upstream-c"
+        ]
+    );
+
+    // Simulate a slow passive-health write after a completed 503. The budget
+    // expires before the next send; the previous HTTP error must become a
+    // total-timeout response while preserving the single actual attempt.
+    payload["request_timeout_ms"] = json!(80);
+    let saved = app
+        .clone()
+        .oneshot(admin_request("PUT", Body::from(payload.to_string())))
+        .await
+        .unwrap();
+    assert_eq!(saved.status(), StatusCode::OK);
+    drain(saved).await;
+    sqlx::raw_sql("CREATE FUNCTION ordered_slow_health() RETURNS TRIGGER AS $$ BEGIN PERFORM pg_sleep(0.15); RETURN NEW; END; $$ LANGUAGE plpgsql; CREATE TRIGGER ordered_slow_health AFTER UPDATE OF consecutive_failures ON accounts FOR EACH ROW WHEN (NEW.id='account-a' AND NEW.consecutive_failures > OLD.consecutive_failures) EXECUTE FUNCTION ordered_slow_health();")
+        .execute(&pool).await.unwrap();
+    let response = runtime_request(
+        &state,
+        &key,
+        "ordered-deadline",
+        json!({"model":"logical-model","input":"hello"}),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::GATEWAY_TIMEOUT);
+    assert!(String::from_utf8_lossy(&drain(response).await).contains("gateway_total_timeout"));
+    let events = database
+        .list_usage_events_page(&filter, 10, None)
+        .await
+        .unwrap()
+        .data;
+    assert_eq!(events.len(), 3);
+    let deadline = events
+        .iter()
+        .find(|event| event.client_source == "ordered-deadline")
+        .unwrap();
+    assert_eq!(
+        deadline.error_summary.as_deref(),
+        Some("gateway_total_timeout")
+    );
+    assert_eq!(deadline.status_code, 504);
+    assert_eq!(deadline.account_id, "account-a");
+    assert_eq!(deadline.retry_count, 0);
+    assert_eq!(
+        database
+            .list_attempts_for_event(&deadline.request_id)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(requests.lock().unwrap().len(), 7);
+    drop(app);
+    drop(state);
+    drop(control_plane);
+    drop(database);
+    pool.close().await;
+    sqlx::query(&format!("DROP SCHEMA \"{schema}\" CASCADE"))
+        .execute(&admin)
+        .await
+        .unwrap();
+    admin.close().await;
+}
+
+#[tokio::test]
 async fn postgres_db_first_source_attribution_covers_primary_fallback_stream_and_failures() {
     let Ok(url) = std::env::var("TEST_DATABASE_URL") else {
         eprintln!("skipping PostgreSQL runtime usage test: TEST_DATABASE_URL is not set");

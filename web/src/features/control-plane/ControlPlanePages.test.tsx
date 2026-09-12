@@ -208,9 +208,19 @@ const baseHandler = async (input: RequestInfo | URL) => {
   if (url === '/admin/provider-presets') return jsonResponse({ data: [{ id: 'preset-a', version: 1, display_name: 'Synthetic preset', definition: source.provider_preset_snapshot, created_at: source.created_at }] });
   if (url === '/admin/capabilities') return jsonResponse(capabilityResponse);
   if (url === '/admin/logical-models') return jsonResponse({ data: [logicalModel] });
+  if (url === '/admin/logical-models/logical-a/routing') return jsonResponse({ data: {
+    logical_model: logicalModel,
+    lines: [{ source_id: 'source-a', account_id: 'account-a', upstream_model_id: 'upstream-a', protocols: ['openai_chat_completions'] }],
+    protocols: ['openai_chat_completions'], strategy: 'primary_then_weighted_fallback',
+    request_timeout_ms: null, max_retries: null,
+  } });
+  if (url === '/admin/sources/source-a/models/upstream-a/capabilities') return jsonResponse({ data: [{
+    source_id: 'source-a', upstream_model_id: 'upstream-a', protocol: 'openai_chat_completions',
+    status: 'confirmed', mode: 'native', feature_capabilities: {}, field_source: 'user',
+  }] });
   if (url === '/admin/model-bindings') return jsonResponse({ data: [binding] });
   if (url === '/admin/routes') return jsonResponse({ data: [route] });
-  if (url.startsWith('/admin/sources/source-a/models')) return jsonResponse({ data: [sourceModel] });
+  if (url.startsWith('/admin/sources/source-a/models')) return jsonResponse({ data: [url.includes('confirmation_status=confirmed') ? { ...sourceModel, confirmation_status: 'confirmed' } : sourceModel] });
   if (url === '/admin/sources/source-a/discoveries/latest') return jsonResponse({
     data: {
       id: 3,
@@ -617,34 +627,41 @@ describe('production control-plane pages', () => {
     expect(container.textContent).toContain('route_not_found');
   });
 
-  it('keeps LogicalModel, ModelBinding, and Route as separate CRUD views', async () => {
+  it('shows one model row with protocols and its line without implementation tabs or IDs', async () => {
     await renderPage('models');
-    expect(container.textContent).toContain('Model A');
-
-    const tabs = () => Array.from(container.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
-    await act(async () => tabs().find((button) => button.textContent?.includes('绑定'))?.click());
-    expect(container.textContent).toContain('upstream-a');
-
-    await act(async () => tabs().find((button) => button.textContent?.includes('路由规则'))?.click());
-    expect(container.textContent).toContain('固定主选 → 加权回退');
-    expect(container.textContent).not.toMatch(/Random|Round-Robin/);
+    const table = container.querySelector('table')!;
+    expect(table.querySelectorAll('tbody tr')).toHaveLength(1);
+    expect(container.querySelector('[role="tab"]')).toBeNull();
+    expect(table.textContent).toContain('model-public');
+    expect(table.textContent).toContain('Source A');
+    expect(table.textContent).toContain('Account A');
+    expect(table.textContent).toContain('upstream-a');
+    expect(table.textContent).toContain('主线路');
+    expect(table.textContent).toContain('Chat Completions');
+    expect(table.textContent).toContain('Responses');
+    expect(table.textContent).toContain('Messages');
+    expect(table.textContent).not.toContain('route-a');
+    expect(table.textContent).not.toContain('选择 #');
+    expect(table.textContent).not.toContain('绑定 ID');
+    expect(table.textContent).not.toContain('固定主选');
   });
 
-
-  it.each([
-    { tab: '逻辑模型', edit: '编辑 logical-a', path: '/admin/logical-models/logical-a', expected: { id: 'logical-a', public_name: 'model-public' } },
-    { tab: '绑定', edit: '编辑 1', path: '/admin/model-bindings/1', expected: { logical_model_id: 'logical-a', source_id: 'source-a', account_id: 'account-a', upstream_model_id: 'upstream-a' } },
-    { tab: '路由规则', edit: '编辑 route-a', path: '/admin/routes/route-a', expected: { id: 'route-a', logical_model_id: 'logical-a', strategy: 'primary_then_weighted_fallback' } },
-  ])('submits the $tab editor through its footer and retains values while saving', async ({ tab, edit, path, expected }) => {
+  it('submits the complete model configuration once and prevents close or duplicate submission while saving', async () => {
     let finish!: () => void;
     const save = vi.fn(() => new Promise<Response>(resolve => { finish = () => resolve(jsonResponse({ data: {} })); }));
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      if (String(input) === path && init?.method === 'PUT') { expect(JSON.parse(String(init.body))).toMatchObject(expected); return save(); }
+      if (String(input) === '/admin/logical-models/logical-a/routing' && init?.method === 'PUT') {
+        expect(JSON.parse(String(init.body))).toEqual({
+          public_name: 'model-public', display_name: 'Model A', enabled: true,
+          lines: [{ source_id: 'source-a', account_id: 'account-a', upstream_model_id: 'upstream-a' }],
+          request_timeout_ms: null, max_retries: null,
+        });
+        return save();
+      }
       return baseHandler(input);
     }));
     await renderPage('models');
-    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(button => button.textContent?.includes(tab))!.click());
-    await act(async () => container.querySelector<HTMLButtonElement>(`button[aria-label="${edit}"]`)!.click());
+    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="编辑 model-public"]')!.click());
     const submit = container.querySelector<HTMLButtonElement>('[role="dialog"] button[type="submit"]')!;
     await act(async () => submit.click());
     expect(save).toHaveBeenCalledOnce();
@@ -656,6 +673,30 @@ describe('production control-plane pages', () => {
     expect(container.querySelector('[role="dialog"]')).not.toBeNull();
     await act(async () => finish());
     expect(container.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it('retains the drawer draft on a failed save and permits retry', async () => {
+    let failSave = true;
+    const save = vi.fn(async () => failSave
+      ? jsonResponse({ error: { code: 'save_conflict', message: 'Try saving again' } }, 409)
+      : jsonResponse({ data: {} }));
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith('/logical-a/routing') && init?.method === 'PUT') return save();
+      return baseHandler(input);
+    }));
+    await renderPage('models');
+    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="编辑 model-public"]')!.click());
+    const submit = container.querySelector<HTMLButtonElement>('[role="dialog"] button[type="submit"]')!;
+    await act(async () => submit.click());
+    expect(save).toHaveBeenCalledOnce();
+    expect(container.querySelector('[role="dialog"] [role="alert"]')).not.toBeNull();
+    expect(container.querySelector<HTMLInputElement>('#model-routing-editor-form input')?.value).toBe('model-public');
+    expect(container.querySelector('.mantine-Notification-root')).toBeNull();
+    failSave = false;
+    await act(async () => submit.click());
+    expect(save).toHaveBeenCalledTimes(2);
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+    expect(container.querySelectorAll('.mantine-Notification-root')).toHaveLength(1);
   });
 
   it('filters capabilities and exposes the selected protocol chain as labeled details', async () => {

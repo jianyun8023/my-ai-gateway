@@ -218,6 +218,7 @@ LogicalModel <──────────────────────
 - `model_presets` 以 `(id, version)` 唯一，保存 canonical model ID、别名、元数据和值来源；它只提供默认元数据，不能替代 Source 的实际协议能力。
 - `source_models` 以 `(source_id, upstream_model_id)` 唯一，分别保存确认状态 `pending/confirmed`、可用状态 `unknown/available/unavailable`、原始发现快照、解析后元数据和每个字段的来源。
 - `logical_models` 保存对外公开名及 `pending/confirmed/unavailable` 状态；上游模型 ID 与逻辑模型名不要求相同。
+- `logical_models.request_timeout_ms` 与 `max_retries` 保存模型请求设置。超时覆盖整次请求与 SSE，null 继承全局总超时；重试数限制首次之后的实际尝试数，null 遍历所有可用线路。
 - `source_model_capabilities` 以 `(source_id, upstream_model_id, protocol)` 唯一，协议模式为 `unknown/native/adapter/unsupported`。`unknown` 和 `unsupported` 都不是可路由能力；Adapter 仍只允许一次直接转换，并要求其来源协议已确认原生可用。能力行可由配置导入创建，也可由管理端逐协议 upsert（`PUT /admin/sources/:source_id/models/:model/capabilities/:protocol`）；feature 能力缺省时从 SourceModel metadata 推导，非法值保持 unknown 而不猜测。
 - `model_bindings` 显式关联 LogicalModel、Source、Account、upstream model 和入口协议。Binding 初始为 `pending`；只有逻辑模型、Source、Account、SourceModel 和对应协议能力都已确认且可用时，数据库才允许转为 `confirmed`。
 
@@ -239,11 +240,12 @@ ProviderPreset 与发现确认阶段不改变 Route，也不把发现结果自�
 
 跨 Source fallback 已接入 DB-first runtime snapshot。Route 只声明逻辑模型、入口协议、策略和是否允许有损转换；实际首选与 fallback 候选来自已确认、可用的 ModelBinding。每个候选 Binding 独立携带 Source、Account、上游模型、endpoint 和协议链，运行时不会再把首选 Source 的连接信息套到 fallback 请求上。
 
-当前规则：
+当前规则（#195 在既有加权策略之外新增 `ordered_fallback`）：
 
 - 首选 Binding 固定优先；HTTP 408、429、5xx、传输错误，以及首选账号禁用或处于 PostgreSQL 冷却时，才进入 fallback 候选池。
-- fallback 候选统一执行 enabled、健康状态和权重过滤；HTTP 响应错误与传输错误使用同一选择规则。
-- 当前最多执行一次 fallback 请求（首选 1 次 + fallback 1 次），不会形成无界重试。
+- fallback 候选统一执行协议、enabled 和健康过滤；HTTP 响应错误与传输错误使用同一资格规则。
+- `primary_then_weighted_fallback` 保持固定首选和一次按权重选择的 fallback（首选 1 次 + fallback 1 次）；无可用备用时仍沿用短 `Retry-After` 的一次同账号重试。
+- `ordered_fallback` 按 Binding priority 降序对应的线路顺序逐一尝试，跳过协议不匹配、停用或冷却线路，每条最多一次；不按权重重排。`max_retries=0` 只允许一次实际尝试，null 遍历全部可用线路。所有尝试共享同一请求总超时；SSE 开始后由同一总时限终止流，不再重放到备用线路。
 - 候选请求使用自己的 Source Base URL、协议 endpoint 和 Account 凭据；请求体顶层 `model` 按实际 Binding 的 `upstream_model_id` 重写。开发期初始化配置中的账号 `model_map` 也会在三类协议主路径和 fallback 路径生效。
 - 跨 Source/Provider fallback 只允许原生协议链。Adapter 路由不能跨 Provider fallback；非法方向、多段转换和缺失 endpoint 会在配置或控制面事务中被拒绝。
 - 响应已经开始向下游发送后不能再切换账号。
@@ -538,6 +540,8 @@ Prometheus 保持实时、可聚合、低基数职责：请求量、耗时、Tok
 控制面写入采用 `SERIALIZABLE` 事务：先写候选变更，再校验引用、endpoint、Adapter 注册表与方向、单段转换、能力链和 Binding 可路由性，随后在同一事务读取并构建下一版不可变 snapshot；任一步失败都回滚。提交成功后一次写锁替换整个 snapshot，并发请求只会持有旧版或新版的完整 `Arc`。手工 reload 使用一致性只读事务；失败不替换当前有效 snapshot。
 
 Admin 资源为 `/admin/sources`、`/admin/accounts`、`/admin/logical-models`、`/admin/model-bindings` 和 `/admin/routes`，支持集合 `GET/POST`、单资源 `GET/PUT/DELETE` 与 `PUT /{id}/enabled`。`GET /admin/capabilities` 读取与 proxy 相同的不可变 runtime snapshot，按 Route、Source、Account、logical/upstream model 输出三协议完整矩阵、primary/fallback Binding、直接转换链、degraded 状态和结构化不可路由错误；它不会回退到初始化配置。错误固定为 `{error:{code,message}}`；Account 与能力矩阵响应均不返回 `credential_ciphertext`、`credential_env` 或明文凭据。
+
+#195 的常规模型配置通过 `GET/PUT /admin/logical-models/{id}/routing` 聚合接口承载模型名、启停、有序 Source/Account/upstream model 线路以及超时/重试。PUT 可以创建模型，在同一个既有控制面事务中根据已确认、可用的模型协议能力生成各协议 Binding 和 Route，策略固定为 `ordered_fallback`；保留已有模型 metadata、field_sources 与 ID。完整校验、snapshot 构建和事务提交均成功后一次发布，失败整体回滚。界面无需串行调用模型/Binding/Route 写接口。普通界面仅为模型列表与编辑抽屉，协议能力只读，底层 CRUD 能力保留；对旧加权配置的修改通过显式保存转为顺序线路。
 
 控制面写入契约以 Source/Binding 为中心：Source 创建时复制 `provider_preset_id@version` 快照，后续 `PUT` 不允许更换该引用；Account 直接引用 `source_id`，凭据只能提交 `credential_env` 或 `credential_ciphertext`；LogicalModel 的 `status` 与 `enabled` 分离；ModelBinding 明确携带 `logical_model_id/source_id/account_id/upstream_model_id/protocol/status/enabled/priority`；Route 只声明 `logical_model_id/protocols/strategy/allow_lossy_conversion/enabled`，上游 Source、账号、模型、模式和 Adapter 全部由 Binding + SourceModelCapability 解析，Route 不再复制这些字段。ProviderPreset 与 SourceModel 的发现/确认 API 由 #13 负责，不在本控制面重复实现。
 

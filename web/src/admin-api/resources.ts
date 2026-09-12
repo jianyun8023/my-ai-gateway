@@ -15,6 +15,8 @@ import type {
   LogicalModelWriteInput,
   ModelBinding,
   ModelBindingWriteInput,
+  ModelRoutingConfiguration,
+  ModelRoutingWriteInput,
   ProviderPreset,
   ProviderPresetDiff,
   Route,
@@ -255,6 +257,22 @@ export class GatewayAdminResources {
       '/admin/model-bindings',
       { signal },
     )).data;
+  }
+
+  async modelRouting(id: string, signal?: AbortSignal): Promise<ModelRoutingConfiguration> {
+    return (await this.transport.json<AdminDataEnvelope<ModelRoutingConfiguration>>(
+      `/admin/logical-models/${encodePath(id)}/routing`, { signal },
+    )).data;
+  }
+
+  saveModelRouting(
+    id: string,
+    input: ModelRoutingWriteInput,
+    signal?: AbortSignal,
+  ): Promise<AdminMutationEnvelope<ModelRoutingConfiguration>> {
+    return this.transport.json(
+      `/admin/logical-models/${encodePath(id)}/routing`, jsonInit('PUT', input, signal),
+    );
   }
 
   async createModelBinding(

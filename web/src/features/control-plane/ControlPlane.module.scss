@@ -410,68 +410,12 @@
   overflow-wrap: anywhere;
 }
 
-.runtimeSummary {
-  min-width: 150px;
-  display: grid;
-  gap: 5px;
-}
-
-.runtimeSummary > span {
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex-wrap: wrap;
-}
-
-.runtimeSummary small {
-  color: var(--text-secondary);
-  font-size: 10px;
-  overflow-wrap: anywhere;
-}
-
-.bindingsTable {
-  min-width: 1260px;
-}
-
-.routesTable {
-  min-width: 1120px;
-}
-
-.routesTable th:nth-child(4),
-.routesTable td:nth-child(4) {
-  width: 220px;
-}
-
-.routesTable th:nth-child(6),
-.routesTable td:nth-child(6) {
-  width: 90px;
-}
-
-.routeStrategy {
-  word-break: normal;
-  overflow-wrap: normal !important;
-}
-
 .fieldLabel {
   display: block;
   margin-bottom: 6px;
   color: var(--text-primary);
   font-size: 12px;
   font-weight: 650;
-}
-
-.protocolChecks {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.protocolChecks > div {
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  padding: 8px 10px;
-  background: var(--bg-secondary);
 }
 
 .protocolCapabilityEditor {
@@ -501,41 +445,6 @@
   display: flex;
   align-items: center;
   font-size: 12px;
-  overflow-wrap: anywhere;
-}
-
-.runtimeList {
-  display: grid;
-  gap: 8px;
-}
-
-.runtimeList > div {
-  min-width: 0;
-  display: grid;
-  grid-template-columns: minmax(150px, 0.7fr) minmax(0, 1fr);
-  gap: 12px;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  padding: 10px;
-  background: var(--bg-secondary);
-}
-
-.runtimeList > div > span {
-  min-width: 0;
-  display: grid;
-  gap: 2px;
-}
-
-.runtimeList > div > div {
-  display: flex;
-  align-items: flex-start;
-  justify-content: flex-end;
-  gap: 4px;
-  flex-wrap: wrap;
-}
-
-.runtimeList strong,
-.runtimeList small {
   overflow-wrap: anywhere;
 }
 
@@ -629,11 +538,6 @@
   justify-self: start;
 }
 
-.runtimeList small {
-  color: var(--text-secondary);
-  font-size: var(--fs-small);
-}
-
 @media (max-width: 1280px) {
   .table .rowActions {
     gap: 2px;
@@ -657,10 +561,7 @@
   .runHeader { grid-template-columns: minmax(0, 1fr); }
   .modelIdentity { align-items: flex-start; flex-direction: column; }
   .featureMatrix { grid-template-columns: minmax(0, 1fr); }
-  .protocolChecks { grid-template-columns: minmax(0, 1fr); }
   .protocolCapabilityEditor > div { grid-template-columns: minmax(0, 1fr); }
-  .runtimeList > div { grid-template-columns: minmax(0, 1fr); }
-  .runtimeList > div > div { justify-content: flex-start; }
   .secretResult > [data-ui="button"] { width: 100%; }
 }
 

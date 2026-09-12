@@ -157,6 +157,10 @@ pub(crate) fn application(state: AppState) -> Router {
                 .delete(admin::delete_logical_model),
         )
         .route(
+            "/admin/logical-models/{id}/routing",
+            get(admin::get_model_routing).put(admin::put_model_routing),
+        )
+        .route(
             "/admin/logical-models/{id}/enabled",
             put(admin::set_logical_model_enabled),
         )

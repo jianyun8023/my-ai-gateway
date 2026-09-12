@@ -1,0 +1,27 @@
+.item {
+  --item-border-color: var(--border);
+  --item-filled-color: var(--surface);
+  min-width: 0;
+  background: var(--surface);
+}
+
+.control {
+  min-height: 44px;
+  color: var(--fg);
+  background: var(--fg-soft);
+
+  &:hover:not(:disabled, [data-disabled]) { background: var(--fg-soft); }
+}
+
+.label {
+  font-size: var(--fs-meta);
+  font-weight: 600;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.panel {
+  min-width: 0;
+  color: var(--fg);
+  overflow-wrap: anywhere;
+}

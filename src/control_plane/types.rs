@@ -133,6 +133,43 @@ pub(crate) struct LogicalModelView {
 }
 
 #[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ModelRoutingWrite {
+    pub(crate) public_name: String,
+    pub(crate) display_name: String,
+    pub(crate) enabled: bool,
+    pub(crate) lines: Vec<ModelRoutingLineWrite>,
+    pub(crate) request_timeout_ms: Option<i64>,
+    pub(crate) max_retries: Option<i32>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ModelRoutingLineWrite {
+    pub(crate) source_id: String,
+    pub(crate) account_id: String,
+    pub(crate) upstream_model_id: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub(crate) struct ModelRoutingLineView {
+    pub(crate) source_id: String,
+    pub(crate) account_id: String,
+    pub(crate) upstream_model_id: String,
+    pub(crate) protocols: Vec<Protocol>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub(crate) struct ModelRoutingView {
+    pub(crate) logical_model: LogicalModelView,
+    pub(crate) lines: Vec<ModelRoutingLineView>,
+    pub(crate) protocols: Vec<Protocol>,
+    pub(crate) strategy: String,
+    pub(crate) request_timeout_ms: Option<i64>,
+    pub(crate) max_retries: Option<i32>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
 pub(crate) struct ModelBindingWrite {
     pub(crate) logical_model_id: String,
     pub(crate) source_id: String,

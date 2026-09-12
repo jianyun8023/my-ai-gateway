@@ -46,6 +46,7 @@ Tech-Utility：冷灰底色、绿色强调、紧凑数据布局。使用固定�
 | Mantine `NavLink` | Shell 使用 button 语义保留 hash 导航，选中态对应 `aria-current=page`；视觉与触摸尺寸由 UI 主题统一 |
 | Mantine `Table` / `TableScroll` | 原生表格语义与带名称、可聚焦的横向滚动区；主题统一单元格密度、表头与分隔线，页面负责列宽和行操作 |
 | `Modal` | Mantine Modal/Drawer 的项目契约：标题、尺寸、底部操作、关闭禁用、退出回调；管理详情、事件详情和移动导航共用 |
+| Mantine `Accordion` | 模型编辑抽屉的只读高级信息，默认折叠；键盘与展开状态由框架处理，品牌边框、表面与文字映射集中在 UI 主题 |
 | `overlays.ts` | 直接导出 Mantine Popover/Checkbox，列偏好在公共主题下使用，无需机械包装 |
 
 通用组件在 `web/src/components/ui`，不反向依赖 API 或控制面模块。浮层布局由 [Overlay.module.scss](web/src/components/ui/Overlay.module.scss) 管理，行为交给 Mantine；[ConsolePrimitives.module.scss](web/src/components/ui/ConsolePrimitives.module.scss) 仅保留 SegmentedTabs 的项目视觉，不再承担通用控件。`features/control-plane/shared.tsx` 保留协议标签、错误展示、确认流程和业务布局；协议常量、错误归一化与格式化分别由 `lib/protocols.ts`、`admin-api/errors.ts` 和 `utils/format.ts` 提供。分层约束见 [前端架构](docs/frontend-architecture.md)。
@@ -116,6 +117,6 @@ Shell 保留原生 CSS Grid/Flex 布局与现有 hash 导航、刷新版本及 s
 ## 筛选、编辑操作与详情组合
 
 - `FilterPanel` 以 Mantine Paper 提供命名 section、品牌表面/边框、12px 内边距与圆角，以及子项收缩边界。控制面的 `FilterBar` 只排列发现/能力字段；用量的 `FilterBar` 保留预设、普通/高级筛选布局与 draft/apply 回调。预设立即应用，普通字段显式应用，日期校验仍由用量功能层维护。
-- `FormActions` 返回取消/提交两个按钮的 Fragment，标签、可选提交图标、`form` ID、busy 和取消回调由页面传入。原生 `type="submit"` 关联现有表单；busy 禁用按钮。它不拥有表单值、校验、请求或浮层状态。页面仍传入 `closeDisabled`，执行防重复、退出清理与详情转编辑焦点契约。来源/账号、三种模型实体、发现编辑、Key 创建/轮换共用此组合；不改变敏感 Key 的即时清理。
+- `FormActions` 返回取消/提交两个按钮的 Fragment，标签、可选提交图标、`form` ID、busy 和取消回调由页面传入。原生 `type="submit"` 关联现有表单；busy 禁用按钮。它不拥有表单值、校验、请求或浮层状态。页面仍传入 `closeDisabled`，执行防重复、退出清理与详情转编辑焦点契约。来源/账号、模型线路编辑、发现编辑、Key 创建/轮换共用此组合；不改变敏感 Key 的即时清理。
 - UI 的 `DetailList` / `DetailItem` 统一 `dl/dt/dd`、标签/值、长字段换行和窄屏单列。默认行式用于来源、模型、能力、设置；`layout="grid"` 用于请求事件基本字段。Token 精确明细、来源质量和 attempt 列表由用量功能层维护。领域协议标签与转换链继续由调用方提供。
 - 已有 `FormGrid`、`DrawerSection` 和 `PageActions` 继续负责控制面表单布局、详情/长表单分区和页操作排列；新表单复用 `SourceForm` 中的字段与分区组合方式，不复制其 CRUD 或生命周期。通用 UI 不包含 schema、mutation/query、通知或浮层生命周期。
