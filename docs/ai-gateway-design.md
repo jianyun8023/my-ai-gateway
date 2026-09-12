@@ -135,7 +135,7 @@ Web Search、Tools、Thinking、Vision、Provider 扩展字段在原生透传路
 
 SSE 用量按字段是否由上游提供进行合并：显式 `0` 覆盖旧值，缺失字段保留先前值；已知数值字段全部为零仍属于 `parsed`，不回退估算。缓存读写先分别合并，再计算 cached；input/output 发生更新且本帧未提供 total 时，使用合并后的 input + output，避免沿用较早事件的 total。当前帧明确提供的 total 保持上游值，缓存及 reasoning 不重复计入推导 total（#188）。
 
-### 3.3 Kimi Code
+### 3.3 Kimi Code CN
 
 Kimi Code 官方于 2026-09 原生支持 OpenAI Responses（`POST /coding/v1/responses`，2026-09-06 实测返回标准 Responses 语义：reasoning item、流式 function_call 事件、`usage.input_tokens_details.cached_tokens`、`incomplete_details`），三协议全部按原生透传处理：
 
@@ -181,7 +181,9 @@ UI 流程为：
 
 字段优先级为：用户覆盖 > 模型预设 > 上游发现 > unknown。刷新模型时不得覆盖用户已经确认的字段；新发现的模型先进入待确认列表，不自动改变现有路由。
 
-当前实现内置版本化 ProviderPreset：`deepseek@1`、`minimax@1`、`kimi_code@1` 保留为历史不可变快照；DeepSeek/MiniMax 最新为 `@3`，Kimi Code 最新为 `@4`。`@2` 记录已验证的 Responses `web_search` 与 Kimi Responses Adapter 的 `tool_streaming`；`@3` 进一步显式记录 Responses 的 `web_search_citations` 与 `web_search_sources`：DeepSeek/MiniMax 当前声明为 `unsupported`，Kimi（当时走 Adapter）声明为 `supported`。`kimi_code@4`（#157）将 Responses 切换为官方原生 `/v1/responses`：`web_search` 与 `tool_streaming` 声明为 `supported`，原生端点的 citation/source 可见性未验证、保持 `unknown`，不做猜测。启动注册新版本不会改写已经创建的 Source 快照。ProviderPreset 完整声明默认 Base URL、三协议 endpoint/模式、认证和 Header 模板、最小连接测试请求、默认能力及发现规则；Kimi Code 因官方未提供已认证模型列表 endpoint，明确声明 `discovery.support=unsupported`，不会猜测接口。首批 ModelPreset 包括 DeepSeek V4、MiniMax M3/M2.7、Kimi K3/K2.7 Code Model。
+当前实现内置版本化 ProviderPreset：`deepseek@1`、`minimax@1`、`kimi_code@1` 保留为历史不可变快照；DeepSeek/MiniMax 最新为 `@3`，Kimi Code CN 最新为 `@5`。`@2` 记录已验证的 Responses `web_search` 与 Kimi Responses Adapter 的 `tool_streaming`；`@3` 进一步显式记录 Responses 的 `web_search_citations` 与 `web_search_sources`：DeepSeek/MiniMax 当前声明为 `unsupported`，Kimi（当时走 Adapter）声明为 `supported`。`kimi_code@4`（#157）将 Responses 切换为官方原生 `/v1/responses`：`web_search` 与 `tool_streaming` 声明为 `supported`，原生端点的 citation/source 可见性未验证、保持 `unknown`，不做猜测。
+
+`kimi_code@5` 展示为 `Kimi Code CN`，启用 Bearer 鉴权的 `GET /v1/models`（完整 URL 为 `https://api.kimi.com/coding/v1/models`，2026-09-12 实测成功），复用 `data[].id` 解析器，取代历史预设中错误的“不支持发现”声明。迁移 0026 一次性更新存量 Kimi Source 的预设版本与 discovery 快照，保留其他连接设置、模型和路由，并将 Source/Account 的旧默认名称改为 `Kimi Code CN`；自定义名称不变。历史预设仍不可变，普通启动注册新版本不会改写 Source 快照。ProviderPreset 完整声明默认 Base URL、三协议 endpoint/模式、认证和 Header 模板、最小连接测试请求、默认能力及发现规则。首批 ModelPreset 包括 DeepSeek V4、MiniMax M3/M2.7、Kimi K3/K2.7 Code Model。
 
 管理 API 流程为：
 
@@ -410,11 +412,11 @@ Kimi（#157 起三协议全部原生，单一 Route 即可覆盖）：
 
 ### ProviderPreset 与模型发现
 
-- DeepSeek、MiniMax、Kimi Code 内置版本化 ProviderPreset；
+- DeepSeek、MiniMax、Kimi Code CN 内置版本化 ProviderPreset；
 - 首批版本化 ModelPreset，字段来源严格为 `preset/unknown`；
 - Source 创建时复制完整预设快照，最新预设仅用于差异预览；
 - Source 独立 Base URL、endpoint、认证和协议能力快照用于后续连接测试；
-- DeepSeek/MiniMax 模型列表发现；Kimi Code 显式报告不支持发现；
+- DeepSeek、MiniMax、Kimi Code CN 模型列表发现；Kimi 从 `kimi_code@5` 起启用；
 - discovery 原始 snapshot、脱敏失败、Account/操作者/耗时/预设版本审计；
 - 稳定 added/changed/missing、待确认列表、用户编辑和事务化批量确认；
 - 不自动创建 LogicalModel、Binding 或 Route，不改变 `/v1/models` 和运行时路由。

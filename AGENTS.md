@@ -29,7 +29,7 @@
 - **可观测性**：Prometheus `/metrics` 已接入；OpenTelemetry OTLP/gRPC tracing 已由 [PR #80](https://github.com/jianyun8023/my-ai-gateway/pull/80) 实现，通过 `OTEL_EXPORTER_OTLP_ENDPOINT` 启用，未设置时仅本地 tracing 日志。是否在生产配置、采集成功需另外验证。
 - **事件与控制台**：#110 按方案 C 新增窄 `system_events`、统一 `/admin/events` 读模型与“运行事件”页；既有事实表不双写，普通成功请求不进入该时间线。`/admin/` 下共有总览、用量分析、请求事件、运行事件、来源管理、模型与路由、能力矩阵、设置八个导航入口；前三项仍是用量主导航。#199 已将原“模型发现”从一级导航下沉为来源生命周期内的“模型更新审核”（`#sources/<id>` 详情、`#sources/<id>/edit` 编辑、`#sources/<id>/review` 审核），来源列表/详情/编辑按 `docs/design/source-management-ui/` 原型重组。
 - **前端治理**：#166 的 54 项原始范围与验收项已完成并关闭，PR #169–#182 已合并；逐批证据与边界保留在 `docs/mantine-migration.md`。这不替代 #110 第九页、真实 Provider、生产配置或性能验收。
-- **Provider / Adapter**：DeepSeek、MiniMax 最新内置 preset 为 `@3`，Kimi Code 为 `@4`；通用 `BUILTIN_PROVIDER_PRESET_VERSION` 仍为 `3`，Kimi 单独版本常量为 `4`。Kimi Responses 已改为原生 `/v1/responses`，迁移见 `0023_kimi_native_responses.sql`（[PR #158](https://github.com/jianyun8023/my-ai-gateway/pull/158)）。生产 Adapter 注册表为空，原 `crates/kimi-responses-adapter` 已删除；`cfg(test)` 中的旧名称用于框架测试，不代表生产支持。
+- **Provider / Adapter**：DeepSeek、MiniMax 最新内置 preset 为 `@3`，Kimi Code CN 为 `@5`（2026-09-12 补充：启用鉴权 `GET /v1/models`，迁移 `0026_kimi_code_cn_discovery.sql` 更新存量 Source 的 discovery 与旧默认名称）；通用 `BUILTIN_PROVIDER_PRESET_VERSION` 仍为 `3`，Kimi 单独版本常量为 `5`，内部 ID 保持 `kimi_code`。Kimi Responses 已改为原生 `/v1/responses`，迁移见 `0023_kimi_native_responses.sql`（[PR #158](https://github.com/jianyun8023/my-ai-gateway/pull/158)）。生产 Adapter 注册表为空，原 `crates/kimi-responses-adapter` 已删除；`cfg(test)` 中的旧名称用于框架测试，不代表生产支持。
 
 当前跟踪与验收边界：
 

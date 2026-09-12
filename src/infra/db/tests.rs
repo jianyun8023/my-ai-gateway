@@ -490,6 +490,110 @@ async fn postgres_migrates_kimi_sources_to_native_responses() {
 }
 
 #[tokio::test]
+async fn postgres_migrates_kimi_discovery_and_default_names_without_overwriting_customizations() {
+    let Some(database) = postgres_test_database().await else {
+        eprintln!("skipping Kimi discovery migration test: TEST_DATABASE_URL is not set");
+        return;
+    };
+    // Also checks that the SQL-installed v5 matches the immutable Rust preset.
+    install_builtin_presets(&ModelCatalogRepository::new(database.pool.clone()))
+        .await
+        .expect("migration and builtin presets agree");
+    let latest = crate::domain::provider_preset::builtin_provider_presets()
+        .unwrap()
+        .into_iter()
+        .find(|preset| preset.id == "kimi_code" && preset.version == 5)
+        .unwrap();
+    let suffix = uuid::Uuid::new_v4().simple().to_string();
+    let mut tx = database.pool.begin().await.unwrap();
+    sqlx::query("DELETE FROM gateway_schema_migrations WHERE version=26")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+
+    let mut fixtures = Vec::new();
+    for (kind, provider, version, name) in [
+        ("default", "kimi_code", 4, "Kimi Code"),
+        ("custom", "kimi_code", 4, "Personal Kimi"),
+        ("other", "deepseek", 3, "Kimi Code"),
+    ] {
+        let source_id = format!("kimi-discovery-{kind}-{suffix}");
+        sqlx::query("INSERT INTO sources (id,display_name,provider_preset_id,provider_preset_version,provider_preset_snapshot,base_url,endpoints,auth_config,protocol_capabilities) SELECT $1,$2,id,version,jsonb_set(definition,'{default_headers,x-custom}','\"preserved\"'),'https://example.invalid/coding',$5,$6,$7 FROM provider_presets WHERE id=$3 AND version=$4")
+            .bind(&source_id)
+            .bind(name)
+            .bind(provider)
+            .bind(version)
+            .bind(json!({"openai_responses":"/custom/responses"}))
+            .bind(json!({"credential_header":{"header":"x-api-key","prefix":""}}))
+            .bind(json!({"openai_responses":{"mode":"native","features":{"tools":"unknown"}}}))
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO accounts (id,source_id,display_name,credential_env) VALUES ($1,$1,$2,'KIMI_MIGRATION_TEST_KEY')")
+            .bind(&source_id)
+            .bind(name)
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        let before: Value = sqlx::query_scalar(
+            "SELECT to_jsonb(source)-'updated_at' FROM sources source WHERE id=$1",
+        )
+        .bind(&source_id)
+        .fetch_one(&mut *tx)
+        .await
+        .unwrap();
+        fixtures.push((source_id, provider, name, before));
+    }
+
+    let migration = include_str!("../../../migrations/0026_kimi_code_cn_discovery.sql");
+    sqlx::raw_sql(migration).execute(&mut *tx).await.unwrap();
+    for (source_id, provider, name, mut expected) in fixtures {
+        let expected_name = if provider == "kimi_code" && name == "Kimi Code" {
+            "Kimi Code CN"
+        } else {
+            name
+        };
+        if provider == "kimi_code" {
+            expected["provider_preset_version"] = json!(5);
+            expected["provider_preset_snapshot"]["discovery"] =
+                latest.definition["discovery"].clone();
+            expected["display_name"] = json!(expected_name);
+        }
+        let after: Value = sqlx::query_scalar(
+            "SELECT to_jsonb(source)-'updated_at' FROM sources source WHERE id=$1",
+        )
+        .bind(&source_id)
+        .fetch_one(&mut *tx)
+        .await
+        .unwrap();
+        assert_eq!(after, expected);
+        let account_name: String =
+            sqlx::query_scalar("SELECT display_name FROM accounts WHERE id=$1")
+                .bind(&source_id)
+                .fetch_one(&mut *tx)
+                .await
+                .unwrap();
+        assert_eq!(account_name, expected_name);
+    }
+
+    let source_id = format!("kimi-discovery-default-{suffix}");
+    sqlx::query("UPDATE sources SET display_name='Kimi Code',provider_preset_snapshot=jsonb_set(provider_preset_snapshot,'{discovery,endpoint}','\"/custom/models\"') WHERE id=$1")
+        .bind(&source_id)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    sqlx::raw_sql(migration).execute(&mut *tx).await.unwrap();
+    let (name, endpoint): (String, String) = sqlx::query_as("SELECT display_name,provider_preset_snapshot#>>'{discovery,endpoint}' FROM sources WHERE id=$1")
+        .bind(&source_id)
+        .fetch_one(&mut *tx)
+        .await
+        .unwrap();
+    assert_eq!(name, "Kimi Code");
+    assert_eq!(endpoint, "/custom/models");
+    tx.rollback().await.unwrap();
+}
+
+#[tokio::test]
 async fn postgres_queries_keep_logical_attempt_and_utc_boundary_semantics() {
     let Some(database) = postgres_test_database().await else {
         eprintln!("skipping PostgreSQL usage query test: TEST_DATABASE_URL is not set");

@@ -17,7 +17,7 @@
 | OpenAI Responses | `POST /v1/responses` |
 | Anthropic Messages | `POST /v1/messages` |
 
-内置 DeepSeek、MiniMax、Kimi Code 预设，三协议均使用原生路径。具体模型的可用功能以控制台能力矩阵为准。
+内置 DeepSeek、MiniMax、Kimi Code CN 预设，三协议均使用原生路径，并支持鉴权模型列表发现。具体模型的可用功能以控制台能力矩阵为准。
 
 ## 快速开始
 
