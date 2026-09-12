@@ -20,8 +20,8 @@ use std::{
 };
 use uuid::Uuid;
 
-pub(crate) const CURRENT_SCHEMA_VERSION: i32 = 25;
-pub(crate) const CURRENT_MIGRATION_VERSION: i32 = 25;
+pub(crate) const CURRENT_SCHEMA_VERSION: i32 = 26;
+pub(crate) const CURRENT_MIGRATION_VERSION: i32 = 26;
 pub(crate) const DEFAULT_BATCH_SIZE: i32 = 500;
 pub(crate) const DEFAULT_MAX_BATCHES: i32 = 1_000;
 pub(crate) const MAX_BATCH_SIZE: i32 = 10_000;

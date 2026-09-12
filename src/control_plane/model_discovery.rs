@@ -936,6 +936,7 @@ mod tests {
 
     #[derive(Clone, Debug)]
     struct RecordedRequest {
+        method: reqwest::Method,
         path: String,
         authorization: Option<String>,
         body: String,
@@ -956,6 +957,7 @@ mod tests {
                     let (parts, body) = request.into_parts();
                     let body = to_bytes(body, 1024 * 1024).await.unwrap_or_default();
                     recorded.lock().unwrap().push(RecordedRequest {
+                        method: parts.method,
                         path: parts.uri.path().into(),
                         authorization: parts
                             .headers
@@ -1361,13 +1363,27 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn postgres_kimi_protocol_tests_and_failure_logs_are_redacted() {
+    async fn postgres_kimi_discovery_and_protocol_tests_keep_failure_logs_redacted() {
         let Some(database) = postgres_database().await else {
             eprintln!("skipping Kimi connection test: TEST_DATABASE_URL is not set");
             return;
         };
         let private_body = "private complete response body";
+        let catalog = json!({"object":"list","has_more":false,"data":[
+            {"id":"kimi-for-coding","object":"model","context_length":1048576,"supports_reasoning":true},
+            {"id":"kimi-for-coding-highspeed","object":"model"},
+            {"id":"k3","object":"model"},
+            {"id":"k3-256k","object":"model"}
+        ]});
         let replies = vec![
+            MockReply {
+                status: StatusCode::OK,
+                body: catalog.to_string(),
+            },
+            MockReply {
+                status: StatusCode::OK,
+                body: catalog.to_string(),
+            },
             MockReply {
                 status: StatusCode::OK,
                 body: "{}".into(),
@@ -1384,6 +1400,10 @@ mod tests {
                 status: StatusCode::UNAUTHORIZED,
                 body: private_body.into(),
             },
+            MockReply {
+                status: StatusCode::UNAUTHORIZED,
+                body: private_body.into(),
+            },
         ];
         let (base_url, recorded, server) = spawn_mock_upstream(replies).await;
         let fixture = create_fixture(&database, "kimi_code", format!("{base_url}/coding")).await;
@@ -1392,15 +1412,37 @@ mod tests {
             http::test_client().expect("discovery client"),
         );
 
-        let unsupported = service
+        let discovered = service
             .discover(&fixture.source_id, &fixture.account_id, "integration-test")
             .await
             .unwrap();
-        assert_eq!(unsupported.run.status, "unsupported");
+        assert_eq!(discovered.run.status, "succeeded");
+        assert_eq!(discovered.run.http_status, Some(200));
+        assert_eq!(discovered.run.raw_snapshot, Some(catalog));
+        assert_eq!(discovered.diff.added.len(), 4);
         assert_eq!(
-            unsupported.run.error_code.as_deref(),
-            Some("discovery_unsupported")
+            discovered
+                .models
+                .iter()
+                .map(|model| model.upstream_model_id.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "k3",
+                "k3-256k",
+                "kimi-for-coding",
+                "kimi-for-coding-highspeed"
+            ]
         );
+        assert!(discovered.models.iter().all(|model| {
+            model.confirmation_status == CatalogStatus::Pending
+                && model.availability_status == CatalogAvailability::Available
+        }));
+        let repeated = service
+            .discover(&fixture.source_id, &fixture.account_id, "integration-test")
+            .await
+            .unwrap();
+        assert_eq!(repeated.run.status, "succeeded");
+        assert_eq!(repeated.diff, DiscoveryDiff::default());
 
         for protocol in [
             Protocol::OpenAiChatCompletions,
@@ -1440,6 +1482,18 @@ mod tests {
         assert_eq!(failed.status, "failed");
         assert_eq!(failed.http_status, Some(401));
         assert_eq!(failed.error_code.as_deref(), Some("upstream_http_error"));
+        let failed_discovery = service
+            .discover(&fixture.source_id, &fixture.account_id, "integration-test")
+            .await
+            .unwrap();
+        assert_eq!(failed_discovery.run.status, "failed");
+        assert_eq!(failed_discovery.run.http_status, Some(401));
+        assert_eq!(
+            failed_discovery.run.error_code.as_deref(),
+            Some("upstream_http_error")
+        );
+        assert!(failed_discovery.run.raw_snapshot.is_none());
+        assert_eq!(failed_discovery.diff, DiscoveryDiff::default());
         let logs = String::from_utf8(log_buffer.lock().unwrap().clone()).unwrap();
         assert!(!logs.contains(&fixture.credential));
         assert!(!logs.contains(private_body));
@@ -1452,12 +1506,22 @@ mod tests {
                 .map(|request| request.path.as_str())
                 .collect::<Vec<_>>(),
             vec![
+                "/coding/v1/models",
+                "/coding/v1/models",
                 "/coding/v1/chat/completions",
                 "/coding/v1/responses",
                 "/coding/v1/messages",
                 "/coding/v1/chat/completions",
+                "/coding/v1/models",
             ]
         );
+        for request in requests
+            .iter()
+            .filter(|request| request.path.ends_with("/models"))
+        {
+            assert_eq!(request.method, reqwest::Method::GET);
+            assert!(request.body.is_empty());
+        }
         assert!(requests.iter().all(|request| {
             request.authorization.as_deref()
                 == Some(format!("Bearer {}", fixture.credential).as_str())

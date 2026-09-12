@@ -13,11 +13,9 @@ pub(crate) const PROVIDER_PRESET_SCHEMA_VERSION: u32 = 1;
 /// The latest built-in provider preset record version.  Record versions are
 /// immutable snapshots; bumping this value never rewrites an existing Source.
 pub(crate) const BUILTIN_PROVIDER_PRESET_VERSION: i32 = 3;
-/// The latest built-in `kimi_code` preset record version.  Kimi runs one
-/// version ahead of the shared builtin line: v4 switches Responses to the
-/// officially supported native `/v1/responses` endpoint and retires the
-/// embedded Responses→Anthropic adapter (issue #157).
-pub(crate) const KIMI_CODE_PROVIDER_PRESET_VERSION: i32 = 4;
+/// The latest built-in `kimi_code` preset record version. v5 names the
+/// provider Kimi Code CN and enables authenticated model discovery.
+pub(crate) const KIMI_CODE_PROVIDER_PRESET_VERSION: i32 = 5;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -361,6 +359,12 @@ pub(crate) fn builtin_provider_presets() -> Result<Vec<ProviderPresetInput>, Cat
         },
     );
 
+    // Verified with a Kimi Code API key on 2026-09-12: GET
+    // /coding/v1/models returns an OpenAI-compatible data[].id catalog.
+    // Keep v1-v4 definitions and display names immutable.
+    let mut kimi_v5 = kimi_v4.clone();
+    kimi_v5.discovery = openai_discovery("/v1/models");
+
     [
         (deepseek_id, deepseek_name, 1, deepseek_definition),
         (minimax_id, minimax_name, 1, minimax_definition),
@@ -369,6 +373,7 @@ pub(crate) fn builtin_provider_presets() -> Result<Vec<ProviderPresetInput>, Cat
         (minimax_id, minimax_name, 2, minimax_v2),
         (kimi_id, kimi_name, 2, kimi_v2),
         (kimi_id, kimi_name, 3, kimi_v3),
+        (kimi_id, kimi_name, 4, kimi_v4),
         (
             deepseek_id,
             deepseek_name,
@@ -383,9 +388,9 @@ pub(crate) fn builtin_provider_presets() -> Result<Vec<ProviderPresetInput>, Cat
         ),
         (
             kimi_id,
-            kimi_name,
+            "Kimi Code CN",
             KIMI_CODE_PROVIDER_PRESET_VERSION,
-            kimi_v4,
+            kimi_v5,
         ),
     ]
     .into_iter()
@@ -770,11 +775,11 @@ mod tests {
     #[test]
     fn builtins_are_versioned_complete_and_explicit_about_discovery() {
         let presets = builtin_provider_presets().expect("valid builtins");
-        assert_eq!(presets.len(), 10);
+        assert_eq!(presets.len(), 11);
         for preset in &presets {
             assert!(matches!(
                 preset.version,
-                1 | 2 | BUILTIN_PROVIDER_PRESET_VERSION | KIMI_CODE_PROVIDER_PRESET_VERSION
+                1 | 2 | BUILTIN_PROVIDER_PRESET_VERSION | 4 | KIMI_CODE_PROVIDER_PRESET_VERSION
             ));
             let definition: ProviderPresetDefinition =
                 serde_json::from_value(preset.definition.clone()).unwrap();
@@ -821,9 +826,7 @@ mod tests {
         // unverified citation/source visibility stays unknown.
         let kimi_v4 = presets
             .iter()
-            .find(|preset| {
-                preset.id == "kimi_code" && preset.version == KIMI_CODE_PROVIDER_PRESET_VERSION
-            })
+            .find(|preset| preset.id == "kimi_code" && preset.version == 4)
             .unwrap();
         let kimi_v4_definition: ProviderPresetDefinition =
             serde_json::from_value(kimi_v4.definition.clone()).unwrap();
@@ -844,6 +847,22 @@ mod tests {
             kimi_v4_responses.default_capabilities["web_search_citations"],
             CapabilitySupport::Unknown
         );
+        assert_eq!(kimi_v4.display_name, "Kimi Code");
+        assert!(matches!(
+            kimi_v4_definition.discovery,
+            DiscoveryPreset::Unsupported { .. }
+        ));
+        let kimi_v5 = presets
+            .iter()
+            .find(|preset| {
+                preset.id == "kimi_code" && preset.version == KIMI_CODE_PROVIDER_PRESET_VERSION
+            })
+            .unwrap();
+        let kimi_v5_definition: ProviderPresetDefinition =
+            serde_json::from_value(kimi_v5.definition.clone()).unwrap();
+        assert_eq!(kimi_v5.display_name, "Kimi Code CN");
+        assert_eq!(kimi_v5_definition.discovery, openai_discovery("/v1/models"));
+        assert_eq!(kimi_v5_definition.protocols, kimi_v4_definition.protocols);
         for provider_id in ["deepseek", "minimax"] {
             let preset = presets
                 .iter()

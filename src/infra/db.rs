@@ -449,6 +449,11 @@ impl Database {
         ))
         .execute(&mut *tx)
         .await?;
+        sqlx::raw_sql(include_str!(
+            "../../migrations/0026_kimi_code_cn_discovery.sql"
+        ))
+        .execute(&mut *tx)
+        .await?;
         tx.commit().await
     }
 

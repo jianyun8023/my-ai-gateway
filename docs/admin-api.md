@@ -56,8 +56,11 @@ Virtual Key 鉴权时，默认使用 key 的 `name`；若 `name` 为空则回退
 | `minimax@1` | `https://api.minimax.io` | `/v1/chat/completions` native | `/v1/responses` native | `/anthropic/v1/messages` native | `GET /v1/models` |
 | `kimi_code@1`-`@3` | `https://api.kimi.com/coding` | `/v1/chat/completions` native | `/v1/messages` via `kimi_responses_adapter`（历史快照，#157 已退役） | `/v1/messages` native | 显式 `unsupported` |
 | `kimi_code@4` | `https://api.kimi.com/coding` | `/v1/chat/completions` native | `/v1/responses` native | `/v1/messages` native | 显式 `unsupported` |
+| `kimi_code@5`（Kimi Code CN） | `https://api.kimi.com/coding` | `/v1/chat/completions` native | `/v1/responses` native | `/v1/messages` native | `GET /v1/models` |
 
-预设同时包含 Bearer 认证模板、Anthropic 版本 Header、各协议最小测试请求、默认能力和发现解析规则。Kimi Code 未猜测不存在的模型列表 endpoint；模型元数据可继续使用内置 ModelPreset 和用户编辑。
+预设同时包含 Bearer 认证模板、Anthropic 版本 Header、各协议最小测试请求、默认能力和发现解析规则。最新 Kimi 预设为 `kimi_code@5`，展示名称为 `Kimi Code CN`；内部 ID 仍为 `kimi_code`。2026-09-12 使用 API Key 实测 `GET https://api.kimi.com/coding/v1/models` 返回 200 和 4 个模型，不带 Key 返回 401。发现复用 `data[].id` 解析规则，完整目录保存在 run snapshot，模型元数据继续经过 ModelPreset 补齐和用户确认。
+
+迁移 `0026_kimi_code_cn_discovery.sql` 一次性将已有 `kimi_code` Source 的预设版本升级到 `@5`，只替换快照中的 discovery 声明；Source Base URL、认证、endpoint、协议能力、已确认模型和路由保持原值。Source 和关联 Account 的旧默认名称 `Kimi Code` 更新为 `Kimi Code CN`，自定义名称保留。历史 `@1`–`@4` 的名称与定义保持不可变；普通启动注册新版本不会改写 Source，后续启动重放本次迁移也不会覆盖用户修改。
 
 ## 创建 Source 快照
 
@@ -147,7 +150,7 @@ POST 和 PUT 均在一个 SERIALIZABLE 事务内保存模型和请求设置、�
 }
 ```
 
-当前 `kimi_code@4` 预设的 Kimi Responses 返回 `protocol=openai_responses`、`upstream_protocol=openai_responses`、`mode=native`。上游非 2xx、超时或连接失败也返回持久化后的结构化结果，`status=failed`，错误消息为固定脱敏文本；不会读取或保存完整失败正文。
+当前 `kimi_code@5` 预设的 Kimi Responses 返回 `protocol=openai_responses`、`upstream_protocol=openai_responses`、`mode=native`。上游非 2xx、超时或连接失败也返回持久化后的结构化结果，`status=failed`，错误消息为固定脱敏文本；不会读取或保存完整失败正文。
 
 连接测试会产生一个最小的真实模型请求，可能消耗少量上游 Token。上游请求超时为 120 秒；账号健康探测复用该连接测试。此时限独立于数据面的 `GATEWAY_SSE_*` 配置。
 
@@ -218,7 +221,7 @@ endpoint，经过同一 URL allowlist、DNS、重定向和凭据策略，客户�
 - `diff.added|changed|missing`：按 `upstream_model_id` 排序，每项列出稳定 `changed_fields`；
 - `models`：本次新增、变化或 availability 变化后的 SourceModel。
 
-相同 snapshot 的重复刷新返回空 diff。模型消失时只将 SourceModel 标记为 `unavailable`，不删除记录。发现失败只新增一条 `failed` run，不更新任何 SourceModel；Kimi Code 返回 `unsupported` run。
+相同 snapshot 的重复刷新返回空 diff。模型消失时只将 SourceModel 标记为 `unavailable`，不删除记录。发现失败只新增一条 `failed` run，不更新任何 SourceModel；仅显式不支持发现的预设（如历史 `kimi_code@1`–`@4`）返回 `unsupported` run，最新 `kimi_code@5` 正常调用上游目录。
 
 `GET /admin/sources/:source_id/discoveries/latest` 返回最近 run、可复现 diff 和 `last_discovered_at`。成功 run 的 `raw_snapshot` 是上游模型目录，不包含请求凭据；失败 run 的 snapshot 为 `null`，只包含脱敏错误码和消息。
 
@@ -300,7 +303,7 @@ Content-Type: application/json
       "route_id": "kimi-responses-native",
       "source": {
         "source_id": "kimi-code-primary",
-        "display_name": "Kimi Code"
+        "display_name": "Kimi Code CN"
       },
       "account": {
         "account_id": "kimi-main",
@@ -472,7 +475,7 @@ dry-run 只统计候选，不删除数据。正式清理按 attempt → logical 
 
 `POST /admin/control-plane/import` 接受导出 JSON，或 `{ "data": <export>, "replace": true, "requested_by": "..." }` 包装。非空目标必须显式 `replace=true`。导入按 FK 顺序恢复并重置 serial sequence；提交后重新构建 snapshot，只有 fingerprint 与导出一致才返回 `verified=true` 和新的 `snapshot_revision`。目标环境必须自行注入导出中列出的 Secret。
 
-`GET /admin/ops/schema`（`/admin/schema` 为同义入口）返回当前 `schema_version`、`migration_version`、应用版本和 UTC 更新时间。网关启动时会顺序应用仓库中的迁移；当前版本为 25，`migrations/0025_logical_model_request_settings.sql` 增加逻辑模型总请求超时与重试设置。控制面导出包含这些字段，runtime snapshot fingerprint 同时覆盖策略和请求设置。
+`GET /admin/ops/schema`（`/admin/schema` 为同义入口）返回当前 `schema_version`、`migration_version`、应用版本和 UTC 更新时间。网关启动时会顺序应用仓库中的迁移；当前版本为 26，`migrations/0026_kimi_code_cn_discovery.sql` 启用 Kimi Code CN 模型发现并更新存量 Source。迁移 0025 增加的逻辑模型总请求超时与重试设置仍包含在控制面导出中，runtime snapshot fingerprint 同时覆盖策略和请求设置。
 
 完整的 PostgreSQL `pg_dump`、新库恢复、Docker Compose 和本地 CLI 步骤见 [`docs/operations.md`](./operations.md)。物理 dump 可能包含数据库内的加密凭据和全部历史，必须按高敏感备份保护；脱敏迁移请使用控制面 JSON 导出。
 
