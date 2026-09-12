@@ -1,6 +1,6 @@
 # 前端架构与治理
 
-控制台是 React + TypeScript + Vite 应用，通过 `/admin/` 提供九个导航入口。本文约定代码职责、共享能力与检查门禁；领域与协议基线仍以 [设计文档](ai-gateway-design.md) 为准，视觉与交互遵循 [design.md](../design.md)。
+控制台是 React + TypeScript + Vite 应用，通过 `/admin/` 提供八个导航入口。本文约定代码职责、共享能力与检查门禁；领域与协议基线仍以 [设计文档](ai-gateway-design.md) 为准，视觉与交互遵循 [design.md](../design.md)。
 
 本轮沿用后端治理的分层、共享能力收敛、死代码清理和门禁方式，实现位于 `codex/frontend-architecture-governance`。起点为 2026-09-08 的 `main` `de708e8`，完成后整合已合并后端治理的 `main` `efeb445`。
 
@@ -11,7 +11,7 @@
 | 层 | 入口与职责 |
 | --- | --- |
 | 应用装配 | `main.tsx` 初始化与挂载；`Root.tsx` 同步主题；`App.tsx` 接入连接状态、导航和页面 |
-| 导航与页面 | `lib/consoleNavigation.ts` 定义九个 hash 入口；`pages/` 组合功能与刷新状态 |
+| 导航与页面 | `lib/consoleNavigation.ts` 定义八个 hash 入口；`pages/` 组合功能与刷新状态 |
 | 业务功能 | `features/usage/` 组织筛选、总览、分析、请求事件与详情；`features/events/` 组织统一运行事件时间线；`features/control-plane/` 组织来源、发现、模型路由、能力矩阵与设置 |
 | 资源与数据 | `admin-api/resources.ts` 封装控制面资源；`gateway-usage/` 封装用量查询、过滤、游标合并及响应适配 |
 | HTTP 传输 | `admin-api/client.ts` 是管理请求的统一入口；`admin-api/errors.ts` 提供错误归一化 |

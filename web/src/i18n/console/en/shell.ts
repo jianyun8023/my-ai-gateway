@@ -32,6 +32,7 @@ export const shell = {
   // Source workspace sub-page titles
   title: {
     source_detail: 'Source Details',
+    source_new: 'New Source',
     source_edit: 'Edit Source',
     source_review: 'Model Update Review',
   },

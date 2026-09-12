@@ -67,6 +67,8 @@ export function SourceEditPage({ api, refreshRevision = 0, onBusyChange, sourceI
   const isCreate = !sourceId;
   const { value: accountEditor, setValue: setAccountEditor, opened: accountEditorOpen, afterExit: accountEditorAfterExit } = useOverlayState<{ record?: Account }>();
   const { value: deleteTarget, setValue: setDeleteTarget, opened: deleteTargetOpen, afterExit: deleteTargetAfterExit } = useOverlayState<Account>();
+  const [sourceDeleteOpen, setSourceDeleteOpen] = useState(false);
+  const [draft, setDraft] = useState<{ enabled: boolean; capabilities: Source['protocol_capabilities'] }>();
   const [mutationBusy, setMutationBusy] = useState(false);
   const [mutationError, setMutationError] = useState<AdminErrorShape>();
   const [testBusy, setTestBusy] = useState(false);
@@ -150,6 +152,15 @@ export function SourceEditPage({ api, refreshRevision = 0, onBusyChange, sourceI
     );
   };
 
+  const confirmDeleteSource = () => {
+    if (isCreate || !sourceId) return;
+    void mutate(
+      () => api.deleteSource(sourceId),
+      t('sources.message.source_deleted', { name: sourceId }),
+      () => openSource(''),
+    );
+  };
+
   const runConnectionTest = async () => {
     const account = enabledAccounts[0];
     if (!account || testBusy) return;
@@ -208,11 +219,16 @@ export function SourceEditPage({ api, refreshRevision = 0, onBusyChange, sourceI
             busy={mutationBusy}
             onCancel={() => openSource(isCreate ? '' : sourceId!)}
           />
+          {!isCreate && (
+            <Button variant="danger" disabled={mutationBusy} onClick={() => setSourceDeleteOpen(true)}>
+              <IconTrash2 size={14} />{t('common.delete')}
+            </Button>
+          )}
         </div>
       </PageActions>
 
       {query.error && <ErrorState error={query.error} onRetry={query.reload} />}
-      {mutationError && !accountEditorOpen && !deleteTargetOpen && <ErrorState error={mutationError} />}
+      {mutationError && !accountEditorOpen && !deleteTargetOpen && !sourceDeleteOpen && <ErrorState error={mutationError} />}
 
       <div className={styles.editLayout}>
         <div className={styles.stack}>
@@ -223,6 +239,7 @@ export function SourceEditPage({ api, refreshRevision = 0, onBusyChange, sourceI
             busy={mutationBusy}
             error={formErrorMessage}
             onSubmit={submitSource}
+            onDraftChange={setDraft}
           />
 
           {!isCreate && (
@@ -282,14 +299,15 @@ export function SourceEditPage({ api, refreshRevision = 0, onBusyChange, sourceI
           <Card title={t('sources.edit.summary_card')}>
             <DetailList>
               <DetailItem label={t('sources.edit.summary_status')}>
-                <StatusPill tone={source?.enabled ? 'success' : 'muted'}>{source ? t(source.enabled ? 'common.enabled' : 'common.disabled') : t('sources.edit.summary_new')}</StatusPill>
+                <StatusPill tone={(draft?.enabled ?? source?.enabled) ? 'success' : 'muted'}>{source || draft ? t((draft?.enabled ?? source?.enabled) ? 'common.enabled' : 'common.disabled') : t('sources.edit.summary_new')}</StatusPill>
               </DetailItem>
               <DetailItem label={t('sources.edit.summary_accounts')}>{isCreate ? '—' : t('sources.edit.summary_accounts_value', { count: sourceAccounts.length })}</DetailItem>
               <DetailItem label={t('sources.edit.summary_protocols')}>
                 <span className={styles.inlineActions}>
-                  {GATEWAY_PROTOCOLS.map((protocol) => (
-                    <StatusPill key={protocol} tone={protocolModeTone(source?.protocol_capabilities[protocol]?.mode)} title={PROTOCOL_LABELS[protocol]}>{t(protocolModeKey(source?.protocol_capabilities[protocol]?.mode))}</StatusPill>
-                  ))}
+                  {GATEWAY_PROTOCOLS.map((protocol) => {
+                    const capabilities = draft?.capabilities ?? source?.protocol_capabilities;
+                    return <StatusPill key={protocol} tone={protocolModeTone(capabilities?.[protocol]?.mode)} title={PROTOCOL_LABELS[protocol]}>{t(protocolModeKey(capabilities?.[protocol]?.mode))}</StatusPill>;
+                  })}
                 </span>
               </DetailItem>
               <DetailItem label={t('common.updated_at')}>{source ? formatDateTime(source.updated_at) : '—'}</DetailItem>
@@ -324,6 +342,7 @@ export function SourceEditPage({ api, refreshRevision = 0, onBusyChange, sourceI
                   {enabledAccounts[0]?.last_probe_at ? formatDateTime(enabledAccounts[0].last_probe_at) : t('sources.edit.verify_none')}
                 </DetailItem>
               </DetailList>
+              <p className={styles.secondaryText}>{t('sources.edit.verify_saved_hint')}</p>
             </Card>
           )}
         </div>
@@ -354,6 +373,17 @@ export function SourceEditPage({ api, refreshRevision = 0, onBusyChange, sourceI
         busy={mutationBusy}
         onCancel={() => !mutationBusy && setDeleteTarget(undefined)}
         onConfirm={confirmDeleteAccount}
+      />
+
+      <ConfirmDialog
+        open={sourceDeleteOpen}
+        title={t('sources.confirm.delete_source_title')}
+        description={<div className={styles.page}>{t('sources.confirm.delete_source_body', { id: sourceId ?? '' })}<FormError message={formErrorMessage} /></div>}
+        confirmLabel={t('common.delete')}
+        danger
+        busy={mutationBusy}
+        onCancel={() => !mutationBusy && setSourceDeleteOpen(false)}
+        onConfirm={confirmDeleteSource}
       />
     </section>
   );

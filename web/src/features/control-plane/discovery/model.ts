@@ -19,6 +19,8 @@ export interface SourceSyncStats {
   latest: LatestDiscovery | null;
   models: SourceModel[];
   pendingCount: number;
+  /** 最近一次运行是否产出可信差异；failed / unsupported / 尚未运行时差异不可判断。 */
+  diffAvailable: boolean;
   addedCount: number;
   changedCount: number;
   missingCount: number;
@@ -28,6 +30,7 @@ export interface SourceSyncStats {
 
 export const buildSyncStats = (latest: LatestDiscovery | null, models: SourceModel[]): SourceSyncStats => {
   const diff = latest?.diff ?? latest?.run.diff ?? emptyDiff();
+  const diffAvailable = latest?.run.status === 'succeeded';
   const changedIds = new Set(
     [...diff.added, ...diff.changed, ...diff.missing].map((entry) => entry.upstream_model_id),
   );
@@ -35,10 +38,11 @@ export const buildSyncStats = (latest: LatestDiscovery | null, models: SourceMod
     latest,
     models,
     pendingCount: models.filter((model) => model.confirmation_status === 'pending').length,
+    diffAvailable,
     addedCount: diff.added.length,
     changedCount: diff.changed.length,
     missingCount: diff.missing.length,
-    unchangedCount: models.filter((model) => !changedIds.has(model.upstream_model_id)).length,
+    unchangedCount: diffAvailable ? models.filter((model) => !changedIds.has(model.upstream_model_id)).length : 0,
     lastSyncAt: latest?.last_discovered_at ?? latest?.run.completed_at ?? null,
   };
 };

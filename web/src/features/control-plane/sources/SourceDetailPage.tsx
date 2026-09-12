@@ -69,6 +69,7 @@ export function SourceDetailPage({ api, refreshRevision = 0, onBusyChange, sourc
   const [testResults, setTestResults] = useState<Partial<Record<GatewayProtocol, ConnectionTestResult>>>({});
   const [testError, setTestError] = useState<AdminErrorShape>();
   const [actionError, setActionError] = useState<string>();
+  const [checking, setChecking] = useState(false);
 
   const openSource = (targetId: string, section?: SourceSection) => {
     if (onOpenSource) {
@@ -127,6 +128,8 @@ export function SourceDetailPage({ api, refreshRevision = 0, onBusyChange, sourc
     if (!effectiveAccountId || testBusy || testingAll) return;
     setTestingAll(true);
     setTestError(undefined);
+    // 本次测试从头开始：历史成功结果不再保留，避免与本次失败混淆。
+    setTestResults({});
     try {
       const results = await Promise.all(GATEWAY_PROTOCOLS.map(async (protocol) => {
         try {
@@ -135,31 +138,42 @@ export function SourceDetailPage({ api, refreshRevision = 0, onBusyChange, sourc
             protocol,
             model: testModel.trim() || undefined,
             requested_by: 'admin-ui',
-          })] as const;
-        } catch {
-          return [protocol, undefined] as const;
+          }), undefined] as const;
+        } catch (error) {
+          return [protocol, undefined, normalizeAdminError(error)] as const;
         }
       }));
-      setTestResults((current) => ({ ...current, ...Object.fromEntries(results.filter(([, value]) => value)) }));
+      setTestResults(Object.fromEntries(results.filter(([, value]) => value)));
+      const firstFailure = results.find(([, , error]) => error)?.[2];
+      if (firstFailure) setTestError(firstFailure);
     } finally {
       setTestingAll(false);
     }
   };
 
   const checkUpdates = async () => {
-    if (!effectiveAccountId || !stats || detailQuery.refreshing) return;
+    if (!effectiveAccountId || !stats || checking) return;
     clearOperationNotification();
     setActionError(undefined);
+    setChecking(true);
     onBusyChange?.(true);
     try {
-      await api.runDiscovery(sourceId, effectiveAccountId);
-      notifySuccess(t('sources.list.message.check_done', { name: source?.display_name ?? sourceId }));
+      const execution = await api.runDiscovery(sourceId, effectiveAccountId);
       detailQuery.reload();
-      openSource(sourceId, 'review');
+      // 运行失败/不支持由运行结果表达，不能提前宣告检查成功。
+      if (execution.run.status === 'succeeded') {
+        notifySuccess(t('sources.list.message.check_done', { name: source?.display_name ?? sourceId }));
+        openSource(sourceId, 'review');
+        return;
+      }
+      setActionError(execution.run.status === 'unsupported'
+        ? t('sources.list.message.check_unsupported', { name: source?.display_name ?? sourceId })
+        : t('sources.list.message.check_failed', { name: source?.display_name ?? sourceId }));
     } catch {
       setActionError(t('sources.list.message.check_failed', { name: source?.display_name ?? sourceId }));
       detailQuery.reload();
     } finally {
+      setChecking(false);
       onBusyChange?.(false);
     }
   };
@@ -204,7 +218,7 @@ export function SourceDetailPage({ api, refreshRevision = 0, onBusyChange, sourc
           <div className={styles.rowActions}>
             <Button variant="secondary" onClick={() => openSource(source.id, 'edit')}><IconPencil size={14} />{t('sources.modal.edit_source')}</Button>
             <Button variant="secondary" loading={testingAll} disabled={!effectiveAccountId || Boolean(testBusy)} onClick={() => void testAll()}>{t('sources.detail.test_connection')}</Button>
-            <Button variant="secondary" loading={detailQuery.refreshing} disabled={!effectiveAccountId} onClick={() => void checkUpdates()}>{t('sources.detail.check_updates')}</Button>
+            <Button variant="secondary" loading={checking} disabled={!effectiveAccountId || checking} onClick={() => void checkUpdates()}>{t('sources.detail.check_updates')}</Button>
             {(stats?.pendingCount ?? 0) > 0 && (
               <Button variant="primary" onClick={() => openSource(source.id, 'review')}>{t('sources.detail.review_changes')}</Button>
             )}
@@ -265,7 +279,7 @@ export function SourceDetailPage({ api, refreshRevision = 0, onBusyChange, sourc
           title={t('sources.detail.sync_card')}
           extra={(
             <div className={styles.rowActions}>
-              <Button size="sm" variant="secondary" loading={detailQuery.refreshing} disabled={!effectiveAccountId} onClick={() => void checkUpdates()}>{t('sources.detail.check_updates')}</Button>
+              <Button size="sm" variant="secondary" loading={checking} disabled={!effectiveAccountId || checking} onClick={() => void checkUpdates()}>{t('sources.detail.check_updates')}</Button>
               {(stats?.pendingCount ?? 0) > 0 && <Button size="sm" variant="primary" onClick={() => openSource(source.id, 'review')}>{t('sources.detail.review_changes')}</Button>}
             </div>
           )}
@@ -281,9 +295,9 @@ export function SourceDetailPage({ api, refreshRevision = 0, onBusyChange, sourc
               </span>
               {stats.latest && <StatusPill tone={stats.latest.run.status === 'succeeded' ? 'success' : stats.latest.run.status === 'failed' ? 'danger' : 'warning'}>{t(`discovery.run_state.${stats.latest.run.status}`, { defaultValue: stats.latest.run.status })}</StatusPill>}
               <div className={styles.inlineActions}>
-                <StatusPill tone="success">{t('discovery.diff_column.added')} {stats.addedCount}</StatusPill>
-                <StatusPill tone="warning">{t('discovery.diff_column.changed')} {stats.changedCount}</StatusPill>
-                <StatusPill tone={stats.missingCount > 0 ? 'danger' : 'muted'}>{t('discovery.diff_column.missing')} {stats.missingCount}</StatusPill>
+                <StatusPill tone="success">{t('discovery.diff_column.added')} {stats.diffAvailable ? stats.addedCount : '—'}</StatusPill>
+                <StatusPill tone="warning">{t('discovery.diff_column.changed')} {stats.diffAvailable ? stats.changedCount : '—'}</StatusPill>
+                <StatusPill tone={stats.diffAvailable && stats.missingCount > 0 ? 'danger' : 'muted'}>{t('discovery.diff_column.missing')} {stats.diffAvailable ? stats.missingCount : '—'}</StatusPill>
                 <StatusPill tone={stats.pendingCount > 0 ? 'warning' : 'muted'}>{t('sources.list.col.pending')} {stats.pendingCount}</StatusPill>
               </div>
             </div>
@@ -367,8 +381,8 @@ export function SourceDetailPage({ api, refreshRevision = 0, onBusyChange, sourc
             <ul className={styles.eventList}>
               {detail.events.map((event) => (
                 <li key={event.event_id}>
-                  <strong>{event.event_type}</strong>
-                  <small>{event.message}</small>
+                  <strong>{t(`sources.detail.event_type.${event.event_type}`, { defaultValue: event.event_type })}</strong>
+                  {event.message && event.message !== event.event_type && <small>{event.message}</small>}
                   <small>{formatDateTime(event.occurred_at)}</small>
                 </li>
               ))}

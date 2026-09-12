@@ -11,7 +11,7 @@ export const discovery = {
   confirm_state: {
     pending: '待审核',
     confirmed: '已确认',
-    unavailable: '不可用',
+    unavailable: '标记不可用',
   },
   availability_state: {
     unknown: '未知',
@@ -30,6 +30,7 @@ export const discovery = {
     changed: '字段变化',
     changed_with_fields: '字段变化: {{fields}}',
     missing: '缺失',
+    unknown: '未取得比较结果',
   },
   // 能力摘要特性
   feature: {
@@ -48,7 +49,7 @@ export const discovery = {
 
   // 运行/结果状态
   loading_run: '正在加载最近一次模型更新…',
-  state_unsupported: '该提供商预设不支持模型发现，无法自动检查模型更新。',
+  state_unsupported: '该提供商预设不支持自动同步上游模型列表，无法执行模型更新检查。',
   state_failed: '模型更新检查失败',
   state_failed_desc: '检查来源连接与账号凭据后重试。',
   state_empty: '检查成功，但上游返回空模型列表',

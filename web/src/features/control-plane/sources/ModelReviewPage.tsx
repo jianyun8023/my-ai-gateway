@@ -109,7 +109,15 @@ export function ModelReviewPage({ api, refreshRevision = 0, onBusyChange, source
     (!confirmationFilter || model.confirmation_status === confirmationFilter)
     && (!availabilityFilter || model.availability_status === availabilityFilter)
   ));
-  const eligibleModels = visibleModels.filter((model) => model.confirmation_status === 'pending' && model.availability_status === 'available');
+  const filteredModels = visibleModels.filter((model) => {
+    const term = search.trim().toLowerCase();
+    if (!term) return true;
+    return model.upstream_model_id.toLowerCase().includes(term)
+      || (typeof model.metadata.display_name === 'string' && model.metadata.display_name.toLowerCase().includes(term));
+  });
+  // 全选、选中数量与批量确认都以当前可见（含搜索）范围为准，避免确认被搜索隐藏的模型。
+  const eligibleModels = filteredModels.filter((model) => model.confirmation_status === 'pending' && model.availability_status === 'available');
+  const confirmableSelection = eligibleModels.filter((model) => selectedModels.has(model.upstream_model_id));
   const effectiveAccountId = enabledAccounts[0]?.id ?? '';
 
   const runMutation = async (
@@ -163,7 +171,7 @@ export function ModelReviewPage({ api, refreshRevision = 0, onBusyChange, source
   };
 
   const confirmSelected = () => {
-    confirmModels(eligibleModels.filter((model) => selectedModels.has(model.upstream_model_id)));
+    confirmModels(confirmableSelection);
   };
 
   const toggleAll = (checked: boolean) => {
@@ -186,13 +194,6 @@ export function ModelReviewPage({ api, refreshRevision = 0, onBusyChange, source
       ? t('discovery.change_kind.changed_with_fields', { fields: known.map((field) => field.replace('metadata.', '')).join(', ') })
       : t('discovery.change_kind.changed');
   };
-
-  const filteredModels = visibleModels.filter((model) => {
-    const term = search.trim().toLowerCase();
-    if (!term) return true;
-    return model.upstream_model_id.toLowerCase().includes(term)
-      || (typeof model.metadata.display_name === 'string' && model.metadata.display_name.toLowerCase().includes(term));
-  });
 
   if (contextQuery.loading && !context) return <LoadingState label={t('discovery.loading')} />;
   if (contextQuery.error && !context) return <ErrorState error={contextQuery.error} onRetry={contextQuery.reload} />;
@@ -231,8 +232,8 @@ export function ModelReviewPage({ api, refreshRevision = 0, onBusyChange, source
           <Button variant="secondary" onClick={runDiscovery} loading={mutationBusy} disabled={!effectiveAccountId}>
             <IconPlay size={14} />{t('sources.review.rerun')}
           </Button>
-          <Button variant="secondary" onClick={() => setConfirmOpen(true)} disabled={selectedModels.size === 0 || mutationBusy}>
-            <IconCircleCheck size={14} />{t('discovery.confirm_selected')}{selectedModels.size > 0 ? ` (${selectedModels.size})` : ''}
+          <Button variant="secondary" onClick={() => setConfirmOpen(true)} disabled={confirmableSelection.length === 0 || mutationBusy}>
+            <IconCircleCheck size={14} />{t('discovery.confirm_selected')}{confirmableSelection.length > 0 ? ` (${confirmableSelection.length})` : ''}
           </Button>
           <Button variant="primary" onClick={gotoModels}>{t('sources.review.goto_models')}</Button>
         </div>
@@ -258,10 +259,10 @@ export function ModelReviewPage({ api, refreshRevision = 0, onBusyChange, source
 
       {stats && (
         <div className={styles.statsGrid} data-count="5">
-          <MetricCard label={t('discovery.diff_column.added')} value={String(stats.addedCount)} tone={stats.addedCount > 0 ? 'success' : undefined} />
-          <MetricCard label={t('discovery.diff_column.changed')} value={String(stats.changedCount)} tone={stats.changedCount > 0 ? 'warning' : undefined} />
-          <MetricCard label={t('discovery.diff_column.missing')} value={String(stats.missingCount)} tone={stats.missingCount > 0 ? 'warning' : undefined} />
-          <MetricCard label={t('sources.review.stat_unchanged')} value={String(stats.unchangedCount)} />
+          <MetricCard label={t('discovery.diff_column.added')} value={stats.diffAvailable ? String(stats.addedCount) : '—'} tone={stats.diffAvailable && stats.addedCount > 0 ? 'success' : undefined} />
+          <MetricCard label={t('discovery.diff_column.changed')} value={stats.diffAvailable ? String(stats.changedCount) : '—'} tone={stats.diffAvailable && stats.changedCount > 0 ? 'warning' : undefined} />
+          <MetricCard label={t('discovery.diff_column.missing')} value={stats.diffAvailable ? String(stats.missingCount) : '—'} tone={stats.diffAvailable && stats.missingCount > 0 ? 'warning' : undefined} />
+          <MetricCard label={t('sources.review.stat_unchanged')} value={stats.diffAvailable ? String(stats.unchangedCount) : '—'} />
           <MetricCard label={t('sources.review.stat_pending')} value={String(stats.pendingCount)} tone={stats.pendingCount > 0 ? 'warning' : 'success'} />
         </div>
       )}
@@ -348,7 +349,9 @@ export function ModelReviewPage({ api, refreshRevision = 0, onBusyChange, source
                     <Table.Td><span className={styles.primaryText}><code>{model.upstream_model_id}</code><small className={styles.secondaryText}>{t(`discovery.availability_state.${model.availability_status}`)}</small></span></Table.Td>
                     <Table.Td>{typeof model.metadata.logical_model_name === 'string' && model.metadata.logical_model_name ? model.metadata.logical_model_name : <span className={styles.secondaryText}>—</span>}</Table.Td>
                     <Table.Td><span className={styles.secondaryText}>{capabilitySummary(model, t) || '—'}</span></Table.Td>
-                    <Table.Td>{change ? (
+                    <Table.Td>{!review?.stats.diffAvailable ? (
+                      <span className={styles.secondaryText}>{t('discovery.change_kind.unknown')}</span>
+                    ) : change ? (
                       <span className={styles.primaryText}>
                         <StatusPill tone={change.kind === 'added' ? 'success' : change.kind === 'missing' ? 'danger' : 'warning'}>{changeLabel(change.kind, change.changedFields)}</StatusPill>
                         {change.kind === 'changed' && change.changedFields.length > 0 && <small className={styles.secondaryText}>{change.changedFields.join(', ')}</small>}
@@ -417,7 +420,7 @@ export function ModelReviewPage({ api, refreshRevision = 0, onBusyChange, source
       <ConfirmDialog
         open={confirmOpen}
         title={t('discovery.batch_confirm_title')}
-        description={<>{t('discovery.batch_confirm_desc', { count: selectedModels.size })}{mutationError && <ErrorState error={mutationError} />}</>}
+        description={<>{t('discovery.batch_confirm_desc', { count: confirmableSelection.length })}{mutationError && <ErrorState error={mutationError} />}</>}
         confirmLabel={t('discovery.confirm_models')}
         busy={mutationBusy}
         onCancel={() => !mutationBusy && setConfirmOpen(false)}

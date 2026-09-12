@@ -113,6 +113,18 @@ export const sources = {
     events_loading: 'Loading recent activity…',
     events_empty: 'No recent activity',
     events_empty_desc: 'Connection tests, model syncs and model confirmations appear here.',
+    event_type: {
+      'source.create': 'Source created',
+      'source.update': 'Source updated',
+      'source.delete': 'Source deleted',
+      'source.enable': 'Source enabled',
+      'source.disable': 'Source disabled',
+      'source.discovery': 'Model sync',
+      'source.connection_test': 'Connection test',
+      'source_model.confirm': 'Upstream model confirmed',
+      'source_model.update': 'Upstream model updated',
+      'account.probe': 'Account probe',
+    },
   },
 
   // 主页面
@@ -218,7 +230,8 @@ export const sources = {
     message: {
       check_done: 'Model update check finished for {{name}}.',
       check_failed: 'Model update check failed for {{name}}. Check the connection and account, then retry.',
-      batch_check_done: 'Batch check finished: {{succeeded}} succeeded, {{failed}} failed.',
+      check_unsupported: 'Model update checks are not supported for {{name}}.',
+      batch_check_done: 'Batch check finished: {{succeeded}} succeeded, {{failed}} failed, {{unsupported}} unsupported.',
       toggle_failed: 'Failed to change source {{name}}. Please retry.',
     },
   },
@@ -253,6 +266,7 @@ export const sources = {
     verify_failed: 'Failed',
     verify_none: 'Not verified yet',
     verify_probe: 'Last probe',
+    verify_saved_hint: 'Connection tests use the saved configuration and account; unsaved drafts are not verified.',
   },
 
   // Model update review page

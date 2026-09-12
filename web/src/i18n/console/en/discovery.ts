@@ -11,7 +11,7 @@ export const discovery = {
   confirm_state: {
     pending: 'Pending review',
     confirmed: 'Confirmed',
-    unavailable: 'Unavailable',
+    unavailable: 'Marked unavailable',
   },
   availability_state: {
     unknown: 'Unknown',
@@ -30,6 +30,7 @@ export const discovery = {
     changed: 'Field changes',
     changed_with_fields: 'Field changes: {{fields}}',
     missing: 'Missing',
+    unknown: 'No comparison available',
   },
   // Capability summary features
   feature: {
@@ -48,7 +49,7 @@ export const discovery = {
 
   // Run/result states
   loading_run: 'Loading the latest model check…',
-  state_unsupported: 'This provider preset does not support model discovery, so automatic model checks are unavailable.',
+  state_unsupported: 'This provider preset does not support syncing the upstream model catalog, so model update checks are unavailable.',
   state_failed: 'Model update check failed',
   state_failed_desc: 'Check the source connection and account credentials, then retry.',
   state_empty: 'The check succeeded but the upstream returned no models',

@@ -102,10 +102,17 @@ export function SourcesPage({ api, refreshRevision = 0, onBusyChange, onOpenSour
     setChecking(source.id, true);
     onBusyChange?.(true);
     try {
-      await api.runDiscovery(source.id, account.id);
-      notifySuccess(t('sources.list.message.check_done', { name: source.display_name }));
+      const execution = await api.runDiscovery(source.id, account.id);
       query.reload();
-      openSource(source.id, 'review');
+      // 运行失败/不支持由运行结果表达，不能提前宣告检查成功。
+      if (execution.run.status === 'succeeded') {
+        notifySuccess(t('sources.list.message.check_done', { name: source.display_name }));
+        openSource(source.id, 'review');
+        return;
+      }
+      setActionError(execution.run.status === 'unsupported'
+        ? t('sources.list.message.check_unsupported', { name: source.display_name })
+        : t('sources.list.message.check_failed', { name: source.display_name }));
     } catch {
       setActionError(t('sources.list.message.check_failed', { name: source.display_name }));
       query.reload();
@@ -124,18 +131,25 @@ export function SourcesPage({ api, refreshRevision = 0, onBusyChange, onOpenSour
     setCheckingIds(new Set(targets.map((source) => source.id)));
     onBusyChange?.(true);
     let succeeded = 0;
+    let unsupported = 0;
     await Promise.all(targets.map(async (source) => {
       const account = enabledAccount(source.id)!;
       try {
-        await api.runDiscovery(source.id, account.id);
-        succeeded += 1;
+        const execution = await api.runDiscovery(source.id, account.id);
+        if (execution.run.status === 'succeeded') succeeded += 1;
+        else if (execution.run.status === 'unsupported') unsupported += 1;
+        // failed 计入失败，不在这里重复计数成功。
       } catch {
         // 单个来源失败不影响其他来源，最终结果在汇总通知中体现。
       }
     }));
     setCheckingIds(new Set());
     onBusyChange?.(false);
-    notifySuccess(t('sources.list.message.batch_check_done', { succeeded, failed: targets.length - succeeded }));
+    notifySuccess(t('sources.list.message.batch_check_done', {
+      succeeded,
+      failed: targets.length - succeeded - unsupported,
+      unsupported,
+    }));
     query.reload();
   };
 
