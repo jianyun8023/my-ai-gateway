@@ -17,3 +17,27 @@ export const protocolModeKey = (mode: SourceProtocolMode | undefined) => (
 export const credentialKey = (account: Account) => (
   account.credential_configured ? 'sources.credential.configured' : 'sources.credential.not_configured'
 );
+
+/** 来源连接状态完全由账号真实健康数据推导，不虚构延迟或探测结果。 */
+export type SourceConnectionState = 'healthy' | 'partial' | 'unknown' | 'none';
+
+export interface SourceConnectionSummary {
+  state: SourceConnectionState;
+  healthy: number;
+  total: number;
+}
+
+export const sourceConnection = (accounts: Account[]): SourceConnectionSummary => {
+  const enabled = accounts.filter((account) => account.enabled);
+  if (enabled.length === 0) return { state: 'none', healthy: 0, total: accounts.length };
+  const healthy = enabled.filter((account) => account.health_status === 'healthy').length;
+  if (healthy === enabled.length) return { state: 'healthy', healthy, total: enabled.length };
+  if (healthy > 0) return { state: 'partial', healthy, total: enabled.length };
+  return { state: enabled.every((account) => account.health_status === 'unknown') ? 'unknown' : 'partial', healthy, total: enabled.length };
+};
+
+export const sourceConnectionTone = (state: SourceConnectionState) => {
+  if (state === 'healthy') return 'success' as const;
+  if (state === 'partial') return 'warning' as const;
+  return 'muted' as const;
+};

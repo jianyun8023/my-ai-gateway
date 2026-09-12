@@ -48,7 +48,7 @@ export const runtimeEvents = {
     health: '账号健康',
     operation: '运维操作',
     admin: '管理审计',
-    discovery: '模型发现',
+    discovery: '模型更新',
   },
   levels: { all: '全部级别', info: '信息', warning: '警告', error: '错误' },
   sources: {

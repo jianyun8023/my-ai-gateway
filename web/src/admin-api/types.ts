@@ -77,7 +77,7 @@ type ProviderDiscoveryDefinition =
       reason: string;
     };
 
-export interface ProviderPresetDefinition {
+interface ProviderPresetDefinition {
   schema_version?: number;
   default_base_url?: string;
   credential_header?: CredentialHeaderTemplate;
@@ -150,6 +150,9 @@ export interface Account {
   enabled: boolean;
   weight: number;
   health_status: string;
+  health_updated_at?: string | null;
+  last_probe_at?: string | null;
+  last_probe_status?: string | null;
   cooldown_until?: string | null;
   created_at: string;
   updated_at: string;

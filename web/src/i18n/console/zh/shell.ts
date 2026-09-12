@@ -24,10 +24,16 @@ export const shell = {
     events: '请求事件',
     'runtime-events': '运行事件',
     sources: '来源管理',
-    discovery: '模型发现',
     models: '模型与路由',
     capabilities: '能力矩阵',
     settings: '系统设置',
+  },
+
+  // 来源管理工作区子页面标题
+  title: {
+    source_detail: '来源详情',
+    source_edit: '编辑来源',
+    source_review: '模型更新审核',
   },
 
   connection_aria: "网关连接",

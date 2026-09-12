@@ -31,7 +31,7 @@ App → GatewayManagementPage → features/events → useAdminQuery / 游标合�
     → GatewayAdminResources → AdminClient → /admin/events
 ```
 
-页面负责组合，表单、详情和局部展示放到所属功能目录。来源与账号、模型发现与确认、逻辑模型与 Binding/Route 的职责保持分离；拆组件不能改变提交字段或能力判断。
+页面负责组合，表单、详情和局部展示放到所属功能目录。来源与账号（来源列表/详情/编辑）、模型更新审核、逻辑模型与 Binding/Route 的职责保持分离；拆组件不能改变提交字段或能力判断。
 
 模型与路由按 [#195 V3](design/model-routing-ui/implementation-v3.md) 以逻辑模型为唯一列表对象。`routingPresentation` 将配置与运行时能力聚合为线路、协议和健康摘要，`ModelRoutePath` 展示请求路径；不同协议的实际顺序不同时保留差异，旧加权备用池不能显示为确定顺序。模型列表同时读取请求设置；当重试上限限制回退时，显示最多尝试的可用线路数并省去无条件的失败箭头，保留全部候选线路以表达冷却跳过不消耗次数。`ModelRoutingEditor` 用现有字段与抽屉维护有序线路，通过 `GatewayAdminResources.createModelRouting` 创建或 `saveModelRouting` 更新，一次保存到模型级事务接口，不在浏览器顺序调用多种资源写接口。新增模型 ID 由服务端生成，不用公开名称命中更新路径。Binding / Route 的领域职责和 Admin API 保留，独立 CRUD 表单与详情页已移除；实现信息仅在抽屉底部 Accordion 只读展示。
 

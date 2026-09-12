@@ -48,7 +48,7 @@ export const runtimeEvents = {
     health: 'Account health',
     operation: 'Operation',
     admin: 'Admin audit',
-    discovery: 'Discovery',
+    discovery: 'Model Updates',
   },
   levels: { all: 'All levels', info: 'Info', warning: 'Warning', error: 'Error' },
   sources: {

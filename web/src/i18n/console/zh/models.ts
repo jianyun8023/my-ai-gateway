@@ -51,7 +51,7 @@ export const models = {
       select_model: '选择已确认的上游模型',
       no_sources: '暂无来源，请先添加来源',
       no_accounts: '此来源暂无账号',
-      no_confirmed_models: '暂无已确认模型，请先在模型发现中确认',
+      no_confirmed_models: '暂无已确认模型，请先在来源管理中检查模型更新并确认',
       loading_models: '正在加载已确认模型…',
       loading_capabilities: '正在加载协议能力…',
       request_settings: '请求设置',

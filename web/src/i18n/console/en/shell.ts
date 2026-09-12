@@ -24,10 +24,16 @@ export const shell = {
     events: 'Request Events',
     'runtime-events': 'Runtime Events',
     sources: 'Sources',
-    discovery: 'Model Discovery',
     models: 'Models & Routes',
     capabilities: 'Capabilities',
     settings: 'Settings',
+  },
+
+  // Source workspace sub-page titles
+  title: {
+    source_detail: 'Source Details',
+    source_edit: 'Edit Source',
+    source_review: 'Model Update Review',
   },
 
   connection_aria: "Gateway connection",

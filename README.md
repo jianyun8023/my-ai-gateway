@@ -7,7 +7,7 @@
 ## 核心能力
 
 - **统一接入**：支持 OpenAI Chat Completions、OpenAI Responses 和 Anthropic Messages，原生转发 JSON 与 SSE。
-- **可视化管理**：来源接入、模型发现与确认、协议能力检查、模型与路由配置。
+- **可视化管理**：来源接入、模型更新审核、协议能力检查、模型与路由配置。
 - **故障切换**：首选账号优先，失败后自动 fallback，支持健康探测与冷却。
 - **用量与运维**：Token 统计、请求归因、Virtual Key 管理、凭据加密、Prometheus 指标与可选 OpenTelemetry tracing。
 
