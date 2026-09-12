@@ -11,7 +11,7 @@ import { SelectField, TextAreaField, TextField } from '@/components/ui/FormField
 import styles from '@/features/control-plane/ControlPlane.module.scss';
 import { CheckboxField, DrawerSection, FormError, FormGrid } from '@/features/control-plane/shared';
 import { PROTOCOL_LABELS } from '@/lib/protocols';
-import { useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
 const presetEndpoints = (preset?: ProviderPreset): Partial<Record<GatewayProtocol, string>> => {
@@ -64,12 +64,15 @@ export function SourceForm({
   busy,
   error,
   onSubmit,
+  onDraftChange,
 }: {
   record?: Source;
   presets: ProviderPreset[];
   busy: boolean;
   error?: string;
   onSubmit: (input: SourceCreateInput | SourceWriteInput) => void;
+  /** 表单草稿（启用状态与三协议能力）变化时上报，供页面级摘要等展示同一份草稿。 */
+  onDraftChange?: (draft: { enabled: boolean; capabilities: Source['protocol_capabilities'] }) => void;
 }) {
   const { t } = useTranslation('console');
   const orderedPresets = useMemo(
@@ -99,6 +102,11 @@ export function SourceForm({
   const [defaultHeaders, setDefaultHeaders] = useState(() => defaultHeadersJson(initialAuthConfig));
   const [enabled, setEnabled] = useState(record?.enabled ?? true);
   const [validationError, setValidationError] = useState('');
+
+  // 让页面级摘要等展示与表单一致的草稿。
+  useEffect(() => {
+    onDraftChange?.({ enabled, capabilities });
+  }, [enabled, capabilities, onDraftChange]);
 
   const selectedPreset = orderedPresets.find((preset) => `${preset.id}@${preset.version}` === presetKey);
 
@@ -205,6 +213,7 @@ export function SourceForm({
 
   return (
     <form id="source-editor-form" className={styles.page} onSubmit={submit}>
+      <FormError message={validationError || error} />
       <FormGrid>
         <TextField label={t('sources.field.source_id')} value={id} disabled={Boolean(record) || busy} onChange={(event) => setId(event.target.value)} autoComplete="off" />
         <TextField label={t('sources.field.display_name')} value={displayName} disabled={busy} onChange={(event) => setDisplayName(event.target.value)} autoComplete="off" />
@@ -296,7 +305,6 @@ export function SourceForm({
           <TextAreaField label={t('sources.form.default_headers')} value={defaultHeaders} disabled={busy} onChange={(event) => setDefaultHeaders(event.target.value)} spellCheck={false} />
         </FormGrid>
       </DrawerSection>
-      <FormError message={validationError || error} />
     </form>
   );
 }

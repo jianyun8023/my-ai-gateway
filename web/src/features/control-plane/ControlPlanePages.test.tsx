@@ -4,6 +4,7 @@ import { GatewayManagementPage } from '@/pages/GatewayManagementPage';
 import { SourceForm } from './sources/SourceForm';
 import { Toggle } from './shared';
 import { FormActions } from '@/components/ui/FormActions';
+import * as operationNotifications from '@/components/ui/notifications';
 import type { Source } from '@/admin-api';
 import { setTestLanguage } from '@/test/setup';
 import { selectComboboxValue } from '@/test/interactions';
@@ -916,5 +917,98 @@ describe('production control-plane pages', () => {
     });
     expect(container.querySelector('[role="alert"]')).toBeNull();
     expect(container.querySelector('tbody')?.textContent).toContain('Model A');
+  });
+
+  it('scopes select-all and batch confirm to the current search results', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === '/admin/sources/source-a/models') {
+        return jsonResponse({ data: [sourceModel, { ...sourceModel, upstream_model_id: 'upstream-b', metadata: {} }] });
+      }
+      return baseHandler(input);
+    }));
+    await renderReview();
+    const fieldId = [...container.querySelectorAll('label')].find(label => label.textContent === '搜索模型')!.htmlFor;
+    const field = document.getElementById(fieldId) as HTMLInputElement;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(field, 'upstream-a');
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(container.querySelector('input[aria-label="选择 upstream-b"]')).toBeNull();
+    await act(async () => container.querySelector<HTMLInputElement>('input[aria-label="选择全部可确认模型"]')!.click());
+    const selectedLabel = [...container.querySelectorAll('button')].find(button => button.textContent?.includes('批量确认'))!.textContent;
+    expect(selectedLabel).toBe('批量确认 (1)');
+  });
+
+  it.each(['failed', 'unsupported'])('does not count a %s batch check run as success', async (status) => {
+    const successNotice = vi.spyOn(operationNotifications, 'notifySuccess');
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith('/discoveries') && init?.method === 'POST') {
+        return jsonResponse({ data: { run: { status, id: 10, discovered_model_count: 0, error_code: 'audit_execution_' + status }, diff: { added: [], changed: [], missing: [] }, models: [] } });
+      }
+      return baseHandler(input);
+    }));
+    await renderPage('sources');
+    await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent === '批量检查更新')!.click());
+    expect(successNotice).toHaveBeenCalledTimes(1);
+    expect(successNotice.mock.calls[0][0]).not.toContain('成功 1 个');
+  });
+
+  it('surfaces HTTP failures from the all-protocol connection test', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).endsWith('/connection-tests')) {
+        return jsonResponse({ error: { code: 'audit_service_unavailable', message: 'Connection test service unavailable' } }, 503);
+      }
+      return baseHandler(input);
+    }));
+    await renderPage('sources', { route: { page: 'sources', sourceId: 'source-a' } });
+    await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent === '测试连接')!.click());
+    expect(container.querySelector('[role="alert"]')).not.toBeNull();
+  });
+
+  it('prevents duplicate in-flight check-updates submissions on the detail page', async () => {
+    const pending = deferred<void>();
+    let requests = 0;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith('/discoveries') && init?.method === 'POST') {
+        requests += 1;
+        await pending.promise;
+        return jsonResponse({ data: { run: { status: 'succeeded', id: 10, discovered_model_count: 1 }, diff: { added: [], changed: [], missing: [] }, models: [] } });
+      }
+      return baseHandler(input);
+    }));
+    await renderPage('sources', { route: { page: 'sources', sourceId: 'source-a' }, onOpenSource: vi.fn() });
+    const button = [...container.querySelectorAll('button')].find(button => button.textContent === '检查模型更新')!;
+    try {
+      await act(async () => button.click());
+      await act(async () => button.click());
+      expect(requests).toBe(1);
+    } finally {
+      await act(async () => pending.resolve(undefined));
+    }
+  });
+
+  it('does not present unchanged diff stats when the last run did not succeed', async () => {
+    await renderReview();
+    // 最新一次 unsupported 运行：差异不可判断，行与统计都不表达“无变化”。
+    expect(container.textContent).toContain('未取得比较结果');
+    const unchangedCard = [...container.querySelectorAll('[data-ui="metric-card"]')].find(card => card.textContent?.includes('无变化'))!;
+    expect(unchangedCard.textContent).not.toContain('4');
+  });
+
+  it('restores the source delete entry with a confirmation on the edit page', async () => {
+    await renderPage('sources', { route: { page: 'sources', sourceId: 'source-a', section: 'edit' } });
+    const deleteButton = [...container.querySelectorAll('button')].find(button => button.textContent === '删除')!;
+    await act(async () => deleteButton.click());
+    const dialog = container.querySelector('[role="dialog"]')!;
+    expect(dialog.textContent).toContain('确认删除 source-a');
+  });
+
+  it('shows create-form validation errors at the top of the form', async () => {
+    await renderPage('sources', { route: { page: 'sources', sourceId: 'new', section: 'edit' } });
+    await act(async () => container.querySelector<HTMLButtonElement>('button[form="source-editor-form"]')!.click());
+    const form = container.querySelector('#source-editor-form')!;
+    const alert = form.querySelector('[role="alert"]');
+    expect(alert).not.toBeNull();
+    expect(container.querySelectorAll('#source-editor-form [role="alert"]')).toHaveLength(1);
   });
 });

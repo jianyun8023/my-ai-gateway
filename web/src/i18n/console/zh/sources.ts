@@ -113,6 +113,21 @@ export const sources = {
     events_loading: '正在加载最近操作…',
     events_empty: '暂无最近操作',
     events_empty_desc: '测试连接、模型同步、模型确认等操作会记录在这里。',
+    event_type: {
+      'source.create': '创建来源',
+      'source.update': '更新来源',
+      'source.delete': '删除来源',
+      'source.enable': '启用来源',
+      'source.disable': '停用来源',
+      'source.discovery': '模型同步',
+      'source.discovery.succeeded': '模型同步成功',
+      'source.discovery.failed': '模型同步失败',
+      'source.discovery.unsupported': '模型同步不支持',
+      'source.connection_test': '测试连接',
+      'source_model.confirm': '确认上游模型',
+      'source_model.update': '更新上游模型',
+      'account.probe': '账号探测',
+    },
   },
 
   // 主页面
@@ -218,7 +233,8 @@ export const sources = {
     message: {
       check_done: '来源 {{name}} 的模型更新检查完成。',
       check_failed: '来源 {{name}} 的模型更新检查失败，请检查连接与账号后重试。',
-      batch_check_done: '批量检查更新完成：成功 {{succeeded}} 个，失败 {{failed}} 个。',
+      check_unsupported: '来源 {{name}} 不支持自动检查模型更新。',
+      batch_check_done: '批量检查更新完成：成功 {{succeeded}} 个，失败 {{failed}} 个，不支持 {{unsupported}} 个。',
       toggle_failed: '来源 {{name}} 状态变更失败，请重试。',
     },
   },
@@ -253,6 +269,7 @@ export const sources = {
     verify_failed: '失败',
     verify_none: '尚未验证',
     verify_probe: '最近探测',
+    verify_saved_hint: '连接测试基于已保存的配置与账号，不会验证未保存的草稿。',
   },
 
   // 模型更新审核页

@@ -105,11 +105,13 @@ function App() {
   ];
 
   const pageTitle = route.page === 'sources' && route.sourceId
-    ? t(route.section === 'edit'
-      ? 'shell.title.source_edit'
-      : route.section === 'review'
-        ? 'shell.title.source_review'
-        : 'shell.title.source_detail')
+    ? t(route.sourceId === 'new'
+      ? 'shell.title.source_new'
+      : route.section === 'edit'
+        ? 'shell.title.source_edit'
+        : route.section === 'review'
+          ? 'shell.title.source_review'
+          : 'shell.title.source_detail')
     : t(`shell.nav.${page}`);
 
   useEffect(() => {

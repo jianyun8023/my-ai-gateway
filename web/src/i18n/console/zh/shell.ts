@@ -32,6 +32,7 @@ export const shell = {
   // 来源管理工作区子页面标题
   title: {
     source_detail: '来源详情',
+    source_new: '新增来源',
     source_edit: '编辑来源',
     source_review: '模型更新审核',
   },
