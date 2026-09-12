@@ -20,9 +20,10 @@ import type { CatalogData } from '@/features/control-plane/models/catalog';
 import { ModelRoutePath } from '@/features/control-plane/models/ModelRoutePath';
 import { ModelRoutingEditor } from '@/features/control-plane/models/ModelRoutingEditor';
 import { summarizeModelRouting } from '@/features/control-plane/models/routingPresentation';
-import { ConfirmDialog, EmptyTable, ErrorState, PageActions, ProtocolPill, Toggle } from '@/features/control-plane/shared';
+import { ConfirmDialog, EmptyTable, ErrorState, PageActions, Toggle } from '@/features/control-plane/shared';
 import { useAdminQuery } from '@/hooks/useAdminQuery';
 import { useLocalizedApiError } from '@/hooks/useLocalizedApiError';
+import { PROTOCOL_LABELS, PROTOCOL_SHORT_LABELS } from '@/lib/protocols';
 import { useCallback, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -126,10 +127,10 @@ export function ModelsRoutesPage({ api, refreshRevision = 0, onBusyChange }: Mod
                 return <Table.Tr key={model.id} data-clickable="true" onClick={() => openEditor(model.id)}>
                   <Table.Td><span className={styles.primaryText}><strong>{model.public_name}</strong>{model.display_name !== model.public_name && <small>{model.display_name}</small>}</span></Table.Td>
                   <Table.Td><div className={pageStyles.protocols}>{summary.protocols.map((protocol) => (
-                    <span key={protocol.protocol}>
-                      <ProtocolPill protocol={protocol.protocol} />
-                      <StatusPill tone={protocol.mode === 'native' ? 'success' : protocol.mode === 'adapter' || protocol.mode === 'mixed' ? 'warning' : 'muted'}>{t(`models.v3.${protocol.mode}`)}</StatusPill>
-                    </span>
+                    <StatusPill key={protocol.protocol}
+                      tone={protocol.mode === 'native' ? 'success' : protocol.mode === 'adapter' || protocol.mode === 'mixed' ? 'warning' : 'muted'}
+                      title={`${PROTOCOL_LABELS[protocol.protocol]} · ${t(`models.v3.${protocol.mode}`)}`}
+                    >{PROTOCOL_SHORT_LABELS[protocol.protocol]}</StatusPill>
                   ))}</div></Table.Td>
                   <Table.Td><ModelRoutePath summary={summary} /></Table.Td>
                   <Table.Td><StatusPill tone={statusTones[summary.status]}>{t(`models.v3.${summary.status}`)}</StatusPill></Table.Td>
