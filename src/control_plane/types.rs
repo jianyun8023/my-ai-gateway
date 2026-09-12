@@ -126,6 +126,8 @@ pub(crate) struct LogicalModelView {
     pub(crate) metadata: Value,
     pub(crate) field_sources: Value,
     pub(crate) enabled: bool,
+    pub(crate) request_timeout_ms: Option<i64>,
+    pub(crate) max_retries: Option<i32>,
     pub(crate) confirmed_at: Option<DateTime<Utc>>,
     pub(crate) unavailable_at: Option<DateTime<Utc>>,
     pub(crate) created_at: DateTime<Utc>,

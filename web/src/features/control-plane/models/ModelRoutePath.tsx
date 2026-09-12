@@ -52,9 +52,14 @@ function PathGroup({ path, showProtocols }: { path: ModelRoutePathGroup; showPro
   const unselected = path.entries.filter((entry) => entry.role === 'unselected');
   const primary = selected.filter((entry) => entry.role === 'primary');
   const backups = selected.filter((entry) => entry.role === 'backup');
+  const limited = path.maxAttempts !== null && path.maxAttempts < selected.length;
   return (
     <div className={styles.path} role="group" aria-label={path.protocols.map((protocol) => PROTOCOL_LABELS[protocol]).join(', ')}>
       {showProtocols && <div className={styles.badges}>{path.protocols.map((protocol) => <ProtocolPill key={protocol} protocol={protocol} />)}</div>}
+      {limited && <Text size="xs" c="dimmed">
+        {t(path.maxAttempts === 1 ? 'models.v3.no_retry' : 'models.v3.attempt_limit', { count: path.maxAttempts ?? 0 })}
+        {' '}{t('models.v3.skipped_lines')}
+      </Text>}
       <div className={styles.chain}>
         {path.strategy === 'weighted' ? <>
           {primary.map((entry) => <RouteLine key={entry.line.id} entry={entry} strategy={path.strategy} />)}
@@ -64,7 +69,7 @@ function PathGroup({ path, showProtocols }: { path: ModelRoutePathGroup; showPro
             <div className={styles.chain}>{backups.map((entry) => <RouteLine key={entry.line.id} entry={entry} strategy={path.strategy} />)}</div>
           </div>}
         </> : selected.map((entry, index) => <div key={entry.line.id} className={styles.step}>
-          {path.strategy === 'ordered' && index > 0 && entry.role === 'backup' && entry.backupIndex === index && <FailureArrow />}
+          {path.strategy === 'ordered' && !limited && index > 0 && entry.role === 'backup' && entry.backupIndex === index && <FailureArrow />}
           <RouteLine entry={entry} strategy={path.strategy} />
         </div>)}
         {unselected.map((entry) => <RouteLine key={entry.line.id} entry={entry} strategy={path.strategy} />)}

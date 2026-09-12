@@ -288,6 +288,27 @@ pub(crate) async fn get_model_routing(
     admin_result(&state, control_plane.get_model_routing(&id).await).await
 }
 
+pub(crate) async fn create_model_routing(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    payload: Result<Json<control_plane::ModelRoutingWrite>, JsonRejection>,
+) -> Response<Body> {
+    let control_plane = match admin_control_plane(&state, &headers) {
+        Ok(control_plane) => control_plane,
+        Err(response) => return response,
+    };
+    let input = match json_payload(payload) {
+        Ok(input) => input,
+        Err(response) => return response,
+    };
+    mutation_result(
+        &state,
+        StatusCode::CREATED,
+        control_plane.create_model_routing(&input).await,
+    )
+    .await
+}
+
 pub(crate) async fn put_model_routing(
     State(state): State<AppState>,
     headers: HeaderMap,

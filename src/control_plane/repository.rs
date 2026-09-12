@@ -12,8 +12,8 @@ pub(super) fn account_view_select(filtered: bool) -> &'static str {
 
 pub(super) fn logical_model_select(filtered: bool) -> &'static str {
     match filtered {
-        true => "SELECT id,public_name,display_name,status,metadata,field_sources,enabled,confirmed_at,unavailable_at,created_at,updated_at FROM logical_models WHERE id=$1 ORDER BY id",
-        false => "SELECT id,public_name,display_name,status,metadata,field_sources,enabled,confirmed_at,unavailable_at,created_at,updated_at FROM logical_models ORDER BY id",
+        true => "SELECT id,public_name,display_name,status,metadata,field_sources,enabled,request_timeout_ms,max_retries,confirmed_at,unavailable_at,created_at,updated_at FROM logical_models WHERE id=$1 ORDER BY id",
+        false => "SELECT id,public_name,display_name,status,metadata,field_sources,enabled,request_timeout_ms,max_retries,confirmed_at,unavailable_at,created_at,updated_at FROM logical_models ORDER BY id",
     }
 }
 

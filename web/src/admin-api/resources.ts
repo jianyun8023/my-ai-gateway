@@ -265,6 +265,13 @@ export class GatewayAdminResources {
     )).data;
   }
 
+  createModelRouting(
+    input: ModelRoutingWriteInput,
+    signal?: AbortSignal,
+  ): Promise<AdminMutationEnvelope<ModelRoutingConfiguration>> {
+    return this.transport.json('/admin/model-routings', jsonInit('POST', input, signal));
+  }
+
   saveModelRouting(
     id: string,
     input: ModelRoutingWriteInput,

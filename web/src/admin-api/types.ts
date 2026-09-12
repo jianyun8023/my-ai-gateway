@@ -330,6 +330,8 @@ export interface LogicalModel {
   metadata: ModelMetadataValues;
   field_sources: Partial<Record<ModelMetadataField, MetadataSource>>;
   enabled: boolean;
+  request_timeout_ms: number | null;
+  max_retries: number | null;
   confirmed_at?: string | null;
   unavailable_at?: string | null;
   created_at: string;

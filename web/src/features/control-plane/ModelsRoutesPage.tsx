@@ -87,8 +87,8 @@ export function ModelsRoutesPage({ api, refreshRevision = 0, onBusyChange }: Mod
     setMutationError(undefined);
     deletion.setValue(model);
   };
-  const submit = (id: string, input: ModelRoutingWriteInput) => {
-    void mutate(() => api.saveModelRouting(id, input), t('models.v3.saved'));
+  const submit = (id: string | undefined, input: ModelRoutingWriteInput) => {
+    void mutate(() => id === undefined ? api.createModelRouting(input) : api.saveModelRouting(id, input), t('models.v3.saved'));
   };
 
   if (query.loading && !data) return <LoadingState label={t('models.loading')} />;
@@ -172,7 +172,7 @@ function ModelMoreActions({ name, busy, onDelete }: { name: string; busy: boolea
 function ModelRoutingDrawer({ id, open, onClose, afterExit, api, data, busy, error, onSubmit }: {
   id?: string; open: boolean; onClose: () => void; afterExit: () => void;
   api: GatewayAdminResources; data: CatalogData; busy: boolean; error?: string;
-  onSubmit: (id: string, input: ModelRoutingWriteInput) => void;
+  onSubmit: (id: string | undefined, input: ModelRoutingWriteInput) => void;
 }) {
   const { t } = useTranslation('console');
   const load = useCallback((signal: AbortSignal) => id ? api.modelRouting(id, signal) : Promise.resolve(undefined), [api, id]);

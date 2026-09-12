@@ -27,6 +27,8 @@
 
 编辑抽屉维护一个有序线路数组，服务端在一个事务内验证并写入模型、Binding 和 Route，然后发布运行时快照。新配置采用真实顺序回退。现有加权配置读取时仍如实说明备用选择方式，保存编辑后切换为所列顺序；不把旧加权行为画成确定的备用顺序。
 
+新增通过 `POST /admin/model-routings` 由服务端生成 ID，名称冲突返回 409；编辑 PUT 仅更新已有模型。列表从 LogicalModel 响应读取重试上限，有限次尝试用明确说明代替无条件失败箭头；保留全部候选线路，停用、冷却或协议不匹配的跳过不占尝试次数。
+
 协议默认只读，高级信息默认折叠。V3 不提供 Binding / RouteRule 一级管理页、路由策略选择、Route Builder、Model Fallback、Capability Filter、发布草稿或额外模型装饰字段。
 
 ## 验证记录
@@ -50,3 +52,13 @@
 后端回归覆盖三协议实际顺序回退、重试与冷却跳过、总超时和 SSE 不重放、事务回滚与模型状态恢复、迁移及聚合接口、PostgreSQL Usage / attempt 去重与归因。顺序回退的客户端取消沿用既有流处理与结算链，本轮未新增该分支的专用取消用例。
 
 浏览器使用合成数据，没有发送真实模型请求。本轮不将本地界面和数据库回归外推为生产部署或真实 Provider 验收。
+
+## PR #196 复审修复
+
+2026-09-12，针对 `190a21d` 提交的[两项评审](https://github.com/jianyun8023/my-ai-gateway/pull/196#pullrequestreview-5185264653)：
+
+- 新增模型独立于更新接口，服务端生成 ID，重名返回 409；更新不存在的模型返回 404。回归覆盖 Admin 鉴权、创建冲突、公开名称与已有 ID 重合、原模型配置及 snapshot revision 保持不变。
+- LogicalModel 读模型包含请求设置，列表按实际重试上限说明最多尝试次数。回归覆盖 0 次、1 次和不限次数，保留冷却线路后的候选项，避免把次数限制误画为无条件回退链。
+- Rust 242 + Contract 90 + Mock 35，共 367 项通过；使用独立 PostgreSQL 测试库和 `--include-ignored`，0 失败、0 跳过。
+- Web 36 个测试文件、238 项通过；TypeScript、ESLint、Knip、Rust fmt/check/Clippy、Web/Rust 构建、JSON 配置和 diff 检查通过。
+- 浏览器检查实际生产构建与合成 Admin API，确认重试 0 次和 1 次说明及列表布局；本次未新增真实 Provider、部署或性能验收。构建保留既有主 chunk 体积提示。

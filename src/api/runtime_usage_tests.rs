@@ -831,6 +831,81 @@ async fn postgres_ordered_routing_api_records_each_attempt_once_and_deadline_exh
     assert_eq!(read.status(), StatusCode::OK);
     let read: Value = serde_json::from_slice(&drain(read).await).unwrap();
     assert_eq!(read["data"]["lines"].as_array().unwrap().len(), 3);
+    let original_routing = read["data"].clone();
+    let original_revision = state.snapshot().revision;
+    let creation_request = |body: &Value, authorized: bool| {
+        let mut request = axum::http::Request::builder()
+            .method("POST")
+            .uri("/admin/model-routings")
+            .header(header::CONTENT_TYPE, "application/json");
+        if authorized {
+            request = request.header(
+                header::AUTHORIZATION,
+                format!("Bearer {}", crate::test_helpers::TEST_ADMIN_KEY),
+            );
+        }
+        request.body(Body::from(body.to_string())).unwrap()
+    };
+    let unauthorized_create = app
+        .clone()
+        .oneshot(creation_request(&payload, false))
+        .await
+        .unwrap();
+    assert_eq!(unauthorized_create.status(), StatusCode::UNAUTHORIZED);
+    let duplicate = app
+        .clone()
+        .oneshot(creation_request(&payload, true))
+        .await
+        .unwrap();
+    assert_eq!(duplicate.status(), StatusCode::CONFLICT);
+    drain(duplicate).await;
+    let missing = app
+        .clone()
+        .oneshot(
+            axum::http::Request::builder()
+                .method("PUT")
+                .uri("/admin/logical-models/missing-id/routing")
+                .header(
+                    header::AUTHORIZATION,
+                    format!("Bearer {}", crate::test_helpers::TEST_ADMIN_KEY),
+                )
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(payload.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+    drain(missing).await;
+    assert_eq!(state.snapshot().revision, original_revision);
+    assert_eq!(
+        control_plane.load_snapshot().await.unwrap().revision,
+        original_revision
+    );
+
+    // Reusing an existing model's ID as a new public name must create a
+    // separate model, including when the original model has been renamed.
+    assert_ne!(id, "logical-model");
+    let mut create_payload = payload.clone();
+    create_payload["public_name"] = json!(id);
+    let created = app
+        .clone()
+        .oneshot(creation_request(&create_payload, true))
+        .await
+        .unwrap();
+    assert_eq!(created.status(), StatusCode::CREATED);
+    let created: Value = serde_json::from_slice(&drain(created).await).unwrap();
+    assert_ne!(created["data"]["logical_model"]["id"], id);
+    assert_eq!(created["data"]["logical_model"]["public_name"], id);
+    let unchanged = app
+        .clone()
+        .oneshot(admin_request("GET", Body::empty()))
+        .await
+        .unwrap();
+    let unchanged: Value = serde_json::from_slice(&drain(unchanged).await).unwrap();
+    assert_eq!(unchanged["data"], original_routing);
+    assert_eq!(state.snapshot().revision, original_revision + 1);
+
     let (key_id, key) = database
         .create_virtual_key("ordered-test", &[])
         .await

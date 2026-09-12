@@ -48,7 +48,7 @@ const lines = [
 const configuration = (overrides: Partial<ModelRoutingConfiguration> = {}): ModelRoutingConfiguration => ({
   logical_model: {
     id: 'logical-a', public_name: 'public-a', display_name: 'Original display name', status: 'confirmed',
-    enabled: true, metadata: {}, field_sources: {}, created_at: date, updated_at: date,
+    enabled: true, metadata: {}, field_sources: {}, request_timeout_ms: null, max_retries: null, created_at: date, updated_at: date,
   },
   lines, protocols: [chat], strategy: 'primary_then_weighted_fallback', request_timeout_ms: null, max_retries: null,
   ...overrides,
@@ -153,7 +153,7 @@ describe('model routing editor', () => {
     await selectComboboxValue(field('主线路 · 上游模型'), 'upstream-a');
     await waitFor(() => protocolText(chat)?.includes('原生') === true);
     submit();
-    expect(onSubmit).toHaveBeenCalledExactlyOnceWith('new-model', {
+    expect(onSubmit).toHaveBeenCalledExactlyOnceWith(undefined, {
       public_name: 'new-model', display_name: 'new-model', enabled: true,
       lines: [{ source_id: 'source-a', account_id: 'account-a', upstream_model_id: 'upstream-a' }],
       request_timeout_ms: null, max_retries: null,

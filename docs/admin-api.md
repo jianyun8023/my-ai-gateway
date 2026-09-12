@@ -84,7 +84,7 @@ Source 生命周期还提供 `GET/PUT/DELETE /admin/sources/:source_id` 和 `PUT
 
 ### 模型与有序上游线路
 
-`GET /admin/logical-models/:id/routing` 读取模型的完整线路配置；`PUT` 同路径创建或替换该模型的配置。请求体如下，协议由服务端从确认后的 SourceModelCapability 推导，不接受手动协议映射：
+`GET /admin/logical-models/:id/routing` 读取模型的完整线路配置；`PUT` 同路径只替换已存在模型的配置，不存在时返回 `404`。`POST /admin/model-routings` 原子创建模型和线路，由服务端生成独立于公开名称的模型 ID，成功返回 `201`；公开名称重复返回 `409`，不会覆盖已有模型。创建和编辑共用以下请求体，协议由服务端从确认后的 SourceModelCapability 推导，不接受手动协议映射：
 
 ```json
 {
@@ -107,9 +107,9 @@ Source 生命周期还提供 `GET/PUT/DELETE /admin/sources/:source_id` 和 `PUT
 - 每条线路必须引用启用的 Source/Account、`confirmed + available` 的 SourceModel 及至少一个 `confirmed` 的 native/已注册 adapter 协议能力；保留同一 Provider family 的既有 Binding 校验。重复线路、unknown/unsupported 能力和非法 Adapter 会被拒绝。
 - 启用模型必须至少有一条线路。模型停用时仍保存线路意图，之后可用原 enabled 接口恢复；保存不会覆盖已有 `metadata`、`field_sources`、preset 或 ID。创建模型默认 confirmed；对既有 unavailable 模型提交完整可用线路视为用户重新确认，事务内依次执行 unavailable → pending → confirmed 并重新验证所有线路，任何失败整体回滚。停用且清空线路的保存保留既有目录状态，允许重命名而不错误地宣称恢复可用。
 
-响应 `data` 为 `{logical_model, lines, protocols, strategy, request_timeout_ms, max_retries}`；`logical_model` 使用既有完整 LogicalModel 响应，返回的每条 `line` 在上述三个 ID 之外增加只读 `protocols`。GET 按 `priority DESC, binding id` 稳定重建线路，仅将已启用并确认、来源模型可用且已发布 Route 覆盖的协议记为可用；停用或 pending 绑定保留在结果中但不宣称支持。旧配置的策略如实返回，存在不同策略时为 `mixed`。
+响应 `data` 为 `{logical_model, lines, protocols, strategy, request_timeout_ms, max_retries}`；`logical_model` 使用完整 LogicalModel 响应，返回的每条 `line` 在上述三个 ID 之外增加只读 `protocols`。LogicalModel 列表、详情和写入响应也包含 `request_timeout_ms`、`max_retries`（未设置为 `null`），使列表能表达实际尝试次数限制，无需逐模型查询。GET 按 `priority DESC, binding id` 稳定重建线路，仅将已启用并确认、来源模型可用且已发布 Route 覆盖的协议记为可用；停用或 pending 绑定保留在结果中但不宣称支持。旧配置的策略如实返回，存在不同策略时为 `mixed`。
 
-PUT 在一个 SERIALIZABLE 事务内保存模型和请求设置、替换该模型的 Binding/Route、验证完整协议链并构建候选 snapshot，成功提交后只发布一次，响应包含 `snapshot_revision`。任一线路或 snapshot 校验失败时整体回滚，不留下部分模型、半套线路或新设置。旧资源 CRUD API 继续保留；`DELETE /admin/logical-models/:id` 通过外键级联清理该模型从属的 Binding/Route。
+POST 和 PUT 均在一个 SERIALIZABLE 事务内保存模型和请求设置、写入该模型的 Binding/Route、验证完整协议链并构建候选 snapshot，成功提交后只发布一次，响应包含 `snapshot_revision`。任一线路或 snapshot 校验失败时整体回滚，不留下部分模型、半套线路或新设置。旧资源 CRUD API 继续保留；`DELETE /admin/logical-models/:id` 通过外键级联清理该模型从属的 Binding/Route。
 
 连接测试和发现必须选择一个已经关联到该 Source、处于 enabled 状态且配置了 `credential_env` 的 Account。凭据只在进程内从环境变量读取，不在请求响应、审计表或日志中回显。Account/Source 的完整生命周期由 PostgreSQL 控制面 API 管理。
 

@@ -52,7 +52,7 @@ export function ModelRoutingEditor({
   configuration?: ModelRoutingConfiguration;
   busy: boolean;
   error?: string;
-  onSubmit: (id: string, input: ModelRoutingWriteInput) => void;
+  onSubmit: (id: string | undefined, input: ModelRoutingWriteInput) => void;
 }) {
   const { t } = useTranslation('console');
   const record = configuration?.logical_model;
@@ -187,7 +187,7 @@ export function ModelRoutingEditor({
       setValidationError(t('models.v3.editor.validate_confirmed_models'));
       return;
     }
-    onSubmit(record?.id ?? publicName.trim(), {
+    onSubmit(record?.id, {
       public_name: publicName.trim(),
       display_name: record?.display_name ?? publicName.trim(),
       enabled,
@@ -373,7 +373,7 @@ export function ModelRoutingEditor({
             <div className={styles.sectionContent}>
               <p className={styles.hint}>{t('models.v3.editor.advanced_hint')}</p>
               <DetailList>
-                <DetailItem label={t('models.field.lm_id')}><code>{record?.id ?? (publicName.trim() || t('models.v3.editor.assigned_on_save'))}</code></DetailItem>
+                <DetailItem label={t('models.field.lm_id')}><code>{record?.id ?? t('models.v3.editor.assigned_on_save')}</code></DetailItem>
                 <DetailItem label={t('models.field.strategy')}>{configuration?.strategy ?? t('models.v3.editor.ordered_strategy')}</DetailItem>
                 <DetailItem label={t('models.v3.editor.bindings')}><span className={styles.inline}>{savedBindings.length ? savedBindings.map((binding) => <code key={binding.id}>{binding.id}</code>) : '—'}</span></DetailItem>
                 <DetailItem label={t('models.v3.editor.route_rules')}><span className={styles.inline}>{savedRoutes.length ? savedRoutes.map((route) => <code key={route.id}>{route.id}</code>) : '—'}</span></DetailItem>

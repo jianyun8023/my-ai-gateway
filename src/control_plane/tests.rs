@@ -318,15 +318,22 @@ async fn postgres_model_routing_saves_atomically_and_preserves_order_and_metadat
         .await
         .unwrap();
 
-    // A model with a new ID is created through the same atomic contract.
+    // Creation assigns an ID independently of the public model name.
     input.public_name = "created-model".to_owned();
     input.enabled = true;
     input.max_retries = Some(0);
-    let created = control_plane
-        .put_model_routing("created-id", &input)
+    let created = control_plane.create_model_routing(&input).await.unwrap();
+    let created_id = created.record.logical_model.id.clone();
+    assert_ne!(created_id, input.public_name);
+    let listed = control_plane
+        .list_logical_models()
         .await
+        .unwrap()
+        .into_iter()
+        .find(|model| model.id == created_id)
         .unwrap();
-    assert_eq!(created.record.logical_model.id, "created-id");
+    assert_eq!(listed.request_timeout_ms, Some(2500));
+    assert_eq!(listed.max_retries, Some(0));
     assert_eq!(
         created.record.logical_model.status,
         CatalogStatus::Confirmed
@@ -340,21 +347,20 @@ async fn postgres_model_routing_saves_atomically_and_preserves_order_and_metadat
             .max_retries,
         Some(0)
     );
-    sqlx::query(
-        "UPDATE logical_models SET status='unavailable',unavailable_at=NOW() WHERE id='created-id'",
-    )
-    .execute(database.pool())
-    .await
-    .unwrap();
+    sqlx::query("UPDATE logical_models SET status='unavailable',unavailable_at=NOW() WHERE id=$1")
+        .bind(&created_id)
+        .execute(database.pool())
+        .await
+        .unwrap();
     let mut rejected_reconfirmation = input.clone();
     rejected_reconfirmation.lines[0].upstream_model_id = "missing".to_owned();
     assert!(control_plane
-        .put_model_routing("created-id", &rejected_reconfirmation)
+        .put_model_routing(&created_id, &rejected_reconfirmation)
         .await
         .is_err());
     assert_eq!(
         control_plane
-            .get_logical_model("created-id")
+            .get_logical_model(&created_id)
             .await
             .unwrap()
             .status,
@@ -365,7 +371,7 @@ async fn postgres_model_routing_saves_atomically_and_preserves_order_and_metadat
     paused.lines.clear();
     paused.public_name = "paused-model".to_owned();
     let saved_paused = control_plane
-        .put_model_routing("created-id", &paused)
+        .put_model_routing(&created_id, &paused)
         .await
         .unwrap();
     assert_eq!(
@@ -375,7 +381,7 @@ async fn postgres_model_routing_saves_atomically_and_preserves_order_and_metadat
     assert!(!saved_paused.record.logical_model.enabled);
     assert!(saved_paused.record.lines.is_empty());
     let reconfirmed = control_plane
-        .put_model_routing("created-id", &input)
+        .put_model_routing(&created_id, &input)
         .await
         .unwrap();
     assert_eq!(
@@ -389,7 +395,7 @@ async fn postgres_model_routing_saves_atomically_and_preserves_order_and_metadat
         .resolve_detailed(Protocol::OpenAiChatCompletions, "created-model")
         .is_ok());
     control_plane
-        .delete_logical_model("created-id")
+        .delete_logical_model(&created_id)
         .await
         .unwrap();
     assert!(control_plane
@@ -397,13 +403,13 @@ async fn postgres_model_routing_saves_atomically_and_preserves_order_and_metadat
         .await
         .unwrap()
         .iter()
-        .all(|route| route.logical_model_id != "created-id"));
+        .all(|route| route.logical_model_id != created_id));
     assert!(control_plane
         .list_model_bindings()
         .await
         .unwrap()
         .iter()
-        .all(|binding| binding.logical_model_id != "created-id"));
+        .all(|binding| binding.logical_model_id != created_id));
     database.pool().close().await;
     sqlx::query(&format!("DROP SCHEMA \"{schema}\" CASCADE"))
         .execute(&admin)

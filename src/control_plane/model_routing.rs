@@ -28,6 +28,14 @@ impl ControlPlane {
         Ok(record)
     }
 
+    pub(crate) async fn create_model_routing(
+        &self,
+        input: &ModelRoutingWrite,
+    ) -> Result<Mutation<ModelRoutingView>, ControlPlaneError> {
+        let id = format!("model-{}", uuid::Uuid::new_v4());
+        self.write_model_routing(&id, input, true).await
+    }
+
     /// Compile a complete model intent in one transaction. The existing CRUD
     /// endpoints remain available; this replaces only this model's bindings
     /// and routes and publishes one fully validated runtime snapshot.
@@ -36,6 +44,15 @@ impl ControlPlane {
         id: &str,
         input: &ModelRoutingWrite,
     ) -> Result<Mutation<ModelRoutingView>, ControlPlaneError> {
+        self.write_model_routing(id, input, false).await
+    }
+
+    async fn write_model_routing(
+        &self,
+        id: &str,
+        input: &ModelRoutingWrite,
+        create: bool,
+    ) -> Result<Mutation<ModelRoutingView>, ControlPlaneError> {
         validate_model_routing(id, input)?;
         let mut tx = self.begin_write().await?;
         let current: Option<CatalogStatus> =
@@ -43,6 +60,11 @@ impl ControlPlane {
                 .bind(id)
                 .fetch_optional(&mut *tx)
                 .await?;
+        if !create && current.is_none() {
+            return Err(ControlPlaneError::NotFound(format!(
+                "logical model '{id}' not found"
+            )));
+        }
         let next_status = if input.lines.is_empty() {
             current.unwrap_or(CatalogStatus::Confirmed)
         } else {
@@ -65,7 +87,12 @@ impl ControlPlane {
         // Keep confirmed bindings enabled even when the model is paused. The
         // final model enable flag is written before validation/publication;
         // no intermediate state can escape this transaction.
-        sqlx::query("INSERT INTO logical_models (id,public_name,display_name,status,enabled,confirmed_at,unavailable_at,request_timeout_ms,max_retries) VALUES ($1,$2,$3,$6,TRUE,CASE WHEN $6='confirmed' THEN NOW() ELSE NULL END,CASE WHEN $6='unavailable' THEN NOW() ELSE NULL END,$4,$5) ON CONFLICT (id) DO UPDATE SET public_name=EXCLUDED.public_name,display_name=EXCLUDED.display_name,status=EXCLUDED.status,enabled=TRUE,confirmed_at=CASE WHEN $6='confirmed' THEN COALESCE(logical_models.confirmed_at,NOW()) ELSE logical_models.confirmed_at END,unavailable_at=CASE WHEN $6='unavailable' THEN logical_models.unavailable_at ELSE NULL END,request_timeout_ms=EXCLUDED.request_timeout_ms,max_retries=EXCLUDED.max_retries,updated_at=NOW()")
+        let model_write = if create {
+            "INSERT INTO logical_models (id,public_name,display_name,status,enabled,confirmed_at,unavailable_at,request_timeout_ms,max_retries) VALUES ($1,$2,$3,$6,TRUE,CASE WHEN $6='confirmed' THEN NOW() ELSE NULL END,CASE WHEN $6='unavailable' THEN NOW() ELSE NULL END,$4,$5)"
+        } else {
+            "UPDATE logical_models SET public_name=$2,display_name=$3,status=$6,enabled=TRUE,confirmed_at=CASE WHEN $6='confirmed' THEN COALESCE(confirmed_at,NOW()) ELSE confirmed_at END,unavailable_at=CASE WHEN $6='unavailable' THEN unavailable_at ELSE NULL END,request_timeout_ms=$4,max_retries=$5,updated_at=NOW() WHERE id=$1"
+        };
+        sqlx::query(model_write)
             .bind(id)
             .bind(&input.public_name)
             .bind(&input.display_name)
@@ -216,11 +243,8 @@ async fn fetch_model_routing_tx(
     id: &str,
 ) -> Result<ModelRoutingView, ControlPlaneError> {
     let logical_model = fetch_logical_model_tx(tx, id).await?;
-    let (request_timeout_ms, max_retries): (Option<i64>, Option<i32>) =
-        sqlx::query_as("SELECT request_timeout_ms,max_retries FROM logical_models WHERE id=$1")
-            .bind(id)
-            .fetch_one(&mut **tx)
-            .await?;
+    let request_timeout_ms = logical_model.request_timeout_ms;
+    let max_retries = logical_model.max_retries;
     let strategies: Vec<String> = sqlx::query_scalar(
         "SELECT DISTINCT strategy FROM routes WHERE logical_model_id=$1 ORDER BY strategy",
     )

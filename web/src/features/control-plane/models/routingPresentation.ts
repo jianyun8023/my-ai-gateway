@@ -49,6 +49,7 @@ export interface ModelRoutePathEntry {
 export interface ModelRoutePathGroup {
   protocols: GatewayProtocol[];
   strategy: 'ordered' | 'weighted' | 'unknown';
+  maxAttempts: number | null;
   entries: ModelRoutePathEntry[];
 }
 
@@ -217,7 +218,10 @@ export function summarizeModelRouting(model: LogicalModel, data: CatalogData): M
       ]);
       const matching = paths.find((path) => signature(path) === signature({ strategy, entries }));
       if (matching) matching.protocols.push(protocol);
-      else paths.push({ protocols: [protocol], strategy, entries });
+      else paths.push({
+        protocols: [protocol], strategy, entries,
+        maxAttempts: strategy === 'ordered' && model.max_retries !== null ? model.max_retries + 1 : null,
+      });
     }
 
     const cells = selected.length ? selected.map(({ cell }) => cell) : rows.flatMap((row) => row.protocols.filter((cell) => cell.protocol_in === protocol && cell.status === 'unroutable'));

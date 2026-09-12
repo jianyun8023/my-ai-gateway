@@ -36,6 +36,10 @@ describe('GatewayAdminResources', () => {
       method: 'PUT', signal: controller.signal, body: JSON.stringify(input),
     }));
     expect(transport.json).toHaveBeenCalledTimes(2);
+    await api.createModelRouting(input, controller.signal);
+    expect(transport.json).toHaveBeenLastCalledWith('/admin/model-routings', expect.objectContaining({
+      method: 'POST', signal: controller.signal, body: JSON.stringify(input),
+    }));
   });
 
   it('sends typed source mutations to encoded Admin resource paths', async () => {

@@ -47,7 +47,7 @@ impl ControlPlane {
         let confirmed_at = (input.status == CatalogStatus::Confirmed).then(Utc::now);
         let unavailable_at = (input.status == CatalogStatus::Unavailable).then(Utc::now);
         let record = sqlx::query_as::<_, LogicalModelView>(
-            "INSERT INTO logical_models (id,public_name,display_name,status,metadata,field_sources,enabled,confirmed_at,unavailable_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id,public_name,display_name,status,metadata,field_sources,enabled,confirmed_at,unavailable_at,created_at,updated_at",
+            "INSERT INTO logical_models (id,public_name,display_name,status,metadata,field_sources,enabled,confirmed_at,unavailable_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id,public_name,display_name,status,metadata,field_sources,enabled,request_timeout_ms,max_retries,confirmed_at,unavailable_at,created_at,updated_at",
         )
         .bind(&input.id)
         .bind(&input.public_name)
@@ -84,7 +84,7 @@ impl ControlPlane {
                 })?;
         validate_status_transition(current, input.status, "logical model")?;
         let record = sqlx::query_as::<_, LogicalModelView>(
-            "UPDATE logical_models SET public_name=$2,display_name=$3,status=$4,metadata=$5,field_sources=$6,enabled=$7,confirmed_at=CASE WHEN $4='confirmed' THEN COALESCE(confirmed_at,NOW()) ELSE confirmed_at END,unavailable_at=CASE WHEN $4='unavailable' THEN NOW() ELSE NULL END,updated_at=NOW() WHERE id=$1 RETURNING id,public_name,display_name,status,metadata,field_sources,enabled,confirmed_at,unavailable_at,created_at,updated_at",
+            "UPDATE logical_models SET public_name=$2,display_name=$3,status=$4,metadata=$5,field_sources=$6,enabled=$7,confirmed_at=CASE WHEN $4='confirmed' THEN COALESCE(confirmed_at,NOW()) ELSE confirmed_at END,unavailable_at=CASE WHEN $4='unavailable' THEN NOW() ELSE NULL END,updated_at=NOW() WHERE id=$1 RETURNING id,public_name,display_name,status,metadata,field_sources,enabled,request_timeout_ms,max_retries,confirmed_at,unavailable_at,created_at,updated_at",
         )
         .bind(id)
         .bind(&input.public_name)

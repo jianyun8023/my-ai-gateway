@@ -149,6 +149,8 @@ const logicalModel = {
   metadata: {},
   field_sources: {},
   enabled: true,
+  request_timeout_ms: null,
+  max_retries: null,
   confirmed_at: '2026-08-31T00:00:00Z',
   unavailable_at: null,
   created_at: '2026-08-31T00:00:00Z',
@@ -644,6 +646,65 @@ describe('production control-plane pages', () => {
     expect(table.textContent).not.toContain('选择 #');
     expect(table.textContent).not.toContain('绑定 ID');
     expect(table.textContent).not.toContain('固定主选');
+  });
+
+  it('creates through POST, retains a conflicting draft, and never treats a model name as an update ID', async () => {
+    const writes = vi.fn(async (path: string, init: RequestInit) => {
+      expect(path).toBe('/admin/model-routings');
+      expect(init.method).toBe('POST');
+      return JSON.parse(String(init.body)).public_name === logicalModel.public_name
+        ? jsonResponse({ error: { code: 'conflict', message: 'Model name already exists' } }, 409)
+        : jsonResponse({ data: {} }, 201);
+    });
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'POST' || init?.method === 'PUT') return writes(String(input), init);
+      return baseHandler(input);
+    }));
+    await renderPage('models');
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === '新增模型')!.click());
+    const name = container.querySelector<HTMLInputElement>('#model-routing-editor-form input')!;
+    const setName = (value: string) => act(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(name, value);
+      name.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    setName(logicalModel.public_name);
+    await selectComboboxValue(container.querySelector<HTMLInputElement>('input[aria-label="主线路 · 来源"]')!, 'source-a');
+    await waitFor(() => !container.querySelector<HTMLInputElement>('input[aria-label="主线路 · 上游模型"]')!.disabled);
+    await selectComboboxValue(container.querySelector<HTMLInputElement>('input[aria-label="主线路 · 上游模型"]')!, 'upstream-a');
+    const submit = container.querySelector<HTMLButtonElement>('[role="dialog"] button[type="submit"]')!;
+    await act(async () => submit.click());
+    expect(writes).toHaveBeenCalledOnce();
+    expect(container.querySelector('[role="dialog"] [role="alert"]')?.textContent).toContain('409');
+    expect(name.value).toBe(logicalModel.public_name);
+    setName(logicalModel.id);
+    await act(async () => submit.click());
+    expect(writes).toHaveBeenCalledTimes(2);
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it.each([0, 1, null])('shows the retry limit %s without promising unlimited fallback', async (maxRetries) => {
+    const accounts = ['a', 'b', 'c'].map((id) => ({ ...account, id: `account-${id}` }));
+    const bindings = accounts.map((item, index) => ({ ...binding, id: index + 1, account_id: item.id }));
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/admin/logical-models') return jsonResponse({ data: [{ ...logicalModel, max_retries: maxRetries }] });
+      if (url === '/admin/accounts') return jsonResponse({ data: accounts });
+      if (url === '/admin/model-bindings') return jsonResponse({ data: bindings });
+      if (url === '/admin/routes') return jsonResponse({ data: [{ ...route, strategy: 'ordered_fallback' }] });
+      if (url === '/admin/capabilities') return jsonResponse({ ...capabilityResponse, data: bindings.map((item, index) => ({
+        ...capabilityResponse.data[0], account: { account_id: item.account_id, enabled: true },
+        protocols: [{ ...capabilityResponse.data[0].protocols[0], binding_id: item.id, selection: index === 0 ? 'primary' : 'fallback', selection_rank: index }],
+      })) });
+      return baseHandler(input);
+    }));
+    await renderPage('models');
+    const table = container.querySelector('table')!;
+    expect(table.querySelectorAll('[role="img"][aria-label="失败后"]')).toHaveLength(maxRetries === null ? 2 : 0);
+    if (maxRetries !== null) {
+      expect(table.textContent).toContain(maxRetries === 0 ? '仅尝试首条可用线路，请求失败后不再回退' : '最多尝试 2 条可用线路');
+      expect(table.textContent).toContain('不占尝试次数');
+    }
+    expect(table.textContent).toContain('备用线路 2');
   });
 
   it('submits the complete model configuration once and prevents close or duplicate submission while saving', async () => {

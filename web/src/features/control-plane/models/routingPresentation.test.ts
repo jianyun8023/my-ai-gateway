@@ -18,7 +18,7 @@ const messages: GatewayProtocol = 'anthropic_messages';
 const timestamp = '2026-09-12T00:00:00Z';
 const model: LogicalModel = {
   id: 'model-a', public_name: 'public-model', display_name: 'Model A', status: 'confirmed',
-  metadata: {}, field_sources: {}, enabled: true, created_at: timestamp, updated_at: timestamp,
+  metadata: {}, field_sources: {}, enabled: true, request_timeout_ms: null, max_retries: null, created_at: timestamp, updated_at: timestamp,
 };
 
 function binding(id: number, line: string, protocol: GatewayProtocol = chat): ModelBinding {
@@ -89,6 +89,19 @@ function catalog(bindings: ModelBinding[], rows: CapabilityMatrixRow[], routes =
 afterEach(() => vi.useRealTimers());
 
 describe('model-level routing presentation', () => {
+  it.each([0, 1, null])('keeps all candidate lines while exposing the actual retry cap %s', (maxRetries) => {
+    const bindings = [binding(1, 'a'), binding(2, 'b'), binding(3, 'c')];
+    const data = catalog(bindings, bindings.map((item, index) => row(item, [capability(item, index)])));
+    data.accounts[0].health_status = 'cooling_down';
+    data.accounts[0].cooldown_until = '2099-01-01T00:00:00Z';
+    const summary = summarizeModelRouting({ ...model, max_retries: maxRetries }, data);
+    expect(summary.paths[0].maxAttempts).toBe(maxRetries === null ? null : maxRetries + 1);
+    // A cooling primary is skipped without consuming the cap; later lines must remain visible.
+    expect(summary.paths[0].entries.map((entry) => entry.line.accountId)).toEqual(['account-a', 'account-b', 'account-c']);
+    data.routes[0].strategy = 'primary_then_weighted_fallback';
+    expect(summarizeModelRouting({ ...model, max_retries: maxRetries }, data).paths[0].maxAttempts).toBeNull();
+  });
+
   it('merges protocol bindings into two actual lines and one shared plan', () => {
     const aChat = binding(1, 'a');
     const aResponses = binding(2, 'a', responses);
