@@ -25,7 +25,6 @@ export const shell = {
     'runtime-events': '运行事件',
     sources: '来源管理',
     models: '模型与路由',
-    capabilities: '能力矩阵',
     settings: '系统设置',
   },
 

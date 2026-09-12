@@ -301,112 +301,10 @@
   font-size: 13px;
 }
 
-.snapshotMeta small,
-.blockMeta {
+.snapshotMeta small {
   display: block;
   color: var(--text-secondary);
   font-size: var(--fs-small);
-  overflow-wrap: anywhere;
-}
-
-.capabilitiesTable {
-  min-width: 1180px;
-}
-
-.capabilityCell {
-  min-width: 132px;
-  display: grid;
-  align-content: start;
-  gap: 5px;
-}
-
-.capabilityCell > span {
-  display: flex;
-  gap: 4px;
-  flex-wrap: wrap;
-}
-
-.capabilityCell small {
-  color: var(--text-secondary);
-  font-size: 10px;
-  overflow-wrap: anywhere;
-}
-
-.protocolDetailGrid {
-  display: grid;
-  gap: 10px;
-}
-
-.protocolDetail {
-  min-width: 0;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius);
-  padding: 14px;
-  background: var(--bg-secondary);
-}
-
-.protocolDetail[data-state='adapter'] {
-  border-color: color-mix(in oklch, var(--warn) 30%, var(--border-color));
-}
-
-.protocolDetail[data-state='missing'] {
-  border-color: color-mix(in oklch, var(--danger) 30%, var(--border-color));
-}
-
-.protocolDetail > header {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  flex-wrap: wrap;
-  margin-bottom: 10px;
-}
-
-.protocolDetail > p {
-  margin: 0;
-  color: var(--text-secondary);
-  font-size: 12px;
-}
-
-.conversionChain {
-  min-width: 0;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.conversionChain > span {
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  flex-wrap: wrap;
-}
-
-.conversionChain i {
-  color: var(--text-secondary);
-  font-style: normal;
-}
-
-.featureMatrix {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 5px 10px;
-  margin-top: 12px;
-}
-
-.featureMatrix > span {
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 7px;
-  border-bottom: 1px solid var(--border-color);
-  padding: 5px 0;
-}
-
-.featureMatrix code {
-  font-family: var(--font-mono);
-  font-size: 11px;
   overflow-wrap: anywhere;
 }
 
@@ -560,7 +458,6 @@
   .protocolTestRow > [data-ui="button"] { width: 100%; min-height: 44px; }
   .runHeader { grid-template-columns: minmax(0, 1fr); }
   .modelIdentity { align-items: flex-start; flex-direction: column; }
-  .featureMatrix { grid-template-columns: minmax(0, 1fr); }
   .protocolCapabilityEditor > div { grid-template-columns: minmax(0, 1fr); }
   .secretResult > [data-ui="button"] { width: 100%; }
 }

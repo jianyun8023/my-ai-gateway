@@ -569,7 +569,7 @@ Provider 与 Source 已使用独立运行时身份：Provider 按 Source 固化�
 
 ### 7.4 控制台
 
-控制台提供总览、用量分析、请求事件、运行事件、来源管理、模型与路由、能力矩阵、系统设置八个入口；“模型更新审核”作为来源生命周期内的子页面（`#sources/<id>/review`）接入，不再是独立一级导航。前三项继续由 `/admin/usage/*` 提供用量统计与请求明细；“运行事件”通过 `/admin/events` 展示跨子系统关注项；其他管理页面通过对应 `/admin/*` 资源完成接入、模型确认、路由和 Virtual Key 管理。
+控制台提供总览、用量分析、请求事件、运行事件、来源管理、模型与路由、系统设置七个入口；“模型更新审核”作为来源生命周期内的子页面（`#sources/<id>/review`）接入，不再是独立一级导航。有效能力与运行时诊断合并到模型的只读详情，按实际模型、协议和上游线路展示；不再提供独立能力矩阵页面，但后端能力计算与 `/admin/capabilities` 契约保持不变。前三项继续由 `/admin/usage/*` 提供用量统计与请求明细；“运行事件”通过 `/admin/events` 展示跨子系统关注项；其他管理页面通过对应 `/admin/*` 资源完成接入、模型确认、路由和 Virtual Key 管理。
 
 `GatewayConsoleShell` 统一导航与 Admin Key 连接。用量视图与管理视图分别由 `GatewayUsagePage`、`GatewayManagementPage` 接入，公共组件位于 `web/src/components/ui`。视觉与交互规范见 [design.md](../design.md)，目录与开发命令见 [前端 README](../web/README.md)，分层、共享 Admin 传输与时间窗口规则见 [前端架构](frontend-architecture.md)。
 

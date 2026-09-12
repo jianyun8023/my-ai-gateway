@@ -25,7 +25,6 @@ export const shell = {
     'runtime-events': 'Runtime Events',
     sources: 'Sources',
     models: 'Models & Routes',
-    capabilities: 'Capabilities',
     settings: 'Settings',
   },
 

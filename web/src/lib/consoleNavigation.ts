@@ -1,6 +1,6 @@
 export const CONSOLE_PAGES = [
   'overview', 'analysis', 'events', 'runtime-events',
-  'sources', 'models', 'capabilities', 'settings',
+  'sources', 'models', 'settings',
 ] as const;
 
 export type ConsolePage = typeof CONSOLE_PAGES[number];

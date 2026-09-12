@@ -46,7 +46,7 @@ describe('App console routing', () => {
     vi.unstubAllGlobals();
   });
 
-  it('flat sidebar shows all 8 navigation pages', async () => {
+  it('shows seven navigation pages with capabilities available within models', async () => {
     window.location.hash = '#overview';
     await act(async () => {
       root.render(<App />);
@@ -54,7 +54,7 @@ describe('App console routing', () => {
     });
 
     const navButtons = container.querySelectorAll('nav[aria-label="主导航"] button');
-    expect(navButtons).toHaveLength(8);
+    expect(navButtons).toHaveLength(7);
     expect(Array.from(navButtons).map((b) => b.textContent)).toEqual(expect.arrayContaining([
       expect.stringContaining('总览'),
       expect.stringContaining('用量分析'),
@@ -62,10 +62,10 @@ describe('App console routing', () => {
       expect.stringContaining('运行事件'),
       expect.stringContaining('来源管理'),
       expect.stringContaining('模型与路由'),
-      expect.stringContaining('能力矩阵'),
       expect.stringContaining('系统设置'),
     ]));
     expect(Array.from(navButtons).map((b) => b.textContent).some((text) => text?.includes('模型发现'))).toBe(false);
+    expect(Array.from(navButtons).some((button) => button.textContent?.includes('能力矩阵'))).toBe(false);
   });
 
   it('reacts to browser history hash changes and canonicalizes unknown routes', async () => {

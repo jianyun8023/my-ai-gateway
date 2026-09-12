@@ -17,7 +17,7 @@
 | OpenAI Responses | `POST /v1/responses` |
 | Anthropic Messages | `POST /v1/messages` |
 
-内置 DeepSeek、MiniMax、Kimi Code CN 预设，三协议均使用原生路径，并支持鉴权模型列表发现。具体模型的可用功能以控制台能力矩阵为准。
+内置 DeepSeek、MiniMax、Kimi Code CN 预设，三协议均使用原生路径，并支持鉴权模型列表发现。具体模型的可用功能在控制台“模型与路由”的有效能力详情中查看。
 
 ## 快速开始
 
@@ -35,7 +35,7 @@ curl http://127.0.0.1:8787/healthz
 ### 首次接入
 
 1. 添加来源和账号凭据，选择 Provider 预设并测试连接。
-2. 发现并确认模型，配置逻辑模型、Binding 与路由，检查能力矩阵。
+2. 发现并确认模型，配置逻辑模型、Binding 与路由；点击模型的协议标识或查看按钮，检查已发布的有效能力、上游线路及运行时诊断。
 3. 在设置中创建 Virtual Key，供客户端调用网关。
 
 运行期配置以 PostgreSQL 为准。可通过 [`config.example.json`](config.example.json) 初始化或显式导入；上游 Key 通过环境变量或加密凭据保存。

@@ -13,7 +13,6 @@ import {
   IconFileText,
   IconLayers,
   IconSettings,
-  IconSlidersHorizontal,
   IconSunAsterisk,
 } from './components/ui/icons';
 import {
@@ -45,7 +44,6 @@ const PAGE_ICONS: Record<ConsolePage, React.ReactNode> = {
   'runtime-events': <IconDatabase size={18} />,
   sources: <IconLayers size={18} />,
   models: <IconSunAsterisk size={18} />,
-  capabilities: <IconSlidersHorizontal size={18} />,
   settings: <IconSettings size={18} />,
 };
 
@@ -89,7 +87,7 @@ function App() {
   // page headers and <title> follow the active language.
   const navigationSections: readonly ConsoleNavSection[] = [
     { label: t('shell.section.monitor'), pages: ['overview', 'analysis', 'events', 'runtime-events'] },
-    { label: t('shell.section.config'), pages: ['sources', 'models', 'capabilities'] },
+    { label: t('shell.section.config'), pages: ['sources', 'models'] },
     { label: t('shell.section.system'), pages: ['settings'] },
   ];
 
@@ -100,7 +98,6 @@ function App() {
     { id: 'runtime-events', label: t('shell.nav.runtime-events'), icon: PAGE_ICONS['runtime-events'] },
     { id: 'sources', label: t('shell.nav.sources'), icon: PAGE_ICONS.sources },
     { id: 'models', label: t('shell.nav.models'), icon: PAGE_ICONS.models },
-    { id: 'capabilities', label: t('shell.nav.capabilities'), icon: PAGE_ICONS.capabilities },
     { id: 'settings', label: t('shell.nav.settings'), icon: PAGE_ICONS.settings },
   ];
 

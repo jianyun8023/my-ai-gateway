@@ -1,4 +1,4 @@
-import type { AdminErrorShape, GatewayAdminResources, LogicalModel, ModelRoutingWriteInput } from '@/admin-api';
+import type { AdminErrorShape, GatewayAdminResources, GatewayProtocol, LogicalModel, ModelRoutingWriteInput } from '@/admin-api';
 import { normalizeAdminError } from '@/admin-api';
 import { Table } from '@mantine/core';
 import { Button } from '@/components/ui/Button';
@@ -6,7 +6,7 @@ import { Card } from '@/components/ui/Card';
 import { TextField } from '@/components/ui/FormField';
 import { FormActions } from '@/components/ui/FormActions';
 import { IconButton } from '@/components/ui/IconButton';
-import { IconPencil, IconPlus, IconRefreshCw, IconTrash2 } from '@/components/ui/icons';
+import { IconEye, IconPencil, IconPlus, IconRefreshCw, IconTrash2 } from '@/components/ui/icons';
 import { LoadingState } from '@/components/ui/LoadingState';
 import { Modal } from '@/components/ui/Modal';
 import { clearOperationNotification, notifySuccess } from '@/components/ui/notifications';
@@ -18,6 +18,7 @@ import styles from '@/features/control-plane/ControlPlane.module.scss';
 import pageStyles from '@/features/control-plane/models/ModelsRoutes.module.scss';
 import type { CatalogData } from '@/features/control-plane/models/catalog';
 import { ModelRoutePath } from '@/features/control-plane/models/ModelRoutePath';
+import { ModelCapabilitiesDrawer } from '@/features/control-plane/models/ModelCapabilitiesDrawer';
 import { ModelRoutingEditor } from '@/features/control-plane/models/ModelRoutingEditor';
 import { summarizeModelRouting } from '@/features/control-plane/models/routingPresentation';
 import { ConfirmDialog, EmptyTable, ErrorState, PageActions, Toggle } from '@/features/control-plane/shared';
@@ -43,6 +44,7 @@ export function ModelsRoutesPage({ api, refreshRevision = 0, onBusyChange }: Mod
   const apiErrorText = useLocalizedApiError();
   const [search, setSearch] = useState('');
   const editor = useOverlayState<{ id?: string }>();
+  const capabilityDetails = useOverlayState<{ model: LogicalModel; protocol?: GatewayProtocol }>();
   const deletion = useOverlayState<LogicalModel>();
   const mutationLock = useRef(false);
   const [mutationBusy, setMutationBusy] = useState(false);
@@ -127,16 +129,20 @@ export function ModelsRoutesPage({ api, refreshRevision = 0, onBusyChange }: Mod
                 return <Table.Tr key={model.id} data-clickable="true" onClick={() => openEditor(model.id)}>
                   <Table.Td><span className={styles.primaryText}><strong>{model.public_name}</strong>{model.display_name !== model.public_name && <small>{model.display_name}</small>}</span></Table.Td>
                   <Table.Td><div className={pageStyles.protocols}>{summary.protocols.map((protocol) => (
-                    <StatusPill key={protocol.protocol}
+                    <button key={protocol.protocol} type="button" className={pageStyles.protocolButton}
+                      aria-label={t('capabilities.protocol_view_aria', { model: model.public_name, protocol: PROTOCOL_LABELS[protocol.protocol] })}
+                      onClick={(event) => { event.stopPropagation(); capabilityDetails.setValue({ model, protocol: protocol.protocol }); }}>
+                    <StatusPill
                       tone={protocol.mode === 'native' ? 'success' : protocol.mode === 'adapter' || protocol.mode === 'mixed' ? 'warning' : 'muted'}
                       title={`${PROTOCOL_LABELS[protocol.protocol]} · ${t(`models.v3.${protocol.mode}`)}`}
-                    >{PROTOCOL_SHORT_LABELS[protocol.protocol]}</StatusPill>
+                    >{PROTOCOL_SHORT_LABELS[protocol.protocol]}</StatusPill></button>
                   ))}</div></Table.Td>
                   <Table.Td><ModelRoutePath summary={summary} /></Table.Td>
                   <Table.Td><StatusPill tone={statusTones[summary.status]}>{t(`models.v3.${summary.status}`)}</StatusPill></Table.Td>
                   <Table.Td onClick={(event) => event.stopPropagation()}>
                     <div className={pageStyles.actions}>
                       <Toggle label={t('models.table.toggle_aria', { id: model.public_name })} checked={model.enabled} disabled={mutationBusy} showLabel={false} onChange={(enabled) => void mutate(() => api.setLogicalModelEnabled(model.id, enabled), t(enabled ? 'models.table.toggle_enabled' : 'models.table.toggle_disabled', { name: model.public_name }))} />
+                      <IconButton label={t('capabilities.view_aria', { model: model.public_name })} onClick={() => capabilityDetails.setValue({ model })}><IconEye size={16} /></IconButton>
                       <IconButton label={t('models.table.edit_aria', { id: model.public_name })} disabled={mutationBusy} onClick={() => openEditor(model.id)}><IconPencil size={16} /></IconButton>
                       <ModelMoreActions name={model.public_name} busy={mutationBusy} onDelete={() => openDelete(model)} />
                     </div>
@@ -146,6 +152,12 @@ export function ModelsRoutesPage({ api, refreshRevision = 0, onBusyChange }: Mod
             </Table></TableScroll>
           </Card>
         )}
+      {capabilityDetails.value && <ModelCapabilitiesDrawer
+        key={`${capabilityDetails.value.model.id}:${capabilityDetails.value.protocol ?? 'all'}`}
+        model={data.logicalModels.find((model) => model.id === capabilityDetails.value?.model.id) ?? capabilityDetails.value.model}
+        data={data} initialProtocol={capabilityDetails.value.protocol} open={capabilityDetails.opened}
+        onClose={() => capabilityDetails.setValue(undefined)} afterExit={capabilityDetails.afterExit}
+      />}
       {editor.value && <ModelRoutingDrawer
         key={editor.value.id ?? 'new'} id={editor.value.id} open={editor.opened} onClose={() => editor.setValue(undefined)} afterExit={editor.afterExit}
         api={api} data={data} busy={mutationBusy} error={mutationError ? apiErrorText(mutationError) : undefined} onSubmit={submit}

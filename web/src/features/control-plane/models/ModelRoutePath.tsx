@@ -14,7 +14,7 @@ const healthTone = (health: string): StatusTone => {
   return 'muted';
 };
 
-function RouteLine({ entry, strategy }: { entry: ModelRoutePathEntry; strategy: ModelRoutePathGroup['strategy'] }) {
+function RouteLine({ entry, strategy, compact = false }: { entry: ModelRoutePathEntry; strategy: ModelRoutePathGroup['strategy']; compact?: boolean }) {
   const { t } = useTranslation('console');
   const { line } = entry;
   const roleLabel = entry.role === 'primary' ? t('models.v3.primary')
@@ -23,12 +23,12 @@ function RouteLine({ entry, strategy }: { entry: ModelRoutePathEntry; strategy: 
   const healthLabel = line.healthStatus === 'disabled' ? t('models.v3.disabled')
     : t(`values.health.${line.healthStatus}`, { defaultValue: t('models.v3.unknown') });
   return (
-    <Card className={styles.line}>
+    <Card className={`${styles.line} ${compact ? styles.singleLine : ''}`}>
       <div className={styles.lineHeader}>
         <Text component="span" size="xs" fw={600} c={entry.role === 'primary' ? 'var(--accent)' : 'dimmed'} className={styles.wrap}>{roleLabel}</Text>
         <StatusPill tone={healthTone(line.healthStatus)}>{healthLabel}</StatusPill>
       </div>
-      <Text size="xs" fw={600} className={styles.wrap}>{line.accountName}</Text>
+      <Text size="xs" fw={600} className={`${styles.wrap} ${styles.account}`}>{line.accountName}</Text>
       <Text component="div" size="xs" c="dimmed" className={styles.metadata}>
         <span>{line.sourceName}</span><code>{line.upstreamModelId}</code>
       </Text>
@@ -61,6 +61,7 @@ function PathGroup({ path, showProtocols }: { path: ModelRoutePathGroup; showPro
         {' '}{t('models.v3.skipped_lines')}
       </Text>}
       <div className={styles.chain}>
+        {path.entries.length === 1 ? <RouteLine entry={path.entries[0]} strategy={path.strategy} compact /> : <>
         {path.strategy === 'weighted' ? <>
           {primary.map((entry) => <RouteLine key={entry.line.id} entry={entry} strategy={path.strategy} />)}
           {primary.length > 0 && backups.length > 0 && <FailureArrow />}
@@ -73,6 +74,7 @@ function PathGroup({ path, showProtocols }: { path: ModelRoutePathGroup; showPro
           <RouteLine entry={entry} strategy={path.strategy} />
         </div>)}
         {unselected.map((entry) => <RouteLine key={entry.line.id} entry={entry} strategy={path.strategy} />)}
+        </>}
       </div>
     </div>
   );
