@@ -1,6 +1,5 @@
 import { GatewayAdminResources } from '@/admin-api';
 import { AdminClient } from '@/admin-api/client';
-import { CapabilitiesPage } from '@/features/control-plane/CapabilitiesPage';
 import { ModelReviewPage } from '@/features/control-plane/sources/ModelReviewPage';
 import { ModelsRoutesPage } from '@/features/control-plane/ModelsRoutesPage';
 import { SettingsPage } from '@/features/control-plane/SettingsPage';
@@ -60,7 +59,6 @@ export function GatewayManagementPage({
     return <SourcesPage {...shared} onOpenSource={onOpenSource} />;
   }
   if (page === 'runtime-events') return <RuntimeEventsPage {...shared} />;
-  if (page === 'capabilities') return <CapabilitiesPage {...shared} />;
   if (page === 'models') return <ModelsRoutesPage {...shared} />;
   return (
     <SettingsPage

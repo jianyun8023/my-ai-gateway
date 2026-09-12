@@ -11,6 +11,7 @@ import type {
 import { describe, expect, it, vi, afterEach } from 'vitest';
 import type { CatalogData } from './catalog';
 import { summarizeModelRouting } from './routingPresentation';
+import { modelProtocolCapabilities } from './modelCapabilities';
 
 const chat: GatewayProtocol = 'openai_chat_completions';
 const responses: GatewayProtocol = 'openai_responses';
@@ -161,6 +162,7 @@ describe('model-level routing presentation', () => {
     expect(summary.protocols[0]).toMatchObject({ mode: 'native', supported: true, status: 'unknown' });
     expect(summary.status).toBe('unknown');
     expect(summary.lines[0].healthStatus).toBe('unknown');
+    expect(modelProtocolCapabilities(model, data, chat).entries[0].cell?.mode).toBe('native');
   });
 
   it('shows cooling and disabled lines even when the runtime plan still references them', () => {
@@ -178,6 +180,7 @@ describe('model-level routing presentation', () => {
     ]);
     expect(summary.status).toBe('degraded');
     expect(summary.protocols[0].supported).toBe(true);
+    expect(modelProtocolCapabilities(model, data, chat).entries).toHaveLength(3);
   });
 
   it('reports native and adapter paths together and retains explicit degradation', () => {
@@ -234,6 +237,9 @@ describe('model-level routing presentation', () => {
     expect(summary.status).toBe(status);
     expect(summary.protocols[0]).toMatchObject({ status, supported: false });
     expect(summary.paths[0].entries[0].role).toBe('unselected');
+    const detail = modelProtocolCapabilities({ ...model, ...change }, data, chat);
+    expect(detail.entries).toEqual([]);
+    expect(detail.unpublished[0]).toMatchObject({ role: 'unselected', status });
   });
 
   it('retains an unpublished pending binding without treating it as a backup', () => {
@@ -244,5 +250,126 @@ describe('model-level routing presentation', () => {
     const summary = summarizeModelRouting(model, data);
     expect(summary.paths[0].entries[1]).toMatchObject({ role: 'unselected', status: 'pending' });
     expect(summary.status).toBe('degraded');
+  });
+});
+
+describe('model capability detail scope', () => {
+  const missing = (item: ModelBinding, protocol: GatewayProtocol, code = 'runtime_binding_not_available') => capability(item, 0, {
+    protocol_in: protocol, status: 'unroutable', binding_id: null, mode: null, selection: null,
+    error: { code, message: `No available binding for ${protocol}`, route_id: 'route-a' },
+  });
+
+  it('shows one actual line per protocol when three separate routes contain cross-protocol placeholders', () => {
+    const protocols = [chat, responses, messages];
+    const bindings = protocols.map((protocol, index) => binding(index + 1, 'a', protocol));
+    const routes = protocols.map((protocol) => ({ ...route([protocol]), id: `route-${protocol}` }));
+    const rows = bindings.map((item, index) => ({
+      ...row(item, protocols.map((protocol) => protocol === item.protocol ? capability(item, 0) : missing(item, protocol))),
+      route_id: routes[index].id,
+    }));
+    const data = catalog(bindings, rows, routes);
+    for (const protocol of protocols) {
+      const detail = modelProtocolCapabilities(model, data, protocol);
+      expect(detail.entries).toHaveLength(1);
+      expect(detail.entries[0].cell).toMatchObject({ protocol_in: protocol, status: 'routable' });
+      expect(detail.errors).toEqual([]);
+      expect(detail.unpublished).toEqual([]);
+    }
+  });
+
+  it('retains an actual unavailable cell on a route that handles the selected protocol', () => {
+    const item = binding(1, 'a');
+    const errorCell = missing(item, chat);
+    const detail = modelProtocolCapabilities(model, catalog([item], [row(item, [errorCell])]), chat);
+    expect(detail.entries[0].cell?.error?.code).toBe('runtime_binding_not_available');
+    expect(detail.entries[0].cell?.status).toBe('unroutable');
+  });
+
+  it('preserves a model/protocol resolver error carried by other rows without claiming their account as the failed line', () => {
+    const a = binding(1, 'a');
+    const b = binding(2, 'b');
+    const error = missing(a, responses, 'unsupported_protocol');
+    const data = catalog([a, b], [row(a, [capability(a, 0), error]), row(b, [capability(b, 1), error])], [
+      route(), { ...route([responses]), id: 'route-responses' },
+    ]);
+    const detail = modelProtocolCapabilities(model, data, responses);
+    expect(detail.entries).toEqual([]);
+    expect(detail.errors).toEqual([error.error]);
+    expect(detail.configured).toBe(true);
+  });
+
+  it.each([
+    [{ enabled: false }, 'disabled'],
+    [{ status: 'pending' }, 'pending'],
+    [{ status: 'unavailable' }, 'unavailable'],
+    [{ id: 2 }, 'unavailable'],
+  ] as const)('does not republish an old cell after binding state changes: %o', (change, status) => {
+    const item = binding(1, 'a');
+    const data = catalog([{ ...item, ...change }], [row(item, [capability(item, 0)])]);
+    const detail = modelProtocolCapabilities(model, data, chat);
+    expect(detail.entries).toEqual([]);
+    expect(detail.unpublished).toHaveLength(1);
+    expect(detail.unpublished[0]).toMatchObject({ role: 'unselected', status });
+  });
+
+  it('does not republish an old cell after its route is disabled', () => {
+    const item = binding(1, 'a');
+    const data = catalog([item], [row(item, [capability(item, 0)])], [{ ...route(), enabled: false }]);
+    const detail = modelProtocolCapabilities(model, data, chat);
+    expect(detail.entries).toEqual([]);
+    expect(detail.unpublished[0]).toMatchObject({ role: 'unselected', status: 'disabled' });
+  });
+
+  it('does not resurrect a removed line from an older snapshot', () => {
+    const item = binding(1, 'a');
+    const detail = modelProtocolCapabilities(model, catalog([], [row(item, [capability(item, 0)])]), chat);
+    expect(detail.entries).toEqual([]);
+    expect(detail.unpublished).toEqual([]);
+    expect(detail.configured).toBe(true);
+  });
+
+  it('keeps missing snapshot data distinct from an unconfigured protocol', () => {
+    const item = binding(1, 'a');
+    const data = catalog([item], []);
+    const detail = modelProtocolCapabilities(model, data, chat);
+    expect(detail.configured).toBe(true);
+    expect(detail.entries).toEqual([]);
+    expect(detail.unpublished).toHaveLength(1);
+    expect(detail.unpublished[0].status).toBe('unavailable');
+    expect(modelProtocolCapabilities(model, data, responses)).toMatchObject({ configured: false, entries: [], unpublished: [], errors: [] });
+  });
+
+  it('does not replace a missing protocol cell with another protocol or preset capabilities', () => {
+    const item = binding(1, 'a');
+    const data = catalog([item], [row(item, [capability(item, 0, { protocol_in: responses })])]);
+    const detail = modelProtocolCapabilities(model, data, chat);
+    expect(detail.entries).toHaveLength(1);
+    expect(detail.entries[0].cell).toBeUndefined();
+  });
+
+  it('retains disabled, pending and cooling lines omitted from the published matrix', () => {
+    const a = { ...binding(1, 'a'), enabled: false };
+    const b = { ...binding(2, 'b'), status: 'pending' as const };
+    const c = binding(3, 'c');
+    const data = catalog([a, b, c], []);
+    data.accounts[2].health_status = 'cooling_down';
+    data.accounts[2].cooldown_until = '2099-01-01T00:00:00Z';
+    const detail = modelProtocolCapabilities(model, data, chat);
+    expect(detail.unpublished.map((entry) => entry.status)).toEqual(['disabled', 'pending', 'unavailable']);
+  });
+
+  it('keeps protocol-specific primary order and degraded feature facts', () => {
+    const a = binding(1, 'a');
+    const aResponses = binding(2, 'a', responses);
+    const b = binding(3, 'b');
+    const bResponses = binding(4, 'b', responses);
+    const degraded = capability(aResponses, 1, { degraded: true, degraded_features: ['thinking'], mode: 'adapter' });
+    const data = catalog([a, aResponses, b, bResponses], [
+      row(a, [capability(a, 0), degraded]), row(b, [capability(b, 1), capability(bResponses, 0)]),
+    ], [route([chat, responses])]);
+    expect(modelProtocolCapabilities(model, data, chat).entries.map(({ row }) => row.account.account_id)).toEqual(['account-a', 'account-b']);
+    const detail = modelProtocolCapabilities(model, data, responses);
+    expect(detail.entries.map(({ row }) => row.account.account_id)).toEqual(['account-b', 'account-a']);
+    expect(detail.entries[1].cell).toEqual(degraded);
   });
 });

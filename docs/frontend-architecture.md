@@ -1,6 +1,6 @@
 # 前端架构与治理
 
-控制台是 React + TypeScript + Vite 应用，通过 `/admin/` 提供八个导航入口。本文约定代码职责、共享能力与检查门禁；领域与协议基线仍以 [设计文档](ai-gateway-design.md) 为准，视觉与交互遵循 [design.md](../design.md)。
+控制台是 React + TypeScript + Vite 应用，通过 `/admin/` 提供七个导航入口。本文约定代码职责、共享能力与检查门禁；领域与协议基线仍以 [设计文档](ai-gateway-design.md) 为准，视觉与交互遵循 [design.md](../design.md)。
 
 本轮沿用后端治理的分层、共享能力收敛、死代码清理和门禁方式，实现位于 `codex/frontend-architecture-governance`。起点为 2026-09-08 的 `main` `de708e8`，完成后整合已合并后端治理的 `main` `efeb445`。
 
@@ -11,8 +11,8 @@
 | 层 | 入口与职责 |
 | --- | --- |
 | 应用装配 | `main.tsx` 初始化与挂载；`Root.tsx` 同步主题；`App.tsx` 接入连接状态、导航和页面 |
-| 导航与页面 | `lib/consoleNavigation.ts` 定义八个 hash 入口；`pages/` 组合功能与刷新状态 |
-| 业务功能 | `features/usage/` 组织筛选、总览、分析、请求事件与详情；`features/events/` 组织统一运行事件时间线；`features/control-plane/` 组织来源、发现、模型路由、能力矩阵与设置 |
+| 导航与页面 | `lib/consoleNavigation.ts` 定义七个 hash 入口；`pages/` 组合功能与刷新状态 |
+| 业务功能 | `features/usage/` 组织筛选、总览、分析、请求事件与详情；`features/events/` 组织统一运行事件时间线；`features/control-plane/` 组织来源、发现、模型路由及有效能力详情、设置 |
 | 资源与数据 | `admin-api/resources.ts` 封装控制面资源；`gateway-usage/` 封装用量查询、过滤、游标合并及响应适配 |
 | HTTP 传输 | `admin-api/client.ts` 是管理请求的统一入口；`admin-api/errors.ts` 提供错误归一化 |
 | 共享能力 | `hooks/` 提供查询生命周期；`lib/` 管理导航、协议与偏好存储；`utils/` 提供格式化和下载 |
@@ -32,6 +32,8 @@ App → GatewayManagementPage → features/events → useAdminQuery / 游标合�
 ```
 
 页面负责组合，表单、详情和局部展示放到所属功能目录。来源与账号（来源列表/详情/编辑）、模型更新审核、逻辑模型与 Binding/Route 的职责保持分离；拆组件不能改变提交字段或能力判断。
+
+模型列表通过协议标识或查看按钮打开 `models/ModelCapabilitiesDrawer.tsx` 的只读有效能力详情，不需要进入编辑/保存流程。`modelCapabilities.ts` 按模型与实际路由覆盖的协议选择 `/admin/capabilities` 快照单元格；三条分别处理 Chat、Responses、Messages 的路由不会再生成一张含大量无关不可路由单元格的页面。真实解析错误、未发布线路及其禁用/待确认/冷却状态仍需保留；缺失快照不能从 Provider 预设推断为支持。协议完全解析失败且错误附于其他模型路由行时，按模型/协议展示该错误，不将其他行的 Source/Account 当作失败归因。有效功能、转换/降级、端点/路由诊断和快照信息在模型内查看；来源模型的能力声明与确认仍属于来源管理。旧 `#capabilities` 与其他已移除 hash 一样回到总览，不保留兼容页面。
 
 模型与路由按 [#195 V3](design/model-routing-ui/implementation-v3.md) 以逻辑模型为唯一列表对象。`routingPresentation` 将配置与运行时能力聚合为线路、协议和健康摘要，`ModelRoutePath` 展示请求路径；不同协议的实际顺序不同时保留差异，旧加权备用池不能显示为确定顺序。模型列表同时读取请求设置；当重试上限限制回退时，显示最多尝试的可用线路数并省去无条件的失败箭头，保留全部候选线路以表达冷却跳过不消耗次数。`ModelRoutingEditor` 用现有字段与抽屉维护有序线路，通过 `GatewayAdminResources.createModelRouting` 创建或 `saveModelRouting` 更新，一次保存到模型级事务接口，不在浏览器顺序调用多种资源写接口。新增模型 ID 由服务端生成，不用公开名称命中更新路径。Binding / Route 的领域职责和 Admin API 保留，独立 CRUD 表单与详情页已移除；实现信息仅在抽屉底部 Accordion 只读展示。
 

@@ -8,7 +8,7 @@ export const models = {
     backup: '备用线路 {{index}}',
     no_lines: '尚未配置线路',
     healthy: '正常',
-    degraded: '部分线路不可用',
+    degraded: '部分线路受限',
     unavailable: '不可用',
     disabled: '已停用',
     pending: '待确认',
@@ -110,7 +110,7 @@ export const models = {
   route_form: {
     validate_required: '路由 ID、逻辑模型与至少一个入口协议为必填项。',
     selection_label: '选择语义',
-    lossy_hint: '实际损失由有效能力矩阵列出。',
+    lossy_hint: '实际转换或损失在模型的有效能力详情中列出。',
   },
 
   metadata_source: {

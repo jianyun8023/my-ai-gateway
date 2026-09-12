@@ -1,0 +1,25 @@
+.content { min-width: 0; display: grid; gap: 20px; }
+.identity { display: grid; gap: 4px; overflow-wrap: anywhere; }
+.identity > strong { font-size: 18px; }
+.identity > span, .hint, .identity p { color: var(--text-secondary); font-size: 13px; margin: 0; }
+.identity p { margin-top: 4px; }
+.protocol { min-width: 0; display: grid; gap: 12px; }
+.protocolHeader { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.protocolHeader h3 { margin: 0; font-size: 14px; }
+.line { min-width: 0; padding: 16px; display: grid; gap: 14px; overflow-wrap: anywhere; }
+.lineHeader { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.lineHeader > div:first-child { min-width: 0; display: grid; gap: 4px; }
+.lineHeader strong { font-size: 13px; }
+.lineHeader code { font-size: 12px; color: var(--text-secondary); }
+.badges { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; }
+.features { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 24px; margin: 0; }
+.features > div { display: flex; justify-content: space-between; align-items: center; gap: 8px; border-bottom: 1px solid var(--border-color); padding: 8px 0; }
+.features dt { font-size: 13px; }
+.features dd { margin: 0; }
+.chain { display: grid; gap: 6px; }
+.chain > span { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+
+@media (max-width: 600px) {
+  .features { grid-template-columns: minmax(0, 1fr); }
+  .line { padding: 12px; }
+}

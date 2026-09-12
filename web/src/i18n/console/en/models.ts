@@ -8,7 +8,7 @@ export const models = {
     backup: 'Backup line {{index}}',
     no_lines: 'No lines configured',
     healthy: 'Healthy',
-    degraded: 'Some lines unavailable',
+    degraded: 'Some lines limited',
     unavailable: 'Unavailable',
     disabled: 'Disabled',
     pending: 'Pending confirmation',
@@ -110,7 +110,7 @@ export const models = {
   route_form: {
     validate_required: 'Route ID, LogicalModel, and at least one inbound protocol are required.',
     selection_label: 'Selection semantics',
-    lossy_hint: 'Actual loss is listed in the effective capability matrix.',
+    lossy_hint: 'Actual translation or loss is listed in the model’s effective capability details.',
   },
 
   metadata_source: {

@@ -666,16 +666,41 @@ describe('production control-plane pages', () => {
     expect(document.activeElement).toBe(save);
   });
 
-  it('renders fixed three-protocol runtime facts without inferring unroutable as supported', async () => {
-    await renderPage('capabilities');
+  it('opens published capabilities from a protocol button without editing or writing configuration', async () => {
+    await renderPage('models');
+    const trigger = container.querySelector<HTMLButtonElement>('button[aria-label="查看 model-public 的 Chat Completions 能力"]')!;
+    await act(async () => { trigger.focus(); trigger.click(); });
+    const dialog = container.querySelector('[role="dialog"]')!;
+    expect(dialog.textContent).toContain('有效能力详情');
+    expect(dialog.textContent).toContain('工具调用');
+    expect(dialog.textContent).toContain('不支持');
+    expect(dialog.textContent).not.toContain('route_not_found');
+    expect(dialog.querySelector('form')).toBeNull();
+    expect(dialog.querySelector('button[type="submit"]')).toBeNull();
+    expect([...dialog.querySelectorAll('[role="tab"]')].map(tab => tab.textContent)).toEqual(['Chat', 'Responses', 'Messages']);
+    await act(async () => [...dialog.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(tab => tab.textContent === 'Messages')!.click());
+    expect(dialog.querySelector('[role="tabpanel"]')?.textContent).toContain('未配置');
+    expect(dialog.querySelector('[aria-label="有效功能能力"]')).toBeNull();
+    await act(async () => dialog.querySelector<HTMLButtonElement>('button[aria-label="关闭"]')!.click());
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+    await waitFor(() => document.activeElement === trigger);
+    expect(vi.mocked(fetch).mock.calls.every(([, init]) => !init?.method || init.method === 'GET')).toBe(true);
+  });
 
-    expect(container.textContent).toContain('Chat Completions');
-    expect(container.textContent).toContain('Responses');
-    expect(container.textContent).toContain('Messages');
-    expect(container.textContent).toContain('primary #0');
-    expect(container.textContent).toContain('fallback #1');
-    expect(container.textContent).toContain('降级');
-    expect(container.textContent).toContain('route_not_found');
+  it('opens the available protocol from the model-level detail action', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const protocol = 'anthropic_messages';
+      if (String(input) === '/admin/routes') return jsonResponse({ data: [{ ...route, protocols: [protocol] }] });
+      if (String(input) === '/admin/model-bindings') return jsonResponse({ data: [{ ...binding, protocol }] });
+      if (String(input) === '/admin/capabilities') return jsonResponse({ ...capabilityResponse, data: [{
+        ...capabilityResponse.data[0], protocols: [{ ...capabilityResponse.data[0].protocols[0], protocol_in: protocol, protocol_upstream: protocol }],
+      }] });
+      return baseHandler(input);
+    }));
+    await renderPage('models');
+    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="查看 model-public 的能力详情"]')!.click());
+    expect(container.querySelector('[role="dialog"] [role="tab"][aria-selected="true"]')?.textContent).toBe('Messages');
+    expect(container.querySelector('[role="dialog"] [aria-label="有效功能能力"]')).not.toBeNull();
   });
 
   it('shows one model row with protocols and its line without implementation tabs or IDs', async () => {
@@ -810,19 +835,30 @@ describe('production control-plane pages', () => {
     expect(container.querySelectorAll('.mantine-Notification-root')).toHaveLength(1);
   });
 
-  it('filters capabilities and exposes the selected protocol chain as labeled details', async () => {
-    await renderPage('capabilities');
-    const region = container.querySelector('section[aria-label="能力矩阵筛选"]')!;
-    const statusLabel = [...region.querySelectorAll('label')].find((label) => label.textContent === '路由状态')!;
-    const protocol = document.getElementById(statusLabel.htmlFor) as HTMLInputElement;
-    await selectComboboxValue(protocol, 'degraded');
-    const view = [...container.querySelectorAll<HTMLButtonElement>('tbody button')].find(button => button.getAttribute('aria-label')?.includes('查看'))!;
-    await act(async () => view.click());
-    const terms = [...container.querySelectorAll('[role="dialog"] dt')];
+  it('retains conversions, degradation and real errors in protocol-specific model diagnostics', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === '/admin/routes') return jsonResponse({ data: [{ ...route, protocols: ['openai_chat_completions', 'openai_responses', 'anthropic_messages'] }] });
+      return baseHandler(input);
+    }));
+    await renderPage('models');
+    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="查看 model-public 的 Responses 能力"]')!.click());
+    const dialog = container.querySelector('[role="dialog"]')!;
+    expect(dialog.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe('Responses');
+    expect(dialog.textContent).toContain('已降级');
+    expect(dialog.textContent).toContain('已转换');
+    expect(dialog.textContent).toContain('备用线路');
+    expect(dialog.textContent).not.toContain('备用线路 1');
+    await act(async () => [...dialog.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === '运行时诊断')!.click());
+    const terms = [...dialog.querySelectorAll('dt')];
     expect(terms.length).toBeGreaterThan(0);
     expect(terms.every(term => term.nextElementSibling?.tagName === 'DD')).toBe(true);
-    expect(container.querySelector('[role="dialog"]')?.textContent).toContain('adapter-a');
-    expect(container.querySelector('[role="dialog"]')?.textContent).toContain('Messages');
+    expect(dialog.textContent).toContain('adapter-a');
+    expect(dialog.textContent).toContain('Responses → Messages');
+    await act(async () => [...dialog.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(tab => tab.textContent === 'Messages')!.click());
+    expect(dialog.textContent).toContain('不可路由');
+    expect(dialog.textContent).toContain('No published route');
+    expect(dialog.textContent).toContain('route_not_found');
+    expect(dialog.querySelector('[aria-label="有效功能能力"]')).toBeNull();
   });
 
   it('shows and copies a newly created recoverable Virtual Key', async () => {
@@ -906,7 +942,7 @@ describe('production control-plane pages', () => {
       error: { code: 'unauthorized', message: 'admin key required' },
     }, 401));
     vi.stubGlobal('fetch', fetchRequest);
-    await renderPage('capabilities');
+    await renderPage('models');
 
     expect(container.textContent).toContain('Admin Key 未通过验证');
     expect(container.textContent).toContain('unauthorized');
