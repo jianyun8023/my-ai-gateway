@@ -162,6 +162,7 @@ describe('model-level routing presentation', () => {
     expect(summary.protocols[0]).toMatchObject({ mode: 'native', supported: true, status: 'unknown' });
     expect(summary.status).toBe('unknown');
     expect(summary.lines[0].healthStatus).toBe('unknown');
+    expect(modelProtocolCapabilities(model, data, chat).entries[0].cell?.mode).toBe('native');
   });
 
   it('shows cooling and disabled lines even when the runtime plan still references them', () => {
@@ -179,6 +180,7 @@ describe('model-level routing presentation', () => {
     ]);
     expect(summary.status).toBe('degraded');
     expect(summary.protocols[0].supported).toBe(true);
+    expect(modelProtocolCapabilities(model, data, chat).entries).toHaveLength(3);
   });
 
   it('reports native and adapter paths together and retains explicit degradation', () => {
@@ -235,6 +237,9 @@ describe('model-level routing presentation', () => {
     expect(summary.status).toBe(status);
     expect(summary.protocols[0]).toMatchObject({ status, supported: false });
     expect(summary.paths[0].entries[0].role).toBe('unselected');
+    const detail = modelProtocolCapabilities({ ...model, ...change }, data, chat);
+    expect(detail.entries).toEqual([]);
+    expect(detail.unpublished[0]).toMatchObject({ role: 'unselected', status });
   });
 
   it('retains an unpublished pending binding without treating it as a backup', () => {
@@ -290,6 +295,36 @@ describe('model capability detail scope', () => {
     const detail = modelProtocolCapabilities(model, data, responses);
     expect(detail.entries).toEqual([]);
     expect(detail.errors).toEqual([error.error]);
+    expect(detail.configured).toBe(true);
+  });
+
+  it.each([
+    [{ enabled: false }, 'disabled'],
+    [{ status: 'pending' }, 'pending'],
+    [{ status: 'unavailable' }, 'unavailable'],
+    [{ id: 2 }, 'unavailable'],
+  ] as const)('does not republish an old cell after binding state changes: %o', (change, status) => {
+    const item = binding(1, 'a');
+    const data = catalog([{ ...item, ...change }], [row(item, [capability(item, 0)])]);
+    const detail = modelProtocolCapabilities(model, data, chat);
+    expect(detail.entries).toEqual([]);
+    expect(detail.unpublished).toHaveLength(1);
+    expect(detail.unpublished[0]).toMatchObject({ role: 'unselected', status });
+  });
+
+  it('does not republish an old cell after its route is disabled', () => {
+    const item = binding(1, 'a');
+    const data = catalog([item], [row(item, [capability(item, 0)])], [{ ...route(), enabled: false }]);
+    const detail = modelProtocolCapabilities(model, data, chat);
+    expect(detail.entries).toEqual([]);
+    expect(detail.unpublished[0]).toMatchObject({ role: 'unselected', status: 'disabled' });
+  });
+
+  it('does not resurrect a removed line from an older snapshot', () => {
+    const item = binding(1, 'a');
+    const detail = modelProtocolCapabilities(model, catalog([], [row(item, [capability(item, 0)])]), chat);
+    expect(detail.entries).toEqual([]);
+    expect(detail.unpublished).toEqual([]);
     expect(detail.configured).toBe(true);
   });
 

@@ -14,6 +14,9 @@ export function modelProtocolCapabilities(model: LogicalModel, data: CatalogData
     const cell = row.protocols.find((item) => item.protocol_in === protocol);
     const line = path?.entries.find((item) => item.line.sourceId === row.source.source_id
       && item.line.accountId === row.account.account_id && item.line.upstreamModelId === row.upstream_model_id);
+    // The routing summary already reconciles model/route/binding state with the
+    // snapshot. Do not republish an older routable cell that it no longer selects.
+    if (cell?.status === 'routable' && (!line || line.role === 'unselected')) return [];
     return [{ row, route, cell, line }];
   }).sort((a, b) => (a.cell?.selection_rank ?? Number.MAX_SAFE_INTEGER) - (b.cell?.selection_rank ?? Number.MAX_SAFE_INTEGER));
   const unpublished = (path?.entries ?? []).filter(({ line }) => !entries.some(({ row }) =>
