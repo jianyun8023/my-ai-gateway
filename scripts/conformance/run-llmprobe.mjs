@@ -30,6 +30,7 @@ import {
   runCommand,
   printSummary,
   optionalEnv,
+  redactSensitiveArgs,
 } from './runner-helpers.mjs'
 import {
   normalizeLlmprobe,
@@ -116,7 +117,7 @@ async function main() {
     const npxArgs = buildLlmprobeArgs({ version, baseUrl, apiKey, model })
 
     if (args.dryRun) {
-      console.error(`  [dry-run] npx ${npxArgs.join(' ')}`)
+      console.error(`  [dry-run] npx ${redactSensitiveArgs(npxArgs).join(' ')}`)
       return
     }
 

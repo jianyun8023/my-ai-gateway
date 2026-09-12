@@ -22,6 +22,7 @@ import {
   runCommand,
   printSummary,
   optionalEnv,
+  redactSensitiveArgs,
   REPO_ROOT,
 } from './runner-helpers.mjs'
 import { normalizeCompatcanary } from './normalize-report.mjs'
@@ -100,7 +101,7 @@ async function main() {
       ]
 
       if (args.dryRun) {
-        console.error(`  [dry-run] npx ${npxArgs.join(' ')}`)
+        console.error(`  [dry-run] npx ${redactSensitiveArgs(npxArgs).join(' ')}`)
         continue
       }
 

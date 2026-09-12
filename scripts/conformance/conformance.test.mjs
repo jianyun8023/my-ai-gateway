@@ -12,6 +12,7 @@ import {
   loadVersions,
   loadConfig,
   parseArguments,
+  redactSensitiveArgs,
   REPO_ROOT,
 } from './runner-helpers.mjs'
 
@@ -51,6 +52,13 @@ test('loadConfig returns valid conformance config', () => {
 })
 
 // ── Argument parsing ────────────────────────────────────────────────────────
+
+test('redactSensitiveArgs masks values after sensitive flags only', () => {
+  const argv = ['tool@1.0', '--base-url', 'http://localhost/v1', '--api-key', 'sk-secret', '--model', 'm']
+  const redacted = redactSensitiveArgs(argv)
+  assert.deepEqual(redacted, ['tool@1.0', '--base-url', 'http://localhost/v1', '--api-key', '***', '--model', 'm'])
+  assert.deepEqual(argv, ['tool@1.0', '--base-url', 'http://localhost/v1', '--api-key', 'sk-secret', '--model', 'm'], 'input argv is not mutated')
+})
 
 test('parseArguments defaults to local target', () => {
   const args = parseArguments([])
