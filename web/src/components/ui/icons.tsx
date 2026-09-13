@@ -241,12 +241,24 @@ export function IconLayers({ size = 20, ...props }: IconProps) {
   );
 }
 
-/** Sun/asterisk with center circle — prototype "模型与路由" icon */
+/** Sun/asterisk with center circle — theme switcher. */
 export function IconSunAsterisk({ size = 20, ...props }: IconProps) {
   return (
     <svg {...baseSvgProps} width={size} height={size} strokeWidth={1.8} {...props}>
       <circle cx="12" cy="12" r="3" />
       <path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83" />
+    </svg>
+  );
+}
+
+/** A branch between three endpoints — model routing. */
+export function IconRoute({ size = 20, ...props }: IconProps) {
+  return (
+    <svg {...baseSvgProps} width={size} height={size} strokeWidth={1.8} {...props}>
+      <circle cx="6" cy="5" r="2" />
+      <circle cx="6" cy="19" r="2" />
+      <circle cx="18" cy="5" r="2" />
+      <path d="M6 7v10m0-5h6a6 6 0 0 0 6-5" />
     </svg>
   );
 }

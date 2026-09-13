@@ -198,7 +198,6 @@ export const sources = {
 
   // 来源管理列表页
   list: {
-    subtitle: '管理上游来源、账号、连接状态和模型同步，统一维护 AI 资源并用于模型与路由。',
     summary: {
       sources: '来源数',
       sources_hint: '已启用 {{count}} 个',
@@ -213,6 +212,7 @@ export const sources = {
     search: '搜索来源',
     search_empty: '没有匹配的来源',
     batch_check: '批量检查更新',
+    check_updates: '检查更新',
     col: {
       account: '账号',
       connection: '连接状态',

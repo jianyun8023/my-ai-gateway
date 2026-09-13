@@ -13,7 +13,7 @@ import {
   IconFileText,
   IconLayers,
   IconSettings,
-  IconSunAsterisk,
+  IconRoute,
 } from './components/ui/icons';
 import {
   canonicalConsoleHash,
@@ -43,7 +43,7 @@ const PAGE_ICONS: Record<ConsolePage, React.ReactNode> = {
   events: <IconFileText size={18} />,
   'runtime-events': <IconDatabase size={18} />,
   sources: <IconLayers size={18} />,
-  models: <IconSunAsterisk size={18} />,
+  models: <IconRoute size={18} />,
   settings: <IconSettings size={18} />,
 };
 

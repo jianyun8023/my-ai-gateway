@@ -316,6 +316,13 @@ describe('production control-plane pages', () => {
     expect(container.textContent).toContain('Account A');
     expect(container.textContent).not.toContain('PROVIDER_REFERENCE_ENV');
 
+    const table = container.querySelector('table')!;
+    expect(table.querySelector('[title="Chat Completions · 原生"]')?.textContent).toBe('Chat原生');
+    expect(table.querySelector('[title="Responses · 转换"]')?.textContent).toBe('Responses转换');
+    expect(table.querySelector('[title="Messages · 不支持"]')?.textContent).toBe('Messages不支持');
+    expect([...table.querySelectorAll('th')].map((heading) => heading.textContent)).not.toContain('待审核');
+    expect(table.textContent?.match(/1 待审核/g)).toHaveLength(1);
+
     // 账号管理下沉到编辑来源页，凭据环境变量同样不回显。
     await renderPage('sources', { route: { page: 'sources', sourceId: 'source-a', section: 'edit' } });
     expect(container.textContent).toContain('账号绑定');

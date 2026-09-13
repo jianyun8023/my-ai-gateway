@@ -15,6 +15,7 @@ import { IconButton } from '@/components/ui/IconButton';
 import { Button } from '@/components/ui/Button';
 import {
   IconMenu,
+  IconKey,
   IconSunAsterisk,
   IconRefreshCw,
 } from '@/components/ui/icons';
@@ -87,6 +88,7 @@ export function GatewayConsoleShell({
   const [refreshRevision, setRefreshRevision] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [connectionOpen, setConnectionOpen] = useState(false);
   const mobile = useMediaQuery('(max-width: 920px)');
   const resolvedTheme = useThemeStore((state) => state.resolvedTheme);
   const setTheme = useThemeStore((state) => state.setTheme);
@@ -108,6 +110,7 @@ export function GatewayConsoleShell({
   }, []);
   useEffect(() => { setMobileNavOpen(false); }, [activePage]);
   useEffect(() => { if (!mobile) setMobileNavOpen(false); }, [mobile]);
+  useEffect(() => { if (mobile) setConnectionOpen(false); }, [mobile]);
 
   const applyAdminKey = () => {
     const k = adminKeyDraft.trim();
@@ -117,6 +120,7 @@ export function GatewayConsoleShell({
     persistAdminKey(k);
     setAuthGeneration((generation) => generation + 1);
     setRefreshRevision((c) => c + 1);
+    setConnectionOpen(false);
   };
 
   const navigate = (id: string) => {
@@ -140,7 +144,11 @@ export function GatewayConsoleShell({
   }), [adminKeyConfigured, authGeneration, clearAdminKey, getAdminKey, refreshRevision]);
 
   const connectionControls = <div className={styles.connectionControls} role="group" aria-label={t('shell.connection_aria')}>
-    <Text component="div" className={styles.endpointDisplay} title={gatewayEndpoint}>{gatewayEndpoint}</Text>
+    <div className={styles.connectionEndpoint}>
+      <Text component="span">{t('shell.endpoint_label')}</Text>
+      <Text component="div" className={styles.endpointDisplay}>{gatewayEndpoint}</Text>
+    </div>
+    <Text component="p" className={styles.connectionStatus}>{t(adminKeyConfigured ? 'shell.key_configured' : 'shell.key_not_configured')}</Text>
     <div className={styles.keyInput}>
       <TextField className={styles.keyField} label={t('shell.admin_key_label')} aria-label={t('shell.admin_key_label')}
         autoComplete="off" spellCheck={false} type="password" required value={adminKeyDraft}
@@ -152,7 +160,6 @@ export function GatewayConsoleShell({
   </div>;
 
   const navigation = <div id="gateway-navigation" className={styles.navigationContent}>
-        {/* Brand — matches prototype: AG icon + AI Gateway + version */}
         <div className={styles.brand}>
           <div className={styles.brandIcon}>AG</div>
           <span className={styles.brandText}>{t('shell.brand_name')}</span>
@@ -180,7 +187,7 @@ export function GatewayConsoleShell({
         </nav>
 
         {mobile && <div className={styles.mobileSettings}>
-          <LanguageSwitcher />
+          <LanguageSwitcher className={styles.mobileLanguage} />
           {connectionControls}
         </div>}
 
@@ -195,25 +202,34 @@ export function GatewayConsoleShell({
       ) : <aside className={styles.sidebar} data-od-id="sidebar" aria-label={t('shell.sidebar_aria')}>{navigation}</aside>}
 
       <div className={styles.mainArea}>
-        {/* Topbar — matches prototype: title + endpoint + admin key */}
         <Paper component="header" radius={0} className={styles.topbar} data-od-id="topbar">
           {mobile && <IconButton label={t('shell.open_nav')} aria-controls="gateway-navigation" aria-expanded={mobileNavOpen} onClick={() => setMobileNavOpen(true)}>
             <IconMenu size={20} />
           </IconButton>}
-          <Text component="span" className={styles.topbarTitle}>{title}</Text>
-          {!mobile && connectionControls}
+          <Text component="span" className={styles.topbarTitle}>
+            {mobile ? title : navigationSections.find((section) => section.pages.includes(activePage))?.label ?? title}
+          </Text>
           <div className={styles.topbarRight}>
-            <IconButton label={t(resolvedTheme === 'dark' ? 'shell.switch_to_light' : 'shell.switch_to_dark')} onClick={() => setTheme(resolvedTheme === 'dark' ? 'white' : 'dark')}>
-              <IconSunAsterisk size={18} />
-            </IconButton>
-            {!mobile && <LanguageSwitcher />}
-            {refreshable && (
-              <IconButton label={t('common.refresh')} onClick={() => setRefreshRevision((c) => c + 1)} loading={refreshing}>
-                <IconRefreshCw size={18} />
+            {!mobile && <Button variant="ghost" size="sm" aria-haspopup="dialog" aria-expanded={connectionOpen} onClick={() => setConnectionOpen(true)}>
+              <IconKey size={16} />{t('shell.connection_aria')}
+            </Button>}
+            <div className={styles.utilityControls}>
+              <IconButton label={t(resolvedTheme === 'dark' ? 'shell.switch_to_light' : 'shell.switch_to_dark')} onClick={() => setTheme(resolvedTheme === 'dark' ? 'white' : 'dark')}>
+                <IconSunAsterisk size={18} />
               </IconButton>
-            )}
+              {!mobile && <LanguageSwitcher />}
+              {refreshable && (
+                <IconButton label={t('common.refresh')} onClick={() => setRefreshRevision((c) => c + 1)} loading={refreshing}>
+                  <IconRefreshCw size={18} />
+                </IconButton>
+              )}
+            </div>
           </div>
         </Paper>
+
+        {!mobile && <Modal open={connectionOpen} title={t('shell.connection_aria')} width={480} onClose={() => setConnectionOpen(false)}>
+          {connectionControls}
+        </Modal>}
 
         <div className={styles.content}>
           <div className={styles.pageHeader}>

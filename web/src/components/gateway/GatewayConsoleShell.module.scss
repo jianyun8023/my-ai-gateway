@@ -1,7 +1,7 @@
 /* ─── shell grid ─────────────────────────────────────────────── */
 .shell {
   --gateway-sidebar-width: 220px;
-  --gateway-topbar-h: 52px;
+  --gateway-topbar-h: 56px;
 
   display: flex;
   min-height: 100vh;
@@ -27,7 +27,9 @@
 
 /* Brand — AG icon + name + version */
 .brand {
-  padding: 20px 20px 16px;
+  height: var(--gateway-topbar-h, 56px);
+  box-sizing: border-box;
+  padding: 0 20px;
   flex-shrink: 0;
   display: flex;
   align-items: center;
@@ -85,6 +87,7 @@
 .navigationContent { display: flex; flex-direction: column; }
 .sidebar > .navigationContent { height: 100%; min-height: 0; }
 .mobileSettings { display: grid; gap: 16px; padding: 16px 0 0; border-top: 1px solid var(--border); }
+.mobileLanguage { justify-self: start; }
 
 /* ─── main area ─────────────────────────────────────────────── */
 .mainArea {
@@ -97,11 +100,12 @@
 
 /* ─── topbar ────────────────────────────────────────────────── */
 .topbar {
-  min-height: var(--gateway-topbar-h);
+  height: var(--gateway-topbar-h);
+  box-sizing: border-box;
   background: var(--floating-surface);
   border-bottom: 1px solid var(--border-color);
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   padding: 8px 24px;
   gap: 12px;
@@ -115,8 +119,8 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 15px;
-  font-weight: 600;
+  font-size: var(--fs-meta);
+  color: var(--muted);
 }
 
 .topbarRight {
@@ -127,25 +131,26 @@
   gap: 8px;
 }
 
-.connectionControls { min-width: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.utilityControls { display: flex; align-items: center; gap: 8px; border-left: 1px solid var(--border); padding-left: 12px; }
+.connectionControls { min-width: 0; display: grid; gap: 16px; }
+.connectionEndpoint { min-width: 0; display: grid; gap: 6px; font-size: var(--fs-meta); font-weight: 600; }
+.connectionStatus { margin: 0; color: var(--muted); font-size: var(--fs-meta); }
 .endpointDisplay {
   min-width: 0;
-  max-width: 240px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  padding: 5px 10px;
+  overflow-wrap: anywhere;
+  padding: 10px 12px;
   background: var(--fg-soft);
   border-radius: var(--radius-sm);
   font-family: var(--font-mono);
   font-size: var(--fs-meta);
   color: var(--muted);
 }
-.keyInput { display: flex; align-items: center; gap: 6px; }
+.keyInput { display: flex; align-items: flex-end; gap: 8px; }
+.keyInput > [data-ui='button'] { --button-height-sm: var(--keeper-control-height-md); }
 .keyField {
-  display: flex; align-items: center; gap: 6px;
-  > label { margin: 0; white-space: nowrap; }
-  input { width: 140px; font-family: var(--font-mono); }
+  flex: 1;
+  min-width: 0;
+  input { width: 100%; font-family: var(--font-mono); }
 }
 
 /* ─── content ───────────────────────────────────────────────── */
@@ -159,7 +164,7 @@
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
-  margin-bottom: var(--gap-lg, 24px);
+  margin-bottom: 16px;
   gap: var(--gap-md, 16px);
 
   h1 {
@@ -171,11 +176,6 @@
   }
 }
 
-@media (min-width: 921px) and (max-width: 1280px) {
-  .topbar { grid-template-columns: minmax(0, 1fr) auto; }
-  .topbar > .connectionControls { grid-column: 1 / -1; grid-row: 2; }
-}
-
 /* ─── responsive: tablet ≤ 920px ───────────────────────────── */
 @media (max-width: 920px) {
   .mainArea { margin-left: 0; }
@@ -183,12 +183,7 @@
 
   .topbar { grid-template-columns: auto minmax(0, 1fr) auto; padding: 4px 12px; gap: 8px; }
   .topbarRight { flex-wrap: nowrap; flex-shrink: 0; }
-  .connectionControls { align-items: stretch; flex-direction: column; }
-  .endpointDisplay { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
-  .keyInput { align-items: flex-end; }
-  .keyField { display: block; flex: 1; }
-  .keyField > label { margin-bottom: 6px; }
-  .keyField input { width: 100%; }
+  .utilityControls { border-left: 0; padding-left: 0; }
 
   .pageHeader { flex-direction: column; align-items: flex-start; gap: 12px; }
   .pageHeader h1 { font-size: 22px; }
@@ -199,7 +194,7 @@
   .shell { --keeper-card-radius: var(--radius); --keeper-card-padding: 16px; --keeper-card-header-padding-x: 16px; --keeper-card-header-padding-top: 16px; --keeper-card-header-padding-bottom: 12px; }
 
   .content { padding: 12px; }
-  .topbar { --gateway-topbar-h: 52px; gap: 6px; }
+  .topbar { gap: 6px; }
 
   .pageHeader h1 { font-size: 20px; }
 }

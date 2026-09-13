@@ -1,0 +1,61 @@
+{
+  "metrics": {
+    "topbar": {
+      "x": 220,
+      "y": 0,
+      "width": 1246,
+      "height": 56,
+      "bottom": 56,
+      "centerY": 28
+    },
+    "brand": {
+      "x": 0,
+      "y": 0,
+      "width": 219,
+      "height": 56,
+      "bottom": 56,
+      "centerY": 28
+    },
+    "search": {
+      "x": 985,
+      "y": 249.390625,
+      "width": 180,
+      "height": 36,
+      "bottom": 285.390625,
+      "centerY": 267.390625
+    },
+    "actions": [
+      {
+        "text": "批量检查更新",
+        "y": 249.390625,
+        "height": 36
+      },
+      {
+        "text": "新增来源",
+        "y": 249.390625,
+        "height": 36
+      }
+    ],
+    "table": {
+      "y": 302.390625,
+      "clientWidth": 1196,
+      "scrollWidth": 1196,
+      "clientHeight": 167,
+      "scrollHeight": 167,
+      "overflowY": "auto"
+    },
+    "document": {
+      "clientWidth": 1466,
+      "scrollWidth": 1466
+    },
+    "overflow": []
+  },
+  "mobileOverflow": {
+    "viewport": 390,
+    "clientWidth": 390,
+    "scrollWidth": 390,
+    "summaryColumns": "176px 176px",
+    "tableWidth": 1049
+  },
+  "errors": []
+}

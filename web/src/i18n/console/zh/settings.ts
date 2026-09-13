@@ -33,7 +33,7 @@ export const settings = {
     key_session_subtitle: 'Admin Key 仅保存在当前标签页。',
     key_configured: '当前标签页已配置 Admin Key',
     key_not_configured: '当前标签页未配置 Admin Key',
-    key_hint: '在导航栏中填写 Admin Key。',
+    key_hint: '在“网关连接”中填写 Admin Key；窄屏下请打开导航。',
     runtime: '运行时快照',
     export: '配置导出',
     export_redacted: '脱敏 JSON',

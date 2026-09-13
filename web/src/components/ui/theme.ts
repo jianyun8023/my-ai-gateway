@@ -60,7 +60,7 @@ export const consoleTheme = createTheme({
       },
       classNames: { dropdown: controls.selectDropdown, option: controls.selectOption },
     },
-    Switch: { defaultProps: { color: 'var(--accent)' } },
+    Switch: { defaultProps: { color: 'var(--accent)' }, classNames: { input: controls.switchInput } },
     Checkbox: { defaultProps: { color: 'var(--accent)', iconColor: 'var(--primary-contrast)' } },
     Tooltip: { defaultProps: { withinPortal: true, zIndex: 1300, multiline: true, maw: 320 } },
   },
