@@ -37,6 +37,9 @@ export const shell = {
   },
 
   connection_aria: "Gateway connection",
+  endpoint_label: 'Gateway address',
+  key_configured: 'An Admin Key is configured for this tab.',
+  key_not_configured: 'Enter an Admin Key to access management features.',
 
   // 顶栏
   admin_key_label: 'Admin Key',

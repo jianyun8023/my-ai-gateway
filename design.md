@@ -8,6 +8,8 @@ Tech-Utility：冷灰底色、绿色强调、紧凑数据布局。使用固定�
 
 页面文案只保留操作、状态和必要提示。标题足以说明内容时不再添加副标题；空态给出下一步；接口路径、存储方式、实现过程放在开发文档中。中文与英文同步维护，协议、模型名和 ID 保留原文。
 
+桌面品牌区与顶栏统一为 56px，顶栏展示导航分组，正文保留页面主标题。Admin 连接配置由“网关连接”打开，窄屏仍位于导航抽屉；关闭配置不应用草稿，应用才更新当前标签页的身份。来源列表采用紧凑统计卡片、同高对齐的搜索与操作区，协议名称和模式同时可见；待审核数量合并到模型列，零待审核不额外强调。宽表仅在自身容器内横向滚动，流程说明作为低强调的独立文字区。
+
 ## Token 与尺度
 
 品牌 Token 统一维护在 [gateway-brand.scss](web/src/styles/gateway-brand.scss) 的 `:root`，页面、Mantine CSS 变量和 Portal 共享继承。主题选择与持久化仍由 `useThemeStore` 唯一管理，`ConsoleProvider` 将 `resolvedTheme` 传给 Mantine 的 `forceColorScheme`，不建立另一套主题存储。原生控件通过 `color-scheme` 跟随主题。

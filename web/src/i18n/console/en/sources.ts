@@ -198,7 +198,6 @@ export const sources = {
 
   // Sources list page
   list: {
-    subtitle: 'Manage upstream sources, accounts, connection state and model sync in one place, then use them in Models & Routes.',
     summary: {
       sources: 'Sources',
       sources_hint: '{{count}} enabled',
@@ -213,6 +212,7 @@ export const sources = {
     search: 'Search sources',
     search_empty: 'No sources match',
     batch_check: 'Check All Updates',
+    check_updates: 'Check updates',
     col: {
       account: 'Account',
       connection: 'Connection',

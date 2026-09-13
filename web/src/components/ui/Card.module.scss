@@ -1,6 +1,6 @@
 .card { min-width: 0; padding: var(--keeper-card-padding); background: var(--floating-surface); }
 .card[data-variant='flush'] { padding: 0; overflow: hidden; }
-.header { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 16px; margin-bottom: 16px; }
+.header { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: var(--keeper-card-header-align, start); gap: 16px; margin-bottom: 16px; }
 .card[data-variant='flush'] > .header {
   margin-bottom: 0;
   padding: var(--keeper-card-header-padding-top) var(--keeper-card-header-padding-x) var(--keeper-card-header-padding-bottom);

@@ -13,7 +13,6 @@ import { IconButton } from '@/components/ui/IconButton';
 import {
   IconEye,
   IconPencil,
-  IconPlay,
   IconPlus,
   IconRefreshCw,
 } from '@/components/ui/icons';
@@ -25,13 +24,13 @@ import styles from '@/features/control-plane/ControlPlane.module.scss';
 import { buildSyncStats, type SourceSyncStats } from '@/features/control-plane/discovery/model';
 import {
   protocolModeKey,
-  protocolModeTone,
   sourceConnection,
   sourceConnectionTone,
 } from '@/features/control-plane/sources/presentation';
 import { EmptyTable, ErrorState, Toggle } from '@/features/control-plane/shared';
 import { useAdminQuery } from '@/hooks/useAdminQuery';
-import { PROTOCOL_LABELS } from '@/lib/protocols';
+import { PROTOCOL_LABELS, PROTOCOL_SHORT_LABELS } from '@/lib/protocols';
+import sourceStyles from './sources/SourcesPage.module.scss';
 import { sourceRouteHash, type SourceSection } from '@/lib/consoleNavigation';
 import { formatDateTime } from '@/utils/format';
 import { useCallback, useState } from 'react';
@@ -185,13 +184,11 @@ export function SourcesPage({ api, refreshRevision = 0, onBusyChange, onOpenSour
 
   return (
     <section className={styles.page} data-od-id="page-sources">
-      <p className={styles.secondaryText}>{t('sources.list.subtitle')}</p>
-
-      <div className={styles.statsGrid}>
-        <MetricCard label={t('sources.list.summary.sources')} value={String(data.sources.length)} hint={t('sources.list.summary.sources_hint', { count: enabledSources })} />
-        <MetricCard label={t('sources.list.summary.accounts')} value={String(healthyAccounts)} hint={t('sources.list.summary.accounts_hint', { total: data.accounts.length })} tone={healthyAccounts < data.accounts.length ? 'warning' : 'success'} />
-        <MetricCard label={t('sources.list.summary.models')} value={String(totalModels)} hint={t('sources.list.summary.models_hint')} />
-        <MetricCard label={t('sources.list.summary.pending')} value={String(totalPending)} exact={String(totalPending)} hint={t('sources.list.summary.pending_hint', { count: pendingSources })} tone={totalPending > 0 ? 'warning' : 'success'} />
+      <div className={`${styles.statsGrid} ${sourceStyles.summary}`}>
+        <MetricCard compact label={t('sources.list.summary.sources')} value={String(data.sources.length)} hint={t('sources.list.summary.sources_hint', { count: enabledSources })} />
+        <MetricCard compact label={t('sources.list.summary.accounts')} value={String(healthyAccounts)} hint={t('sources.list.summary.accounts_hint', { total: data.accounts.length })} tone={healthyAccounts < data.accounts.length ? 'warning' : undefined} />
+        <MetricCard compact label={t('sources.list.summary.models')} value={String(totalModels)} hint={t('sources.list.summary.models_hint')} />
+        <MetricCard compact label={t('sources.list.summary.pending')} value={String(totalPending)} exact={String(totalPending)} hint={t('sources.list.summary.pending_hint', { count: pendingSources })} tone={totalPending > 0 ? 'warning' : undefined} />
       </div>
 
       {query.error && <ErrorState error={query.error} onRetry={query.reload} />}
@@ -207,11 +204,15 @@ export function SourcesPage({ api, refreshRevision = 0, onBusyChange, onOpenSour
       ) : (
         <Card
           variant="flush"
+          className={sourceStyles.listCard}
           title={t('sources.list.card_title', { count: data.sources.length })}
           extra={(
-            <div className={styles.rowActions}>
+            <div className={sourceStyles.toolbar}>
               <TextField
+                className={sourceStyles.search}
                 label={t('sources.list.search')}
+                placeholder={t('sources.list.search')}
+                type="search"
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 autoComplete="off"
@@ -225,14 +226,13 @@ export function SourcesPage({ api, refreshRevision = 0, onBusyChange, onOpenSour
         >
           {filteredSources.length === 0 ? <EmptyTable title={t('sources.list.search_empty')} /> : (
             <TableScroll label={t('sources.table.sources_region')}>
-              <Table className={styles.table}>
+              <Table className={`${styles.table} ${sourceStyles.table}`}>
                 <Table.Thead><Table.Tr>
                   <Table.Th scope="col">{t('sources.field.source')}</Table.Th>
                   <Table.Th scope="col">{t('sources.list.col.account')}</Table.Th>
                   <Table.Th scope="col">{t('sources.list.col.connection')}</Table.Th>
                   <Table.Th scope="col">{t('sources.list.col.upstream')}</Table.Th>
                   <Table.Th scope="col">{t('sources.list.col.last_sync')}</Table.Th>
-                  <Table.Th scope="col">{t('sources.list.col.pending')}</Table.Th>
                   <Table.Th scope="col">{t('sources.list.col.protocols')}</Table.Th>
                   <Table.Th scope="col">{t('common.status')}</Table.Th>
                   <Table.Th scope="col">{t('common.actions')}</Table.Th>
@@ -257,15 +257,23 @@ export function SourcesPage({ api, refreshRevision = 0, onBusyChange, onOpenSour
                       <Table.Td>{!stats || (stats.latest === null && stats.models.length === 0) ? <span className={styles.secondaryText}>{t('sources.list.never_synced')}</span> : (
                         <span className={styles.primaryText}>
                           <strong>{t('sources.list.model_count', { count: stats.models.length })}</strong>
-                          <small>{t('sources.list.pending_count', { count: stats.pendingCount })}</small>
+                          {stats.pendingCount > 0 && <StatusPill tone="warning">{t('sources.list.pending_count', { count: stats.pendingCount })}</StatusPill>}
                         </span>
                       )}</Table.Td>
-                      <Table.Td>{stats?.lastSyncAt ? formatDateTime(stats.lastSyncAt) : <span className={styles.secondaryText}>—</span>}</Table.Td>
-                      <Table.Td><StatusPill tone={stats && stats.pendingCount > 0 ? 'warning' : 'muted'}>{stats?.pendingCount ?? 0}</StatusPill></Table.Td>
-                      <Table.Td><span className={styles.inlineActions}>
+                      <Table.Td>{stats?.lastSyncAt ? (
+                        <time className={sourceStyles.syncTime} dateTime={stats.lastSyncAt} title={formatDateTime(stats.lastSyncAt)} aria-label={formatDateTime(stats.lastSyncAt)}>
+                          <span>{formatDateTime(stats.lastSyncAt, { dateStyle: 'short' })}</span>
+                          <small>{formatDateTime(stats.lastSyncAt, { timeStyle: 'short' })}</small>
+                        </time>
+                      ) : <span className={styles.secondaryText}>—</span>}</Table.Td>
+                      <Table.Td><span className={sourceStyles.protocols}>
                         {GATEWAY_PROTOCOLS.map((protocol) => {
-                          const label = t(protocolModeKey(source.protocol_capabilities[protocol]?.mode));
-                          return <StatusPill key={protocol} tone={protocolModeTone(source.protocol_capabilities[protocol]?.mode)} title={`${PROTOCOL_LABELS[protocol]} · ${label}`}>{label}</StatusPill>;
+                          const mode = source.protocol_capabilities[protocol]?.mode;
+                          const label = t(protocolModeKey(mode));
+                          return <span key={protocol} className={sourceStyles.protocol} title={`${PROTOCOL_LABELS[protocol]} · ${label}`}>
+                            <span>{PROTOCOL_SHORT_LABELS[protocol]}</span>
+                            <StatusPill tone={mode === 'adapter' ? 'warning' : 'muted'}>{label}</StatusPill>
+                          </span>;
                         })}
                       </span></Table.Td>
                       <Table.Td onClick={(event) => event.stopPropagation()}>
@@ -274,12 +282,12 @@ export function SourcesPage({ api, refreshRevision = 0, onBusyChange, onOpenSour
                       <Table.Td onClick={(event) => event.stopPropagation()}><div className={styles.rowActions}>
                         <IconButton label={t('sources.table.view_aria', { id: source.id })} onClick={() => openSource(source.id)}><IconEye size={16} /></IconButton>
                         <IconButton label={t('sources.table.edit_aria', { id: source.id })} onClick={() => openSource(source.id, 'edit')}><IconPencil size={16} /></IconButton>
-                        <IconButton
-                          label={t('sources.list.check_updates_aria', { id: source.id })}
+                        <Button variant="ghost" size="sm"
+                          aria-label={t('sources.list.check_updates_aria', { id: source.id })}
                           disabled={!enabledAccount(source.id) || checkingIds.size > 0}
                           loading={checking}
                           onClick={() => void checkUpdates(source)}
-                        ><IconPlay size={16} /></IconButton>
+                        ><IconRefreshCw size={14} />{t('sources.list.check_updates')}</Button>
                       </div></Table.Td>
                     </Table.Tr>
                   );
@@ -290,10 +298,10 @@ export function SourcesPage({ api, refreshRevision = 0, onBusyChange, onOpenSour
         </Card>
       )}
 
-      <Card className={styles.flowCard}>
+      <aside className={sourceStyles.flow} aria-label={t('sources.list.flow_title')}>
         <strong>{t('sources.list.flow_title')}</strong>
-        <span className={styles.secondaryText}>{t('sources.list.flow_steps')}</span>
-      </Card>
+        <p>{t('sources.list.flow_steps')}</p>
+      </aside>
     </section>
   );
 }

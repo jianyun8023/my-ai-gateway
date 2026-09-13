@@ -33,7 +33,7 @@ export const settings = {
     key_session_subtitle: 'The Admin Key is stored only in this tab.',
     key_configured: 'Admin Key configured for this tab',
     key_not_configured: 'No Admin Key configured for this tab',
-    key_hint: 'Enter an Admin Key in the navigation bar.',
+    key_hint: 'Enter an Admin Key in Gateway connection, or open navigation on smaller screens.',
     runtime: 'Runtime Snapshot',
     export: 'Configuration Export',
     export_redacted: 'Redacted JSON',

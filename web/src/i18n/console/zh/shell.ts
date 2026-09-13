@@ -37,6 +37,9 @@ export const shell = {
   },
 
   connection_aria: "网关连接",
+  endpoint_label: '网关地址',
+  key_configured: '当前标签页已配置 Admin Key。',
+  key_not_configured: '填写 Admin Key 以访问管理功能。',
 
   // 顶栏
   admin_key_label: 'Admin Key',

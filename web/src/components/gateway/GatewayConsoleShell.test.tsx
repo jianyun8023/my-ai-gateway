@@ -29,7 +29,13 @@ describe('GatewayConsoleShell Admin key boundary', () => {
     vi.unstubAllGlobals();
   });
 
-  it('keeps the applied secret out of text, URL, localStorage, and logs', () => {
+  const openConnection = async () => {
+    const trigger = container.querySelector<HTMLButtonElement>('button[aria-haspopup="dialog"]')!;
+    await act(async () => { trigger.focus(); trigger.click(); });
+    return trigger;
+  };
+
+  it('keeps the applied secret out of text, URL, localStorage, and logs', async () => {
     let readAdminKey = () => '';
     let clearAdminKey = () => {};
     let refreshRevision = -1;
@@ -56,6 +62,8 @@ describe('GatewayConsoleShell Admin key boundary', () => {
       );
     });
 
+    expect(container.querySelector('input[aria-label="Admin Key"]')).toBeNull();
+    await openConnection();
     const input = container.querySelector<HTMLInputElement>('input[aria-label="Admin Key"]')!;
     expect(input.required).toBe(true);
     expect(input.placeholder).toBe('GATEWAY_ADMIN_KEY');
@@ -66,13 +74,14 @@ describe('GatewayConsoleShell Admin key boundary', () => {
     });
     const apply = Array.from(container.querySelectorAll<HTMLButtonElement>('button'))
       .find((button) => button.textContent?.includes('应用'));
-    act(() => apply?.click());
+    await act(async () => apply?.click());
 
     expect(readAdminKey()).toBe('top-secret-value');
     expect(refreshRevision).toBe(1);
     expect(authGeneration).toBe(1);
     expect(sessionStorage.getItem(GATEWAY_ADMIN_KEY_STORAGE_KEY)).toBe('top-secret-value');
-    expect(input.value).toBe('');
+    await openConnection();
+    expect(container.querySelector<HTMLInputElement>('input[aria-label="Admin Key"]')!.value).toBe('');
     expect(localStorage.getItem(GATEWAY_ADMIN_KEY_STORAGE_KEY)).toBeNull();
     expect(container.textContent).not.toContain('top-secret-value');
     expect(window.location.href).not.toContain('top-secret-value');
@@ -121,11 +130,19 @@ describe('GatewayConsoleShell Admin key boundary', () => {
     await act(async () => root.render(<GatewayConsoleShell activePage="overview" title="总览"
       navigationSections={[{ label: '监控', pages: ['overview'] }]} navigationItems={[{ id: 'overview', label: '总览', icon: <IconDashboardGrid /> }]}
       onNavigate={() => {}}>{(value) => { context = value; return <div>content</div>; }}</GatewayConsoleShell>));
+    const connectionTrigger = await openConnection();
     const input = container.querySelector<HTMLInputElement>('input[aria-label="Admin Key"]')!;
     act(() => {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'draft-demo-key');
       input.dispatchEvent(new Event('input', { bubbles: true }));
     });
+    await act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)); });
+    expect(document.activeElement).toBe(connectionTrigger);
+    expect(context!.getAdminKey()).toBe('');
+    expect(context!.refreshRevision).toBe(0);
+    await openConnection();
+    expect(container.querySelector<HTMLInputElement>('input[aria-label="Admin Key"]')!.value).toBe('draft-demo-key');
     await act(async () => { mobile = true; listeners.forEach((query, callback) => callback({ matches: query.includes('max-width') && mobile })); });
     expect(container.querySelector('input[aria-label="Admin Key"]')).toBeNull();
     const open = container.querySelector<HTMLButtonElement>('button[aria-label="打开导航"]')!;
@@ -139,13 +156,15 @@ describe('GatewayConsoleShell Admin key boundary', () => {
     expect(document.activeElement).toBe(open);
     expect(context!.refreshRevision).toBe(0);
     await act(async () => { mobile = false; listeners.forEach((query, callback) => callback({ matches: query.includes('max-width') && mobile })); });
+    await openConnection();
     const restored = container.querySelector<HTMLInputElement>('input[aria-label="Admin Key"]')!;
     expect(restored.value).toBe('draft-demo-key');
-    act(() => restored.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+    await act(async () => restored.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
     expect(context!.getAdminKey()).toBe('draft-demo-key');
     expect(context!.refreshRevision).toBe(1);
     expect(context!.authGeneration).toBe(1);
-    expect(restored.value).toBe('');
+    await openConnection();
+    expect(container.querySelector<HTMLInputElement>('input[aria-label="Admin Key"]')!.value).toBe('');
     expect(container.textContent).not.toContain('draft-demo-key');
   });
 

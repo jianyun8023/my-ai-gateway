@@ -1,0 +1,84 @@
+.listCard {
+  --keeper-card-header-align: center;
+  --keeper-card-header-padding-top: 16px;
+  --keeper-card-header-padding-bottom: 16px;
+}
+
+.toolbar {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.search {
+  width: 180px;
+  min-width: 0;
+
+  // Retain an associated label without adding a second toolbar row.
+  > label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+
+.table {
+  min-width: 1040px;
+
+  th { white-space: nowrap; }
+  td:first-child, td:nth-child(2) { min-width: 120px; }
+  td:nth-child(3) { min-width: 108px; }
+  td:nth-child(4) { min-width: 90px; }
+}
+
+.syncTime {
+  display: grid;
+  gap: 2px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+
+  small { color: var(--muted); font-size: var(--fs-small); }
+}
+
+.protocols {
+  display: grid;
+  grid-template-columns: repeat(3, max-content);
+  gap: 12px;
+}
+
+.protocol {
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+}
+
+.flow {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+  padding: 8px 4px;
+  color: var(--muted);
+  font-size: var(--fs-small);
+  line-height: 1.6;
+
+  strong { font-weight: 600; }
+  p { margin: 0; overflow-wrap: anywhere; }
+}
+
+@media (max-width: 600px) {
+  .toolbar { width: 100%; }
+  .search { flex: 1 0 100%; }
+}
+
+@media (min-width: 381px) and (max-width: 920px) {
+  .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
