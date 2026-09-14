@@ -18,7 +18,10 @@ export const usage = {
     status: '状态',
     retries: '重试',
     latency: '延迟',
+    ttft: '首 Token 时间',
+    generation_time: '生成时长',
     tokens: 'Token',
+    tps: 'TPS',
     cache: '缓存',
     cache_hit_rate: '命中率',
     usage_source: '用量来源',
@@ -214,8 +217,10 @@ export const usage = {
     empty_desc: '调整时间范围或筛选条件后重试。',
     title: '请求事件',
     token_details_title: 'Token 用量详情',
+    tps_details_title: '吞吐详情',
     cache_details_title: '缓存详情',
     cache_basis: '命中率 = 缓存读取 / 输入 Token，缓存创建不计入命中',
+    tps_basis: 'TPS = 输出 Token / 生成时长；流式请求的生成时长为总延迟减去首 Token 时间（TTFT），非流式请求按总延迟计算',
   },
 
   // —— 页面级 ——

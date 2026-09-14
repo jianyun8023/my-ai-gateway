@@ -113,6 +113,40 @@ describe('event metric cells', () => {
     expect(popover?.textContent).toContain('缓存创建不计入命中');
   });
 
+  it('renders output throughput over the post-first-token generation window', async () => {
+    // 299 output tokens over (10s latency − 2s TTFT) = 37.4 t/s.
+    const tpsEvent: UsageEventViewModel = { ...richEvent, latencyMs: 10_000, ttftMs: 2_000, streamed: true };
+    const client = new GatewayUsageClient(new AdminClient({ fetchImpl: vi.fn<typeof fetch>() }));
+    await act(async () => root.render(<EventsTable events={[tpsEvent]} hasMore={false} loadingMore={false} onLoadMore={() => {}}
+      visibleColumns={['tps']} onVisibleColumnsChange={() => {}} onExport={() => {}} client={client} />));
+    const cell = container.querySelectorAll('tbody tr td')[1];
+    expect(cell.textContent).toBe('37.4 t/s');
+    act(() => { cell.querySelector('span')!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 60)); });
+    const popover = document.querySelector('[data-od-id="tps-breakdown"]');
+    expect(popover?.textContent).toContain('吞吐详情');
+    expect(popover?.textContent).toContain('首 Token 时间');
+    expect(popover?.textContent).toContain('2,000 ms');
+    expect(popover?.textContent).toContain('生成时长');
+    expect(popover?.textContent).toContain('8,000 ms');
+  });
+
+  it('uses the full latency as the throughput window for non-streaming requests', async () => {
+    // 299 output tokens over 10s latency with no TTFT = 29.9 t/s.
+    const tpsEvent: UsageEventViewModel = { ...richEvent, latencyMs: 10_000, ttftMs: undefined, streamed: false };
+    const client = new GatewayUsageClient(new AdminClient({ fetchImpl: vi.fn<typeof fetch>() }));
+    await act(async () => root.render(<EventsTable events={[tpsEvent]} hasMore={false} loadingMore={false} onLoadMore={() => {}}
+      visibleColumns={['tps']} onVisibleColumnsChange={() => {}} onExport={() => {}} client={client} />));
+    expect(container.querySelectorAll('tbody tr td')[1].textContent).toBe('29.9 t/s');
+  });
+
+  it('shows a dash for throughput when output usage is unreported or missing', async () => {
+    const client = new GatewayUsageClient(new AdminClient({ fetchImpl: vi.fn<typeof fetch>() }));
+    await act(async () => root.render(<EventsTable events={[fixtureEvents[1]]} hasMore={false} loadingMore={false} onLoadMore={() => {}}
+      visibleColumns={['tps']} onVisibleColumnsChange={() => {}} onExport={() => {}} client={client} />));
+    expect(container.querySelectorAll('tbody tr td')[1].textContent).toBe('—');
+  });
+
   it('lists every token component with the usage source in the breakdowns', async () => {
     await act(async () => root.render(<><TokenBreakdown event={richEvent} /><CacheBreakdown event={richEvent} /></>));
     const token = container.querySelector('[data-od-id="token-breakdown"]')!;
