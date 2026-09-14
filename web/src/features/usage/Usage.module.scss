@@ -159,11 +159,11 @@
 }
 .eventTable {
   display: grid;
-  min-width: calc(80px + var(--event-columns) * 154px);
+  min-width: var(--event-grid-min-width);
 }
 .eventGrid {
   display: grid;
-  grid-template-columns: 80px repeat(var(--event-columns), minmax(154px, 1fr));
+  grid-template-columns: var(--event-grid-template);
   align-items: center;
 }
 .eventHeader {

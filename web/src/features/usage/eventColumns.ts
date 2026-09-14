@@ -57,6 +57,39 @@ export const DEFAULT_VISIBLE_COLUMNS: EventColumn[] = [
   'cache',
 ];
 
+// Grid track per column: text columns flex to fill the viewport, while compact
+// metric columns (status/retries/latency/tokens/cache) are capped so the
+// numeric cluster stays tight instead of stretching across wide screens.
+interface EventColumnTrack { min: number; max: string }
+
+export const EVENT_COLUMN_TRACKS: Record<EventColumn, EventColumnTrack> = {
+  time: { min: 150, max: '1.1fr' },
+  logicalModel: { min: 140, max: '1.3fr' },
+  upstreamModel: { min: 140, max: '1.3fr' },
+  provider: { min: 110, max: '1fr' },
+  sourceAccount: { min: 120, max: '1fr' },
+  clientSource: { min: 110, max: '1fr' },
+  protocol: { min: 120, max: '1fr' },
+  status: { min: 116, max: '0.7fr' },
+  retries: { min: 84, max: '108px' },
+  latency: { min: 76, max: '96px' },
+  tokens: { min: 88, max: '112px' },
+  cache: { min: 84, max: '104px' },
+  usageSource: { min: 128, max: '1fr' },
+};
+
+const EVENT_ACTIONS_TRACK_WIDTH = 80;
+
+export const eventTableGridTemplate = (columns: EventColumn[]): string => [
+  `${EVENT_ACTIONS_TRACK_WIDTH}px`,
+  ...columns.map((column) => {
+    const track = EVENT_COLUMN_TRACKS[column];
+    return `minmax(${track.min}px, ${track.max})`;
+  }),
+].join(' ');
+
+export const eventTableMinWidth = (columns: EventColumn[]): number =>
+  EVENT_ACTIONS_TRACK_WIDTH + columns.reduce((total, column) => total + EVENT_COLUMN_TRACKS[column].min, 0);
 
 export const normalizeVisibleEventColumns = (value: unknown): EventColumn[] => {
   if (!Array.isArray(value)) return DEFAULT_VISIBLE_COLUMNS;

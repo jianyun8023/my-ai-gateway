@@ -1,4 +1,4 @@
-import { DEFAULT_VISIBLE_COLUMNS, normalizeVisibleEventColumns } from '@/features/usage/eventColumns';
+import { DEFAULT_VISIBLE_COLUMNS, EVENT_COLUMN_TRACKS, eventTableGridTemplate, eventTableMinWidth, normalizeVisibleEventColumns } from '@/features/usage/eventColumns';
 import { formatFallbackReason } from '@/features/usage/formatters';
 import { adaptUsageEventPage } from '@/gateway-usage';
 import { gatewayUsageEventsFixture } from '@/test/fixtures/usage';
@@ -26,6 +26,15 @@ describe('GatewayUsagePage logic', () => {
   it('persists only supported columns and never allows an empty table', () => {
     expect(normalizeVisibleEventColumns(['time', 'clientSource', 'usageSource', 'cost'])).toEqual(['time', 'clientSource', 'usageSource']);
     expect(normalizeVisibleEventColumns([]).length).toBeGreaterThan(0);
+  });
+
+  it('caps compact metric columns while text columns flex with the viewport', () => {
+    for (const column of ['retries', 'latency', 'tokens', 'cache'] as const) {
+      expect(EVENT_COLUMN_TRACKS[column].max).toMatch(/^\d+px$/);
+    }
+    expect(EVENT_COLUMN_TRACKS.logicalModel.max).toMatch(/fr$/);
+    expect(eventTableGridTemplate(['time', 'tokens'])).toBe('80px minmax(150px, 1.1fr) minmax(88px, 112px)');
+    expect(eventTableMinWidth(DEFAULT_VISIBLE_COLUMNS)).toBe(80 + DEFAULT_VISIBLE_COLUMNS.reduce((total, column) => total + EVENT_COLUMN_TRACKS[column].min, 0));
   });
 
   it('appends stable cursor pages without duplicate events', () => {

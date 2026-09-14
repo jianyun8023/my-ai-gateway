@@ -9,7 +9,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { Notice } from '@/components/ui/Notice';
 import { CacheCell, TokenCell } from './EventMetricCells';
 import { UsageStatus } from './UsageStatus';
-import { EVENT_COLUMNS, EVENT_COLUMN_HINTS, EVENT_COLUMN_LABELS, NUMERIC_EVENT_COLUMNS, type EventColumn } from '@/features/usage/eventColumns';
+import { EVENT_COLUMNS, EVENT_COLUMN_HINTS, EVENT_COLUMN_LABELS, eventTableGridTemplate, eventTableMinWidth, NUMERIC_EVENT_COLUMNS, type EventColumn } from '@/features/usage/eventColumns';
 import { formatDuration, formatFallbackReason, formatTime } from '@/features/usage/formatters';
 import styles from '@/features/usage/Usage.module.scss';
 import { UsageBadge } from '@/features/usage/UsageBadge';
@@ -133,7 +133,11 @@ export function EventsTable({ events, hasMore, loadingMore, loadMoreError, onLoa
       {exportError && <Notice action={onRetryExport && <Button size="sm" variant="secondary" onClick={onRetryExport}>{t('common.retry')}</Button>}>{exportError}</Notice>}
       <div ref={parentRef} className={styles.eventScroll} role="region" aria-label={t('usage.events.title')} tabIndex={0}>
         <Table className={styles.eventTable} aria-label={t('usage.events.title')} aria-rowcount={hasMore ? -1 : events.length + 1}
-          style={{ '--event-columns': visibleColumns.length, '--event-header-height': `${EVENT_HEADER_HEIGHT}px` } as CSSProperties}>
+          style={{
+            '--event-grid-template': eventTableGridTemplate(visibleColumns),
+            '--event-grid-min-width': `${eventTableMinWidth(visibleColumns)}px`,
+            '--event-header-height': `${EVENT_HEADER_HEIGHT}px`,
+          } as CSSProperties}>
           <Table.Thead className={styles.eventHeader}>
             <Table.Tr aria-rowindex={1} className={styles.eventGrid}>
               <Table.Th scope="col">{t('common.actions')}</Table.Th>
