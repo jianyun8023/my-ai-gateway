@@ -262,3 +262,13 @@ export function IconRoute({ size = 20, ...props }: IconProps) {
     </svg>
   );
 }
+
+export function IconInfoCircle({ size = 20, ...props }: IconProps) {
+  return (
+    <svg {...baseSvgProps} width={size} height={size} strokeWidth={1.8} {...props}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 16v-4" />
+      <path d="M12 8h.01" />
+    </svg>
+  );
+}

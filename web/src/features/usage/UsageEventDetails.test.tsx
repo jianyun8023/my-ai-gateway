@@ -43,7 +43,10 @@ describe('usage event details', () => {
     fetchImpl.mockResolvedValueOnce(new Response(JSON.stringify({ attempts: [{ attempt_no: 0, provider_id: 'provider-b', source_id: 'source-b', account_id: 'account-b', upstream_model_id: 'model-b', status_code: 200, success: true, latency_ms: 20 }] })));
     await act(async () => [...dialog.querySelectorAll('button')].find(button => button.textContent === '重试')!.click());
     expect(dialog.textContent).toContain('account-b');
-    expect(dialog.textContent).toContain('source-b');
+    // A single attempt is compressed to one row; full attribution stays in the title.
+    const attemptRow = dialog.querySelector('[title*="source-b"]');
+    expect(attemptRow?.getAttribute('title')).toContain('provider-b');
+    expect(attemptRow?.getAttribute('title')).toContain('model-b');
     expect(dialog.textContent).not.toContain('暂时不可用');
     act(() => dialog.querySelector('button')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 250)); });
@@ -71,8 +74,10 @@ describe('usage event details', () => {
     await render({ ...event, ...adaptUsageEventPage(gatewayUsageEventsFixture).events[1] });
     const dialog = document.querySelector('[role="dialog"]')!;
     expect(dialog.textContent).toContain('记账零不代表已确认零用量');
-    expect(dialog.textContent).toContain('总计 —');
-    expect(dialog.textContent).toContain('缺失');
+    const values = Object.fromEntries([...dialog.querySelectorAll('dt')].map(term => [term.textContent, term.nextElementSibling?.textContent]));
+    expect(values['总计']).toBe('—');
+    expect(values['命中率']).toBe('—');
+    expect(dialog.textContent).toContain('未获取');
   });
 
   it('cancels the detail request when the drawer is removed', async () => {
