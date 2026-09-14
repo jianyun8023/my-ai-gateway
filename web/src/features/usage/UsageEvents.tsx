@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Notice } from '@/components/ui/Notice';
-import { CacheCell, TokenCell } from './EventMetricCells';
+import { CacheCell, TokenCell, TpsCell } from './EventMetricCells';
 import { UsageStatus } from './UsageStatus';
 import { EVENT_COLUMNS, EVENT_COLUMN_HINTS, EVENT_COLUMN_LABELS, eventTableGridTemplate, eventTableMinWidth, NUMERIC_EVENT_COLUMNS, type EventColumn } from '@/features/usage/eventColumns';
 import { formatDuration, formatFallbackReason, formatTime } from '@/features/usage/formatters';
@@ -45,6 +45,7 @@ const renderEventCell = (event: UsageEventViewModel, column: EventColumn, t: TFu
     }
     case 'latency': return <span title={formatDuration(event.latencyMs, true)}>{formatDuration(event.latencyMs)}</span>;
     case 'tokens': return <TokenCell event={event} />;
+    case 'tps': return <TpsCell event={event} />;
     case 'cache': return <CacheCell event={event} />;
     case 'usageSource': return <UsageBadge source={event.usageSource} />;
   }
