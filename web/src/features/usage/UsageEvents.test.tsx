@@ -8,7 +8,9 @@ import { adaptUsageEventPage } from '@/gateway-usage/adapter';
 import { AdminClient } from '@/admin-api/client';
 import { GatewayUsageClient } from '@/gateway-usage';
 import { EVENT_COLUMNS, type EventColumn } from './eventColumns';
+import { CacheBreakdown, TokenBreakdown } from './EventMetricCells';
 import { EventsTable } from './UsageEvents';
+import type { UsageEventViewModel } from '@/gateway-usage';
 
 describe('event column preferences', () => {
   let container: HTMLDivElement;
@@ -44,6 +46,85 @@ describe('event column preferences', () => {
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)); });
     expect(document.activeElement).toBe(trigger);
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+});
+
+describe('event metric cells', () => {
+  let container: HTMLDivElement;
+  let root: ReturnType<typeof createRoot>;
+  const fixtureEvents = adaptUsageEventPage(gatewayUsageEventsFixture).events;
+  const richEvent: UsageEventViewModel = {
+    ...fixtureEvents[0],
+    usageSource: 'parsed',
+    tokens: { input: 23373, output: 299, reasoning: 143, cached: 22528, cacheRead: 22528, cacheCreation: 0, total: 23672 },
+  };
+  beforeEach(async () => {
+    await setTestLanguage('zh');
+    globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.tagName === 'TR' ? 74 : this.getAttribute('role') === 'region' ? 420 : 0;
+    });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+  afterEach(() => { act(() => root.unmount()); container.remove(); vi.restoreAllMocks(); });
+
+  const renderTable = async (events: UsageEventViewModel[]) => {
+    const client = new GatewayUsageClient(new AdminClient({ fetchImpl: vi.fn<typeof fetch>() }));
+    await act(async () => root.render(<EventsTable events={events} hasMore={false} loadingMore={false} onLoadMore={() => {}}
+      visibleColumns={['tokens', 'cache']} onVisibleColumnsChange={() => {}} onExport={() => {}} client={client} />));
+  };
+
+  it('renders compact token totals and cache hit rates in the row', async () => {
+    await renderTable([richEvent, fixtureEvents[1]]);
+    const rows = [...container.querySelectorAll('tbody tr')];
+    const cellsOf = (row: Element) => [...row.querySelectorAll('td')].map((cell) => cell.textContent);
+    expect(cellsOf(rows[0])[1]).toBe('23.7K');
+    expect(cellsOf(rows[0])[2]).toBe('96.4%');
+    // Missing usage keeps the source badge instead of an unexplained zero, and
+    // a zero input renders a dash rather than 0%.
+    expect(cellsOf(rows[1])[1]).toBe('未获取');
+    expect(cellsOf(rows[1])[2]).toBe('—');
+  });
+
+  it('reveals the full token breakdown when hovering the token cell', async () => {
+    await renderTable([richEvent]);
+    const tokenCell = container.querySelectorAll('tbody tr td')[1];
+    act(() => { tokenCell.querySelector('span')!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 60)); });
+    const popover = document.querySelector('[data-od-id="token-breakdown"]');
+    expect(popover?.textContent).toContain('Token 用量详情');
+    expect(popover?.textContent).toContain('23,373');
+    expect(popover?.textContent).toContain('22,528');
+    expect(popover?.textContent).toContain('23,672');
+    expect(popover?.textContent).toContain('上游流式');
+  });
+
+  it('reveals cache hit details when hovering the cache cell', async () => {
+    await renderTable([richEvent]);
+    const cacheCell = container.querySelectorAll('tbody tr td')[2];
+    act(() => { cacheCell.querySelector('span')!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 60)); });
+    const popover = document.querySelector('[data-od-id="cache-breakdown"]');
+    expect(popover?.textContent).toContain('缓存详情');
+    expect(popover?.textContent).toContain('96.4%');
+    expect(popover?.textContent).toContain('22,528');
+    expect(popover?.textContent).toContain('缓存创建不计入命中');
+  });
+
+  it('lists every token component with the usage source in the breakdowns', async () => {
+    await act(async () => root.render(<><TokenBreakdown event={richEvent} /><CacheBreakdown event={richEvent} /></>));
+    const token = container.querySelector('[data-od-id="token-breakdown"]')!;
+    for (const label of ['输入', '输出', '推理', '缓存读取', '缓存创建', '总计', '用量来源']) {
+      expect(token.textContent).toContain(label);
+    }
+    expect(token.textContent).toContain('299');
+    expect(token.textContent).toContain('143');
+    expect(token.textContent).toContain('上游流式');
+    const cache = container.querySelector('[data-od-id="cache-breakdown"]')!;
+    expect(cache.textContent).toContain('命中率');
+    expect(cache.textContent).toContain('96.4%');
   });
 });
 

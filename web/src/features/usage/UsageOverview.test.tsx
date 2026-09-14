@@ -50,7 +50,7 @@ describe('overview metrics and usage provenance', () => {
     expect(container.textContent).toContain('Usage is missing for 1 requests');
     const recent = container.querySelector('[data-od-id="recent-activity"]')!;
     expect(recent.textContent).toContain('Success'); expect(recent.textContent).toContain('Failure');
-    expect(recent.textContent).toContain('Estimated'); expect(recent.textContent).toContain('Missing');
+    expect(recent.textContent).toContain('Estimated'); expect(recent.textContent).toContain('Not captured');
     expect(recent.textContent).toContain('— tokens');
     expect(recent.textContent).toContain('source-tokyo');
     expect(metric(2).querySelector('strong')?.getAttribute('title')).toBe('1,780');

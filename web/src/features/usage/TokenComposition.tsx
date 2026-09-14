@@ -1,5 +1,5 @@
 import { UsageSourceSummary } from './UsageSourceSummary';
-import { hasOnlyUnreportedUsage } from './usageQuality';
+import { cacheHitRate, hasOnlyUnreportedUsage } from './usageQuality';
 import { Progress } from '@mantine/core';
 import { Card } from '@/components/ui/Card';
 import styles from '@/features/usage/Usage.module.scss';
@@ -48,7 +48,7 @@ export function TokenComposition({ summary }: { summary: UsageSummaryViewModel }
       })}</dl>
       <small className={styles.cacheNote}>{t('usage.composition.overlap')}</small>
       <UsageSourceSummary summary={summary} />
-      {tokens.cacheRead > 0 && <small className={styles.cacheNote}>{t('usage.composition.cache_rate', { rate: tokens.input > 0 ? formatPercent(tokens.cacheRead / tokens.input) : '—' })}</small>}
+      {tokens.cacheRead > 0 && <small className={styles.cacheNote}>{t('usage.composition.cache_rate', { rate: formatPercent(cacheHitRate(tokens)) })}</small>}
     </div>
   </Card>;
 }

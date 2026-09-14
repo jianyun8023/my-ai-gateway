@@ -19,17 +19,37 @@ export const usage = {
     retries: '重试',
     latency: '延迟',
     tokens: 'Token',
+    cache: '缓存',
+    cache_hit_rate: '命中率',
     usage_source: '用量来源',
     fallback_reason: '回退原因',
   },
 
-  // —— 用量来源枚举展示(值保持枚举原形)——
+  // —— 用量来源枚举展示(值保持枚举原形;筛选与详情用完整文案)——
   usage_source: {
     unknown: '未知',
+    upstream: '上游返回（完整响应）',
+    parsed: '上游返回（流式响应）',
+    estimated: '本地估算',
+    missing: '未获取',
+  },
+
+  // —— 用量来源短文案(Badge 等紧凑场景)——
+  usage_source_short: {
+    unknown: '未知',
     upstream: '上游',
-    parsed: '解析',
+    parsed: '上游流式',
     estimated: '估算',
-    missing: '缺失',
+    missing: '未获取',
+  },
+
+  // —— 用量来源说明(Tooltip,区分数据可信来源与采集方式)——
+  usage_source_desc: {
+    unknown: '用量来源未知，Token 依据尚未确认。',
+    upstream: 'Token 用量来自上游完整响应中的 usage 字段。',
+    parsed: 'Token 用量来自上游 SSE 流式响应中的 usage 字段，由网关按事件解析并合并，不是本地估算。',
+    estimated: '上游未报告 Token 用量，数值由网关本地估算。',
+    missing: '没有可用的 Token 用量数据。',
   },
 
   // —— 回退原因枚举展示(值保持原因码原形)——
@@ -173,6 +193,9 @@ export const usage = {
   detail: {
     aria: '请求事件详情',
     kicker: '请求事件',
+    section_basic: '基本信息',
+    section_routing: '路由',
+    section_cache: '缓存',
     token_title: 'Token',
     token_subtitle: '最终逻辑请求口径,不因回退重复累计',
     attempts_title: '上游尝试',
@@ -190,6 +213,9 @@ export const usage = {
     empty_title: '当前范围没有请求事件',
     empty_desc: '调整时间范围或筛选条件后重试。',
     title: '请求事件',
+    token_details_title: 'Token 用量详情',
+    cache_details_title: '缓存详情',
+    cache_basis: '命中率 = 缓存读取 / 输入 Token，缓存创建不计入命中',
   },
 
   // —— 页面级 ——

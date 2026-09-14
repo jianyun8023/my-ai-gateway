@@ -19,17 +19,37 @@ export const usage = {
     retries: 'Retries',
     latency: 'Latency',
     tokens: 'Tokens',
+    cache: 'Cache',
+    cache_hit_rate: 'Hit rate',
     usage_source: 'Usage source',
     fallback_reason: 'Fallback reason',
   },
 
-  // —— 用量来源枚举展示(值保持枚举原形)——
+  // —— 用量来源枚举展示(值保持枚举原形;筛选与详情用完整文案)——
   usage_source: {
     unknown: 'Unknown',
+    upstream: 'Upstream (full response)',
+    parsed: 'Upstream (stream)',
+    estimated: 'Local estimate',
+    missing: 'Not captured',
+  },
+
+  // —— 用量来源短文案(Badge 等紧凑场景)——
+  usage_source_short: {
+    unknown: 'Unknown',
     upstream: 'Upstream',
-    parsed: 'Parsed',
+    parsed: 'Upstream stream',
     estimated: 'Estimated',
-    missing: 'Missing',
+    missing: 'Not captured',
+  },
+
+  // —— 用量来源说明(Tooltip,区分数据可信来源与采集方式)——
+  usage_source_desc: {
+    unknown: 'Usage source is unknown; token provenance is unconfirmed.',
+    upstream: 'Token usage was reported by the upstream in the usage field of the full response.',
+    parsed: 'Token usage comes from the usage field of the upstream SSE stream, parsed and merged per event by the gateway. It is not a local estimate.',
+    estimated: 'The upstream did not report token usage; values are estimated locally by the gateway.',
+    missing: 'No token usage data is available.',
   },
 
   // —— 回退原因枚举展示(值保持原因码原形)——
@@ -173,6 +193,9 @@ export const usage = {
   detail: {
     aria: 'Request event details',
     kicker: 'Request Event',
+    section_basic: 'Basic Info',
+    section_routing: 'Routing',
+    section_cache: 'Cache',
     token_title: 'Tokens',
     token_subtitle: 'Final logical request accounting; never duplicated across fallbacks',
     attempts_title: 'Upstream Attempts',
@@ -190,6 +213,9 @@ export const usage = {
     empty_title: 'No request events in the selected range',
     empty_desc: 'Try a different time range or filters.',
     title: 'Request Events',
+    token_details_title: 'Token usage details',
+    cache_details_title: 'Cache details',
+    cache_basis: 'Hit rate = cache read / input tokens; cache creation is not counted as a hit',
   },
 
   // —— 页面级 ——

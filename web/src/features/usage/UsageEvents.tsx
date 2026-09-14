@@ -1,16 +1,16 @@
 import { Table } from '@mantine/core';
 import { IconButton } from '@/components/ui/IconButton';
-import { IconEye } from '@/components/ui/icons';
+import { IconEye, IconInfoCircle } from '@/components/ui/icons';
 import { LoadingState } from '@/components/ui/LoadingState';
-import { Checkbox, Popover } from '@/components/ui/overlays';
+import { Checkbox, Popover, Tooltip } from '@/components/ui/overlays';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Notice } from '@/components/ui/Notice';
+import { CacheCell, TokenCell } from './EventMetricCells';
 import { UsageStatus } from './UsageStatus';
-import { isUnreportedUsage } from './usageQuality';
-import { EVENT_COLUMNS, EVENT_COLUMN_LABELS, type EventColumn } from '@/features/usage/eventColumns';
-import { formatDuration, formatFallbackReason, formatTime, formatUsageTokens } from '@/features/usage/formatters';
+import { EVENT_COLUMNS, EVENT_COLUMN_HINTS, EVENT_COLUMN_LABELS, eventTableGridTemplate, eventTableMinWidth, NUMERIC_EVENT_COLUMNS, type EventColumn } from '@/features/usage/eventColumns';
+import { formatDuration, formatFallbackReason, formatTime } from '@/features/usage/formatters';
 import styles from '@/features/usage/Usage.module.scss';
 import { UsageBadge } from '@/features/usage/UsageBadge';
 import { EventDetails } from '@/features/usage/UsageEventDetails';
@@ -44,9 +44,23 @@ const renderEventCell = (event: UsageEventViewModel, column: EventColumn, t: TFu
         : label;
     }
     case 'latency': return <span title={formatDuration(event.latencyMs, true)}>{formatDuration(event.latencyMs)}</span>;
-    case 'tokens': return event.tokens.total === 0 && isUnreportedUsage(event.usageSource) ? <UsageBadge source={event.usageSource} /> : <span title={formatUsageTokens(event.tokens.total, event.usageSource, true)}>{formatUsageTokens(event.tokens.total, event.usageSource)}</span>;
+    case 'tokens': return <TokenCell event={event} />;
+    case 'cache': return <CacheCell event={event} />;
     case 'usageSource': return <UsageBadge source={event.usageSource} />;
   }
+};
+
+const eventColumnHeader = (column: EventColumn, t: TFunction) => {
+  const hintKey = EVENT_COLUMN_HINTS[column];
+  if (!hintKey) return t(EVENT_COLUMN_LABELS[column]);
+  return (
+    <span className={styles.eventHeaderLabel}>
+      {t(EVENT_COLUMN_LABELS[column])}
+      <Tooltip label={t(hintKey)} events={{ hover: true, focus: true, touch: false }}>
+        <IconInfoCircle size={13} />
+      </Tooltip>
+    </span>
+  );
 };
 
 interface EventsTableProps {
@@ -119,11 +133,15 @@ export function EventsTable({ events, hasMore, loadingMore, loadMoreError, onLoa
       {exportError && <Notice action={onRetryExport && <Button size="sm" variant="secondary" onClick={onRetryExport}>{t('common.retry')}</Button>}>{exportError}</Notice>}
       <div ref={parentRef} className={styles.eventScroll} role="region" aria-label={t('usage.events.title')} tabIndex={0}>
         <Table className={styles.eventTable} aria-label={t('usage.events.title')} aria-rowcount={hasMore ? -1 : events.length + 1}
-          style={{ '--event-columns': visibleColumns.length, '--event-header-height': `${EVENT_HEADER_HEIGHT}px` } as CSSProperties}>
+          style={{
+            '--event-grid-template': eventTableGridTemplate(visibleColumns),
+            '--event-grid-min-width': `${eventTableMinWidth(visibleColumns)}px`,
+            '--event-header-height': `${EVENT_HEADER_HEIGHT}px`,
+          } as CSSProperties}>
           <Table.Thead className={styles.eventHeader}>
             <Table.Tr aria-rowindex={1} className={styles.eventGrid}>
               <Table.Th scope="col">{t('common.actions')}</Table.Th>
-              {visibleColumns.map((column) => <Table.Th scope="col" key={column}>{t(EVENT_COLUMN_LABELS[column])}</Table.Th>)}
+              {visibleColumns.map((column) => <Table.Th scope="col" key={column} className={NUMERIC_EVENT_COLUMNS.has(column) ? styles.numericColumn : undefined}>{eventColumnHeader(column, t)}</Table.Th>)}
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody className={styles.eventBody} style={{ height: virtualizer.getTotalSize() }}>
@@ -136,7 +154,7 @@ export function EventsTable({ events, hasMore, loadingMore, loadMoreError, onLoa
                   <Table.Td onClick={(click) => click.stopPropagation()}>
                     <IconButton label={t('usage.events.view_aria', { id: event.requestId })} onClick={() => setSelectedEvent(event)}><IconEye size={16} /></IconButton>
                   </Table.Td>
-                  {visibleColumns.map((column) => <Table.Td key={column}>{renderEventCell(event, column, t)}</Table.Td>)}
+                  {visibleColumns.map((column) => <Table.Td key={column} className={NUMERIC_EVENT_COLUMNS.has(column) ? styles.numericColumn : undefined}>{renderEventCell(event, column, t)}</Table.Td>)}
                 </Table.Tr>
               );
             })}
