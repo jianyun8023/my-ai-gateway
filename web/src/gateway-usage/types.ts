@@ -108,6 +108,10 @@ export interface UsageEventViewModel {
   fallback: boolean;
   fallbackReason?: string;
   latencyMs?: number;
+  // TTFT is recorded for streaming requests only (absent on non-streaming or
+  // failed empty streams). Together with latencyMs it derives output TPS.
+  ttftMs?: number;
+  streamed: boolean;
   tokens: TokenTotals;
   usageSource: UsageSource;
   degraded: boolean;

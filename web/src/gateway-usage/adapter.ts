@@ -192,6 +192,8 @@ const adaptUsageEvent = (payload: RawGatewayUsagePayload): UsageEventViewModel =
     fallback: asBoolean(item.fallback, retryCount > 0 || attempts.length > 1 || Boolean(fallbackReason)),
     fallbackReason,
     latencyMs: firstDefined(item, ['latency_ms']) === undefined ? undefined : readNumber(item, ['latency_ms']),
+    ttftMs: firstDefined(item, ['ttft_ms', 'ttftMs']) === undefined ? undefined : readNumber(item, ['ttft_ms', 'ttftMs']),
+    streamed: asBoolean(item.streamed),
     tokens: adaptTokenTotals(item),
     usageSource: readString(item, ['usage_source'], 'missing'),
     degraded: asBoolean(item.degraded),

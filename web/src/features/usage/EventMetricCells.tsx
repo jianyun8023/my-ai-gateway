@@ -1,7 +1,7 @@
 import { HoverCard } from '@/components/ui/overlays';
 import { UsageBadge } from '@/features/usage/UsageBadge';
-import { formatUsageTokens } from '@/features/usage/formatters';
-import { cacheHitRate, isUnreportedUsage } from '@/features/usage/usageQuality';
+import { formatDuration, formatTps, formatUsageTokens } from '@/features/usage/formatters';
+import { cacheHitRate, generationTimeMs, isUnreportedUsage, outputTokensPerSecond } from '@/features/usage/usageQuality';
 import styles from '@/features/usage/Usage.module.scss';
 import type { UsageEventViewModel } from '@/gateway-usage';
 import { formatPercent } from '@/utils/formatCompact';
@@ -49,6 +49,27 @@ export function CacheBreakdown({ event }: { event: UsageEventViewModel }) {
   );
 }
 
+// Throughput breakdown shown when hovering the TPS cell: the output tokens and
+// the exact timing window (latency, TTFT, generation time) the rate derives
+// from, so a high/low TPS can be attributed to prefill vs generation.
+export function TpsBreakdown({ event }: { event: UsageEventViewModel }) {
+  const { t } = useTranslation('console');
+  const rows: Array<[string, string]> = [
+    [t('usage.legend.output'), formatUsageTokens(event.tokens.output, event.usageSource, true)],
+    [t('usage.field.latency'), formatDuration(event.latencyMs, true)],
+    ...(event.ttftMs !== undefined ? [[t('usage.field.ttft'), formatDuration(event.ttftMs, true)] as [string, string]] : []),
+    [t('usage.field.generation_time'), formatDuration(generationTimeMs(event), true)],
+    [t('usage.field.tps'), formatTps(outputTokensPerSecond(event))],
+  ];
+  return (
+    <div className={styles.metricPopover} data-od-id="tps-breakdown">
+      <strong className={styles.metricPopoverTitle}>{t('usage.events.tps_details_title')}</strong>
+      <dl>{rows.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
+      <p className={styles.metricPopoverNote}>{t('usage.events.tps_basis')}</p>
+    </div>
+  );
+}
+
 export function TokenCell({ event }: { event: UsageEventViewModel }) {
   if (event.tokens.total === 0 && isUnreportedUsage(event.usageSource)) {
     return <UsageBadge source={event.usageSource} />;
@@ -74,6 +95,21 @@ export function CacheCell({ event }: { event: UsageEventViewModel }) {
       </HoverCard.Target>
       <HoverCard.Dropdown>
         <CacheBreakdown event={event} />
+      </HoverCard.Dropdown>
+    </HoverCard>
+  );
+}
+
+export function TpsCell({ event }: { event: UsageEventViewModel }) {
+  const tps = outputTokensPerSecond(event);
+  if (tps === null) return <span className={styles.metricValue}>—</span>;
+  return (
+    <HoverCard position="bottom-end" shadow="md" radius={8} withinPortal>
+      <HoverCard.Target>
+        <span className={styles.metricValue}>{formatTps(tps)}</span>
+      </HoverCard.Target>
+      <HoverCard.Dropdown>
+        <TpsBreakdown event={event} />
       </HoverCard.Dropdown>
     </HoverCard>
   );
