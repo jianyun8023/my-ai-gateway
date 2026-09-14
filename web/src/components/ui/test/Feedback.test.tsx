@@ -32,8 +32,10 @@ describe('console feedback', () => {
     expect(document.activeElement).toBe(trigger);
     const close = container.querySelector<HTMLButtonElement>('[aria-label="关闭通知"]')!;
     expect(close).not.toBeNull();
-    await act(async () => { close.click(); await new Promise(resolve => setTimeout(resolve, 10)); });
-    expect(container.querySelector('[role="status"]')).toBeNull();
+    await act(async () => { close.click(); });
+    // The hide transition is zero-duration in tests, but its timers can be
+    // delayed under CI load; poll instead of sleeping a fixed 10ms.
+    await vi.waitFor(() => { expect(container.querySelector('[role="status"]')).toBeNull(); });
   });
 
   it('auto closes transient feedback and clears it when another operation starts', async () => {
