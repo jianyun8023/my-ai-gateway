@@ -8,7 +8,7 @@ import '@/i18n/console';
 import { describe, expect, it } from 'vitest';
 
 describe('GatewayUsagePage logic', () => {
-  it('defaults to nine high-frequency event columns', () => {
+  it('defaults to ten high-frequency event columns', () => {
     expect(DEFAULT_VISIBLE_COLUMNS).toEqual([
       'time',
       'logicalModel',
@@ -18,6 +18,7 @@ describe('GatewayUsagePage logic', () => {
       'retries',
       'latency',
       'tokens',
+      'tps',
       'cache',
     ]);
     expect(normalizeVisibleEventColumns([])).toEqual(DEFAULT_VISIBLE_COLUMNS);
@@ -29,7 +30,7 @@ describe('GatewayUsagePage logic', () => {
   });
 
   it('caps compact metric columns while text columns flex with the viewport', () => {
-    for (const column of ['retries', 'latency', 'tokens', 'cache'] as const) {
+    for (const column of ['retries', 'latency', 'tokens', 'tps', 'cache'] as const) {
       expect(EVENT_COLUMN_TRACKS[column].max).toMatch(/^\d+px$/);
     }
     expect(EVENT_COLUMN_TRACKS.logicalModel.max).toMatch(/fr$/);
