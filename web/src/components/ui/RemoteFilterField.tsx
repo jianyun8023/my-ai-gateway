@@ -1,7 +1,8 @@
 import { Combobox, CloseButton, Loader, ScrollArea, TextInput, useCombobox } from '@mantine/core';
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from './Button';
+import styles from './RemoteFilterField.module.scss';
 
 interface Options {
   data: string[];
@@ -32,9 +33,18 @@ export function RemoteFilterField({ label, value, onChange, loadOptions, context
   const id = useId();
   const [state, setState] = useState<OptionState>();
   const [revision, setRevision] = useState(0);
+  // Candidates stay valid across open/close cycles while the query scope
+  // (context key + search text + loader identity) is unchanged. Remembering
+  // the settled scope here lets a reopened dropdown reuse its candidates
+  // instead of flashing a spinner and refetching on every click.
+  const settledRef = useRef<{ key: string; load: RemoteFilterFieldProps['loadOptions'] } | undefined>(undefined);
   const combobox = useCombobox({
-    onDropdownOpen: () => setRevision((previous) => previous + 1),
-    onDropdownClose: () => combobox.resetSelectedOption(),
+    onDropdownClose: () => {
+      combobox.resetSelectedOption();
+      // Closing aborts any in-flight request; drop its marker so the next open
+      // starts a fresh fetch instead of waiting on a result that never arrives.
+      setState((previous) => previous?.status === 'loading' ? undefined : previous);
+    },
   });
   const opened = combobox.dropdownOpened;
   const search = value.trim();
@@ -45,11 +55,15 @@ export function RemoteFilterField({ label, value, onChange, loadOptions, context
 
   useEffect(() => {
     if (!opened) return;
+    const settled = settledRef.current;
+    if (settled?.key === key && settled.load === loadOptions) return;
     const controller = new AbortController();
     const timeout = setTimeout(() => {
       setState({ load: loadOptions, key, status: 'loading' });
       void loadOptions(search, controller.signal).then((result) => {
-        if (!controller.signal.aborted) setState({ load: loadOptions, key, status: 'ready', result });
+        if (controller.signal.aborted) return;
+        settledRef.current = { key, load: loadOptions };
+        setState({ load: loadOptions, key, status: 'ready', result });
       }).catch(() => {
         if (!controller.signal.aborted) setState({ load: loadOptions, key, status: 'error' });
       });
@@ -65,6 +79,15 @@ export function RemoteFilterField({ label, value, onChange, loadOptions, context
     : failed ? t('common.filter_options_failed')
       : result?.has_more ? t('common.filter_options_more')
         : result?.data.length === 0 ? t('common.filter_options_empty') : '';
+  // Status text lives inside the dropdown, not the input description: a
+  // changing description height shifts the field within bottom-aligned filter
+  // rows and moves the anchored dropdown, which read as a drifting input.
+  const retry = failed ? (
+    <Button size="sm" variant="ghost" onMouseDown={(event) => event.preventDefault()} onClick={() => {
+      setRevision((previous) => previous + 1);
+      combobox.openDropdown();
+    }}>{t('common.retry')}</Button>
+  ) : null;
 
   return (
     <Combobox store={combobox} onOptionSubmit={(selected) => {
@@ -81,10 +104,6 @@ export function RemoteFilterField({ label, value, onChange, loadOptions, context
           inputMode={inputMode}
           autoComplete="off"
           aria-busy={loading}
-          description={statusText ? <span role="status">{statusText}{failed && <Button size="sm" variant="ghost" onClick={() => {
-            setRevision((previous) => previous + 1);
-            combobox.openDropdown();
-          }}>{t('common.retry')}</Button>}</span> : undefined}
           onFocus={() => combobox.openDropdown()}
           onClick={() => combobox.openDropdown()}
           onBlur={() => combobox.closeDropdown()}
@@ -105,9 +124,16 @@ export function RemoteFilterField({ label, value, onChange, loadOptions, context
         <ScrollArea.Autosize mah={240} type="auto">
           <Combobox.Options>
             {result?.data.map((option) => <Combobox.Option value={option} key={option}>{option}</Combobox.Option>)}
-            {!result?.data.length && <Combobox.Empty>{statusText}</Combobox.Empty>}
+            {!result?.data.length && statusText && (
+              <Combobox.Empty>
+                <span className={styles.status} role="status">{statusText}{retry}</span>
+              </Combobox.Empty>
+            )}
           </Combobox.Options>
         </ScrollArea.Autosize>
+        {statusText && (result?.data.length ?? 0) > 0 && (
+          <div className={styles.footer} role="status">{statusText}{retry}</div>
+        )}
       </Combobox.Dropdown>
     </Combobox>
   );

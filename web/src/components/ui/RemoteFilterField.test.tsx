@@ -56,6 +56,47 @@ describe('remote filter candidates', () => {
     expect(input().value).toBe('');
   });
 
+  it('reuses settled candidates when reopened, without refetching or spinning', async () => {
+    const load = vi.fn<Load>().mockResolvedValue({ data: ['historical-model'], has_more: false });
+    act(() => root.render(<Probe load={load} />));
+    act(() => input().click());
+    await debounce();
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toContain('historical-model');
+    act(() => {
+      input().dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', code: 'ArrowDown', bubbles: true }));
+    });
+    act(() => input().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true })));
+    expect(input().value).toBe('historical-model');
+    expect(input().getAttribute('aria-expanded')).toBe('false');
+    act(() => container.querySelector<HTMLButtonElement>('button[aria-label="清空模型"]')!.click());
+    act(() => input().click());
+    expect(input().getAttribute('aria-expanded')).toBe('true');
+    expect(input().getAttribute('aria-busy')).not.toBe('true');
+    expect(container.textContent).toContain('historical-model');
+    await debounce();
+    expect(load).toHaveBeenCalledTimes(1);
+  });
+
+  it('refetches after a close interrupted the request', async () => {
+    let resolveFirst: ((result: Result) => void) | undefined;
+    const load = vi.fn<Load>()
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = resolve; }))
+      .mockResolvedValue({ data: ['recovered-model'], has_more: false });
+    act(() => root.render(<Probe load={load} />));
+    act(() => input().click());
+    await debounce();
+    expect(load).toHaveBeenCalledTimes(1);
+    act(() => input().dispatchEvent(new FocusEvent('focusout', { bubbles: true })));
+    expect(input().getAttribute('aria-expanded')).toBe('false');
+    act(() => input().click());
+    expect(input().getAttribute('aria-busy')).toBe('true');
+    await debounce();
+    expect(load).toHaveBeenCalledTimes(2);
+    expect(container.textContent).toContain('recovered-model');
+    expect(resolveFirst).toBeDefined();
+  });
+
   it('debounces typing and drops responses after search, context and loader changes', async () => {
     const requests: { signal: AbortSignal; resolve: (result: Result) => void }[] = [];
     const load = vi.fn<Load>((_search, signal) => new Promise((resolve) => requests.push({ signal, resolve })));
