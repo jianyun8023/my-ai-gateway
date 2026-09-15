@@ -6,6 +6,21 @@ import styles from '@/features/usage/Usage.module.scss';
 import type { UsageEventViewModel } from '@/gateway-usage';
 import { formatPercent } from '@/utils/formatCompact';
 import { useTranslation } from 'react-i18next';
+import type { CSSProperties } from 'react';
+
+export function LatencyCell({ value, max }: { value?: number; max: number }) {
+  if (value === undefined || !Number.isFinite(value) || value < 0) return <span>—</span>;
+  const width = max > 0 ? Math.min(100, Math.max(0, value / max * 100)) : 0;
+  return (
+    <span className={styles.latencyCell} title={formatDuration(value, true)}>
+      {formatDuration(value)}
+      <span className={styles.latencyTrack} aria-hidden="true">
+        <span data-latency-tone={value > 10_000 ? 'danger' : value > 3_000 ? 'warning' : 'success'}
+          style={{ '--latency-width': `${width}%` } as CSSProperties} />
+      </span>
+    </span>
+  );
+}
 
 // Full token breakdown shown when hovering the compact Token cell. Exact
 // integer values; the row itself only carries the compact total.
@@ -70,6 +85,7 @@ export function TpsBreakdown({ event }: { event: UsageEventViewModel }) {
 
 export function TokenCell({ event }: { event: UsageEventViewModel }) {
   if (event.tokens.total === 0 && isUnreportedUsage(event.usageSource)) {
+    if (!event.success) return <span>—</span>;
     return <UsageBadge source={event.usageSource} />;
   }
   return (

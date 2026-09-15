@@ -1,7 +1,6 @@
 export const EVENT_COLUMNS = [
   'time',
-  'logicalModel',
-  'upstreamModel',
+  'model',
   'provider',
   'sourceAccount',
   'clientSource',
@@ -19,8 +18,7 @@ export type EventColumn = typeof EVENT_COLUMNS[number];
 
 export const EVENT_COLUMN_LABELS: Record<EventColumn, string> = {
   time: 'usage.field.time',
-  logicalModel: 'usage.field.logical_model',
-  upstreamModel: 'usage.field.upstream_model',
+  model: 'usage.field.model',
   provider: 'usage.field.provider',
   sourceAccount: 'usage.field.source_account',
   clientSource: 'usage.field.client_source',
@@ -39,6 +37,7 @@ export const NUMERIC_EVENT_COLUMNS: ReadonlySet<EventColumn> = new Set(['tokens'
 
 // Column headers that explain the displayed metric through an info tooltip.
 export const EVENT_COLUMN_HINTS: Partial<Record<EventColumn, string>> = {
+  latency: 'usage.events.latency_basis',
   tokens: 'usage.detail.token_subtitle',
   tps: 'usage.events.tps_basis',
   cache: 'usage.events.cache_basis',
@@ -46,11 +45,10 @@ export const EVENT_COLUMN_HINTS: Partial<Record<EventColumn, string>> = {
 
 export const DEFAULT_VISIBLE_COLUMNS: EventColumn[] = [
   'time',
-  'logicalModel',
-  'upstreamModel',
+  'model',
   'provider',
+  'clientSource',
   'status',
-  'retries',
   'latency',
   'tokens',
   'tps',
@@ -63,18 +61,17 @@ export const DEFAULT_VISIBLE_COLUMNS: EventColumn[] = [
 interface EventColumnTrack { min: number; max: string }
 
 export const EVENT_COLUMN_TRACKS: Record<EventColumn, EventColumnTrack> = {
-  time: { min: 150, max: '1.1fr' },
-  logicalModel: { min: 140, max: '1.3fr' },
-  upstreamModel: { min: 140, max: '1.3fr' },
+  time: { min: 96, max: '112px' },
+  model: { min: 180, max: '1.6fr' },
   provider: { min: 110, max: '1fr' },
   sourceAccount: { min: 120, max: '1fr' },
-  clientSource: { min: 110, max: '1fr' },
+  clientSource: { min: 144, max: '1fr' },
   protocol: { min: 120, max: '1fr' },
-  status: { min: 116, max: '0.7fr' },
-  retries: { min: 84, max: '108px' },
-  latency: { min: 76, max: '96px' },
+  status: { min: 148, max: '0.8fr' },
+  retries: { min: 132, max: '148px' },
+  latency: { min: 96, max: '104px' },
   tokens: { min: 88, max: '112px' },
-  tps: { min: 84, max: '104px' },
+  tps: { min: 104, max: '112px' },
   cache: { min: 84, max: '104px' },
   usageSource: { min: 128, max: '1fr' },
 };

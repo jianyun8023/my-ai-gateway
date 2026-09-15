@@ -4,6 +4,7 @@ export const usage = {
   // —— 字段名(筛选、维度卡、事件表列、详情共用)——
   field: {
     time: 'Time',
+    model: 'Model',
     logical_model: 'Logical model',
     upstream_model: 'Upstream model',
     provider: 'Provider',
@@ -185,6 +186,8 @@ export const usage = {
 
   // —— 事件状态与行 ——
   event: {
+    retry_count_one: '{{count}} retry',
+    retry_count_other: '{{count}} retries',
     success: 'Success',
     failure: 'Failure',
     retries_fallback: '{{count}} · fallback',
@@ -211,6 +214,7 @@ export const usage = {
 
   // —— 事件表 ——
   events: {
+    latency_basis: 'Total latency; bar length compares with the longest loaded request. Green ≤3s, amber 3–10s, red >10s; visual cues only.',
     view_aria: 'View request {{id}} details',
     empty_title: 'No request events in the selected range',
     empty_desc: 'Try a different time range or filters.',

@@ -10,6 +10,7 @@ import { GatewayUsageClient } from '@/gateway-usage';
 import { EVENT_COLUMNS, type EventColumn } from './eventColumns';
 import { CacheBreakdown, TokenBreakdown, TpsBreakdown } from './EventMetricCells';
 import { EventsTable } from './UsageEvents';
+import { formatEventTime, formatTime } from './formatters';
 import type { UsageEventViewModel } from '@/gateway-usage';
 
 describe('event column preferences', () => {
@@ -70,11 +71,72 @@ describe('event metric cells', () => {
   });
   afterEach(() => { act(() => root.unmount()); container.remove(); vi.restoreAllMocks(); });
 
-  const renderTable = async (events: UsageEventViewModel[]) => {
+  const renderTable = async (events: UsageEventViewModel[], columns: EventColumn[] = ['tokens', 'cache']) => {
     const client = new GatewayUsageClient(new AdminClient({ fetchImpl: vi.fn<typeof fetch>() }));
     await act(async () => root.render(<EventsTable events={events} hasMore={false} loadingMore={false} onLoadMore={() => {}}
-      visibleColumns={['tokens', 'cache']} onVisibleColumnsChange={() => {}} onExport={() => {}} client={client} />));
+      visibleColumns={columns} onVisibleColumnsChange={() => {}} onExport={() => {}} client={client} />));
   };
+
+  it('distinguishes model mapping from fallback, including fallback to the same model', async () => {
+    await renderTable([
+      { ...richEvent, id: 'mapped', logicalModel: 'friendly-name', upstreamModel: 'actual-model', fallback: false, fallbackReason: undefined, retryCount: 0 },
+      { ...richEvent, id: 'same', logicalModel: 'same-model', upstreamModel: 'same-model', fallback: true, fallbackReason: 'account_cooling_down', retryCount: 0 },
+      { ...richEvent, id: 'retried', fallback: false, fallbackReason: undefined, retryCount: 2 },
+    ], ['model', 'retries']);
+    const rows = container.querySelectorAll('tbody tr');
+    expect(rows[0].textContent).toContain('friendly-name');
+    expect(rows[0].textContent).toContain('actual-model');
+    expect(rows[0].querySelector('[aria-label*="已回退"]')).toBeNull();
+    expect(rows[0].querySelectorAll('td')[2].textContent).toBe('—');
+    expect(rows[1].textContent?.match(/same-model/g)).toHaveLength(1);
+    expect(rows[1].querySelector('[aria-label*="已回退"]')?.getAttribute('title')).toContain('主账号冷却中');
+    expect(rows[1].querySelectorAll('td')[2].textContent).toBe('已回退');
+    expect(rows[2].querySelectorAll('td')[2].textContent).toBe('2');
+  });
+
+  it('labels known clients and preserves unknown client identities', async () => {
+    await renderTable(['claude-code', 'codex', 'kimi_code', 'curl', 'custom-agent/v2'].map((clientSource) => ({
+      ...richEvent, id: clientSource, clientSource,
+    })), ['clientSource']);
+    const clients = [...container.querySelectorAll('tbody tr')].map((row) => row.querySelectorAll('td')[1]);
+    expect(clients.map((cell) => cell.textContent)).toEqual(['Claude Code', 'Codex', 'Kimi Code', 'curl', 'custom-agent/v2']);
+    expect(clients[4].querySelector('[title]')?.getAttribute('title')).toBe('custom-agent/v2');
+    expect(clients.every((cell) => cell.querySelector('svg'))).toBe(true);
+  });
+
+  it('keeps dates visible across years, with full local timestamps available', async () => {
+    const dates = ['2025-12-31T12:00:00Z', '2026-01-01T12:00:00Z', 'invalid'];
+    await renderTable(dates.map((createdAt) => ({ ...richEvent, id: createdAt, createdAt })), ['time']);
+    const times = [...container.querySelectorAll('tbody time')];
+    expect(times[0].getAttribute('title')).toBe(formatTime(dates[0]));
+    expect(times[0].textContent).toContain(formatEventTime(dates[0]).time);
+    expect(times[0].querySelector('small')?.textContent).toContain('2025');
+    expect(times[1].querySelector('small')?.textContent).toContain('2026');
+    expect(times[2].textContent).toBe('—');
+  });
+
+  it('preserves unknown and zero latency while scaling valid bars to loaded requests', async () => {
+    await renderTable([undefined, 0, 5_000, 20_000, Number.NaN, -1].map((latencyMs, index) => ({
+      ...richEvent, id: String(index), latencyMs,
+    })), ['latency']);
+    const cells = [...container.querySelectorAll('tbody tr')].map((row) => row.querySelectorAll('td')[1]);
+    expect(cells.map((cell) => cell.textContent)).toEqual(['—', '0 ms', '5.0 s', '20 s', '—', '—']);
+    expect(cells[0].querySelector('[data-latency-tone]')).toBeNull();
+    expect(cells[1].querySelector<HTMLElement>('[data-latency-tone]')?.style.getPropertyValue('--latency-width')).toBe('0%');
+    expect(cells[2].querySelector<HTMLElement>('[data-latency-tone="warning"]')?.style.getPropertyValue('--latency-width')).toBe('25%');
+    expect(cells[3].querySelector('[title]')?.getAttribute('title')).toBe('20,000 ms');
+    expect(cells[3].querySelector<HTMLElement>('[data-latency-tone="danger"]')?.style.getPropertyValue('--latency-width')).toBe('100%');
+  });
+
+  it('retains source warnings on successful missing-usage requests and reported zero on failures', async () => {
+    await renderTable([
+      { ...fixtureEvents[1], id: 'missing-success', success: true },
+      { ...fixtureEvents[1], id: 'reported-failure', usageSource: 'upstream' },
+    ], ['tokens']);
+    const rows = container.querySelectorAll('tbody tr');
+    expect(rows[0].textContent).toContain('未获取');
+    expect(rows[1].querySelectorAll('td')[1].textContent).toBe('0');
+  });
 
   it('renders compact token totals and cache hit rates in the row', async () => {
     await renderTable([richEvent, fixtureEvents[1]]);
@@ -82,9 +144,8 @@ describe('event metric cells', () => {
     const cellsOf = (row: Element) => [...row.querySelectorAll('td')].map((cell) => cell.textContent);
     expect(cellsOf(rows[0])[1]).toBe('23.7K');
     expect(cellsOf(rows[0])[2]).toBe('96.4%');
-    // Missing usage keeps the source badge instead of an unexplained zero, and
-    // a zero input renders a dash rather than 0%.
-    expect(cellsOf(rows[1])[1]).toBe('未获取');
+    // Failed requests with missing usage remain quiet, without claiming zero.
+    expect(cellsOf(rows[1])[1]).toBe('—');
     expect(cellsOf(rows[1])[2]).toBe('—');
   });
 
@@ -192,6 +253,28 @@ describe('virtual event table', () => {
   });
   afterEach(() => { act(() => root.unmount()); container.remove(); vi.restoreAllMocks(); });
 
+  it('highlights only added identities and expires highlights before virtual rows remount', async () => {
+    const client = new GatewayUsageClient(new AdminClient({ fetchImpl: vi.fn<typeof fetch>() }));
+    const render = (items: UsageEventViewModel[]) => root.render(<EventsTable events={items} hasMore={false}
+      loadingMore={false} onLoadMore={() => {}} visibleColumns={['status']} onVisibleColumnsChange={() => {}} onExport={() => {}} client={client} />);
+    await act(async () => render(events));
+    expect(container.querySelector('[data-new="true"]')).toBeNull();
+    vi.useFakeTimers();
+    try {
+      const updated = [{ ...base, id: 'new-request', requestId: 'new-request' }, ...events];
+      act(() => render(updated));
+      expect(container.querySelectorAll('[data-new="true"]')).toHaveLength(1);
+      expect(container.querySelector('[data-new="true"] button')?.getAttribute('aria-label')).toContain('new-request');
+      expect(container.querySelector('tr[data-index="1"]')?.getAttribute('data-new')).toBe('false');
+      act(() => vi.advanceTimersByTime(1500));
+      expect(container.querySelector('[data-new="true"]')).toBeNull();
+      const region = container.querySelector<HTMLElement>('[role="region"]')!;
+      act(() => { region.scrollTop = 24000; region.dispatchEvent(new Event('scroll')); });
+      act(() => { region.scrollTop = 0; region.dispatchEvent(new Event('scroll')); });
+      expect(container.querySelector('[data-new="true"]')).toBeNull();
+    } finally { vi.useRealTimers(); }
+  });
+
   it('measures rows, keeps a bounded DOM, and retains request identity after refresh', async () => {
     const client = new GatewayUsageClient(new AdminClient({ fetchImpl: vi.fn<typeof fetch>() }));
     const render = (items = events, columns: EventColumn[] = [...EVENT_COLUMNS]) => root.render(<EventsTable events={items} hasMore={false}
@@ -219,14 +302,14 @@ describe('virtual event table', () => {
     const client = new GatewayUsageClient(new AdminClient({ fetchImpl }));
     const onExport = vi.fn();
     await act(async () => root.render(<EventsTable events={events} hasMore={false} loadingMore={false} onLoadMore={() => {}}
-      visibleColumns={['logicalModel', 'status']} onVisibleColumnsChange={() => {}} onExport={onExport} client={client} />));
+      visibleColumns={['model', 'status']} onVisibleColumnsChange={() => {}} onExport={onExport} client={client} />));
     const view = container.querySelector<HTMLButtonElement>('tbody button')!;
     await act(async () => { view.focus(); view.click(); });
     expect(fetchImpl).toHaveBeenCalledOnce();
     expect(String(fetchImpl.mock.calls[0][0])).toContain('/events/request-0');
     expect(container.querySelector('[role="dialog"]')?.textContent).toContain('request-0');
     await act(async () => root.render(<EventsTable events={[events[1], events[0], ...events.slice(2)]} hasMore={false} loadingMore={false} onLoadMore={() => {}}
-      visibleColumns={['logicalModel', 'status']} onVisibleColumnsChange={() => {}} onExport={onExport} client={client} />));
+      visibleColumns={['model', 'status']} onVisibleColumnsChange={() => {}} onExport={onExport} client={client} />));
     expect(container.querySelector('[role="dialog"]')?.textContent).toContain('request-0');
     expect(fetchImpl).toHaveBeenCalledOnce();
     act(() => container.querySelector('[role="dialog"] button')?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));

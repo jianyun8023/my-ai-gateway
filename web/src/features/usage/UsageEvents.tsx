@@ -1,16 +1,16 @@
 import { Table } from '@mantine/core';
 import { IconButton } from '@/components/ui/IconButton';
-import { IconEye, IconInfoCircle } from '@/components/ui/icons';
+import { IconArrowRight, IconEye, IconInfoCircle } from '@/components/ui/icons';
 import { LoadingState } from '@/components/ui/LoadingState';
 import { Checkbox, Popover, Tooltip } from '@/components/ui/overlays';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Notice } from '@/components/ui/Notice';
-import { CacheCell, TokenCell, TpsCell } from './EventMetricCells';
+import { CacheCell, LatencyCell, TokenCell, TpsCell } from './EventMetricCells';
+import { ClientSourceCell, EventTimeCell, ModelCell, RetriesCell } from './EventContextCells';
 import { UsageStatus } from './UsageStatus';
 import { EVENT_COLUMNS, EVENT_COLUMN_HINTS, EVENT_COLUMN_LABELS, eventTableGridTemplate, eventTableMinWidth, NUMERIC_EVENT_COLUMNS, type EventColumn } from '@/features/usage/eventColumns';
-import { formatDuration, formatFallbackReason, formatTime } from '@/features/usage/formatters';
 import styles from '@/features/usage/Usage.module.scss';
 import { UsageBadge } from '@/features/usage/UsageBadge';
 import { EventDetails } from '@/features/usage/UsageEventDetails';
@@ -24,26 +24,17 @@ import { useTranslation } from 'react-i18next';
 const EVENT_HEADER_HEIGHT = 44;
 const eventIdentity = (event: UsageEventViewModel) => `${event.id}:${event.createdAt}`;
 
-const renderEventCell = (event: UsageEventViewModel, column: EventColumn, t: TFunction) => {
+const renderEventCell = (event: UsageEventViewModel, column: EventColumn, maxLatency: number) => {
   switch (column) {
-    case 'time': return <time>{formatTime(event.createdAt)}</time>;
-    case 'logicalModel': return <strong>{event.logicalModel}</strong>;
-    case 'upstreamModel': return event.upstreamModel;
+    case 'time': return <EventTimeCell value={event.createdAt} />;
+    case 'model': return <ModelCell event={event} />;
     case 'provider': return event.provider;
     case 'sourceAccount': return <span>{event.sourceId}<small>{event.account}</small></span>;
-    case 'clientSource': return event.clientSource;
-    case 'protocol': return <span>{event.protocolIn}<small>→ {event.protocolUpstream}</small></span>;
+    case 'clientSource': return <ClientSourceCell value={event.clientSource} />;
+    case 'protocol': return <span>{event.protocolIn}<small className={styles.protocolUpstream}><IconArrowRight size={12} /><span>{event.protocolUpstream}</span></small></span>;
     case 'status': return <UsageStatus success={event.success} statusCode={event.statusCode} />;
-    case 'retries': {
-      if (!event.fallback) return String(event.retryCount);
-      const label = event.retryCount > 0
-        ? t('usage.event.retries_fallback', { count: event.retryCount })
-        : t('usage.event.fallback_only');
-      return event.fallbackReason
-        ? <span title={formatFallbackReason(t, event.fallbackReason)}>{label}</span>
-        : label;
-    }
-    case 'latency': return <span title={formatDuration(event.latencyMs, true)}>{formatDuration(event.latencyMs)}</span>;
+    case 'retries': return <RetriesCell event={event} />;
+    case 'latency': return <LatencyCell value={event.latencyMs} max={maxLatency} />;
     case 'tokens': return <TokenCell event={event} />;
     case 'tps': return <TpsCell event={event} />;
     case 'cache': return <CacheCell event={event} />;
@@ -88,6 +79,12 @@ export function EventsTable({ events, hasMore, loadingMore, loadMoreError, onLoa
   const moveFocusWhenRowsReturn = useRef(false);
   const [columnsOpen, setColumnsOpen] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<UsageEventViewModel>();
+  const previousIds = useRef<Set<string> | undefined>(undefined);
+  const [newEventIds, setNewEventIds] = useState<ReadonlySet<string>>(new Set());
+  const maxLatency = useMemo(() => events.reduce((max, event) => {
+    const value = event.latencyMs;
+    return value !== undefined && Number.isFinite(value) ? Math.max(max, value) : max;
+  }, 0), [events]);
   const selectedEventInRows = useMemo(() => selectedEvent
     ? events.find((event) => eventIdentity(event) === eventIdentity(selectedEvent))
     : undefined, [events, selectedEvent]);
@@ -119,6 +116,17 @@ export function EventsTable({ events, hasMore, loadingMore, loadMoreError, onLoa
     parentRef.current.focus({ preventScroll: true });
     moveFocusWhenRowsReturn.current = false;
   }, [events.length]);
+  useEffect(() => {
+    const ids = new Set(events.map(eventIdentity));
+    const previous = previousIds.current;
+    const added = previous ? [...ids].filter((id) => !previous.has(id)) : [];
+    previousIds.current = ids.size > 0 ? ids : undefined;
+    setNewEventIds(new Set(added));
+    if (added.length === 0) return;
+    // Expire by arrival, so scrolling a virtual row back in cannot replay it.
+    const timeout = setTimeout(() => setNewEventIds(new Set()), 1500);
+    return () => clearTimeout(timeout);
+  }, [events]);
 
   if (events.length === 0) return <div ref={emptyStateRef} tabIndex={-1} data-od-id="events-empty-focus">
     <EmptyState title={t('usage.events.empty_title')} description={t('usage.events.empty_desc')} />
@@ -150,12 +158,13 @@ export function EventsTable({ events, hasMore, loadingMore, loadMoreError, onLoa
               const event = events[virtualRow.index];
               return (
                 <Table.Tr key={virtualRow.key} ref={virtualizer.measureElement} data-index={virtualRow.index} aria-rowindex={virtualRow.index + 2}
-                  data-clickable="true" className={`${styles.eventGrid} ${styles.eventRow}`}
+                  data-clickable="true" data-failed={!event.success} data-new={newEventIds.has(eventIdentity(event))}
+                  className={`${styles.eventGrid} ${styles.eventRow}`}
                   style={{ transform: `translateY(${virtualRow.start - EVENT_HEADER_HEIGHT}px)` }} onClick={(click) => { click.currentTarget.querySelector('button')?.focus({ preventScroll: true }); setSelectedEvent(event); }}>
                   <Table.Td onClick={(click) => click.stopPropagation()}>
                     <IconButton label={t('usage.events.view_aria', { id: event.requestId })} onClick={() => setSelectedEvent(event)}><IconEye size={16} /></IconButton>
                   </Table.Td>
-                  {visibleColumns.map((column) => <Table.Td key={column} className={NUMERIC_EVENT_COLUMNS.has(column) ? styles.numericColumn : undefined}>{renderEventCell(event, column, t)}</Table.Td>)}
+                  {visibleColumns.map((column) => <Table.Td key={column} className={NUMERIC_EVENT_COLUMNS.has(column) ? styles.numericColumn : undefined}>{renderEventCell(event, column, maxLatency)}</Table.Td>)}
                 </Table.Tr>
               );
             })}

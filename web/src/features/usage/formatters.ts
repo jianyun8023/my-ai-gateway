@@ -33,6 +33,20 @@ export const formatBucket = (value: string): string => new Intl.DateTimeFormat(c
   minute: '2-digit',
 }).format(new Date(value));
 
+export const formatEventTime = (value: string): { time: string; date: string } => {
+  const date = new Date(value);
+  if (!value || !Number.isFinite(date.getTime())) return { time: '—', date: '' };
+  const locale = currentIntlLocale();
+  return {
+    time: new Intl.DateTimeFormat(locale, {
+      hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+    }).format(date),
+    date: new Intl.DateTimeFormat(locale, {
+      year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(date),
+  };
+};
+
 export const formatDuration = (value?: number | null, exact = false): string => {
   if (value == null || !Number.isFinite(value) || value < 0) return '—';
   if (exact || value < 1000) return `${formatExactInteger(value)} ms`;

@@ -84,6 +84,31 @@ export function IconRefreshCw({ size = 20, ...props }: IconProps) {
   );
 }
 
+export function IconTerminal({ size = 20, ...props }: IconProps) {
+  return <svg {...baseSvgProps} width={size} height={size} {...props}>
+    <path d="m4 17 6-5-6-5M12 19h8" />
+  </svg>;
+}
+
+export function IconCode({ size = 20, ...props }: IconProps) {
+  return <svg {...baseSvgProps} width={size} height={size} {...props}>
+    <path d="m16 18 6-6-6-6M8 6l-6 6 6 6" />
+  </svg>;
+}
+
+export function IconBot({ size = 20, ...props }: IconProps) {
+  return <svg {...baseSvgProps} width={size} height={size} {...props}>
+    <path d="M12 8V4H8M2 14h2m16 0h2M9 13v2m6-2v2" />
+    <rect x="4" y="8" width="16" height="12" rx="2" />
+  </svg>;
+}
+
+export function IconArrowRight({ size = 20, ...props }: IconProps) {
+  return <svg {...baseSvgProps} width={size} height={size} {...props}>
+    <path d="M5 12h14m-7-7 7 7-7 7" />
+  </svg>;
+}
+
 export function IconDownload({ size = 20, ...props }: IconProps) {
   return (
     <svg {...baseSvgProps} width={size} height={size} {...props}>
