@@ -18,8 +18,7 @@ export const usage = {
     status: 'Status',
     retries: 'Retries',
     latency: 'Latency',
-    ttft: 'Time to first token',
-    generation_time: 'Generation time',
+    ttft: 'Time to first upstream data',
     tokens: 'Tokens',
     tps: 'TPS',
     cache: 'Cache',
@@ -217,10 +216,10 @@ export const usage = {
     empty_desc: 'Try a different time range or filters.',
     title: 'Request Events',
     token_details_title: 'Token usage details',
-    tps_details_title: 'Throughput details',
+    tps_details_title: 'Average output speed',
     cache_details_title: 'Cache details',
     cache_basis: 'Hit rate = cache read / input tokens; cache creation is not counted as a hit',
-    tps_basis: 'TPS = output tokens / generation time; for streaming requests the generation time is total latency minus time to first token (TTFT), otherwise the total latency',
+    tps_basis: 'TPS = output tokens / total request latency in seconds: the average end-to-end output speed. Streaming and non-streaming requests use the same formula, without subtracting time to first upstream data',
   },
 
   // —— 页面级 ——

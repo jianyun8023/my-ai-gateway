@@ -113,22 +113,23 @@ describe('event metric cells', () => {
     expect(popover?.textContent).toContain('缓存创建不计入命中');
   });
 
-  it('renders output throughput over the post-first-token generation window', async () => {
-    // 299 output tokens over (10s latency − 2s TTFT) = 37.4 t/s.
+  it('renders average output speed over total latency for streaming requests', async () => {
+    // 299 output tokens over 10s total latency = 29.9 t/s, including first-data wait.
     const tpsEvent: UsageEventViewModel = { ...richEvent, latencyMs: 10_000, ttftMs: 2_000, streamed: true };
     const client = new GatewayUsageClient(new AdminClient({ fetchImpl: vi.fn<typeof fetch>() }));
     await act(async () => root.render(<EventsTable events={[tpsEvent]} hasMore={false} loadingMore={false} onLoadMore={() => {}}
       visibleColumns={['tps']} onVisibleColumnsChange={() => {}} onExport={() => {}} client={client} />));
     const cell = container.querySelectorAll('tbody tr td')[1];
-    expect(cell.textContent).toBe('37.4 t/s');
+    expect(cell.textContent).toBe('29.9 t/s');
     act(() => { cell.querySelector('span')!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })); });
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 60)); });
     const popover = document.querySelector('[data-od-id="tps-breakdown"]');
-    expect(popover?.textContent).toContain('吞吐详情');
-    expect(popover?.textContent).toContain('首 Token 时间');
+    expect(popover?.textContent).toContain('平均输出速度');
+    expect(popover?.textContent).toContain('首包时间');
     expect(popover?.textContent).toContain('2,000 ms');
-    expect(popover?.textContent).toContain('生成时长');
-    expect(popover?.textContent).toContain('8,000 ms');
+    expect(popover?.textContent).not.toContain('生成时长');
+    expect(popover?.textContent).toContain('10,000 ms');
+    expect(popover?.textContent).toContain('不扣除首包时间');
   });
 
   it('uses the full latency as the throughput window for non-streaming requests', async () => {
@@ -159,15 +160,15 @@ describe('event metric cells', () => {
     const cache = container.querySelector('[data-od-id="cache-breakdown"]')!;
     expect(cache.textContent).toContain('命中率');
     expect(cache.textContent).toContain('96.4%');
-    // 299 output tokens over 1280ms latency minus 280ms TTFT = 299 t/s.
+    // 299 output tokens over 1280ms total latency = 234 t/s (rounded).
     const tps = container.querySelector('[data-od-id="tps-breakdown"]')!;
-    for (const label of ['输出', '延迟', '首 Token 时间', '生成时长', 'TPS']) {
+    for (const label of ['输出', '延迟', '首包时间', 'TPS']) {
       expect(tps.textContent).toContain(label);
     }
     expect(tps.textContent).toContain('1,280 ms');
     expect(tps.textContent).toContain('280 ms');
-    expect(tps.textContent).toContain('1,000 ms');
-    expect(tps.textContent).toContain('299 t/s');
+    expect(tps.textContent).not.toContain('生成时长');
+    expect(tps.textContent).toContain('234 t/s');
   });
 });
 
