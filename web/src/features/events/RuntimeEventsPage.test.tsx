@@ -56,16 +56,18 @@ describe('RuntimeEventsPage', () => {
     vi.unstubAllGlobals();
   });
 
-  const renderPage = async () => {
+  const getAdminKey = () => 'test-admin-key';
+  const onLoadingChange = () => {};
+  const renderPage = async (refreshRevision = 0) => {
     await act(async () => {
       root.render(
         <GatewayManagementPage
           page="runtime-events"
-          getAdminKey={() => 'test-admin-key'}
+          getAdminKey={getAdminKey}
           adminKeyConfigured
           clearAdminKey={() => {}}
-          refreshRevision={0}
-          onLoadingChange={() => {}}
+          refreshRevision={refreshRevision}
+          onLoadingChange={onLoadingChange}
         />,
       );
     });
@@ -190,5 +192,55 @@ describe('RuntimeEventsPage', () => {
     expect(cursorSignal?.aborted).toBe(true);
     finishCursor?.();
     await act(async () => Promise.resolve());
+  });
+
+  it('locks cursor requests synchronously and removes overlapping events', async () => {
+    let finish!: (value: Response) => void;
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify(response([event], true, 'cursor-1'))))
+      .mockImplementationOnce(() => new Promise<Response>((resolve) => { finish = resolve; }));
+    vi.stubGlobal('fetch', fetchMock);
+    await renderPage();
+    const more = [...container.querySelectorAll('button')].find((button) => button.textContent === '加载更多')!;
+    await act(async () => { more.click(); more.click(); });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await act(async () => finish(new Response(JSON.stringify(response([event, { ...event, event_id: 'system:2' }])))));
+    expect(container.querySelectorAll('tbody tr')).toHaveLength(2);
+  });
+
+  it('cancels pagination when refresh starts and keeps the published cursor after refresh fails', async () => {
+    let finishOldPage!: (value: Response) => void;
+    let failRefresh!: (reason: Error) => void;
+    const initial = new Response(JSON.stringify(response([event], true, 'cursor-1')));
+    const second = { ...event, event_id: 'system:2', message: 'Second event' };
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(initial)
+      .mockResolvedValueOnce(new Response(JSON.stringify(response([second], true, 'cursor-2'))))
+      .mockImplementationOnce(() => new Promise<Response>((resolve) => { finishOldPage = resolve; }))
+      .mockImplementationOnce(() => new Promise<Response>((_resolve, reject) => { failRefresh = reject; }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(response([{ ...event, event_id: 'system:3' }]))))
+      .mockResolvedValueOnce(new Response(JSON.stringify(response([{ ...event, event_id: 'system:new', message: 'New first page' }]))));
+    vi.stubGlobal('fetch', fetchMock);
+    await renderPage();
+    const more = () => [...container.querySelectorAll('button')].find((button) => button.textContent === '加载更多')!;
+    await act(async () => more().click());
+    await waitFor(() => container.querySelectorAll('tbody tr').length === 2);
+    await act(async () => more().click());
+    const oldSignal = fetchMock.mock.calls[2][1]!.signal!;
+    await renderPage(1);
+    expect(oldSignal.aborted).toBe(true);
+    expect(container.querySelectorAll('tbody tr')).toHaveLength(2);
+    await act(async () => more().click());
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    await act(async () => finishOldPage(new Response(JSON.stringify(response([{ ...event, event_id: 'system:old', message: 'Obsolete page' }])))));
+    expect(container.textContent).not.toContain('Obsolete page');
+    await act(async () => failRefresh(new Error('Refresh failed')));
+    expect(container.querySelectorAll('tbody tr')).toHaveLength(2);
+    await act(async () => more().click());
+    expect(String(fetchMock.mock.calls[4][0])).toContain('cursor=cursor-2');
+    await waitFor(() => container.querySelectorAll('tbody tr').length === 3);
+    await renderPage(2);
+    await waitFor(() => container.textContent?.includes('New first page') ?? false);
+    expect(container.querySelectorAll('tbody tr')).toHaveLength(1);
+    expect(container.textContent).not.toContain('Second event');
   });
 });

@@ -28,9 +28,10 @@ import { Notice } from '@/components/ui/Notice';
 import { StatusPill, type StatusTone } from '@/components/ui/StatusPill';
 import { TableScroll } from '@/components/ui/TableScroll';
 import { useAdminQuery } from '@/hooks/useAdminQuery';
+import type { QuerySession } from '@/hooks/useQuerySession';
 import { formatDateTime } from '@/utils/format';
 import { Table } from '@mantine/core';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import styles from './RuntimeEventsPage.module.scss';
 
@@ -146,15 +147,13 @@ export function RuntimeEventsPage({ api, refreshRevision = 0, onBusyChange }: Ru
   const [filters, setFilters] = useState<RuntimeEventFilters>(() => appliedFilters(EMPTY_FILTERS));
   const [selected, setSelected] = useState<RuntimeEventRecord>();
   const [appended, setAppended] = useState<AppendedPageState>({ data: [], hasMore: false });
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [loadMoreError, setLoadMoreError] = useState<{ base: RuntimeEventResponse; error: AdminErrorShape }>();
-  const loadMoreController = useRef<AbortController | undefined>(undefined);
-  useEffect(() => () => loadMoreController.current?.abort(), []);
+  const [loadingMoreSession, setLoadingMoreSession] = useState<QuerySession<RuntimeEventResponse>>();
+  const [loadMoreError, setLoadMoreError] = useState<{ session: QuerySession<RuntimeEventResponse>; error: AdminErrorShape }>();
+  const pendingPage = useRef<QuerySession<RuntimeEventResponse> | undefined>(undefined);
 
   const clearPagination = useCallback(() => {
-    loadMoreController.current?.abort();
-    loadMoreController.current = undefined;
-    setLoadingMore(false);
+    pendingPage.current = undefined;
+    setLoadingMoreSession(undefined);
     setLoadMoreError(undefined);
     setAppended({ data: [], hasMore: false });
   }, []);
@@ -165,6 +164,7 @@ export function RuntimeEventsPage({ api, refreshRevision = 0, onBusyChange }: Ru
     [api, filters],
   );
   const query = useAdminQuery({ load, queryKey, refreshRevision, onBusyChange });
+  const loadingMore = loadingMoreSession !== undefined && loadingMoreSession === query.session;
   const response = query.data;
   const appendedForResponse = response && appended.base === response ? appended : undefined;
   const rows = useMemo(() => {
@@ -174,11 +174,7 @@ export function RuntimeEventsPage({ api, refreshRevision = 0, onBusyChange }: Ru
   }, [appendedForResponse?.data, response]);
   const hasMore = appendedForResponse?.hasMore ?? response?.page.has_more ?? false;
   const nextCursor = appendedForResponse?.nextCursor ?? response?.page.next_cursor;
-  const visibleLoadMoreError = response && loadMoreError?.base === response ? loadMoreError.error : undefined;
-
-  useEffect(() => {
-    clearPagination();
-  }, [clearPagination, response]);
+  const visibleLoadMoreError = loadMoreError?.session === query.session ? loadMoreError?.error : undefined;
 
   const apply = () => {
     clearPagination();
@@ -192,34 +188,30 @@ export function RuntimeEventsPage({ api, refreshRevision = 0, onBusyChange }: Ru
     setSelected(undefined);
     setFilters(appliedFilters(empty));
   };
-  const reload = () => {
-    clearPagination();
-    query.reload();
-  };
+  const reload = query.reload;
   const loadMore = async () => {
-    if (!response || !hasMore || !nextCursor || loadingMore) return;
-    loadMoreController.current?.abort();
-    const controller = new AbortController();
-    loadMoreController.current = controller;
-    setLoadingMore(true);
+    const session = query.getSession();
+    if (!session || !hasMore || !nextCursor || query.loading || query.refreshing || pendingPage.current === session) return;
+    pendingPage.current = session;
+    setLoadingMoreSession(session);
     setLoadMoreError(undefined);
     try {
-      const next = await api.runtimeEvents({ ...filters, cursor: nextCursor }, controller.signal);
-      if (controller.signal.aborted) return;
-      setAppended((current) => ({
-        base: response,
-        data: [...(current.base === response ? current.data : []), ...next.data],
+      const next = await api.runtimeEvents({ ...filters, cursor: nextCursor }, session.signal);
+      if (!session.isCurrent()) return;
+      setAppended((current) => session.isCurrent() ? ({
+        base: session.data,
+        data: [...(current.base === session.data ? current.data : []), ...next.data],
         hasMore: next.page.has_more,
         nextCursor: next.page.next_cursor,
-      }));
+      }) : current);
     } catch (error) {
-      if (!controller.signal.aborted && !isAbortError(error)) {
-        setLoadMoreError({ base: response, error: normalizeAdminError(error) });
+      if (session.isCurrent() && !isAbortError(error)) {
+        setLoadMoreError({ session, error: normalizeAdminError(error) });
       }
     } finally {
-      if (loadMoreController.current === controller) {
-        loadMoreController.current = undefined;
-        setLoadingMore(false);
+      if (pendingPage.current === session) {
+        pendingPage.current = undefined;
+        setLoadingMoreSession((current) => current === session ? undefined : current);
       }
     }
   };

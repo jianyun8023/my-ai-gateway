@@ -12,10 +12,7 @@ describe('GatewayUsagePage prototype adaptation', () => {
   it('uses the sidebar shell with flat navigation matching the prototype', () => {
     expect(shellSource).toContain('className={styles.sidebar}');
     expect(shellSource).toContain('navItemsById');
-    // 导航标签已迁移到 console i18n(shell.nav.*),按当前语言渲染全部六个扁平页面。
-    for (const pageId of ['overview', 'analysis', 'events', 'sources', 'models', 'settings']) {
-      expect(appSource).toContain(`t('shell.nav.${pageId}')`);
-    }
+    // Navigation order and translated labels are exercised by App.navigation.test.tsx.
     expect(pageSource).not.toMatch(/Round-Robin/);
   });
 

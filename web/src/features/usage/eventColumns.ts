@@ -1,9 +1,3 @@
-import { readLocalPreference } from '@/lib/browserStorage';
-
-// Bump the suffix when the column set changes so stored preferences reset to
-// defaults that include the new columns.
-export const COLUMNS_STORAGE_KEY = 'my-ai-gateway-usage-event-columns-v4';
-
 export const EVENT_COLUMNS = [
   'time',
   'logicalModel',
@@ -102,12 +96,4 @@ export const normalizeVisibleEventColumns = (value: unknown): EventColumn[] => {
   if (!Array.isArray(value)) return DEFAULT_VISIBLE_COLUMNS;
   const normalized = EVENT_COLUMNS.filter((column) => value.includes(column));
   return normalized.length > 0 ? normalized : DEFAULT_VISIBLE_COLUMNS;
-};
-
-export const loadVisibleColumns = (): EventColumn[] => {
-  try {
-    return normalizeVisibleEventColumns(JSON.parse(readLocalPreference(COLUMNS_STORAGE_KEY)));
-  } catch {
-    return DEFAULT_VISIBLE_COLUMNS;
-  }
 };

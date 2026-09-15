@@ -39,7 +39,7 @@ describe('usage query sessions', () => {
     const query = useUsageData({ client, filters, activeTab: 'events', granularity: 'auto', authGeneration, refreshRevision: revision, onLoadingChange });
     return <>
       <output>{query.eventPage?.events.map(item => item.id).join(',')}</output>
-      <span role="status">{query.loading ? 'loading' : query.refreshing ? 'refreshing' : query.loadingMore ? 'more' : 'idle'}</span>
+      <span role="status" data-exporting={query.exportingFormat}>{query.loading ? 'loading' : query.refreshing ? 'refreshing' : query.loadingMore ? 'more' : 'idle'}</span>
       {query.error && <p role="alert" data-error="load">{query.error.messageKey}</p>}
       {query.loadMoreError && <p role="alert" data-error="more">{query.loadMoreError.messageKey}</p>}
       {query.exportError && <p role="alert" data-error="export">{query.exportError.messageKey}</p>}
@@ -256,6 +256,30 @@ describe('usage query sessions', () => {
     expect(displayed()).toBe('retried');
     expect(container.querySelector('[role="alert"]')).toBeNull();
     expect(client.events.mock.calls[1][1]!.aborted).toBe(true);
+  });
+
+  it.each(['resolve', 'reject'] as const)('ignores an old export that can still %s after identity changes', async (outcome) => {
+    const oldExport = deferred<Blob>();
+    const newExport = deferred<Blob>();
+    const createObjectURL = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:new-export');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    client.events.mockResolvedValueOnce(page('identity-a')).mockResolvedValueOnce(page('identity-b'));
+    client.exportEvents.mockReturnValueOnce(oldExport.promise).mockReturnValueOnce(newExport.promise);
+    await render();
+    await click('Export');
+    await render(baseFilters, 1, 1);
+    expect(client.exportEvents.mock.calls[0][2]!.aborted).toBe(true);
+    await click('Export JSON');
+    await act(async () => outcome === 'resolve'
+      ? oldExport.resolve(new Blob(['old']))
+      : oldExport.reject(new Error('Old export failed')));
+    expect(createObjectURL).not.toHaveBeenCalled();
+    expect(container.querySelector('[data-exporting]')?.getAttribute('data-exporting')).toBe('json');
+    expect(container.querySelector('[data-error="export"]')).toBeNull();
+    await act(async () => newExport.resolve(new Blob(['new'])));
+    expect(createObjectURL).toHaveBeenCalledOnce();
+    expect(container.querySelector('[data-exporting]')).toBeNull();
   });
 
   it('aborts requests and clears the shell busy state when the page unmounts', async () => {
