@@ -13,6 +13,15 @@ describe('gateway usage adapter', () => {
     expect(adaptUsageEventPage({ data: [{ latency_ms: null }, { latency_ms: 0 }] }).events.map(event => event.latencyMs)).toEqual([undefined, 0]);
     expect(adaptUsageEventAttempts({ attempts: [{ latency_ms: null }, { latency_ms: 0 }] }).map(attempt => attempt.latencyMs)).toEqual([undefined, 0]);
   });
+  it('maps ttft and the streaming flag used for throughput computation', () => {
+    const page = adaptUsageEventPage({ data: [
+      { request_id: 's1', ttft_ms: 1200, streamed: true },
+      { request_id: 's2', ttft_ms: null, streamed: false },
+      { request_id: 's3' },
+    ] });
+    expect(page.events.map(event => event.ttftMs)).toEqual([1200, undefined, undefined]);
+    expect(page.events.map(event => event.streamed)).toEqual([true, false, false]);
+  });
   it('joins logical request counts for parsed and unknown sources', () => {
     const rows = adaptUsageBreakdown({ version: 'v1', timezone: 'UTC', dimension: 'usage_source', data: [{ key: 'parsed', logical_requests: 12 }, { key: null, logical_requests: 7 }] });
     expect(adaptUsageSummary(gatewayUsageSummaryFixture, rows).usageSources).toEqual({ parsed: 12, unknown: 7 });

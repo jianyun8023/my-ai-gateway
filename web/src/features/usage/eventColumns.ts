@@ -1,6 +1,8 @@
 import { readLocalPreference } from '@/lib/browserStorage';
 
-export const COLUMNS_STORAGE_KEY = 'my-ai-gateway-usage-event-columns-v3';
+// Bump the suffix when the column set changes so stored preferences reset to
+// defaults that include the new columns.
+export const COLUMNS_STORAGE_KEY = 'my-ai-gateway-usage-event-columns-v4';
 
 export const EVENT_COLUMNS = [
   'time',
@@ -14,6 +16,7 @@ export const EVENT_COLUMNS = [
   'retries',
   'latency',
   'tokens',
+  'tps',
   'cache',
   'usageSource',
 ] as const;
@@ -32,16 +35,18 @@ export const EVENT_COLUMN_LABELS: Record<EventColumn, string> = {
   retries: 'usage.field.retries',
   latency: 'usage.field.latency',
   tokens: 'usage.field.tokens',
+  tps: 'usage.field.tps',
   cache: 'usage.field.cache',
   usageSource: 'usage.field.usage_source',
 };
 
-// Token and cache cells carry right-aligned numeric metrics.
-export const NUMERIC_EVENT_COLUMNS: ReadonlySet<EventColumn> = new Set(['tokens', 'cache']);
+// Token, throughput and cache cells carry right-aligned numeric metrics.
+export const NUMERIC_EVENT_COLUMNS: ReadonlySet<EventColumn> = new Set(['tokens', 'tps', 'cache']);
 
 // Column headers that explain the displayed metric through an info tooltip.
 export const EVENT_COLUMN_HINTS: Partial<Record<EventColumn, string>> = {
   tokens: 'usage.detail.token_subtitle',
+  tps: 'usage.events.tps_basis',
   cache: 'usage.events.cache_basis',
 };
 
@@ -54,11 +59,12 @@ export const DEFAULT_VISIBLE_COLUMNS: EventColumn[] = [
   'retries',
   'latency',
   'tokens',
+  'tps',
   'cache',
 ];
 
 // Grid track per column: text columns flex to fill the viewport, while compact
-// metric columns (status/retries/latency/tokens/cache) are capped so the
+// metric columns (status/retries/latency/tokens/tps/cache) are capped so the
 // numeric cluster stays tight instead of stretching across wide screens.
 interface EventColumnTrack { min: number; max: string }
 
@@ -74,6 +80,7 @@ export const EVENT_COLUMN_TRACKS: Record<EventColumn, EventColumnTrack> = {
   retries: { min: 84, max: '108px' },
   latency: { min: 76, max: '96px' },
   tokens: { min: 88, max: '112px' },
+  tps: { min: 84, max: '104px' },
   cache: { min: 84, max: '104px' },
   usageSource: { min: 128, max: '1fr' },
 };

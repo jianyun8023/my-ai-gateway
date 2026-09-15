@@ -43,3 +43,10 @@ export const formatUsageTokens = (value: number, source: string, exact = false):
   if (value === 0 && isUnreportedUsage(source)) return '—';
   return exact ? formatExactInteger(value) : formatCompact(value);
 };
+
+// Output-token throughput. Rates below 100 keep one decimal; higher rates are
+// rendered as locale-separated integers to stay readable in a compact column.
+export const formatTps = (value?: number | null): string => {
+  if (value == null || !Number.isFinite(value)) return '—';
+  return `${value >= 100 ? formatExactInteger(value) : value.toFixed(1)} t/s`;
+};

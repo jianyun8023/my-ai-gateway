@@ -6,9 +6,9 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { Notice } from '@/components/ui/Notice';
 import styles from '@/features/usage/Usage.module.scss';
 import { UsageStatus } from './UsageStatus';
-import { cacheHitRate, isUnreportedUsage } from './usageQuality';
+import { cacheHitRate, isUnreportedUsage, outputTokensPerSecond } from './usageQuality';
 import { UsageBadge } from '@/features/usage/UsageBadge';
-import { formatDuration, formatFallbackReason, formatTime, formatUsageTokens } from '@/features/usage/formatters';
+import { formatDuration, formatFallbackReason, formatTime, formatTps, formatUsageTokens } from '@/features/usage/formatters';
 import { GatewayUsageClient, type UsageAttemptViewModel, type UsageEventViewModel } from '@/gateway-usage';
 import { useAdminQuery } from '@/hooks/useAdminQuery';
 import { useLocalizedApiError } from '@/hooks/useLocalizedApiError';
@@ -69,6 +69,9 @@ export function EventDetails({ event, onClose, client }: { event: UsageEventView
             <DetailItem label={t('usage.field.client_source')}><strong>{event.clientSource}</strong></DetailItem>
             <DetailItem label={t('usage.field.account')}><strong>{event.account}</strong></DetailItem>
             <DetailItem label={t('usage.field.protocol')}><strong>{event.protocolIn} → {event.protocolUpstream}</strong></DetailItem>
+            {event.ttftMs !== undefined && (
+              <DetailItem label={t('usage.field.ttft')}><strong>{formatDuration(event.ttftMs, true)}</strong></DetailItem>
+            )}
             <DetailItem label={t('usage.field.usage_source')}><UsageBadge source={event.usageSource} /></DetailItem>
             {event.fallbackReason && (
               <DetailItem label={t('usage.field.fallback_reason')}><strong title={event.fallbackReason}>{formatFallbackReason(t, event.fallbackReason)}</strong></DetailItem>
@@ -90,6 +93,7 @@ export function EventDetails({ event, onClose, client }: { event: UsageEventView
             <DetailItem label={t('usage.legend.output')}><strong>{formatUsageTokens(event.tokens.output, event.usageSource, true)}</strong></DetailItem>
             <DetailItem label={t('usage.legend.reasoning')}><strong>{formatUsageTokens(event.tokens.reasoning, event.usageSource, true)}</strong></DetailItem>
             <DetailItem label={t('usage.legend.total')}><strong>{formatUsageTokens(event.tokens.total, event.usageSource, true)}</strong></DetailItem>
+            <DetailItem label={t('usage.field.tps')}><strong>{formatTps(outputTokensPerSecond(event))}</strong></DetailItem>
           </DetailList>
         </DrawerSection>
         <DrawerSection title={t('usage.detail.section_cache')} hint={t('usage.events.cache_basis')}>
