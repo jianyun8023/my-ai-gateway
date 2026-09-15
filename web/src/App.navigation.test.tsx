@@ -55,17 +55,15 @@ describe('App console routing', () => {
 
     const navButtons = container.querySelectorAll('nav[aria-label="主导航"] button');
     expect(navButtons).toHaveLength(7);
-    expect(Array.from(navButtons).map((b) => b.textContent)).toEqual(expect.arrayContaining([
-      expect.stringContaining('总览'),
-      expect.stringContaining('用量分析'),
-      expect.stringContaining('请求事件'),
-      expect.stringContaining('运行事件'),
-      expect.stringContaining('来源管理'),
-      expect.stringContaining('模型与路由'),
-      expect.stringContaining('系统设置'),
-    ]));
+    expect(Array.from(navButtons).map((b) => b.textContent)).toEqual([
+      '总览', '用量分析', '请求事件', '运行事件', '来源管理', '模型与路由', '系统设置',
+    ]);
     expect(Array.from(navButtons).map((b) => b.textContent).some((text) => text?.includes('模型发现'))).toBe(false);
     expect(Array.from(navButtons).some((button) => button.textContent?.includes('能力矩阵'))).toBe(false);
+    await act(async () => setTestLanguage('en'));
+    expect(Array.from(container.querySelectorAll('nav button')).map((button) => button.textContent)).toEqual([
+      'Overview', 'Analysis', 'Request Events', 'Runtime Events', 'Sources', 'Models & Routes', 'Settings',
+    ]);
   });
 
   it('reacts to browser history hash changes and canonicalizes unknown routes', async () => {

@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/Button';
 import { LoadingState } from '@/components/ui/LoadingState';
 import { Notice } from '@/components/ui/Notice';
 import { SegmentedTabs } from '@/components/ui/SegmentedTabs';
-import { COLUMNS_STORAGE_KEY, loadVisibleColumns, normalizeVisibleEventColumns, type EventColumn } from '@/features/usage/eventColumns';
+import { useEventColumns } from '@/features/usage/useEventColumns';
 import type { TrendMetric } from '@/features/usage/model';
 import styles from '@/features/usage/Usage.module.scss';
 import { Analysis } from '@/features/usage/UsageAnalysis';
@@ -14,7 +14,6 @@ import { useUsageData } from '@/features/usage/useUsageData';
 import { useUsageFilters } from '@/features/usage/useUsageFilters';
 import { GatewayUsageClient } from '@/gateway-usage/client';
 import { useLocalizedApiError } from '@/hooks/useLocalizedApiError';
-import { writeLocalPreference } from '@/lib/browserStorage';
 import type { GatewayUsageTab } from '@/lib/consoleNavigation';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -32,7 +31,7 @@ export function GatewayUsagePage({ activeTab, getAdminKey, authGeneration, refre
   const localizeError = useLocalizedApiError();
   const client = useMemo(() => new GatewayUsageClient(new AdminClient({ getAdminKey })), [getAdminKey]);
   const filterState = useUsageFilters();
-  const [visibleColumns, setVisibleColumns] = useState<EventColumn[]>(loadVisibleColumns);
+  const { visibleColumns, changeVisibleColumns } = useEventColumns();
   const [trendMetric, setTrendMetric] = useState<TrendMetric>('composition');
   const [granularity, setGranularity] = useState<'auto' | 'hour' | 'day'>('auto');
   const data = useUsageData({ client, filters: filterState.filters, activeTab, granularity, authGeneration, refreshRevision, onLoadingChange });
@@ -50,11 +49,6 @@ export function GatewayUsagePage({ activeTab, getAdminKey, authGeneration, refre
     : activeTab === 'analysis'
       ? analysisSummary !== undefined
       : data.eventPage !== undefined;
-  const changeVisibleColumns = (columns: EventColumn[]) => {
-    const normalized = normalizeVisibleEventColumns(columns);
-    writeLocalPreference(COLUMNS_STORAGE_KEY, normalized);
-    setVisibleColumns(normalized);
-  };
 
   return (
     <section className={styles.content} data-od-id={`page-${activeTab}`}>

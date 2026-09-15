@@ -17,11 +17,14 @@ import {
 } from './components/ui/icons';
 import {
   canonicalConsoleHash,
+  CONSOLE_PAGE_DEFINITIONS,
+  CONSOLE_SECTIONS,
   consolePageHash,
   isUsagePage,
   resolveConsoleRoute,
   sourceRouteHash,
   type ConsoleNavSection,
+  type ConsoleIcon,
   type ConsolePage,
   type ConsoleRoute,
   type SourceSection,
@@ -37,13 +40,13 @@ const GatewayUsagePage = lazy(async () => {
   return { default: module.GatewayUsagePage };
 });
 
-const PAGE_ICONS: Record<ConsolePage, React.ReactNode> = {
-  overview: <IconDashboardGrid size={18} />,
-  analysis: <IconBarChart size={18} />,
-  events: <IconFileText size={18} />,
-  'runtime-events': <IconDatabase size={18} />,
-  sources: <IconLayers size={18} />,
-  models: <IconRoute size={18} />,
+const NAV_ICONS: Record<ConsoleIcon, React.ReactNode> = {
+  dashboard: <IconDashboardGrid size={18} />,
+  chart: <IconBarChart size={18} />,
+  file: <IconFileText size={18} />,
+  database: <IconDatabase size={18} />,
+  layers: <IconLayers size={18} />,
+  route: <IconRoute size={18} />,
   settings: <IconSettings size={18} />,
 };
 
@@ -85,21 +88,13 @@ function App() {
 
   // Navigation copy is derived from the console namespace so sidebar labels,
   // page headers and <title> follow the active language.
-  const navigationSections: readonly ConsoleNavSection[] = [
-    { label: t('shell.section.monitor'), pages: ['overview', 'analysis', 'events', 'runtime-events'] },
-    { label: t('shell.section.config'), pages: ['sources', 'models'] },
-    { label: t('shell.section.system'), pages: ['settings'] },
-  ];
-
-  const navigationItems: readonly GatewayConsoleNavItem[] = [
-    { id: 'overview', label: t('shell.nav.overview'), icon: PAGE_ICONS.overview },
-    { id: 'analysis', label: t('shell.nav.analysis'), icon: PAGE_ICONS.analysis },
-    { id: 'events', label: t('shell.nav.events'), icon: PAGE_ICONS.events },
-    { id: 'runtime-events', label: t('shell.nav.runtime-events'), icon: PAGE_ICONS['runtime-events'] },
-    { id: 'sources', label: t('shell.nav.sources'), icon: PAGE_ICONS.sources },
-    { id: 'models', label: t('shell.nav.models'), icon: PAGE_ICONS.models },
-    { id: 'settings', label: t('shell.nav.settings'), icon: PAGE_ICONS.settings },
-  ];
+  const navigationSections: readonly ConsoleNavSection[] = CONSOLE_SECTIONS.map((section) => ({
+    label: t(`shell.section.${section}`),
+    pages: CONSOLE_PAGE_DEFINITIONS.filter((entry) => entry.section === section).map(({ id }) => id),
+  }));
+  const navigationItems: readonly GatewayConsoleNavItem[] = CONSOLE_PAGE_DEFINITIONS.map(({ id, icon }) => ({
+    id, label: t(`shell.nav.${id}`), icon: NAV_ICONS[icon],
+  }));
 
   const pageTitle = route.page === 'sources' && route.sourceId
     ? t(route.sourceId === 'new'
@@ -141,6 +136,7 @@ function App() {
                   )
                 : (
                     <GatewayManagementPage
+                      key={authGeneration}
                       page={page}
                       route={route}
                       onOpenSource={navigateToSource}

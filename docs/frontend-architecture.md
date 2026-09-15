@@ -11,11 +11,11 @@
 | 层 | 入口与职责 |
 | --- | --- |
 | 应用装配 | `main.tsx` 初始化与挂载；`Root.tsx` 同步主题；`App.tsx` 接入连接状态、导航和页面 |
-| 导航与页面 | `lib/consoleNavigation.ts` 定义七个 hash 入口；`pages/` 组合功能与刷新状态 |
+| 导航与页面 | `lib/consoleNavigation.ts` 统一定义七个入口及分组、功能空间与图标名称；`App` 派生导航并解析图标和文案；`pages/` 组合功能与刷新状态 |
 | 业务功能 | `features/usage/` 组织筛选、总览、分析、请求事件与详情；`features/events/` 组织统一运行事件时间线；`features/control-plane/` 组织来源、发现、模型路由及有效能力详情、设置 |
 | 资源与数据 | `admin-api/resources.ts` 封装控制面资源；`gateway-usage/` 封装用量查询、过滤、游标合并及响应适配 |
 | HTTP 传输 | `admin-api/client.ts` 是管理请求的统一入口；`admin-api/errors.ts` 提供错误归一化 |
-| 共享能力 | `hooks/` 提供查询生命周期；`lib/` 管理导航、协议与偏好存储；`utils/` 提供格式化和下载 |
+| 共享能力 | `hooks/useQuerySession` 提供查询与后续请求的生命周期，`useAdminQuery` 追加 Admin 错误归一化；`lib/` 管理导航、协议与偏好存储；`utils/` 提供格式化和下载 |
 | 视图基础 | `components/ui/` 提供通用表单、状态、表格和弹窗；`components/gateway/` 提供控制台外壳 |
 
 两条主要读取链路：
@@ -45,6 +45,8 @@ App → GatewayManagementPage → features/events → useAdminQuery / 游标合�
 - 请求路径限制在同源 `/admin/` 下。调用方不能通过自带 Authorization 覆盖当前连接身份，不能另建页面级 `fetch` 或 XMLHttpRequest 通道。
 - `GatewayUsageClient` 只负责端点与数据适配；事件详情在适配层转成 attempt ViewModel，视图不解析原始 JSON。
 - Admin Key 仍由连接模块保存在当前标签页的 `sessionStorage`。非敏感筛选与列偏好使用安全的本地存储辅助函数；存储不可用时当前页面操作仍可继续。
+- 应用或清除 Admin Key 会递增 `authGeneration`。管理空间以该版本作为 React `key`，卸载旧查询、分页与详情/表单状态；用量空间将其纳入查询身份，立即隐藏旧数据。普通刷新只递增 `refreshRevision`，保留当前数据；不能用保留旧数据的刷新替代身份失效。
+- 请求事件的列定义与规范化保留在 `features/usage/eventColumns.ts`；`useEventColumns` 统一管理列偏好的读取、写入与 React 状态。页面只消费列值和变更回调。
 - 查询错误归一化后由页面选择文案；取消请求不显示错误。详情失败明确展示重试，不伪装成“没有 attempt”。
 
 ## 时间范围与查询生命周期
@@ -62,7 +64,11 @@ App → GatewayManagementPage → features/events → useAdminQuery / 游标合�
 
 相对时间只保存预设，不保存过期的绝对窗口。每轮首次查询、刷新或重试重新解析时间，同一轮的统计、分页和导出使用固定窗口，避免滚动时间导致页面间边界漂移。页面跨日后在刷新时切换自然日窗口。
 
-`useUsageData` 为每轮查询持有 AbortController、有效筛选与游标。切换筛选、页面、粒度或刷新时取消旧查询；即使底层在取消后返回，也不发布旧结果。分页在请求发起前同步加锁，按事件 ID 去重，避免滚动回调重复请求同一游标。`useAdminQuery` 为控制面、运行事件首屏和事件详情复用取消、加载、失败与重试流程；运行事件的后续页另外绑定首屏响应身份、取消旧请求并按 namespaced `event_id` 去重，筛选切换后不会拼入旧页。
+`useQuerySession` 统一首屏加载、刷新、失败、重试与取消，并为已发布结果提供后续请求的 signal 和身份检查。查询身份变化时立即隐藏旧结果；同身份刷新开始时取消旧首屏、分页与导出请求，保留已发布数据。刷新成功才替换数据；失败后仍可从原结果继续分页。即使底层在取消后返回，也不能发布旧结果。卸载时取消全部所属请求并清除忙碌状态。
+
+`useUsageData` 通过该原语加载首屏，将解析后的时间窗口和数据一起发布；仅保留用量领域的聚合、游标、分页失败重试与导出状态。分页和导出使用已发布结果的固定窗口；刷新过程中暂停分页，刷新失败后恢复原窗口与游标。分页在请求发起前同步加锁，按事件 ID 去重，避免滚动回调重复请求同一游标。
+
+`useAdminQuery` 在同一原语上追加 Admin 错误归一化，供控制面、运行事件首屏和事件详情使用。运行事件后续分页也绑定共享 session，在刷新开始时取消，按 namespaced `event_id` 去重；刷新失败保留已加载页，成功后以新首屏替换。详情与筛选草稿属于领域组件，连接身份变化时随管理空间一起重置。
 
 ## 组件与布局
 

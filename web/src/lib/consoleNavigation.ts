@@ -1,10 +1,22 @@
-export const CONSOLE_PAGES = [
-  'overview', 'analysis', 'events', 'runtime-events',
-  'sources', 'models', 'settings',
+export const CONSOLE_SECTIONS = ['monitor', 'config', 'system'] as const;
+
+// Route metadata stays independent of React and UI components. App resolves
+// icon names and translation keys when composing the navigation.
+export const CONSOLE_PAGE_DEFINITIONS = [
+  { id: 'overview', section: 'monitor', space: 'usage', icon: 'dashboard' },
+  { id: 'analysis', section: 'monitor', space: 'usage', icon: 'chart' },
+  { id: 'events', section: 'monitor', space: 'usage', icon: 'file' },
+  { id: 'runtime-events', section: 'monitor', space: 'management', icon: 'database' },
+  { id: 'sources', section: 'config', space: 'management', icon: 'layers' },
+  { id: 'models', section: 'config', space: 'management', icon: 'route' },
+  { id: 'settings', section: 'system', space: 'management', icon: 'settings' },
 ] as const;
 
-export type ConsolePage = typeof CONSOLE_PAGES[number];
-export type GatewayUsageTab = Extract<ConsolePage, 'overview' | 'analysis' | 'events'>;
+type ConsolePageDefinition = typeof CONSOLE_PAGE_DEFINITIONS[number];
+export type ConsolePage = ConsolePageDefinition['id'];
+export type ConsoleIcon = ConsolePageDefinition['icon'];
+export const CONSOLE_PAGES = CONSOLE_PAGE_DEFINITIONS.map(({ id }) => id);
+export type GatewayUsageTab = Extract<ConsolePageDefinition, { space: 'usage' }>['id'];
 export type GatewayManagementPage = Exclude<ConsolePage, GatewayUsageTab>;
 export type SourceSection = 'edit' | 'review';
 export interface ConsoleNavSection { label: string; pages: readonly ConsolePage[] }
@@ -19,7 +31,7 @@ export interface ConsoleRoute {
 }
 
 export function isUsagePage(page: ConsolePage): page is GatewayUsageTab {
-  return page === 'overview' || page === 'analysis' || page === 'events';
+  return CONSOLE_PAGE_DEFINITIONS.some((entry) => entry.id === page && entry.space === 'usage');
 }
 
 const normalizeHash = (hash: string): string[] => hash
