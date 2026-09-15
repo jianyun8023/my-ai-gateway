@@ -1,7 +1,7 @@
 import { HoverCard } from '@/components/ui/overlays';
 import { UsageBadge } from '@/features/usage/UsageBadge';
 import { formatDuration, formatTps, formatUsageTokens } from '@/features/usage/formatters';
-import { cacheHitRate, generationTimeMs, isUnreportedUsage, outputTokensPerSecond } from '@/features/usage/usageQuality';
+import { cacheHitRate, isUnreportedUsage, outputTokensPerSecond } from '@/features/usage/usageQuality';
 import styles from '@/features/usage/Usage.module.scss';
 import type { UsageEventViewModel } from '@/gateway-usage';
 import { formatPercent } from '@/utils/formatCompact';
@@ -49,16 +49,14 @@ export function CacheBreakdown({ event }: { event: UsageEventViewModel }) {
   );
 }
 
-// Throughput breakdown shown when hovering the TPS cell: the output tokens and
-// the exact timing window (latency, TTFT, generation time) the rate derives
-// from, so a high/low TPS can be attributed to prefill vs generation.
+// Average output speed uses total latency. First upstream data timing is shown
+// separately for context and does not enter the calculation.
 export function TpsBreakdown({ event }: { event: UsageEventViewModel }) {
   const { t } = useTranslation('console');
   const rows: Array<[string, string]> = [
     [t('usage.legend.output'), formatUsageTokens(event.tokens.output, event.usageSource, true)],
     [t('usage.field.latency'), formatDuration(event.latencyMs, true)],
     ...(event.ttftMs !== undefined ? [[t('usage.field.ttft'), formatDuration(event.ttftMs, true)] as [string, string]] : []),
-    [t('usage.field.generation_time'), formatDuration(generationTimeMs(event), true)],
     [t('usage.field.tps'), formatTps(outputTokensPerSecond(event))],
   ];
   return (

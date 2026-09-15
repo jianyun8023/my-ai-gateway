@@ -1,5 +1,44 @@
-import { cacheHitRate, hasOnlyUnreportedUsage, isUnreportedUsage } from './usageQuality';
+import { cacheHitRate, hasOnlyUnreportedUsage, isUnreportedUsage, outputTokensPerSecond } from './usageQuality';
 import { describe, expect, it } from 'vitest';
+
+describe('outputTokensPerSecond', () => {
+  const event = {
+    latencyMs: 5526, ttftMs: 5522, streamed: true,
+    tokens: { output: 31, reasoning: 10 }, usageSource: 'parsed',
+  };
+
+  it.each([
+    [31, 5526, 5522, 5.6098],
+    [229, 8183, 8082, 27.9848],
+    [196, 7173, 7081, 27.3247],
+  ])('uses total latency for production timing: %i tokens in %i ms', (output, latencyMs, ttftMs, expected) => {
+    const sample = { ...event, latencyMs, ttftMs, tokens: { ...event.tokens, output } };
+    expect(outputTokensPerSecond(sample)).toBeCloseTo(expected, 3);
+  });
+
+  it.each([undefined, 0, 5522, 5526, 6000])('does not depend on first-data timing (%s)', (ttftMs) => {
+    const sample = { ...event, ttftMs };
+    const nonStreaming = { ...sample, streamed: false };
+    expect(outputTokensPerSecond(sample)).toBeCloseTo(5.6098, 3);
+    expect(outputTokensPerSecond(nonStreaming)).toBeCloseTo(5.6098, 3);
+  });
+
+  it('uses full output tokens without subtracting or adding reasoning tokens', () => {
+    expect(outputTokensPerSecond(event)).toBeCloseTo(31 / 5.526);
+  });
+
+  it.each([undefined, 0, -1, Number.NaN, Number.POSITIVE_INFINITY])('omits speed for invalid latency (%s)', (latencyMs) => {
+    expect(outputTokensPerSecond({ ...event, latencyMs })).toBeNull();
+  });
+
+  it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY])('omits speed for invalid output (%s)', (output) => {
+    expect(outputTokensPerSecond({ ...event, tokens: { output } })).toBeNull();
+  });
+
+  it.each(['missing', 'unknown'])('omits speed when usage is %s', (usageSource) => {
+    expect(outputTokensPerSecond({ ...event, usageSource })).toBeNull();
+  });
+});
 
 describe('isUnreportedUsage', () => {
   it('treats upstream-reported and estimated usage as reported', () => {

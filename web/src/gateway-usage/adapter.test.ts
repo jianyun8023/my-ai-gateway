@@ -13,7 +13,7 @@ describe('gateway usage adapter', () => {
     expect(adaptUsageEventPage({ data: [{ latency_ms: null }, { latency_ms: 0 }] }).events.map(event => event.latencyMs)).toEqual([undefined, 0]);
     expect(adaptUsageEventAttempts({ attempts: [{ latency_ms: null }, { latency_ms: 0 }] }).map(attempt => attempt.latencyMs)).toEqual([undefined, 0]);
   });
-  it('maps ttft and the streaming flag used for throughput computation', () => {
+  it('maps first upstream data timing and the streaming flag', () => {
     const page = adaptUsageEventPage({ data: [
       { request_id: 's1', ttft_ms: 1200, streamed: true },
       { request_id: 's2', ttft_ms: null, streamed: false },

@@ -108,8 +108,8 @@ export interface UsageEventViewModel {
   fallback: boolean;
   fallbackReason?: string;
   latencyMs?: number;
-  // TTFT is recorded for streaming requests only (absent on non-streaming or
-  // failed empty streams). Together with latencyMs it derives output TPS.
+  // Time to first upstream body data, excluding gateway heartbeats. Recorded
+  // for streaming requests only; shown separately and not subtracted for TPS.
   ttftMs?: number;
   streamed: boolean;
   tokens: TokenTotals;
