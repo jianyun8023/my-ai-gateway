@@ -4,6 +4,7 @@ export const usage = {
   // —— 字段名(筛选、维度卡、事件表列、详情共用)——
   field: {
     time: '时间',
+    model: '模型',
     logical_model: '逻辑模型',
     upstream_model: '上游模型',
     provider: '提供商',
@@ -189,6 +190,7 @@ export const usage = {
     failure: '失败',
     retries_fallback: '{{count}} · 已回退',
     fallback_only: '已回退',
+    retry_count: '{{count}} 次重试',
   },
 
   // —— 事件详情抽屉 ——
@@ -211,6 +213,7 @@ export const usage = {
 
   // —— 事件表 ——
   events: {
+    latency_basis: '总延迟；条长对比已加载请求的最长耗时。≤3 秒为绿，3–10 秒为琥珀，>10 秒为红，仅作扫读提示。',
     view_aria: '查看请求 {{id}} 详情',
     empty_title: '当前范围没有请求事件',
     empty_desc: '调整时间范围或筛选条件后重试。',

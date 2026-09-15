@@ -183,9 +183,30 @@
   border-radius: 5px;
   font-variant-numeric: tabular-nums;
   cursor: default;
+  text-decoration: underline dotted transparent;
+  text-underline-offset: 3px;
+  transition: background-color 120ms ease, text-decoration-color 120ms ease;
 
-  &:hover { background: var(--accent-soft); }
+  &:hover { background: var(--accent-soft); text-decoration-color: var(--muted); }
 }
+
+.latencyCell { display: inline-flex; flex-direction: column; gap: 4px; width: 100%; font-variant-numeric: tabular-nums; }
+.latencyTrack { height: 3px; width: 100%; border-radius: 2px; background: var(--fg-soft); overflow: hidden; }
+.latencyTrack > span { display: block; width: var(--latency-width); height: 100%; border-radius: inherit; background: var(--success); }
+.latencyTrack > span[data-latency-tone='warning'] { background: var(--warn); }
+.latencyTrack > span[data-latency-tone='danger'] { background: var(--danger); }
+.statusContent { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.statusContent > svg { flex: 0 0 auto; }
+.statusDot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; flex: 0 0 auto; }
+.modelCell { display: block; min-width: 0; }
+.modelPrimary { display: flex; align-items: center; gap: 5px; }
+.modelPrimary > strong { overflow: hidden; text-overflow: ellipsis; }
+.fallbackMarker { display: inline-flex; flex: 0 0 auto; color: var(--warn); }
+.clientBadge { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; padding: 3px 5px; border-radius: 5px; background: var(--fg-soft); }
+.clientBadge > svg { flex: 0 0 auto; color: var(--muted); }
+.clientBadge > span { overflow: hidden; text-overflow: ellipsis; }
+.retryValue { display: inline-flex; align-items: center; gap: 4px; color: var(--warn); }
+.retryValue > svg { flex: 0 0 auto; }
 
 // Hover breakdown popovers for the Token / cache event columns.
 .metricPopover { display: grid; gap: 8px; min-width: 210px; }
@@ -241,8 +262,26 @@
   left: 0;
   width: 100%;
   min-height: 58px;
+  transition: background-color 120ms ease;
   td { min-width: 0; overflow: hidden; font-family: var(--font-mono); text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-small); }
   td small { display: block; overflow: hidden; color: var(--text-secondary); text-overflow: ellipsis; }
+  td .eventDate { font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  td .modelUpstream, td .protocolUpstream { display: flex; align-items: center; gap: 4px; }
+  .modelUpstream > svg, .protocolUpstream > svg { flex: 0 0 auto; }
+  .modelUpstream > span, .protocolUpstream > span { overflow: hidden; text-overflow: ellipsis; }
+  &[data-failed='true']::before { content: ''; position: absolute; inset: 0 auto 0 0; width: 2px; background: var(--danger); pointer-events: none; }
+  &[data-new='true'] > td { animation: eventArrival 1.5s ease-out; }
+}
+
+// Only paint cell backgrounds; row transforms belong to the virtualizer.
+@keyframes eventArrival {
+  from { background-color: var(--accent-soft); }
+  to { background-color: transparent; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .eventRow, .metricValue { transition: none; }
+  .eventRow[data-new='true'] > td { animation: none; }
 }
 .loadingMore { position: sticky; bottom: 0; padding: 9px; text-align: center; color: var(--text-secondary); background: var(--floating-surface); font-size: var(--fs-small); }
 

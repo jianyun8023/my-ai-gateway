@@ -8,14 +8,13 @@ import '@/i18n/console';
 import { describe, expect, it } from 'vitest';
 
 describe('GatewayUsagePage logic', () => {
-  it('defaults to ten high-frequency event columns', () => {
+  it('defaults to nine high-frequency event columns', () => {
     expect(DEFAULT_VISIBLE_COLUMNS).toEqual([
       'time',
-      'logicalModel',
-      'upstreamModel',
+      'model',
       'provider',
+      'clientSource',
       'status',
-      'retries',
       'latency',
       'tokens',
       'tps',
@@ -33,8 +32,8 @@ describe('GatewayUsagePage logic', () => {
     for (const column of ['retries', 'latency', 'tokens', 'tps', 'cache'] as const) {
       expect(EVENT_COLUMN_TRACKS[column].max).toMatch(/^\d+px$/);
     }
-    expect(EVENT_COLUMN_TRACKS.logicalModel.max).toMatch(/fr$/);
-    expect(eventTableGridTemplate(['time', 'tokens'])).toBe('80px minmax(150px, 1.1fr) minmax(88px, 112px)');
+    expect(EVENT_COLUMN_TRACKS.model.max).toMatch(/fr$/);
+    expect(eventTableGridTemplate(['time', 'tokens'])).toBe('80px minmax(96px, 112px) minmax(88px, 112px)');
     expect(eventTableMinWidth(DEFAULT_VISIBLE_COLUMNS)).toBe(80 + DEFAULT_VISIBLE_COLUMNS.reduce((total, column) => total + EVENT_COLUMN_TRACKS[column].min, 0));
   });
 

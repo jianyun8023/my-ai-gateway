@@ -3,7 +3,7 @@ import { useCallback, useState } from 'react';
 import { DEFAULT_VISIBLE_COLUMNS, normalizeVisibleEventColumns, type EventColumn } from './eventColumns';
 
 // Bump the suffix when a changed default column set must reset saved choices.
-const COLUMNS_STORAGE_KEY = 'my-ai-gateway-usage-event-columns-v4';
+const COLUMNS_STORAGE_KEY = 'my-ai-gateway-usage-event-columns-v5';
 
 function loadVisibleColumns(): EventColumn[] {
   try {
