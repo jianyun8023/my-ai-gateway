@@ -8,7 +8,7 @@ export type UpstreamQuotaStatus =
   | 'auth_error'
   | 'disabled';
 
-export interface QuotaAccountView {
+interface QuotaAccountView {
   account_id: string;
   account_display_name: string;
   source_id: string;
@@ -28,7 +28,7 @@ export interface QuotaResource {
   reset_at?: string | null;
 }
 
-export interface QuotaRefreshError {
+interface QuotaRefreshError {
   code: string;
   message: string;
   http_status?: number | null;
