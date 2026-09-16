@@ -7,6 +7,7 @@ pub(crate) mod helpers;
 pub(crate) mod keys;
 pub(crate) mod ops;
 pub(crate) mod proxy;
+pub(crate) mod upstream_quota;
 pub(crate) mod usage;
 
 #[cfg(test)]
