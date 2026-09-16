@@ -13,7 +13,10 @@ use tower_http::{services::ServeDir, trace::TraceLayer};
 use crate::{api, auth::AdminAuth, http::response::error_response, infra::audit, state::AppState};
 
 pub(crate) fn application(state: AppState) -> Router {
-    use api::{admin, discovery, events, filter_options, health_admin, keys, ops, proxy, usage};
+    use api::{
+        admin, discovery, events, filter_options, health_admin, keys, ops, proxy, upstream_quota,
+        usage,
+    };
 
     let discovery_router = discovery::auxiliary_router_with_health(
         state.db.clone(),
@@ -43,6 +46,22 @@ pub(crate) fn application(state: AppState) -> Router {
         .route(
             "/admin/usage/events/{request_id}",
             get(usage::usage_event_detail),
+        )
+        .route(
+            "/admin/upstream-quotas",
+            get(upstream_quota::list_upstream_quotas),
+        )
+        .route(
+            "/admin/upstream-quotas/refresh",
+            post(upstream_quota::refresh_upstream_quotas),
+        )
+        .route(
+            "/admin/upstream-quotas/{id}",
+            get(upstream_quota::get_upstream_quota),
+        )
+        .route(
+            "/admin/upstream-quotas/{id}/refresh",
+            post(upstream_quota::refresh_upstream_quota),
         )
         .route(
             "/admin/retention/policies",

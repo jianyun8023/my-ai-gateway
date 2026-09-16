@@ -32,6 +32,8 @@ export const common = {
   filter_options_empty: '没有匹配候选，可直接输入。',
   filter_options_more: '仅显示部分候选，请输入关键词缩小范围。',
   none: '无',
+  yes: '是',
+  no: '否',
   status: '状态',
   actions: '操作',
   name: '名称',

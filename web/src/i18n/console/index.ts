@@ -5,6 +5,7 @@ import { common as enCommon } from './en/common';
 import { errors as enErrors } from './en/errors';
 import { shell as enShell } from './en/shell';
 import { usage as enUsage } from './en/usage';
+import { quota as enQuota } from './en/quota';
 import { sources as enSources } from './en/sources';
 import { models as enModels } from './en/models';
 import { discovery as enDiscovery } from './en/discovery';
@@ -16,6 +17,7 @@ import { common as zhCommon } from './zh/common';
 import { errors as zhErrors } from './zh/errors';
 import { shell as zhShell } from './zh/shell';
 import { usage as zhUsage } from './zh/usage';
+import { quota as zhQuota } from './zh/quota';
 import { sources as zhSources } from './zh/sources';
 import { models as zhModels } from './zh/models';
 import { discovery as zhDiscovery } from './zh/discovery';
@@ -29,6 +31,7 @@ const en = {
   errors: enErrors,
   shell: enShell,
   usage: enUsage,
+  quota: enQuota,
   sources: enSources,
   models: enModels,
   discovery: enDiscovery,
@@ -43,6 +46,7 @@ const zh = {
   errors: zhErrors,
   shell: zhShell,
   usage: zhUsage,
+  quota: zhQuota,
   sources: zhSources,
   models: zhModels,
   discovery: zhDiscovery,

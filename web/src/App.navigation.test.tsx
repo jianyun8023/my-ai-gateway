@@ -46,7 +46,7 @@ describe('App console routing', () => {
     vi.unstubAllGlobals();
   });
 
-  it('shows seven navigation pages with capabilities available within models', async () => {
+  it('shows eight navigation pages with capabilities available within models', async () => {
     window.location.hash = '#overview';
     await act(async () => {
       root.render(<App />);
@@ -54,15 +54,15 @@ describe('App console routing', () => {
     });
 
     const navButtons = container.querySelectorAll('nav[aria-label="主导航"] button');
-    expect(navButtons).toHaveLength(7);
+    expect(navButtons).toHaveLength(8);
     expect(Array.from(navButtons).map((b) => b.textContent)).toEqual([
-      '总览', '用量分析', '请求事件', '运行事件', '来源管理', '模型与路由', '系统设置',
+      '总览', '用量分析', '请求事件', '上游额度', '运行事件', '来源管理', '模型与路由', '系统设置',
     ]);
     expect(Array.from(navButtons).map((b) => b.textContent).some((text) => text?.includes('模型发现'))).toBe(false);
     expect(Array.from(navButtons).some((button) => button.textContent?.includes('能力矩阵'))).toBe(false);
     await act(async () => setTestLanguage('en'));
     expect(Array.from(container.querySelectorAll('nav button')).map((button) => button.textContent)).toEqual([
-      'Overview', 'Analysis', 'Request Events', 'Runtime Events', 'Sources', 'Models & Routes', 'Settings',
+      'Overview', 'Analysis', 'Request Events', 'Upstream Quotas', 'Runtime Events', 'Sources', 'Models & Routes', 'Settings',
     ]);
   });
 

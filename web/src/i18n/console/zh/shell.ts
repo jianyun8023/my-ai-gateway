@@ -22,6 +22,7 @@ export const shell = {
     overview: '总览',
     analysis: '用量分析',
     events: '请求事件',
+    'upstream-quotas': '上游额度',
     'runtime-events': '运行事件',
     sources: '来源管理',
     models: '模型与路由',
