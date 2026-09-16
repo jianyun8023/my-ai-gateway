@@ -1299,7 +1299,9 @@ async fn create_source_rejects_custom_preset_for_builtin_provider_ids() {
 #[ignore = "requires TEST_DATABASE_URL and runs against an isolated PostgreSQL schema"]
 async fn import_gateway_config_assigns_builtin_provider_presets() {
     use crate::control_plane::model_catalog::{install_builtin_presets, ModelCatalogRepository};
-    use crate::domain::provider_preset::BUILTIN_PROVIDER_PRESET_VERSION;
+    use crate::domain::provider_preset::{
+        ProviderPresetDefinition, SourceAuthConfig, BUILTIN_PROVIDER_PRESET_VERSION,
+    };
 
     let (database, admin, schema) = isolated_database().await;
     install_builtin_presets(&ModelCatalogRepository::new(database.pool().clone()))
@@ -1345,6 +1347,12 @@ async fn import_gateway_config_assigns_builtin_provider_presets() {
         minimax.provider_preset_version,
         BUILTIN_PROVIDER_PRESET_VERSION
     );
+    let preset: ProviderPresetDefinition =
+        serde_json::from_value(minimax.provider_preset_snapshot.clone())
+            .expect("deserialize imported built-in preset");
+    assert_eq!(minimax.auth_config, preset.auth_snapshot());
+    serde_json::from_value::<SourceAuthConfig>(minimax.auth_config)
+        .expect("imported built-in auth snapshot is usable");
 
     let bai = control_plane
         .get_source("bai")
@@ -1352,6 +1360,7 @@ async fn import_gateway_config_assigns_builtin_provider_presets() {
         .expect("load imported bai source");
     assert_eq!(bai.provider_preset_id, "custom");
     assert_eq!(bai.provider_preset_version, 1);
+    assert_eq!(bai.auth_config, json!({}));
 
     let pool = database.pool().clone();
     drop(control_plane);

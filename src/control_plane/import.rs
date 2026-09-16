@@ -4,6 +4,7 @@ use crate::domain::config::{
     AccountConfig, GatewayConfig, ProtocolCapability, ProtocolMode, ProviderConfig, RouteConfig,
 };
 use crate::domain::protocol::Protocol;
+use crate::domain::provider_preset::ProviderPresetDefinition;
 use serde_json::{json, Value};
 use sqlx::{Postgres, Transaction};
 
@@ -39,7 +40,13 @@ pub(super) async fn import_gateway_config(
         let protocol_capabilities = serde_json::to_value(&provider.protocol_capabilities)?;
         let (preset_id, preset_version, preset_snapshot) =
             resolve_import_provider_preset(tx, provider).await?;
-        sqlx::query("INSERT INTO sources (id,display_name,provider_preset_id,provider_preset_version,provider_preset_snapshot,base_url,endpoints,auth_config,protocol_capabilities,enabled) VALUES ($1,$2,$3,$4,$5,$6,$7,'{}'::jsonb,$8,TRUE)")
+        let auth_config = if preset_id == "custom" {
+            json!({})
+        } else {
+            serde_json::from_value::<ProviderPresetDefinition>(preset_snapshot.clone())?
+                .auth_snapshot()
+        };
+        sqlx::query("INSERT INTO sources (id,display_name,provider_preset_id,provider_preset_version,provider_preset_snapshot,base_url,endpoints,auth_config,protocol_capabilities,enabled) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,TRUE)")
             .bind(&provider.id)
             .bind(&provider.name)
             .bind(preset_id)
@@ -47,6 +54,7 @@ pub(super) async fn import_gateway_config(
             .bind(preset_snapshot)
             .bind(&provider.base_url)
             .bind(endpoints)
+            .bind(auth_config)
             .bind(protocol_capabilities)
             .execute(&mut **tx)
             .await?;
