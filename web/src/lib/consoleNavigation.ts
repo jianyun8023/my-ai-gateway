@@ -6,6 +6,7 @@ export const CONSOLE_PAGE_DEFINITIONS = [
   { id: 'overview', section: 'monitor', space: 'usage', icon: 'dashboard' },
   { id: 'analysis', section: 'monitor', space: 'usage', icon: 'chart' },
   { id: 'events', section: 'monitor', space: 'usage', icon: 'file' },
+  { id: 'upstream-quotas', section: 'monitor', space: 'management', icon: 'database' },
   { id: 'runtime-events', section: 'monitor', space: 'management', icon: 'database' },
   { id: 'sources', section: 'config', space: 'management', icon: 'layers' },
   { id: 'models', section: 'config', space: 'management', icon: 'route' },
@@ -21,13 +22,15 @@ export type GatewayManagementPage = Exclude<ConsolePage, GatewayUsageTab>;
 export type SourceSection = 'edit' | 'review';
 export interface ConsoleNavSection { label: string; pages: readonly ConsolePage[] }
 
-/** 来源管理工作区内的子页面：来源详情 / 编辑来源 / 模型更新审核。 */
+/** 控制台路由；来源与上游额度拥有各自的二级详情地址。 */
 export interface ConsoleRoute {
   page: ConsolePage;
   /** page === 'sources' 时存在；'new' 表示新增来源工作流。 */
   sourceId?: string;
   /** sourceId 对应的子页面，缺省为来源详情。 */
   section?: SourceSection;
+  /** page === 'upstream-quotas' 时存在，表示账号额度详情。 */
+  accountId?: string;
 }
 
 export function isUsagePage(page: ConsolePage): page is GatewayUsageTab {
@@ -51,6 +54,9 @@ export const resolveConsoleRoute = (hash: string): ConsoleRoute => {
     const section = segments[2] === 'edit' || segments[2] === 'review' ? segments[2] : undefined;
     return { page: 'sources', sourceId: segments[1], section };
   }
+  if (head === 'upstream-quotas' && segments[1]) {
+    return { page: 'upstream-quotas', accountId: segments[1] };
+  }
   return { page: head };
 };
 
@@ -62,9 +68,14 @@ export const sourceRouteHash = (sourceId: string, section?: SourceSection): stri
   `#sources/${encodeURIComponent(sourceId)}${section ? `/${section}` : ''}`
 );
 
+export const upstreamQuotaRouteHash = (accountId?: string): string => (
+  accountId ? `#upstream-quotas/${encodeURIComponent(accountId)}` : '#upstream-quotas'
+);
+
 /** 将任意 hash 归一化为规范形式，无法识别时回退到总览。 */
 export const canonicalConsoleHash = (hash: string): string => {
   const route = resolveConsoleRoute(hash);
   if (route.page === 'sources' && route.sourceId) return sourceRouteHash(route.sourceId, route.section);
+  if (route.page === 'upstream-quotas') return upstreamQuotaRouteHash(route.accountId);
   return consolePageHash(route.page);
 };
