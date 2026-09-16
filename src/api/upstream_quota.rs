@@ -6,7 +6,7 @@ use axum::{
     Json,
 };
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
-use futures_util::future::join_all;
+use futures_util::{future::join_all, StreamExt};
 use reqwest::{header::HeaderName, Method, Url};
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -79,6 +79,7 @@ pub(crate) struct UpstreamQuotaSnapshot {
     latency_ms: i64,
     stale: bool,
     refresh_error: Option<QuotaRefreshError>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     raw: Option<Value>,
 }
 
@@ -105,7 +106,7 @@ pub(crate) async fn list_upstream_quotas(State(state): State<AppState>) -> Respo
     let snapshots = join_all(
         targets
             .into_iter()
-            .map(|target| fetch_snapshot(state.clone(), target)),
+            .map(|target| fetch_snapshot(state.clone(), target, false)),
     )
     .await;
     (StatusCode::OK, Json(json!({ "data": snapshots }))).into_response()
@@ -130,7 +131,7 @@ pub(crate) async fn get_upstream_quota(
         }
         Err(response) => return response,
     };
-    let snapshot = fetch_snapshot(state, target).await;
+    let snapshot = fetch_snapshot(state, target, true).await;
     (StatusCode::OK, Json(json!({ "data": snapshot }))).into_response()
 }
 
@@ -182,7 +183,11 @@ fn database_error(error: sqlx::Error) -> Response<Body> {
     )
 }
 
-async fn fetch_snapshot(state: AppState, target: QuotaTarget) -> UpstreamQuotaSnapshot {
+async fn fetch_snapshot(
+    state: AppState,
+    target: QuotaTarget,
+    include_raw: bool,
+) -> UpstreamQuotaSnapshot {
     let attempted_at = Utc::now();
     let started = Instant::now();
     let account = account_view(&target);
@@ -245,7 +250,7 @@ async fn fetch_snapshot(state: AppState, target: QuotaTarget) -> UpstreamQuotaSn
                 latency_ms: elapsed_ms(started),
                 stale: false,
                 refresh_error: None,
-                raw: Some(provider.raw),
+                raw: include_raw.then_some(provider.raw),
             }
         }
         Err(failure) => failed_snapshot(account, attempted_at, started, failure),
@@ -367,22 +372,9 @@ async fn fetch_provider_quota(
         .content_length()
         .is_some_and(|size| size > MAX_QUOTA_RESPONSE_BYTES as u64)
     {
-        return Err(FetchFailure {
-            status: "refresh_failed",
-            code: "quota_response_too_large",
-            message: "upstream quota response is too large",
-            http_status: Some(status.as_u16()),
-        });
+        return Err(quota_response_too_large(status));
     }
-    let bytes = response.bytes().await.map_err(transport_failure)?;
-    if bytes.len() > MAX_QUOTA_RESPONSE_BYTES {
-        return Err(FetchFailure {
-            status: "refresh_failed",
-            code: "quota_response_too_large",
-            message: "upstream quota response is too large",
-            http_status: Some(status.as_u16()),
-        });
-    }
+    let bytes = read_quota_body(response, status).await?;
     let raw: Value = serde_json::from_slice(&bytes).map_err(|_| FetchFailure {
         status: "refresh_failed",
         code: "invalid_quota_response",
@@ -390,6 +382,40 @@ async fn fetch_provider_quota(
         http_status: Some(status.as_u16()),
     })?;
     parse_provider_quota(&target.provider_preset_id, raw, Utc::now())
+}
+
+async fn read_quota_body(
+    response: reqwest::Response,
+    status: StatusCode,
+) -> Result<Vec<u8>, FetchFailure> {
+    let mut stream = response.bytes_stream();
+    let mut body = Vec::new();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(transport_failure)?;
+        append_quota_chunk(&mut body, &chunk, status)?;
+    }
+    Ok(body)
+}
+
+fn append_quota_chunk(
+    body: &mut Vec<u8>,
+    chunk: &[u8],
+    status: StatusCode,
+) -> Result<(), FetchFailure> {
+    if body.len().saturating_add(chunk.len()) > MAX_QUOTA_RESPONSE_BYTES {
+        return Err(quota_response_too_large(status));
+    }
+    body.extend_from_slice(chunk);
+    Ok(())
+}
+
+fn quota_response_too_large(status: StatusCode) -> FetchFailure {
+    FetchFailure {
+        status: "refresh_failed",
+        code: "quota_response_too_large",
+        message: "upstream quota response is too large",
+        http_status: Some(status.as_u16()),
+    }
 }
 
 fn quota_url(target: &QuotaTarget) -> Result<Url, FetchFailure> {
@@ -524,35 +550,34 @@ fn parse_deepseek(raw: Value) -> Result<ProviderQuota, FetchFailure> {
 }
 
 fn parse_kimi(raw: Value) -> Result<ProviderQuota, FetchFailure> {
-    let usages = raw
-        .get("usages")
-        .and_then(Value::as_object)
-        .ok_or_else(parse_failure)?;
     let mut resources = Vec::new();
-    for (field, key, label) in [
-        ("limit_5h", "5h", "5 小时"),
-        ("limit_7d", "7d", "7 天"),
-        ("limit_month_total", "month_total", "月度总额度"),
-        ("limit_month_code", "month_code", "月度编码额度"),
-    ] {
-        let Some(entry) = usages.get(field).and_then(Value::as_object) else {
-            continue;
-        };
-        let Some(used_ratio) = entry.get("used_ratio").and_then(number) else {
-            continue;
-        };
-        let used = normalize_ratio(used_ratio);
-        resources.push(QuotaResource {
-            resource_type: "window",
-            key: key.into(),
-            label: label.into(),
-            unit: "percent".into(),
-            used: Some(used),
-            remaining: Some((100.0 - used).clamp(0.0, 100.0)),
-            limit: Some(100.0),
-            reset_at: entry.get("reset_time").and_then(parse_reset_time),
-        });
+
+    if let Some(limits) = raw.get("limits").and_then(Value::as_array) {
+        for limit in limits {
+            if limit
+                .get("window")
+                .and_then(kimi_window_minutes)
+                != Some(300)
+            {
+                continue;
+            }
+            if let Some(resource) = limit
+                .get("detail")
+                .and_then(|detail| kimi_resource(detail, "5h", "5 小时"))
+            {
+                resources.push(resource);
+                break;
+            }
+        }
     }
+
+    if let Some(resource) = raw
+        .get("usage")
+        .and_then(|detail| kimi_resource(detail, "7d", "7 天"))
+    {
+        resources.push(resource);
+    }
+
     if resources.is_empty() {
         return Ok(ProviderQuota {
             resources,
@@ -564,6 +589,46 @@ fn parse_kimi(raw: Value) -> Result<ProviderQuota, FetchFailure> {
         resources,
         status_override: None,
         raw,
+    })
+}
+
+fn kimi_window_minutes(window: &Value) -> Option<i64> {
+    let duration = window.get("duration").and_then(integer)?;
+    if duration <= 0 {
+        return None;
+    }
+    match window.get("timeUnit").and_then(Value::as_str)? {
+        "TIME_UNIT_MINUTE" => Some(duration),
+        "TIME_UNIT_HOUR" => duration.checked_mul(60),
+        "TIME_UNIT_DAY" => duration.checked_mul(24 * 60),
+        "TIME_UNIT_SECOND" if duration % 60 == 0 => Some(duration / 60),
+        _ => None,
+    }
+}
+
+fn kimi_resource(detail: &Value, key: &str, label: &str) -> Option<QuotaResource> {
+    let limit = detail.get("limit").and_then(number)?;
+    if limit <= 0.0 {
+        return None;
+    }
+    let raw_used = detail.get("used").and_then(number);
+    let raw_remaining = detail.get("remaining").and_then(number);
+    let used = raw_used.or_else(|| raw_remaining.map(|remaining| limit - remaining))?;
+    let remaining = raw_remaining.or_else(|| raw_used.map(|used| limit - used))?;
+    let used_percent = (used / limit * 100.0).clamp(0.0, 100.0);
+    let remaining_percent = (remaining / limit * 100.0).clamp(0.0, 100.0);
+    Some(QuotaResource {
+        resource_type: "window",
+        key: key.into(),
+        label: label.into(),
+        unit: "percent".into(),
+        used: Some(used_percent),
+        remaining: Some(remaining_percent),
+        limit: Some(100.0),
+        reset_at: detail
+            .get("resetTime")
+            .or_else(|| detail.get("reset_time"))
+            .and_then(parse_reset_time),
     })
 }
 
@@ -609,9 +674,7 @@ fn parse_minimax(raw: Value, now: DateTime<Utc>) -> Result<ProviderQuota, FetchF
             used: Some((100.0 - remaining).clamp(0.0, 100.0)),
             remaining: Some(remaining),
             limit: Some(100.0),
-            reset_at: selected
-                .get("remains_time")
-                .and_then(|value| parse_reset(value, now)),
+            reset_at: minimax_reset(selected, false, now),
         });
     }
     if let Some(remaining) = minimax_remaining(selected, true) {
@@ -623,9 +686,7 @@ fn parse_minimax(raw: Value, now: DateTime<Utc>) -> Result<ProviderQuota, FetchF
             used: Some((100.0 - remaining).clamp(0.0, 100.0)),
             remaining: Some(remaining),
             limit: Some(100.0),
-            reset_at: selected
-                .get("weekly_remains_time")
-                .and_then(|value| parse_reset(value, now)),
+            reset_at: minimax_reset(selected, true, now),
         });
     }
     if resources.is_empty() {
@@ -664,6 +725,21 @@ fn minimax_remaining(value: &Value, weekly: bool) -> Option<f64> {
     Some((100.0 - used / total * 100.0).clamp(0.0, 100.0))
 }
 
+fn minimax_reset(value: &Value, weekly: bool, now: DateTime<Utc>) -> Option<DateTime<Utc>> {
+    let end_key = if weekly { "weekly_end_time" } else { "end_time" };
+    if let Some(end) = value.get(end_key).and_then(parse_absolute_time) {
+        return Some(end);
+    }
+
+    let remains_key = if weekly {
+        "weekly_remains_time"
+    } else {
+        "remains_time"
+    };
+    let millis = value.get(remains_key).and_then(integer)?.max(0);
+    now.checked_add_signed(ChronoDuration::milliseconds(millis))
+}
+
 fn parse_failure() -> FetchFailure {
     FetchFailure {
         status: "refresh_failed",
@@ -699,14 +775,6 @@ fn integer(value: &Value) -> Option<i64> {
         .or_else(|| value.as_str()?.parse::<i64>().ok())
 }
 
-fn normalize_ratio(value: f64) -> f64 {
-    if value <= 1.0 {
-        (value * 100.0).clamp(0.0, 100.0)
-    } else {
-        value.clamp(0.0, 100.0)
-    }
-}
-
 fn parse_reset_time(value: &Value) -> Option<DateTime<Utc>> {
     let value = value.as_str()?;
     DateTime::parse_from_rfc3339(value)
@@ -714,15 +782,11 @@ fn parse_reset_time(value: &Value) -> Option<DateTime<Utc>> {
         .map(|value| value.with_timezone(&Utc))
 }
 
-fn parse_reset(value: &Value, now: DateTime<Utc>) -> Option<DateTime<Utc>> {
+fn parse_absolute_time(value: &Value) -> Option<DateTime<Utc>> {
     if let Some(text) = value.as_str() {
         if let Ok(timestamp) = DateTime::parse_from_rfc3339(text) {
             return Some(timestamp.with_timezone(&Utc));
         }
-        if let Ok(seconds) = text.parse::<i64>() {
-            return Some(now + ChronoDuration::seconds(seconds.max(0)));
-        }
-        return None;
     }
     let raw = integer(value)?;
     if raw > 10_000_000_000 {
@@ -730,7 +794,7 @@ fn parse_reset(value: &Value, now: DateTime<Utc>) -> Option<DateTime<Utc>> {
     } else if raw > 1_000_000_000 {
         DateTime::<Utc>::from_timestamp(raw, 0)
     } else {
-        Some(now + ChronoDuration::seconds(raw.max(0)))
+        None
     }
 }
 
@@ -761,21 +825,40 @@ mod tests {
     }
 
     #[test]
-    fn parses_kimi_window_ratios() {
+    fn parses_current_kimi_usage_and_limits_shape() {
         let parsed = parse_kimi(json!({
-            "usages": {
-                "limit_5h": {"used_ratio": 0.27, "reset_time": "2026-09-16T12:24:00Z"},
-                "limit_7d": {"used_ratio": "0.59", "reset_time": "2026-09-19T12:24:00Z"}
-            }
+            "usage": {
+                "limit": "100",
+                "used": "59",
+                "remaining": "41",
+                "resetTime": "2026-09-19T12:24:00Z"
+            },
+            "limits": [{
+                "window": {"duration": 300, "timeUnit": "TIME_UNIT_MINUTE"},
+                "detail": {
+                    "limit": "100",
+                    "used": "27",
+                    "remaining": "73",
+                    "resetTime": "2026-09-16T12:24:00Z"
+                }
+            }]
         }))
         .unwrap();
         assert_eq!(parsed.resources.len(), 2);
+        assert_eq!(parsed.resources[0].key, "5h");
         assert_eq!(parsed.resources[0].remaining, Some(73.0));
+        assert_eq!(parsed.resources[1].key, "7d");
         assert_eq!(parsed.resources[1].remaining, Some(41.0));
+        assert_eq!(
+            parsed.resources[0].reset_at,
+            DateTime::parse_from_rfc3339("2026-09-16T12:24:00Z")
+                .ok()
+                .map(|value| value.with_timezone(&Utc))
+        );
     }
 
     #[test]
-    fn parses_minimax_percent_fallback() {
+    fn parses_minimax_end_time_as_millisecond_epoch() {
         let now = DateTime::parse_from_rfc3339("2026-09-16T10:00:00Z")
             .unwrap()
             .with_timezone(&Utc);
@@ -784,12 +867,12 @@ mod tests {
                 "status_code": 0,
                 "model_remains": [{
                     "model_name": "general",
-                    "current_interval_total_count": 0,
-                    "current_interval_usage_count": 0,
                     "current_interval_remaining_percent": 62,
                     "current_weekly_remaining_percent": 78,
-                    "remains_time": 7200,
-                    "weekly_remains_time": 345600
+                    "end_time": 1789567800000_i64,
+                    "weekly_end_time": 1789898400000_i64,
+                    "remains_time": 14998196,
+                    "weekly_remains_time": 345600000
                 }]
             }),
             now,
@@ -797,6 +880,75 @@ mod tests {
         .unwrap();
         assert_eq!(parsed.resources[0].remaining, Some(62.0));
         assert_eq!(parsed.resources[1].remaining, Some(78.0));
+        assert_eq!(
+            parsed.resources[0].reset_at,
+            DateTime::<Utc>::from_timestamp_millis(1789567800000)
+        );
+        assert_eq!(
+            parsed.resources[1].reset_at,
+            DateTime::<Utc>::from_timestamp_millis(1789898400000)
+        );
+    }
+
+    #[test]
+    fn parses_minimax_remains_time_as_milliseconds() {
+        let now = DateTime::parse_from_rfc3339("2026-09-16T10:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let parsed = parse_minimax(
+            json!({
+                "status_code": 0,
+                "model_remains": [{
+                    "model_name": "general",
+                    "current_interval_remaining_percent": 62,
+                    "current_weekly_remaining_percent": 78,
+                    "remains_time": 14998196,
+                    "weekly_remains_time": 345600000
+                }]
+            }),
+            now,
+        )
+        .unwrap();
+        assert_eq!(
+            parsed.resources[0].reset_at,
+            now.checked_add_signed(ChronoDuration::milliseconds(14_998_196))
+        );
+        assert_eq!(
+            parsed.resources[1].reset_at,
+            now.checked_add_signed(ChronoDuration::milliseconds(345_600_000))
+        );
+    }
+
+    #[test]
+    fn list_projection_omits_raw_provider_payload() {
+        let snapshot = UpstreamQuotaSnapshot {
+            account: QuotaAccountView {
+                account_id: "a".into(),
+                account_display_name: "A".into(),
+                source_id: "s".into(),
+                source_display_name: "S".into(),
+                provider_id: "kimi_code".into(),
+                enabled: true,
+            },
+            status: "ok",
+            resources: Vec::new(),
+            fetched_at: Some(Utc::now()),
+            attempted_at: Utc::now(),
+            latency_ms: 1,
+            stale: false,
+            refresh_error: None,
+            raw: None,
+        };
+        let serialized = serde_json::to_value(snapshot).unwrap();
+        assert!(serialized.get("raw").is_none());
+    }
+
+    #[test]
+    fn response_limit_rejects_chunk_before_appending_past_one_mib() {
+        let mut body = vec![0_u8; MAX_QUOTA_RESPONSE_BYTES - 1];
+        let error = append_quota_chunk(&mut body, &[1, 2], StatusCode::OK).unwrap_err();
+        assert_eq!(error.code, "quota_response_too_large");
+        assert_eq!(body.len(), MAX_QUOTA_RESPONSE_BYTES - 1);
     }
 
     #[test]
