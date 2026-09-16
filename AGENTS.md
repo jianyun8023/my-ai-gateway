@@ -70,7 +70,7 @@
 - Admin API 使用 `GATEWAY_ADMIN_KEY`，与下游 Virtual Key / `GATEWAY_API_KEY` 分离；未配置 Admin Key 时管理 API 必须拒绝请求。
 - Provider URL 必须经过 `SourceUrlPolicy` / 共享 HTTP client 的 allowlist、DNS 与重定向校验，禁止客户端任意指定上游 URL；私网自托管来源必须显式放行。
 - 日志禁止输出 Authorization、API Key 和完整请求正文；默认不记录响应正文片段。Base64/hex 是可逆编码，不能当作正文脱敏。
-- 账号代理必须遵守上游服务条款。不实现余额、充值、账单、额度扣减、规避 Provider 风控、TLS 指纹/请求伪装或反封禁；不扩展为多租户 SaaS、复杂 RBAC 或大规模账号运营产品。
+- 账号代理必须遵守上游服务条款。允许通过受 Admin 鉴权保护的控制面只读查询并展示上游账号额度/余额，用于运维观测；不得实现充值、账单支付、额度扣减/修改，亦不得规避 Provider 风控、TLS 指纹/请求伪装或反封禁；不扩展为多租户 SaaS、复杂 RBAC 或大规模账号运营产品。
 - 用量界面优先 Token 时序、模型/Provider/Source 分布和请求归因，价格/成本仅为可选次级视图；协议感知路由与本项目能力矩阵优先于外部产品范例。
 - 可复用 CPA Usage Keeper 的 MIT 页面组件、结构与交互，保留 License 和来源说明；不复用其 Go 后端、SQLite、Redis queue、CPA Management API、Auth Files、Ranking 或凭据/配额逻辑。New API 只借鉴接入、发现、模型与用量的产品思路/字段语义，不复制 AGPL 代码或 UI。
 
