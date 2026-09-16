@@ -645,20 +645,20 @@ fn minimax_remaining(value: &Value, weekly: bool) -> Option<f64> {
         "current_interval"
     };
     if let Some(percent) = value
-        .get(&format!("{prefix}_remaining_percent"))
+        .get(format!("{prefix}_remaining_percent"))
         .and_then(number)
     {
         return Some(percent.clamp(0.0, 100.0));
     }
     let total = value
-        .get(&format!("{prefix}_total_count"))
+        .get(format!("{prefix}_total_count"))
         .and_then(number)?;
     if total <= 0.0 {
         return None;
     }
     let used = value
-        .get(&format!("{prefix}_usage_count"))
-        .or_else(|| value.get(&format!("{prefix}_used_count")))
+        .get(format!("{prefix}_usage_count"))
+        .or_else(|| value.get(format!("{prefix}_used_count")))
         .and_then(number)
         .unwrap_or(0.0);
     Some((100.0 - used / total * 100.0).clamp(0.0, 100.0))
