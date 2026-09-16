@@ -1,5 +1,6 @@
 import { GatewayAdminResources } from '@/admin-api';
 import { AdminClient } from '@/admin-api/client';
+import { UpstreamQuotaPage } from '@/features/quota/UpstreamQuotaPage';
 import { ModelReviewPage } from '@/features/control-plane/sources/ModelReviewPage';
 import { ModelsRoutesPage } from '@/features/control-plane/ModelsRoutesPage';
 import { SettingsPage } from '@/features/control-plane/SettingsPage';
@@ -8,6 +9,7 @@ import { SourceEditPage } from '@/features/control-plane/sources/SourceEditPage'
 import { SourcesPage } from '@/features/control-plane/SourcesPage';
 import { RuntimeEventsPage } from '@/features/events/RuntimeEventsPage';
 import type { ConsoleRoute, GatewayManagementPage as GatewayManagementPageType, SourceSection } from '@/lib/consoleNavigation';
+import { UpstreamQuotaClient } from '@/upstream-quota/client';
 import { useMemo } from 'react';
 
 interface GatewayManagementPageProps {
@@ -33,11 +35,22 @@ export function GatewayManagementPage({
   refreshRevision,
   onLoadingChange,
 }: GatewayManagementPageProps) {
-  const api = useMemo(() => new GatewayAdminResources(
-    new AdminClient({ getAdminKey }),
-  ), [getAdminKey]);
+  const transport = useMemo(() => new AdminClient({ getAdminKey }), [getAdminKey]);
+  const api = useMemo(() => new GatewayAdminResources(transport), [transport]);
+  const quotaClient = useMemo(() => new UpstreamQuotaClient(transport), [transport]);
   const shared = { api, refreshRevision, onBusyChange: onLoadingChange };
 
+  if (page === 'upstream-quotas') {
+    const quotaRoute = route?.page === 'upstream-quotas' ? route : undefined;
+    return (
+      <UpstreamQuotaPage
+        client={quotaClient}
+        accountId={quotaRoute?.accountId}
+        refreshRevision={refreshRevision}
+        onBusyChange={onLoadingChange}
+      />
+    );
+  }
   if (page === 'sources') {
     const sourceRoute = route?.page === 'sources' ? route : undefined;
     const sourceId = sourceRoute?.sourceId;
