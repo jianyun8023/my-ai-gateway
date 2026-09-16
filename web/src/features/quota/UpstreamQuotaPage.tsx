@@ -1,0 +1,574 @@
+import { Checkbox, Select, Table } from '@mantine/core';
+import { Button } from '@/components/ui/Button';
+import { Card } from '@/components/ui/Card';
+import { TextField } from '@/components/ui/FormField';
+import { IconRefreshCw } from '@/components/ui/icons';
+import { LoadingState } from '@/components/ui/LoadingState';
+import { MetricCard } from '@/components/ui/MetricCard';
+import { Notice } from '@/components/ui/Notice';
+import { StatusPill } from '@/components/ui/StatusPill';
+import { TableScroll } from '@/components/ui/TableScroll';
+import { formatDateTime } from '@/utils/format';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { UpstreamQuotaClient } from '@/upstream-quota/client';
+import type {
+  QuotaResource,
+  UpstreamQuotaSnapshot,
+  UpstreamQuotaStatus,
+} from '@/upstream-quota/types';
+import styles from './UpstreamQuota.module.scss';
+
+interface UpstreamQuotaPageProps {
+  client: UpstreamQuotaClient;
+  accountId?: string;
+  refreshRevision?: number;
+  onBusyChange?: (busy: boolean) => void;
+}
+
+const FAILED_STATUSES = new Set<UpstreamQuotaStatus>(['refresh_failed', 'auth_error']);
+const PROBLEM_STATUSES = new Set<UpstreamQuotaStatus>([
+  'low',
+  'exhausted',
+  'refresh_failed',
+  'auth_error',
+  'disabled',
+]);
+
+const providerLabel = (provider: string): string => ({
+  kimi_code: 'Kimi Code',
+  minimax: 'MiniMax',
+  deepseek: 'DeepSeek',
+}[provider] ?? provider);
+
+const mergeSnapshot = (
+  previous: UpstreamQuotaSnapshot | undefined,
+  next: UpstreamQuotaSnapshot,
+): UpstreamQuotaSnapshot => {
+  if (
+    previous
+    && previous.resources.length > 0
+    && next.resources.length === 0
+    && FAILED_STATUSES.has(next.status)
+  ) {
+    return {
+      ...next,
+      resources: previous.resources,
+      fetched_at: previous.fetched_at,
+      raw: previous.raw,
+      stale: true,
+    };
+  }
+  return next;
+};
+
+const mergeSnapshots = (
+  previous: UpstreamQuotaSnapshot[],
+  next: UpstreamQuotaSnapshot[],
+): UpstreamQuotaSnapshot[] => {
+  const previousById = new Map(previous.map((item) => [item.account.account_id, item]));
+  return next.map((item) => mergeSnapshot(previousById.get(item.account.account_id), item));
+};
+
+const resourceByKey = (snapshot: UpstreamQuotaSnapshot, key: string): QuotaResource | undefined => (
+  snapshot.resources.find((resource) => resource.key === key)
+);
+
+const quotaTone = (remaining?: number | null): 'normal' | 'warning' | 'danger' => {
+  if (remaining === undefined || remaining === null) return 'normal';
+  if (remaining < 10) return 'danger';
+  if (remaining < 20) return 'warning';
+  return 'normal';
+};
+
+const statusTone = (status: UpstreamQuotaStatus): 'success' | 'warning' | 'danger' | 'muted' | 'accent' => {
+  switch (status) {
+    case 'ok': return 'success';
+    case 'low': return 'warning';
+    case 'exhausted':
+    case 'refresh_failed':
+    case 'auth_error': return 'danger';
+    case 'refreshing': return 'accent';
+    case 'unsupported':
+    case 'disabled': return 'muted';
+  }
+};
+
+const displayError = (error: unknown): string => (
+  error instanceof Error ? error.message : String(error)
+);
+
+const formatBalance = (resource: QuotaResource): string => {
+  const value = resource.remaining;
+  if (value === undefined || value === null) return '—';
+  if (/^[A-Z]{3}$/.test(resource.unit)) {
+    try {
+      return new Intl.NumberFormat(undefined, {
+        style: 'currency',
+        currency: resource.unit,
+        maximumFractionDigits: 2,
+      }).format(value);
+    } catch {
+      // Fall back to a stable provider-unit rendering for unknown currencies.
+    }
+  }
+  return `${resource.unit} ${value.toLocaleString()}`;
+};
+
+function WindowCell({ resource, unsupported, t }: {
+  resource?: QuotaResource;
+  unsupported: boolean;
+  t: ReturnType<typeof useTranslation<'console'>>['t'];
+}) {
+  if (!resource || resource.remaining === undefined || resource.remaining === null) {
+    return <span className={styles.secondary}>{unsupported ? t('quota.not_applicable') : '—'}</span>;
+  }
+  const remaining = Math.max(0, Math.min(100, resource.remaining));
+  const tone = quotaTone(remaining);
+  return (
+    <div className={styles.quotaCell}>
+      <div className={styles.quotaValue}>
+        <span>{t('quota.remaining')}</span>
+        <strong>{Math.round(remaining)}%</strong>
+      </div>
+      <div className={styles.quotaTrack} aria-hidden="true">
+        <span data-tone={tone} style={{ width: `${remaining}%` }} />
+      </div>
+      <span className={styles.quotaReset}>
+        {resource.reset_at
+          ? t('quota.reset_at', { time: formatDateTime(resource.reset_at) })
+          : t('quota.reset_unknown')}
+      </span>
+    </div>
+  );
+}
+
+function SnapshotStatus({ snapshot, refreshing, t }: {
+  snapshot: UpstreamQuotaSnapshot;
+  refreshing: boolean;
+  t: ReturnType<typeof useTranslation<'console'>>['t'];
+}) {
+  if (refreshing) {
+    return <StatusPill tone="accent">{t('quota.status.refreshing')}</StatusPill>;
+  }
+  return (
+    <StatusPill tone={statusTone(snapshot.status)}>
+      {t(`quota.status.${snapshot.status}`)}
+    </StatusPill>
+  );
+}
+
+function BalanceCell({ snapshot }: { snapshot: UpstreamQuotaSnapshot }) {
+  const balances = snapshot.resources.filter((resource) => resource.type === 'balance');
+  if (balances.length === 0) return <span className={styles.secondary}>—</span>;
+  return (
+    <div className={styles.account}>
+      {balances.map((resource) => (
+        <span key={resource.key} className={styles.balance}>{formatBalance(resource)}</span>
+      ))}
+    </div>
+  );
+}
+
+function ListPage({ client, refreshRevision = 0, onBusyChange }: Omit<UpstreamQuotaPageProps, 'accountId'>) {
+  const { t } = useTranslation('console');
+  const [items, setItems] = useState<UpstreamQuotaSnapshot[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string>();
+  const [refreshingAll, setRefreshingAll] = useState(false);
+  const [refreshingIds, setRefreshingIds] = useState<ReadonlySet<string>>(() => new Set());
+  const [refreshSummary, setRefreshSummary] = useState<string>();
+  const [search, setSearch] = useState('');
+  const [provider, setProvider] = useState('all');
+  const [status, setStatus] = useState('all');
+  const [onlyProblems, setOnlyProblems] = useState(false);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setLoading(true);
+    setError(undefined);
+    onBusyChange?.(true);
+    void client.list(controller.signal)
+      .then((next) => setItems((current) => mergeSnapshots(current, next)))
+      .catch((cause) => {
+        if (!controller.signal.aborted) setError(displayError(cause));
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setLoading(false);
+          onBusyChange?.(false);
+        }
+      });
+    return () => controller.abort();
+  }, [client, refreshRevision, onBusyChange]);
+
+  const refreshAll = async () => {
+    if (refreshingAll) return;
+    setRefreshingAll(true);
+    setRefreshSummary(undefined);
+    setError(undefined);
+    onBusyChange?.(true);
+    try {
+      const next = await client.refreshAll();
+      setItems((current) => mergeSnapshots(current, next));
+      const failed = next.filter((item) => FAILED_STATUSES.has(item.status)).length;
+      setRefreshSummary(t('quota.refresh_summary', {
+        succeeded: next.length - failed,
+        failed,
+      }));
+    } catch (cause) {
+      setError(displayError(cause));
+    } finally {
+      setRefreshingAll(false);
+      onBusyChange?.(false);
+    }
+  };
+
+  const refreshOne = async (accountId: string) => {
+    if (refreshingIds.has(accountId)) return;
+    setRefreshingIds((current) => new Set(current).add(accountId));
+    setError(undefined);
+    try {
+      const next = await client.refresh(accountId);
+      setItems((current) => current.map((item) => (
+        item.account.account_id === accountId ? mergeSnapshot(item, next) : item
+      )));
+    } catch (cause) {
+      setError(displayError(cause));
+    } finally {
+      setRefreshingIds((current) => {
+        const next = new Set(current);
+        next.delete(accountId);
+        return next;
+      });
+    }
+  };
+
+  const providers = useMemo(() => Array.from(new Set(items.map((item) => item.account.provider_id))).sort(), [items]);
+  const filtered = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    return items.filter((item) => {
+      if (term && ![
+        item.account.account_id,
+        item.account.account_display_name,
+        item.account.source_id,
+        item.account.source_display_name,
+      ].some((value) => value.toLowerCase().includes(term))) return false;
+      if (provider !== 'all' && item.account.provider_id !== provider) return false;
+      if (status !== 'all' && item.status !== status) return false;
+      if (onlyProblems && !PROBLEM_STATUSES.has(item.status)) return false;
+      return true;
+    });
+  }, [items, onlyProblems, provider, search, status]);
+
+  const usable = items.filter((item) => item.status === 'ok' || item.status === 'low').length;
+  const low = items.filter((item) => item.status === 'low').length;
+  const failed = items.filter((item) => FAILED_STATUSES.has(item.status)).length;
+  const enabled = items.filter((item) => item.account.enabled).length;
+
+  if (loading && items.length === 0) return <LoadingState label={t('quota.loading')} />;
+
+  return (
+    <section className={styles.page} data-od-id="page-upstream-quotas">
+      {refreshSummary && <Notice tone={failed > 0 ? 'warning' : 'success'}>{refreshSummary}</Notice>}
+      {error && <Notice>{error}</Notice>}
+
+      <div className={styles.summaryGrid}>
+        <MetricCard compact label={t('quota.summary.accounts')} value={String(items.length)} hint={t('quota.summary.accounts_hint', { count: enabled })} />
+        <MetricCard compact label={t('quota.summary.available')} value={String(usable)} hint={t('quota.summary.available_hint')} tone={usable === 0 && items.length > 0 ? 'warning' : undefined} />
+        <MetricCard compact label={t('quota.summary.low')} value={String(low)} hint={t('quota.summary.low_hint')} tone={low > 0 ? 'warning' : undefined} />
+        <MetricCard compact label={t('quota.summary.failed')} value={String(failed)} hint={t('quota.summary.failed_hint')} tone={failed > 0 ? 'warning' : undefined} />
+      </div>
+
+      <Card
+        variant="flush"
+        title={t('quota.list_title', { count: filtered.length })}
+        extra={(
+          <Button variant="secondary" loading={refreshingAll} onClick={() => void refreshAll()}>
+            <IconRefreshCw size={14} />{t('quota.refresh_all')}
+          </Button>
+        )}
+      >
+        <div className={styles.toolbar}>
+          <TextField
+            className={styles.search}
+            label={t('quota.search')}
+            placeholder={t('quota.search_placeholder')}
+            type="search"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            autoComplete="off"
+          />
+          <Select
+            className={styles.select}
+            label={t('quota.provider')}
+            value={provider}
+            onChange={(value) => setProvider(value ?? 'all')}
+            data={[
+              { value: 'all', label: t('quota.all') },
+              ...providers.map((value) => ({ value, label: providerLabel(value) })),
+            ]}
+            allowDeselect={false}
+          />
+          <Select
+            className={styles.select}
+            label={t('quota.state')}
+            value={status}
+            onChange={(value) => setStatus(value ?? 'all')}
+            data={[
+              { value: 'all', label: t('quota.all') },
+              ...(['ok', 'low', 'exhausted', 'refresh_failed', 'auth_error', 'unsupported', 'disabled'] as UpstreamQuotaStatus[])
+                .map((value) => ({ value, label: t(`quota.status.${value}`) })),
+            ]}
+            allowDeselect={false}
+          />
+          <Checkbox
+            className={styles.check}
+            label={t('quota.only_problems')}
+            checked={onlyProblems}
+            onChange={(event) => setOnlyProblems(event.currentTarget.checked)}
+          />
+        </div>
+
+        <TableScroll label={t('quota.table_region')}>
+          <Table className={styles.table}>
+            <Table.Thead><Table.Tr>
+              <Table.Th>{t('quota.column.account')}</Table.Th>
+              <Table.Th>{t('quota.column.provider')}</Table.Th>
+              <Table.Th>{t('quota.column.window_5h')}</Table.Th>
+              <Table.Th>{t('quota.column.window_7d')}</Table.Th>
+              <Table.Th>{t('quota.column.balance')}</Table.Th>
+              <Table.Th>{t('quota.column.status')}</Table.Th>
+              <Table.Th>{t('quota.column.updated')}</Table.Th>
+              <Table.Th>{t('quota.column.actions')}</Table.Th>
+            </Table.Tr></Table.Thead>
+            <Table.Tbody>
+              {filtered.map((snapshot) => {
+                const accountId = snapshot.account.account_id;
+                const refreshing = refreshingIds.has(accountId);
+                const unsupportedWindows = snapshot.account.provider_id === 'deepseek' || snapshot.status === 'unsupported';
+                return (
+                  <Table.Tr key={accountId}>
+                    <Table.Td>
+                      <span className={styles.account}>
+                        <strong>{snapshot.account.account_display_name}</strong>
+                        <small>{accountId}</small>
+                        <small>{snapshot.account.source_display_name}</small>
+                      </span>
+                    </Table.Td>
+                    <Table.Td>{providerLabel(snapshot.account.provider_id)}</Table.Td>
+                    <Table.Td><WindowCell resource={resourceByKey(snapshot, '5h')} unsupported={unsupportedWindows} t={t} /></Table.Td>
+                    <Table.Td><WindowCell resource={resourceByKey(snapshot, '7d')} unsupported={unsupportedWindows} t={t} /></Table.Td>
+                    <Table.Td><BalanceCell snapshot={snapshot} /></Table.Td>
+                    <Table.Td><SnapshotStatus snapshot={snapshot} refreshing={refreshing} t={t} /></Table.Td>
+                    <Table.Td>
+                      {snapshot.stale && snapshot.refresh_error ? (
+                        <span className={styles.stale}>
+                          <strong>{t('quota.refresh_failed')}</strong>
+                          <small>{snapshot.fetched_at ? formatDateTime(snapshot.fetched_at) : '—'}</small>
+                        </span>
+                      ) : (
+                        <span className={styles.secondary}>
+                          {snapshot.fetched_at ? formatDateTime(snapshot.fetched_at) : '—'}
+                        </span>
+                      )}
+                    </Table.Td>
+                    <Table.Td>
+                      <div className={styles.actions}>
+                        <Button variant="ghost" size="sm" loading={refreshing} disabled={snapshot.status === 'unsupported' || snapshot.status === 'disabled'} onClick={() => void refreshOne(accountId)}>
+                          <IconRefreshCw size={13} />{t('quota.refresh')}
+                        </Button>
+                        <Button variant="ghost" size="sm" onClick={() => { window.location.hash = `#upstream-quotas/${encodeURIComponent(accountId)}`; }}>
+                          {t('quota.details')}
+                        </Button>
+                      </div>
+                    </Table.Td>
+                  </Table.Tr>
+                );
+              })}
+            </Table.Tbody>
+          </Table>
+        </TableScroll>
+        <p className={styles.note}>{t('quota.snapshot_note')}</p>
+      </Card>
+    </section>
+  );
+}
+
+function DetailPage({ client, accountId, refreshRevision = 0, onBusyChange }: UpstreamQuotaPageProps & { accountId: string }) {
+  const { t } = useTranslation('console');
+  const [snapshot, setSnapshot] = useState<UpstreamQuotaSnapshot>();
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string>();
+  const [attempts, setAttempts] = useState<UpstreamQuotaSnapshot[]>([]);
+
+  const applySnapshot = useCallback((next: UpstreamQuotaSnapshot) => {
+    setSnapshot((current) => mergeSnapshot(current, next));
+    setAttempts((current) => [next, ...current].slice(0, 5));
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setLoading(true);
+    setError(undefined);
+    onBusyChange?.(true);
+    void client.get(accountId, controller.signal)
+      .then(applySnapshot)
+      .catch((cause) => {
+        if (!controller.signal.aborted) setError(displayError(cause));
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setLoading(false);
+          onBusyChange?.(false);
+        }
+      });
+    return () => controller.abort();
+  }, [accountId, applySnapshot, client, onBusyChange, refreshRevision]);
+
+  const refresh = async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    setError(undefined);
+    onBusyChange?.(true);
+    try {
+      applySnapshot(await client.refresh(accountId));
+    } catch (cause) {
+      setError(displayError(cause));
+    } finally {
+      setRefreshing(false);
+      onBusyChange?.(false);
+    }
+  };
+
+  if (loading && !snapshot) return <LoadingState label={t('quota.loading')} />;
+  if (!snapshot) return <Notice>{error ?? t('quota.missing')}</Notice>;
+
+  const windows = snapshot.resources.filter((resource) => resource.type === 'window');
+  const balances = snapshot.resources.filter((resource) => resource.type === 'balance');
+
+  return (
+    <section className={styles.page} data-od-id="page-upstream-quota-detail">
+      <div>
+        <Button variant="ghost" size="sm" onClick={() => { window.location.hash = '#upstream-quotas'; }}>
+          ← {t('quota.back')}
+        </Button>
+      </div>
+      {error && <Notice>{error}</Notice>}
+      {snapshot.stale && snapshot.refresh_error && (
+        <Notice tone="warning">
+          {t('quota.stale_warning', { message: snapshot.refresh_error.message })}
+        </Notice>
+      )}
+
+      <Card>
+        <div className={styles.detailHeader}>
+          <div className={styles.detailIdentity}>
+            <h2>{snapshot.account.account_display_name}</h2>
+            <span className={styles.secondary}>{snapshot.account.account_id} · {providerLabel(snapshot.account.provider_id)}</span>
+            <div className={styles.detailMeta}>
+              <SnapshotStatus snapshot={snapshot} refreshing={refreshing} t={t} />
+              <span className={styles.secondary}>{snapshot.account.source_display_name}</span>
+              <span className={styles.secondary}>{snapshot.fetched_at ? formatDateTime(snapshot.fetched_at) : '—'}</span>
+            </div>
+          </div>
+          <Button variant="secondary" loading={refreshing} disabled={snapshot.status === 'unsupported' || snapshot.status === 'disabled'} onClick={() => void refresh()}>
+            <IconRefreshCw size={14} />{t('quota.refresh')}
+          </Button>
+        </div>
+      </Card>
+
+      <div className={styles.detailGrid}>
+        <div className={styles.stack}>
+          <Card title={balances.length > 0 && windows.length === 0 ? t('quota.current_balance') : t('quota.current_quota')}>
+            {windows.length > 0 && (
+              <div className={styles.resourceList}>
+                {windows.map((resource) => {
+                  const remaining = resource.remaining ?? 0;
+                  return (
+                    <div className={styles.resourceBlock} key={resource.key}>
+                      <div className={styles.resourceHeading}>
+                        <strong>{resource.label}</strong>
+                        <span>{t('quota.remaining')} {Math.round(remaining)}%</span>
+                      </div>
+                      <div className={styles.quotaTrack}>
+                        <span data-tone={quotaTone(remaining)} style={{ width: `${Math.max(0, Math.min(100, remaining))}%` }} />
+                      </div>
+                      <div className={styles.resourceMeta}>
+                        <span>{t('quota.used')} {Math.round(resource.used ?? (100 - remaining))}%</span>
+                        <span>{resource.reset_at ? t('quota.reset_at', { time: formatDateTime(resource.reset_at) }) : t('quota.reset_unknown')}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {balances.length > 0 && (
+              <div className={styles.resourceList}>
+                {balances.map((resource) => (
+                  <div className={styles.balanceHero} key={resource.key}>
+                    <span className={styles.secondary}>{resource.label}</span>
+                    <strong>{formatBalance(resource)}</strong>
+                  </div>
+                ))}
+              </div>
+            )}
+            {windows.length === 0 && balances.length === 0 && <p className={styles.note}>{t('quota.no_resources')}</p>}
+          </Card>
+
+          <Card title={t('quota.session_attempts')}>
+            <Table>
+              <Table.Thead><Table.Tr>
+                <Table.Th>{t('quota.column.updated')}</Table.Th>
+                <Table.Th>{t('quota.column.status')}</Table.Th>
+                <Table.Th>{t('quota.latency')}</Table.Th>
+              </Table.Tr></Table.Thead>
+              <Table.Tbody>
+                {attempts.map((attempt, index) => (
+                  <Table.Tr key={`${attempt.attempted_at}-${index}`}>
+                    <Table.Td>{formatDateTime(attempt.attempted_at)}</Table.Td>
+                    <Table.Td><StatusPill tone={statusTone(attempt.status)}>{t(`quota.status.${attempt.status}`)}</StatusPill></Table.Td>
+                    <Table.Td>{attempt.latency_ms} ms</Table.Td>
+                  </Table.Tr>
+                ))}
+              </Table.Tbody>
+            </Table>
+            <p className={styles.note}>{t('quota.session_attempts_note')}</p>
+          </Card>
+        </div>
+
+        <div className={styles.stack}>
+          <Card title={t('quota.account_info')}>
+            <dl className={styles.detailList}>
+              <div><dt>{t('quota.provider')}</dt><dd>{providerLabel(snapshot.account.provider_id)}</dd></div>
+              <div><dt>{t('quota.source')}</dt><dd>{snapshot.account.source_display_name} · {snapshot.account.source_id}</dd></div>
+              <div><dt>{t('quota.column.account')}</dt><dd>{snapshot.account.account_id}</dd></div>
+              <div><dt>{t('quota.enabled')}</dt><dd>{snapshot.account.enabled ? t('common.yes') : t('common.no')}</dd></div>
+            </dl>
+          </Card>
+
+          <Card title={t('quota.data_state')}>
+            <dl className={styles.detailList}>
+              <div><dt>{t('quota.column.status')}</dt><dd>{t(`quota.status.${snapshot.status}`)}</dd></div>
+              <div><dt>{t('quota.fetched_at')}</dt><dd>{snapshot.fetched_at ? formatDateTime(snapshot.fetched_at) : '—'}</dd></div>
+              <div><dt>{t('quota.attempted_at')}</dt><dd>{formatDateTime(snapshot.attempted_at)}</dd></div>
+              <div><dt>{t('quota.latency')}</dt><dd>{snapshot.latency_ms} ms</dd></div>
+              <div><dt>{t('quota.data_source')}</dt><dd>upstream API</dd></div>
+            </dl>
+          </Card>
+        </div>
+      </div>
+
+      <Card title={t('quota.raw_data')}>
+        <pre className={styles.raw}>{snapshot.raw ? JSON.stringify(snapshot.raw, null, 2) : t('quota.raw_unavailable')}</pre>
+      </Card>
+    </section>
+  );
+}
+
+export function UpstreamQuotaPage(props: UpstreamQuotaPageProps) {
+  return props.accountId
+    ? <DetailPage {...props} accountId={props.accountId} />
+    : <ListPage {...props} />;
+}
