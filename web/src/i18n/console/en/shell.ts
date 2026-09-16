@@ -22,6 +22,7 @@ export const shell = {
     overview: 'Overview',
     analysis: 'Analysis',
     events: 'Request Events',
+    'upstream-quotas': 'Upstream Quotas',
     'runtime-events': 'Runtime Events',
     sources: 'Sources',
     models: 'Models & Routes',
