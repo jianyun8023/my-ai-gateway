@@ -554,11 +554,7 @@ fn parse_kimi(raw: Value) -> Result<ProviderQuota, FetchFailure> {
 
     if let Some(limits) = raw.get("limits").and_then(Value::as_array) {
         for limit in limits {
-            if limit
-                .get("window")
-                .and_then(kimi_window_minutes)
-                != Some(300)
-            {
+            if limit.get("window").and_then(kimi_window_minutes) != Some(300) {
                 continue;
             }
             if let Some(resource) = limit
@@ -726,7 +722,11 @@ fn minimax_remaining(value: &Value, weekly: bool) -> Option<f64> {
 }
 
 fn minimax_reset(value: &Value, weekly: bool, now: DateTime<Utc>) -> Option<DateTime<Utc>> {
-    let end_key = if weekly { "weekly_end_time" } else { "end_time" };
+    let end_key = if weekly {
+        "weekly_end_time"
+    } else {
+        "end_time"
+    };
     if let Some(end) = value.get(end_key).and_then(parse_absolute_time) {
         return Some(end);
     }
