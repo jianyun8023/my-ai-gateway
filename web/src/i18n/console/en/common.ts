@@ -32,6 +32,8 @@ export const common = {
   filter_options_empty: 'No matching suggestions. You can enter a value.',
   filter_options_more: 'Showing some suggestions. Type to narrow the results.',
   none: 'None',
+  yes: 'Yes',
+  no: 'No',
   status: 'Status',
   actions: 'Actions',
   name: 'Name',
