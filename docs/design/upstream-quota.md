@@ -12,7 +12,7 @@ V1 只提供受 Admin 鉴权保护的**只读运维观测**：
 - 余额型资源：例如 DeepSeek 账户余额；
 - 刷新状态、认证错误、不支持与停用状态；
 - 单账号刷新与批量刷新；
-- Provider 原始响应仅在账号详情中用于排障，不进入普通日志。
+- Provider 原始响应仅在账号详情中用于排障，不进入列表/批量响应或普通日志。
 
 明确不包含：充值、账单支付、余额修改、额度扣减/修改、自动购买、风控规避，也不让额度查询参与代理请求热路径。
 
@@ -90,16 +90,18 @@ UI 的 `refreshing` 是客户端瞬时状态，不要求 Provider 返回。
 
 | 方法 | 路径 | 语义 |
 | --- | --- | --- |
-| `GET` | `/admin/upstream-quotas` | 查询所有账号当前额度；V1 会读取 Provider 最新状态 |
-| `POST` | `/admin/upstream-quotas/refresh` | 显式批量刷新；单账号失败不阻塞其他账号 |
-| `GET` | `/admin/upstream-quotas/{account_id}` | 查询一个账号 |
-| `POST` | `/admin/upstream-quotas/{account_id}/refresh` | 显式刷新一个账号 |
+| `GET` | `/admin/upstream-quotas` | 查询所有账号当前额度；不返回 Provider raw payload |
+| `POST` | `/admin/upstream-quotas/refresh` | 显式批量刷新；单账号失败不阻塞其他账号；不返回 raw payload |
+| `GET` | `/admin/upstream-quotas/{account_id}` | 查询一个账号；可返回 raw payload 供 Admin 排障 |
+| `POST` | `/admin/upstream-quotas/{account_id}/refresh` | 显式刷新一个账号；可返回 raw payload |
 
 批量结果始终按账号返回独立状态；Provider 401/403 映射为 `auth_error`，网络/协议/解析错误映射为 `refresh_failed`。普通 Provider 错误不升级为整个批量 API 的 5xx。
 
 ### V1 stale-while-refresh
 
-当前实现保留在浏览器会话中的最近成功快照：当刷新返回 `refresh_failed` / `auth_error` 且本次没有有效资源时，UI 继续显示上一次成功资源，同时把记录标记为 stale 并显示刷新错误。
+当前实现把最近成功的**规范化资源快照**保存在当前浏览器标签页的 `sessionStorage`，按 `account_id` 隔离；不会缓存 Provider raw payload。组件卸载、列表/详情切换以及页面 reload 后仍可恢复该会话快照。
+
+当刷新返回 `refresh_failed` / `auth_error` 且本次没有有效资源时，客户端继续展示最近成功资源，同时保留本次失败状态、错误与 `attempted_at`，并把记录标记为 `stale`。
 
 服务端持久化快照、跨浏览器共享 TTL 缓存和持久化刷新历史不属于当前首批实现；如后续加入，必须使用独立事实表/缓存，不写入 `usage_events`，也不能改变代理请求热路径。
 
@@ -114,9 +116,9 @@ UI 的 `refreshing` 是客户端瞬时状态，不要求 Provider 返回。
 
 ### Kimi Code
 
-- Endpoint：`GET {source.base_url}/v1/usages`。
-- 依据官方 `kimi-code` 的 managed usage 实现解析 `usages.limit_5h`、`limit_7d` 以及可选月度窗口。
-- `used_ratio` 统一换算为百分比；`reset_time` 保留为 UTC 时间。
+- Endpoint：`GET {source.base_url}/v1/usages`，Kimi Code CN 默认即 `https://api.kimi.com/coding/v1/usages`。
+- 当前响应按顶层 `usage` + `limits[]` 解析：`usage` 映射周窗口（7d）；`limits[]` 中 `window.duration=300` 且 `timeUnit=TIME_UNIT_MINUTE` 的项映射 5h。
+- 每个 `detail`/`usage` 使用 `limit / used / remaining / resetTime`；额度统一换算为百分比，`resetTime` 保留为 UTC 时间。
 - 如果接口可访问但没有已知窗口，返回 `unsupported`，不伪造 0%。
 
 ### MiniMax Token Plan
@@ -124,6 +126,7 @@ UI 的 `refreshing` 是客户端瞬时状态，不要求 Provider 返回。
 - Global：`https://www.minimax.io/v1/token_plan/remains`
 - CN Source：`https://www.minimaxi.com/v1/token_plan/remains`
 - 优先读取 `current_interval_remaining_percent` / `current_weekly_remaining_percent`；缺失时尝试由 usage/total count 换算。
+- 重置时间优先读取 `end_time / weekly_end_time`（epoch，当前响应为毫秒）；缺失时把 `remains_time / weekly_remains_time` 明确按**毫秒倒计时**加到当前时间。
 - `status_code=2062` 视为当前账号/套餐不支持 Token Plan 查询。
 
 ### Custom Provider
@@ -134,8 +137,9 @@ V1 返回 `unsupported`。后续接入必须增加明确的 Provider quota adapt
 
 - 所有 Provider URL 继续经过 `SourceHttpClient` / `SourceUrlPolicy`，沿用 allowlist、DNS、重定向与 SSRF 边界。
 - 账号凭据只通过 `SecretResolver` 在服务端解析，不进入响应、日志或原始 Provider 数据。
-- Provider 响应限制为 1 MiB，并设置独立 10 秒超时。
-- 原始响应只返回给 Admin 详情页；日志仍禁止记录 Authorization、API Key 和完整响应正文。
+- Provider 响应限制为 1 MiB，并设置独立 10 秒超时；无 `Content-Length`/chunked 响应按流式 chunk 累计，超过 1 MiB 立即终止读取，不先完整缓冲。
+- 原始响应只返回给 Admin 单账号详情/单账号刷新；列表和 refresh-all 不携带 `raw` 字段，日志仍禁止记录 Authorization、API Key 和完整响应正文。
+- 浏览器 `sessionStorage` 只保存规范化资源，不保存 raw payload。
 - 额度接口不得影响 Account health、路由权重、冷却或 fallback。
 
 ## 7. UI
@@ -167,7 +171,10 @@ V1 返回 `unsupported`。后续接入必须增加明确的 Provider quota adapt
 
 普通 PR CI 不使用真实 Provider Key，因此能验证：
 
-- Provider JSON 归一化单测；
+- 当前 Kimi `usage + limits[]` JSON 形状归一化单测；
+- MiniMax epoch/millisecond reset 语义单测；
+- 列表 raw projection 与 1 MiB 流式硬上限辅助回归；
+- 浏览器会话级 SWR 缓存回归；
 - Admin Client / 路由契约；
 - Rust/Web 静态检查与构建；
 - 现有 PostgreSQL 回归没有被破坏。
