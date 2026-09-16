@@ -14,10 +14,8 @@ use sqlx::FromRow;
 use std::time::{Duration, Instant};
 
 use crate::{
-    domain::provider_preset::SourceAuthConfig,
-    http::response::error_response,
-    infra::secrets::SecretResolverError,
-    source_url::reqwest_error_is_policy_violation,
+    domain::provider_preset::SourceAuthConfig, http::response::error_response,
+    infra::secrets::SecretResolverError, source_url::reqwest_error_is_policy_violation,
     state::AppState,
 };
 
@@ -104,7 +102,12 @@ pub(crate) async fn list_upstream_quotas(State(state): State<AppState>) -> Respo
         Ok(targets) => targets,
         Err(response) => return response,
     };
-    let snapshots = join_all(targets.into_iter().map(|target| fetch_snapshot(state.clone(), target))).await;
+    let snapshots = join_all(
+        targets
+            .into_iter()
+            .map(|target| fetch_snapshot(state.clone(), target)),
+    )
+    .await;
     (StatusCode::OK, Json(json!({ "data": snapshots }))).into_response()
 }
 
@@ -197,7 +200,10 @@ async fn fetch_snapshot(state: AppState, target: QuotaTarget) -> UpstreamQuotaSn
         };
     }
 
-    if !matches!(target.provider_preset_id.as_str(), "deepseek" | "minimax" | "kimi_code") {
+    if !matches!(
+        target.provider_preset_id.as_str(),
+        "deepseek" | "minimax" | "kimi_code"
+    ) {
         return UpstreamQuotaSnapshot {
             account,
             status: "unsupported",
@@ -220,12 +226,7 @@ async fn fetch_snapshot(state: AppState, target: QuotaTarget) -> UpstreamQuotaSn
     ) {
         Ok(credential) => credential,
         Err(error) => {
-            return failed_snapshot(
-                account,
-                attempted_at,
-                started,
-                secret_failure(error),
-            )
+            return failed_snapshot(account, attempted_at, started, secret_failure(error))
         }
     };
 
@@ -300,14 +301,15 @@ async fn fetch_provider_quota(
     credential: &str,
 ) -> Result<ProviderQuota, FetchFailure> {
     let url = quota_url(target)?;
-    let auth = serde_json::from_value::<SourceAuthConfig>(target.auth_config.clone()).map_err(|_| {
-        FetchFailure {
-            status: "refresh_failed",
-            code: "invalid_auth_config",
-            message: "source authentication configuration is invalid",
-            http_status: None,
-        }
-    })?;
+    let auth =
+        serde_json::from_value::<SourceAuthConfig>(target.auth_config.clone()).map_err(|_| {
+            FetchFailure {
+                status: "refresh_failed",
+                code: "invalid_auth_config",
+                message: "source authentication configuration is invalid",
+                http_status: None,
+            }
+        })?;
     let mut request = state
         .http
         .request(Method::GET, url)
@@ -327,14 +329,13 @@ async fn fetch_provider_quota(
         })?;
         request = request.header(name, value);
     }
-    let credential_name = HeaderName::from_bytes(auth.credential_header.header.as_bytes()).map_err(|_| {
-        FetchFailure {
+    let credential_name = HeaderName::from_bytes(auth.credential_header.header.as_bytes())
+        .map_err(|_| FetchFailure {
             status: "refresh_failed",
             code: "invalid_header_template",
             message: "source credential header is invalid",
             http_status: None,
-        }
-    })?;
+        })?;
     request = request.header(
         credential_name,
         format!("{}{}", auth.credential_header.prefix, credential),
@@ -420,8 +421,12 @@ fn join_source_url(base_url: &str, endpoint: &str) -> Result<Url, FetchFailure> 
     {
         return Err(invalid_quota_url());
     }
-    Url::parse(&format!("{}{}", base.as_str().trim_end_matches('/'), endpoint))
-        .map_err(|_| invalid_quota_url())
+    Url::parse(&format!(
+        "{}{}",
+        base.as_str().trim_end_matches('/'),
+        endpoint
+    ))
+    .map_err(|_| invalid_quota_url())
 }
 
 fn invalid_quota_url() -> FetchFailure {
@@ -483,7 +488,10 @@ fn parse_provider_quota(
 }
 
 fn parse_deepseek(raw: Value) -> Result<ProviderQuota, FetchFailure> {
-    let available = raw.get("is_available").and_then(Value::as_bool).unwrap_or(true);
+    let available = raw
+        .get("is_available")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
     let balances = raw
         .get("balance_infos")
         .and_then(Value::as_array)
@@ -601,7 +609,9 @@ fn parse_minimax(raw: Value, now: DateTime<Utc>) -> Result<ProviderQuota, FetchF
             used: Some((100.0 - remaining).clamp(0.0, 100.0)),
             remaining: Some(remaining),
             limit: Some(100.0),
-            reset_at: selected.get("remains_time").and_then(|value| parse_reset(value, now)),
+            reset_at: selected
+                .get("remains_time")
+                .and_then(|value| parse_reset(value, now)),
         });
     }
     if let Some(remaining) = minimax_remaining(selected, true) {
@@ -629,7 +639,11 @@ fn parse_minimax(raw: Value, now: DateTime<Utc>) -> Result<ProviderQuota, FetchF
 }
 
 fn minimax_remaining(value: &Value, weekly: bool) -> Option<f64> {
-    let prefix = if weekly { "current_weekly" } else { "current_interval" };
+    let prefix = if weekly {
+        "current_weekly"
+    } else {
+        "current_interval"
+    };
     if let Some(percent) = value
         .get(&format!("{prefix}_remaining_percent"))
         .and_then(number)
