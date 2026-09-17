@@ -15,8 +15,8 @@ export const consoleTheme = createTheme({
   defaultRadius: 'md',
   fontSizes: { xs: 'var(--fs-small)', sm: 'var(--fs-meta)', md: 'var(--fs-body)', lg: 'var(--fs-h3)', xl: 'var(--fs-h2)' },
   respectReducedMotion: true,
-  spacing: { xs: '4px', sm: '8px', md: '16px', lg: '24px', xl: '32px' },
-  radius: { xs: '4px', sm: '6px', md: '8px', lg: '12px', xl: '16px' },
+  spacing: { xs: 'var(--gap-xs)', sm: 'var(--gap-sm)', md: 'var(--gap-md)', lg: 'var(--gap-lg)', xl: 'var(--gap-xl)' },
+  radius: { xs: 'var(--radius-xs)', sm: 'var(--radius-sm)', md: 'var(--radius)', lg: 'var(--radius-lg)', xl: 'var(--radius-xl)' },
   breakpoints: { xs: '23.75em', sm: '37.5em', md: '57.5em', lg: '75em', xl: '90em' },
   components: {
     Accordion: {

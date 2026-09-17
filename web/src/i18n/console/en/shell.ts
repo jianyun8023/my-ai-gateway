@@ -1,7 +1,19 @@
 // 控制台外壳/导航文案(英文)——命名空间 console.shell
 export const shell = {
-  switch_to_light: 'Switch to light theme',
-  switch_to_dark: 'Switch to dark theme',
+  appearance: {
+    title: 'Appearance',
+    description: 'Preview a theme style and display mode instantly.',
+    trigger: 'Appearance: {{style}}, {{mode}}',
+    style_label: 'Theme style',
+    mode_label: 'Display mode',
+    modes: { auto: 'System', light: 'Light', dark: 'Dark' },
+    styles: {
+      utility: { label: 'Console Green', description: 'Cool gray engineering workspace' },
+      ocean: { label: 'Deep Ocean', description: 'Blue-gray observability console' },
+      nebula: { label: 'Nebula', description: 'Modern indigo intelligence interface' },
+      sandstone: { label: 'Sandstone', description: 'Warm neutral operations interface' },
+    },
+  },
   // 品牌与侧栏
   brand_name: 'AI Gateway',
   sidebar_aria: 'Console sidebar',

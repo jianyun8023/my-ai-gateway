@@ -1,7 +1,19 @@
 // 控制台外壳/导航文案(简体中文)——命名空间 console.shell
 export const shell = {
-  switch_to_light: '切换为浅色主题',
-  switch_to_dark: '切换为深色主题',
+  appearance: {
+    title: '外观设置',
+    description: '即时预览主题风格与显示模式。',
+    trigger: '外观设置：{{style}}，{{mode}}',
+    style_label: '主题风格',
+    mode_label: '显示模式',
+    modes: { auto: '跟随系统', light: '浅色', dark: '深色' },
+    styles: {
+      utility: { label: '青绿控制台', description: '冷灰与绿色的工程工作台' },
+      ocean: { label: '深海观测', description: '蓝灰与青色的观测控制台' },
+      nebula: { label: '星云', description: '靛紫色的现代智能界面' },
+      sandstone: { label: '砂岩', description: '暖灰与琥珀的沉稳界面' },
+    },
+  },
   // 品牌与侧栏
   brand_name: 'AI Gateway',
   sidebar_aria: '控制台侧栏',

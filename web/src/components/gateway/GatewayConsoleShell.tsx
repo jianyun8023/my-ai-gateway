@@ -16,12 +16,11 @@ import { Button } from '@/components/ui/Button';
 import {
   IconMenu,
   IconKey,
-  IconSunAsterisk,
   IconRefreshCw,
 } from '@/components/ui/icons';
 import { LanguageSwitcher } from '@/components/ui/LanguageSwitcher';
+import { ThemeSwitcher } from '@/components/ui/ThemeSwitcher';
 import type { ConsolePage, ConsoleNavSection } from '@/lib/consoleNavigation';
-import { useThemeStore } from '@/stores/useThemeStore';
 import { useTranslation } from 'react-i18next';
 import styles from './GatewayConsoleShell.module.scss';
 
@@ -94,8 +93,6 @@ export function GatewayConsoleShell({
   const pageTitleRef = useRef<HTMLHeadingElement>(null);
   const previousFocusKey = useRef(focusKey);
   const mobile = useMediaQuery('(max-width: 920px)');
-  const resolvedTheme = useThemeStore((state) => state.resolvedTheme);
-  const setTheme = useThemeStore((state) => state.setTheme);
   const { t } = useTranslation('console');
 
   // 网关服务入口:开发态走本机后端,生产态展示部署来源(替代写死的 localhost 占位)。
@@ -223,9 +220,7 @@ export function GatewayConsoleShell({
               <IconKey size={16} />{t('shell.connection_aria')}
             </Button>}
             <div className={styles.utilityControls}>
-              <IconButton label={t(resolvedTheme === 'dark' ? 'shell.switch_to_light' : 'shell.switch_to_dark')} onClick={() => setTheme(resolvedTheme === 'dark' ? 'white' : 'dark')}>
-                <IconSunAsterisk size={18} />
-              </IconButton>
+              <ThemeSwitcher />
               {!mobile && <LanguageSwitcher />}
               {refreshable && (
                 <IconButton label={t('common.refresh')} onClick={() => setRefreshRevision((c) => c + 1)} loading={refreshing}>

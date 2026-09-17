@@ -12,7 +12,7 @@ Tech-Utility：冷灰底色、绿色强调、紧凑数据布局。使用固定�
 
 ## Token 与尺度
 
-品牌 Token 统一维护在 [gateway-brand.scss](web/src/styles/gateway-brand.scss) 的 `:root`，页面、Mantine CSS 变量和 Portal 共享继承。主题选择与持久化仍由 `useThemeStore` 唯一管理，`ConsoleProvider` 将 `resolvedTheme` 传给 Mantine 的 `forceColorScheme`，不建立另一套主题存储。原生控件通过 `color-scheme` 跟随主题。
+品牌 Token 统一维护在 [gateway-brand.scss](web/src/styles/gateway-brand.scss) 的 `:root`，页面、Mantine CSS 变量和 Portal 共享继承。外观分为两个正交维度：`style` 选择青绿控制台、深海观测、星云或砂岩视觉风格，`mode` 选择浅色、深色或跟随系统。主题选择与持久化仍由 `useThemeStore` 唯一管理；根节点分别通过 `data-theme-style` 与 `data-color-scheme` 暴露解析结果，`ConsoleProvider` 将 `resolvedColorScheme` 传给 Mantine 的 `forceColorScheme`。原生控件通过 `color-scheme` 跟随解析后的显示模式。
 
 | 用途 | Token / 约定 |
 | --- | --- |
@@ -27,7 +27,7 @@ Tech-Utility：冷灰底色、绿色强调、紧凑数据布局。使用固定�
 
 触摸主指针下的输入、选择与文本域字号至少为 16px，避免 iOS 聚焦时自动放大；桌面仍使用紧凑的 12px 控件字号，不通过禁止页面缩放规避该行为。
 
-现有 `--keeper-*`、`--text-*` 等变量也由品牌层映射，页面不重复定义。Mantine 字体、间距、断点、组件默认值及语义变量映射集中在 [theme.ts](web/src/components/ui/theme.ts)。旧 `themes.scss`、`components.scss`、`layout.scss` 和 `mixins.scss` 已在确认无生产调用后删除，不再保留第二套主题或全局组件样式。
+现有 `--keeper-*`、`--text-*` 等变量也由品牌层映射，页面不重复定义。不同风格只覆盖品牌色与圆角尺度，不在业务页面增加主题名称分支；Mantine 字体、间距、圆角、断点、组件默认值及语义变量映射集中在 [theme.ts](web/src/components/ui/theme.ts)。旧 `themes.scss`、`components.scss`、`layout.scss` 和 `mixins.scss` 已在确认无生产调用后删除，不再保留第二套主题或全局组件样式。
 
 加载顺序固定为全局 reset → 品牌 Token → [Mantine 按需样式](web/src/styles/mantine.css) → Root 引入的组件 CSS Modules。新增 Mantine 控件时在该入口补充组件样式及其内部依赖；例如 Select 同时依赖 Input、Popover、ScrollArea 与 Combobox。不要在页面导入全库样式或依赖加载顺序覆盖公共交互。
 
@@ -96,9 +96,9 @@ Tech-Utility：冷灰底色、绿色强调、紧凑数据布局。使用固定�
 
 ### 应用壳与导航
 
-`GatewayConsoleShell` 统一八页导航、标题和顶栏。NavLink 的排版、选中态、焦点和减少动画规则维护于 `components/ui/Navigation.module.scss`，桌面导航至少 40px，移动导航至少 44px；页面不复制导航按钮样式。菜单、主题、刷新使用公共 IconButton，刷新中由 Mantine ActionIcon 禁用重复点击。页面一级标题采用 Mantine Title。
+`GatewayConsoleShell` 统一八页导航、标题和顶栏。NavLink 的排版、选中态、焦点和减少动画规则维护于 `components/ui/Navigation.module.scss`，桌面导航至少 40px，移动导航至少 44px；页面不复制导航按钮样式。菜单、外观、刷新使用公共 IconButton；外观 Popover 可即时预览风格与浅色/深色/跟随系统模式，刷新中由 Mantine ActionIcon 禁用重复点击。页面一级标题采用 Mantine Title。
 
-Shell 保留原生 CSS Grid/Flex 布局与现有 hash 导航、刷新版本及 session-only Admin Key 契约。Admin Key 应用或清空会递增只含数字的认证代次，供用量查询隔离身份；查询键不得包含密钥正文，普通刷新不改变认证代次。大于 1280px 顶栏单行，921–1280px 将连接信息放到第二行；不挤掉标题或隐藏操作。920px 及以下由公共 Drawer 承载导航、语言和连接信息，只有一份连接字段被渲染。草稿受同一 state 控制，切换布局/开关导航不自动应用，显式应用或 Enter 后才清空草稿并触发刷新。桌面侧栏可独立纵向滚动，移动侧栏沿用公共 Drawer 的内容滚动和焦点规则。主题按钮根据 resolvedTheme 决定文案及切换目标，兼容跟随系统深色。
+Shell 保留原生 CSS Grid/Flex 布局与现有 hash 导航、刷新版本及 session-only Admin Key 契约。Admin Key 应用或清空会递增只含数字的认证代次，供用量查询隔离身份；查询键不得包含密钥正文，普通刷新不改变认证代次。大于 1280px 顶栏单行，921–1280px 将连接信息放到第二行；不挤掉标题或隐藏操作。920px 及以下由公共 Drawer 承载导航、语言和连接信息，只有一份连接字段被渲染。草稿受同一 state 控制，切换布局/开关导航不自动应用，显式应用或 Enter 后才清空草稿并触发刷新。桌面侧栏可独立纵向滚动，移动侧栏沿用公共 Drawer 的内容滚动和焦点规则。外观入口读取当前 `style` 与 `mode` 生成可访问名称；跟随系统时只更新解析后的显示模式，不覆盖用户选择的视觉风格。
 
 ### 通知与持久反馈
 

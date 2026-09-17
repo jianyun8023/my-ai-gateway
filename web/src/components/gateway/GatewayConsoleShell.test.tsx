@@ -96,18 +96,25 @@ describe('GatewayConsoleShell Admin key boundary', () => {
     expect(sessionStorage.getItem(GATEWAY_ADMIN_KEY_STORAGE_KEY)).toBeNull();
   });
 
-  it('toggles the resolved system-dark theme and blocks repeated refresh while busy', async () => {
+  it('previews theme style and mode while blocking repeated refresh during work', async () => {
     vi.stubGlobal('matchMedia', (query: string) => ({ matches: query.includes('prefers-color-scheme: dark'), media: query,
       addEventListener: () => {}, removeEventListener: () => {} }));
-    useThemeStore.getState().setTheme('auto');
+    useThemeStore.getState().setStyle('utility');
+    useThemeStore.getState().setMode('auto');
     let context: Parameters<Parameters<typeof GatewayConsoleShell>[0]['children']>[0];
     await act(async () => root.render(<GatewayConsoleShell activePage="overview" title="总览" navigationSections={[]}
       navigationItems={[]} onNavigate={() => {}} refreshable>{(value) => { context = value; return <div>content</div>; }}</GatewayConsoleShell>));
-    const toggle = container.querySelector<HTMLButtonElement>('button[aria-label="切换为浅色主题"]')!;
-    expect(toggle).not.toBeNull();
-    act(() => toggle.click());
-    expect(useThemeStore.getState().resolvedTheme).toBe('light');
-    expect(container.querySelector('button[aria-label="切换为深色主题"]')).not.toBeNull();
+    const appearance = container.querySelector<HTMLButtonElement>('button[aria-label^="外观设置"]')!;
+    expect(appearance).not.toBeNull();
+    await act(async () => appearance.click());
+    const nebula = document.querySelector<HTMLButtonElement>('button[data-theme-option="nebula"]')!;
+    const light = document.querySelector<HTMLButtonElement>('button[data-mode-option="light"]')!;
+    await act(async () => { nebula.click(); light.click(); });
+    expect(useThemeStore.getState().style).toBe('nebula');
+    expect(useThemeStore.getState().mode).toBe('light');
+    expect(useThemeStore.getState().resolvedColorScheme).toBe('light');
+    expect(document.documentElement.getAttribute('data-theme-style')).toBe('nebula');
+    expect(document.documentElement.getAttribute('data-color-scheme')).toBe('light');
     const refresh = container.querySelector<HTMLButtonElement>('button[aria-label="刷新"]')!;
     expect(context!.authGeneration).toBe(0);
     act(() => refresh.click());
