@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setTestLanguage } from '@/test/setup';
 import { IconDashboardGrid } from '@/components/ui/icons';
 import { GatewayConsoleShell, GATEWAY_ADMIN_KEY_STORAGE_KEY } from './GatewayConsoleShell';
+import packageJson from '../../../package.json';
 
 describe('GatewayConsoleShell Admin key boundary', () => {
   let container: HTMLDivElement;
@@ -62,6 +63,7 @@ describe('GatewayConsoleShell Admin key boundary', () => {
       );
     });
 
+    expect(container.textContent).toContain(`v${packageJson.version}`);
     expect(container.querySelector('input[aria-label="Admin Key"]')).toBeNull();
     await openConnection();
     const input = container.querySelector<HTMLInputElement>('input[aria-label="Admin Key"]')!;
