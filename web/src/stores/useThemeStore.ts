@@ -78,3 +78,13 @@ export const useThemeStore = create<ThemeState>()(
     },
   ),
 );
+
+/** Keep the first React render aligned with the synchronous document bootstrap. */
+export const applyThemeBeforeRender = () => {
+  const { mode, style, resolvedColorScheme } = useThemeStore.getState();
+  const nextColorScheme = resolveColorScheme(mode);
+  applyAppearance(style, nextColorScheme);
+  if (nextColorScheme !== resolvedColorScheme) {
+    useThemeStore.setState({ resolvedColorScheme: nextColorScheme });
+  }
+};

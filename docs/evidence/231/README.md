@@ -9,6 +9,8 @@
 - 删除没有独立视觉定义的 `white` 状态；`Theme` 类型归入唯一的主题 store，不再保留单项 `types/index.ts`。
 - 页面只消费 `--bg`、`--surface`、`--fg`、`--muted`、`--border`、`--accent` 等语义 token，不按主题名称分支。
 - Mantine 间距与圆角改为品牌 token；不同风格可以调整表面形态，仍共享组件契约。
+- HTML 头部在首次绘制前恢复已保存风格与显示模式，React 挂载前同步 store/Mantine，避免主题闪烁。
+- 契约测试覆盖每套风格的浅深语义 token、双语文案、预览与启动注册表；旧 SCSS 调色板已删除。
 
 ## 候选风格
 
@@ -50,7 +52,7 @@ mise exec -- node docs/evidence/231/capture-theme-previews.mjs
 
 - `npm --prefix web run lint`：通过，包含 ESLint 与两轮 Knip。
 - `npm --prefix web run typecheck`：通过，包含应用与测试 TypeScript。
-- `npm --prefix web test`：41 个测试文件、331 项测试通过。
+- `npm --prefix web test`：42 个测试文件、345 项测试通过。
 - `npm --prefix web run build`：通过；保留既有大于 500 kB 的 chunk 提示。
 - `npm --prefix web run test:browser-smoke`：通过，覆盖错误恢复、来源草稿隔离、路由焦点与 Portal/Escape。
 - 浏览器检查：四套风格均可在真实来源页面即时切换；浅深模式、Popover 可访问状态与持久化属性同步。

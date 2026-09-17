@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { STORAGE_KEY_THEME } from '@/utils/constants';
-import { useThemeStore } from './useThemeStore';
+import { applyThemeBeforeRender, useThemeStore } from './useThemeStore';
 
 describe('useThemeStore', () => {
   beforeEach(() => {
@@ -26,6 +26,18 @@ describe('useThemeStore', () => {
     expect(useThemeStore.getState().resolvedColorScheme).toBe('dark');
     const persisted = JSON.parse(localStorage.getItem(STORAGE_KEY_THEME)!);
     expect(persisted.state).toEqual({ mode: 'dark', style: 'ocean' });
+  });
+
+  it('resolves the persisted appearance before React renders', () => {
+    vi.stubGlobal('matchMedia', () => ({ matches: true, media: '(prefers-color-scheme: dark)',
+      addEventListener: () => {}, removeEventListener: () => {} }));
+    useThemeStore.setState({ mode: 'auto', style: 'sandstone', resolvedColorScheme: 'light' });
+
+    applyThemeBeforeRender();
+
+    expect(document.documentElement.getAttribute('data-theme-style')).toBe('sandstone');
+    expect(document.documentElement.getAttribute('data-color-scheme')).toBe('dark');
+    expect(useThemeStore.getState().resolvedColorScheme).toBe('dark');
   });
 
   it('tracks system changes only while display mode is auto', () => {

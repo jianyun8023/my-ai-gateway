@@ -12,7 +12,7 @@ Tech-Utility：冷灰底色、绿色强调、紧凑数据布局。使用固定�
 
 ## Token 与尺度
 
-品牌 Token 统一维护在 [gateway-brand.scss](web/src/styles/gateway-brand.scss) 的 `:root`，页面、Mantine CSS 变量和 Portal 共享继承。外观分为两个正交维度：`style` 选择青绿控制台、深海观测、星云或砂岩视觉风格，`mode` 选择浅色、深色或跟随系统。主题选择与持久化仍由 `useThemeStore` 唯一管理；根节点分别通过 `data-theme-style` 与 `data-color-scheme` 暴露解析结果，`ConsoleProvider` 将 `resolvedColorScheme` 传给 Mantine 的 `forceColorScheme`。原生控件通过 `color-scheme` 跟随解析后的显示模式。
+品牌 Token 统一维护在 [gateway-brand.scss](web/src/styles/gateway-brand.scss) 的 `:root`，页面、Mantine CSS 变量和 Portal 共享继承。外观分为两个正交维度：`style` 选择青绿控制台、深海观测、星云或砂岩视觉风格，`mode` 选择浅色、深色或跟随系统。主题选择与持久化仍由 `useThemeStore` 唯一管理；HTML 头部先从同一持久化结构恢复根节点属性，React 挂载前再同步 store 的解析模式，避免已保存主题出现首屏闪烁。根节点分别通过 `data-theme-style` 与 `data-color-scheme` 暴露解析结果，`ConsoleProvider` 将 `resolvedColorScheme` 传给 Mantine 的 `forceColorScheme`。原生控件通过 `color-scheme` 跟随解析后的显示模式。
 
 | 用途 | Token / 约定 |
 | --- | --- |
@@ -27,7 +27,7 @@ Tech-Utility：冷灰底色、绿色强调、紧凑数据布局。使用固定�
 
 触摸主指针下的输入、选择与文本域字号至少为 16px，避免 iOS 聚焦时自动放大；桌面仍使用紧凑的 12px 控件字号，不通过禁止页面缩放规避该行为。
 
-现有 `--keeper-*`、`--text-*` 等变量也由品牌层映射，页面不重复定义。不同风格只覆盖品牌色与圆角尺度，不在业务页面增加主题名称分支；Mantine 字体、间距、圆角、断点、组件默认值及语义变量映射集中在 [theme.ts](web/src/components/ui/theme.ts)。旧 `themes.scss`、`components.scss`、`layout.scss` 和 `mixins.scss` 已在确认无生产调用后删除，不再保留第二套主题或全局组件样式。
+现有 `--keeper-*`、`--text-*` 等变量也由品牌层映射，页面不重复定义。不同风格只覆盖品牌色与圆角尺度，不在业务页面增加主题名称分支；Mantine 字体、间距、圆角、断点、组件默认值及语义变量映射集中在 [theme.ts](web/src/components/ui/theme.ts)。旧 `themes.scss`、`components.scss`、`layout.scss`、`mixins.scss` 及 `variables.scss` 中未使用的旧调色板已在确认无生产调用后删除，不再保留第二套主题或全局组件样式。主题契约测试会校验每个风格的浅深语义 token、双语选择器文案、预览和首屏启动注册表。
 
 加载顺序固定为全局 reset → 品牌 Token → [Mantine 按需样式](web/src/styles/mantine.css) → Root 引入的组件 CSS Modules。新增 Mantine 控件时在该入口补充组件样式及其内部依赖；例如 Select 同时依赖 Input、Popover、ScrollArea 与 Combobox。不要在页面导入全库样式或依赖加载顺序覆盖公共交互。
 
