@@ -16,6 +16,9 @@ pub(crate) const BUILTIN_PROVIDER_PRESET_VERSION: i32 = 3;
 /// The latest built-in `kimi_code` preset record version. v5 names the
 /// provider Kimi Code CN and enables authenticated model discovery.
 pub(crate) const KIMI_CODE_PROVIDER_PRESET_VERSION: i32 = 5;
+/// The current multimodal-aware model preset version. Historical model preset
+/// rows stay immutable; migration 0027 rebases affected catalog records.
+pub(crate) const MULTIMODAL_MODEL_PRESET_VERSION: i32 = 2;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -423,13 +426,17 @@ pub(crate) fn builtin_model_presets() -> Result<Vec<ModelPresetInput>, CatalogEr
     Ok(vec![
         model_preset(
             "deepseek-v4-flash",
-            "deepseek-v4-flash",
-            vec![],
+            MULTIMODAL_MODEL_PRESET_VERSION,
+            "deepseek-flash",
+            vec![
+                "deepseek-v4-flash".into(),
+                "deepseek-v4-flash-vision-exp".into(),
+            ],
             [
-                (MetadataField::DisplayName, json!("DeepSeek V4 Flash")),
-                (MetadataField::ContextWindow, json!(1_000_000)),
+                (MetadataField::DisplayName, json!("DeepSeek V4.1 Flash")),
+                (MetadataField::ContextWindow, json!(1_048_576)),
                 (MetadataField::MaxOutputTokens, json!(384_000)),
-                (MetadataField::InputModalities, json!(["text"])),
+                (MetadataField::InputModalities, json!(["text", "image"])),
                 (MetadataField::OutputModalities, json!(["text"])),
                 (MetadataField::Tools, json!("supported")),
                 (MetadataField::Thinking, json!("supported")),
@@ -440,6 +447,7 @@ pub(crate) fn builtin_model_presets() -> Result<Vec<ModelPresetInput>, CatalogEr
         )?,
         model_preset(
             "deepseek-v4-pro",
+            1,
             "deepseek-v4-pro",
             vec![],
             [
@@ -457,6 +465,7 @@ pub(crate) fn builtin_model_presets() -> Result<Vec<ModelPresetInput>, CatalogEr
         )?,
         model_preset(
             "minimax-m3",
+            1,
             "MiniMax-M3",
             vec![],
             [
@@ -475,6 +484,7 @@ pub(crate) fn builtin_model_presets() -> Result<Vec<ModelPresetInput>, CatalogEr
         )?,
         model_preset(
             "minimax-m2.7",
+            1,
             "MiniMax-M2.7",
             vec!["MiniMax-M2.7-highspeed".into()],
             [
@@ -490,12 +500,16 @@ pub(crate) fn builtin_model_presets() -> Result<Vec<ModelPresetInput>, CatalogEr
         )?,
         model_preset(
             "kimi-k3",
+            MULTIMODAL_MODEL_PRESET_VERSION,
             "k3",
             vec![],
             [
                 (MetadataField::DisplayName, json!("Kimi K3")),
-                (MetadataField::ContextWindow, json!(1_000_000)),
-                (MetadataField::InputModalities, json!(["text"])),
+                (MetadataField::ContextWindow, json!(1_048_576)),
+                (
+                    MetadataField::InputModalities,
+                    json!(["text", "image", "video"]),
+                ),
                 (MetadataField::OutputModalities, json!(["text"])),
                 (MetadataField::Tools, json!("supported")),
                 (MetadataField::Thinking, json!("supported")),
@@ -506,12 +520,13 @@ pub(crate) fn builtin_model_presets() -> Result<Vec<ModelPresetInput>, CatalogEr
         )?,
         model_preset(
             "kimi-k3-256k",
+            MULTIMODAL_MODEL_PRESET_VERSION,
             "k3-256k",
             vec![],
             [
                 (MetadataField::DisplayName, json!("Kimi K3 256K")),
                 (MetadataField::ContextWindow, json!(262_144)),
-                (MetadataField::InputModalities, json!(["text"])),
+                (MetadataField::InputModalities, json!(["text", "image"])),
                 (MetadataField::OutputModalities, json!(["text"])),
                 (MetadataField::Tools, json!("supported")),
                 (MetadataField::Thinking, json!("supported")),
@@ -522,12 +537,39 @@ pub(crate) fn builtin_model_presets() -> Result<Vec<ModelPresetInput>, CatalogEr
         )?,
         model_preset(
             "kimi-for-coding",
+            MULTIMODAL_MODEL_PRESET_VERSION,
             "kimi-for-coding",
-            vec!["kimi-for-coding-highspeed".into()],
+            vec![],
             [
                 (MetadataField::DisplayName, json!("Kimi for Coding")),
+                (MetadataField::ContextWindow, json!(1_048_576)),
+                (
+                    MetadataField::InputModalities,
+                    json!(["text", "image", "video"]),
+                ),
+                (MetadataField::OutputModalities, json!(["text"])),
+                (MetadataField::Tools, json!("supported")),
+                (MetadataField::Thinking, json!("supported")),
+                (MetadataField::WebSearch, json!("supported")),
+                (MetadataField::Streaming, json!("supported")),
+                (MetadataField::Usage, json!("supported")),
+            ],
+        )?,
+        model_preset(
+            "kimi-for-coding-highspeed",
+            MULTIMODAL_MODEL_PRESET_VERSION,
+            "kimi-for-coding-highspeed",
+            vec![],
+            [
+                (
+                    MetadataField::DisplayName,
+                    json!("Kimi for Coding HighSpeed"),
+                ),
                 (MetadataField::ContextWindow, json!(262_144)),
-                (MetadataField::InputModalities, json!(["text"])),
+                (
+                    MetadataField::InputModalities,
+                    json!(["text", "image", "video"]),
+                ),
                 (MetadataField::OutputModalities, json!(["text"])),
                 (MetadataField::Tools, json!("supported")),
                 (MetadataField::Thinking, json!("supported")),
@@ -541,6 +583,7 @@ pub(crate) fn builtin_model_presets() -> Result<Vec<ModelPresetInput>, CatalogEr
 
 fn model_preset<const N: usize>(
     id: &str,
+    version: i32,
     canonical_model_id: &str,
     aliases: Vec<String>,
     fields: [(MetadataField, Value); N],
@@ -548,7 +591,7 @@ fn model_preset<const N: usize>(
     let values = MetadataValues::from_fields(fields)?;
     Ok(ModelPresetInput {
         id: id.into(),
-        version: 1,
+        version,
         canonical_model_id: canonical_model_id.into(),
         aliases,
         metadata: CatalogMetadata::resolve(&MetadataValues::default(), Some(&values))?,
@@ -894,15 +937,39 @@ mod tests {
     #[test]
     fn model_presets_only_assert_documented_fields() {
         let presets = builtin_model_presets().expect("valid model presets");
-        assert!(presets
+        let deepseek = presets
             .iter()
-            .any(|preset| preset.canonical_model_id == "deepseek-v4-flash"));
+            .find(|preset| preset.canonical_model_id == "deepseek-flash")
+            .expect("DeepSeek Flash preset");
+        assert_eq!(deepseek.version, MULTIMODAL_MODEL_PRESET_VERSION);
+        assert_eq!(
+            deepseek.metadata.values.0[&MetadataField::InputModalities],
+            json!(["text", "image"])
+        );
         assert!(presets
             .iter()
             .any(|preset| preset.canonical_model_id == "MiniMax-M3"));
+        let k3 = presets
+            .iter()
+            .find(|preset| preset.canonical_model_id == "k3")
+            .expect("K3 preset");
+        assert_eq!(k3.version, MULTIMODAL_MODEL_PRESET_VERSION);
+        assert_eq!(
+            k3.metadata.values.0[&MetadataField::InputModalities],
+            json!(["text", "image", "video"])
+        );
+        let kimi_code = presets
+            .iter()
+            .find(|preset| preset.canonical_model_id == "kimi-for-coding")
+            .expect("Kimi Code preset");
+        assert_eq!(
+            kimi_code.metadata.values.0[&MetadataField::ContextWindow],
+            json!(1_048_576)
+        );
+        assert!(kimi_code.aliases.is_empty());
         assert!(presets
             .iter()
-            .any(|preset| preset.canonical_model_id == "k3"));
+            .any(|preset| preset.canonical_model_id == "kimi-for-coding-highspeed"));
         for preset in presets {
             assert!(preset
                 .metadata

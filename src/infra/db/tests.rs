@@ -594,6 +594,123 @@ async fn postgres_migrates_kimi_discovery_and_default_names_without_overwriting_
 }
 
 #[tokio::test]
+async fn postgres_repairs_multimodal_model_metadata_and_capabilities() {
+    let Some(database) = postgres_test_database().await else {
+        eprintln!("skipping multimodal capability migration test: TEST_DATABASE_URL is not set");
+        return;
+    };
+    // The SQL-installed v2 rows and the immutable Rust presets must agree.
+    install_builtin_presets(&ModelCatalogRepository::new(database.pool.clone()))
+        .await
+        .expect("migration and multimodal model presets agree");
+
+    let suffix = uuid::Uuid::new_v4().simple().to_string();
+    let deepseek_source = format!("multimodal-deepseek-{suffix}");
+    let kimi_source = format!("multimodal-kimi-{suffix}");
+    let mut tx = database.pool.begin().await.unwrap();
+    sqlx::query("DELETE FROM gateway_schema_migrations WHERE version=27")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+
+    for (source_id, provider, version) in [
+        (&deepseek_source, "deepseek", 3),
+        (&kimi_source, "kimi_code", 5),
+    ] {
+        sqlx::query("INSERT INTO sources (id,display_name,provider_preset_id,provider_preset_version,provider_preset_snapshot,base_url,endpoints,auth_config,protocol_capabilities) SELECT $1,$1,id,version,definition,'https://example.invalid','{}'::jsonb,'{}'::jsonb,'{}'::jsonb FROM provider_presets WHERE id=$2 AND version=$3")
+            .bind(source_id)
+            .bind(provider)
+            .bind(version)
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+    }
+
+    for (source_id, model_id) in [
+        (&deepseek_source, "deepseek-flash"),
+        (&kimi_source, "k3"),
+        (&kimi_source, "k3-256k"),
+        (&kimi_source, "kimi-for-coding"),
+        (&kimi_source, "kimi-for-coding-highspeed"),
+    ] {
+        sqlx::query("INSERT INTO source_models (source_id,upstream_model_id,confirmation_status,availability_status,raw_snapshot,metadata,field_sources,confirmed_at) VALUES ($1,$2,'confirmed','available','{}'::jsonb,$3,$4,NOW())")
+            .bind(source_id)
+            .bind(model_id)
+            .bind(json!({
+                "display_name": model_id,
+                "context_window": 1,
+                "input_modalities": ["text"]
+            }))
+            .bind(json!({
+                "display_name": "preset",
+                "context_window": "preset",
+                "input_modalities": "preset"
+            }))
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO source_model_capabilities (source_id,upstream_model_id,protocol,status,mode,feature_capabilities,field_source,confirmed_at) VALUES ($1,$2,'openai_chat_completions','confirmed','native','{\"vision\":\"unsupported\"}'::jsonb,'user',NOW())")
+            .bind(source_id)
+            .bind(model_id)
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+    }
+
+    let migration = include_str!("../../../migrations/0027_multimodal_model_capabilities.sql");
+    sqlx::raw_sql(migration).execute(&mut *tx).await.unwrap();
+
+    let rows: Vec<(String, i32, Value, Value)> = sqlx::query_as(
+        "SELECT upstream_model_id,matched_model_preset_version,metadata,field_sources FROM source_models WHERE source_id IN ($1,$2) ORDER BY upstream_model_id",
+    )
+    .bind(&deepseek_source)
+    .bind(&kimi_source)
+    .fetch_all(&mut *tx)
+    .await
+    .unwrap();
+    assert_eq!(rows.len(), 5);
+    for (model_id, version, metadata, field_sources) in rows {
+        assert_eq!(version, 2, "{model_id} must move to ModelPreset v2");
+        assert!(metadata["input_modalities"]
+            .as_array()
+            .is_some_and(|modalities| modalities.iter().any(|value| value == "image")));
+        assert_eq!(field_sources["input_modalities"], "preset");
+        let expected_context =
+            if matches!(model_id.as_str(), "k3-256k" | "kimi-for-coding-highspeed") {
+                262_144
+            } else {
+                1_048_576
+            };
+        assert_eq!(metadata["context_window"], expected_context);
+    }
+
+    let visions: Vec<String> = sqlx::query_scalar(
+        "SELECT feature_capabilities->>'vision' FROM source_model_capabilities WHERE source_id IN ($1,$2) ORDER BY upstream_model_id",
+    )
+    .bind(&deepseek_source)
+    .bind(&kimi_source)
+    .fetch_all(&mut *tx)
+    .await
+    .unwrap();
+    assert_eq!(visions, vec!["supported"; 5]);
+
+    // Replaying after the migration marker is present must preserve later edits.
+    sqlx::query("UPDATE source_model_capabilities SET feature_capabilities=jsonb_set(feature_capabilities,'{vision}','\"unsupported\"') WHERE source_id=$1 AND upstream_model_id='k3'")
+        .bind(&kimi_source)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    sqlx::raw_sql(migration).execute(&mut *tx).await.unwrap();
+    let replayed: String = sqlx::query_scalar("SELECT feature_capabilities->>'vision' FROM source_model_capabilities WHERE source_id=$1 AND upstream_model_id='k3' AND protocol='openai_chat_completions'")
+        .bind(&kimi_source)
+        .fetch_one(&mut *tx)
+        .await
+        .unwrap();
+    assert_eq!(replayed, "unsupported");
+    tx.rollback().await.unwrap();
+}
+
+#[tokio::test]
 async fn postgres_queries_keep_logical_attempt_and_utc_boundary_semantics() {
     let Some(database) = postgres_test_database().await else {
         eprintln!("skipping PostgreSQL usage query test: TEST_DATABASE_URL is not set");

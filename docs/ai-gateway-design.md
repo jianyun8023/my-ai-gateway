@@ -185,6 +185,8 @@ UI 流程为：
 
 `kimi_code@5` 展示为 `Kimi Code CN`，启用 Bearer 鉴权的 `GET /v1/models`（完整 URL 为 `https://api.kimi.com/coding/v1/models`，2026-09-12 实测成功），复用 `data[].id` 解析器，取代历史预设中错误的“不支持发现”声明。迁移 0026 一次性更新存量 Kimi Source 的预设版本与 discovery 快照，保留其他连接设置、模型和路由，并将 Source/Account 的旧默认名称改为 `Kimi Code CN`；自定义名称不变。历史预设仍不可变，普通启动注册新版本不会改写 Source 快照。ProviderPreset 完整声明默认 Base URL、三协议 endpoint/模式、认证和 Header 模板、最小连接测试请求、默认能力及发现规则。首批 ModelPreset 包括 DeepSeek V4、MiniMax M3/M2.7、Kimi K3/K2.7 Code Model。
 
+ModelPreset v2 按 2026-09-17 的官方模型规格更新 DeepSeek Flash 与 Kimi Code：`deepseek-flash` 支持图片输入；`k3`、`kimi-for-coding` 与 `kimi-for-coding-highspeed` 支持图片和视频，`k3-256k` 支持图片；`kimi-for-coding` 与 HighSpeed 拆分为不同上下文窗口的独立预设。`input_modalities` 中包含 `image` 时，控制面把它推导为协议能力的 `vision=supported`。迁移 0027 将存量 SourceModel/LogicalModel 的非用户覆盖字段重定向到 v2，并修正已有 SourceModelCapability 的 `vision`；后续重放不覆盖迁移后的用户修改。
+
 管理 API 流程为：
 
 ```text

@@ -16,6 +16,8 @@ use serde_json::Value;
 fn derive_feature_capabilities(
     metadata: &Value,
 ) -> std::collections::BTreeMap<String, crate::domain::catalog::CapabilitySupport> {
+    use crate::domain::catalog::CapabilitySupport;
+
     const FEATURE_KEYS: [&str; 6] = [
         "tools",
         "thinking",
@@ -24,7 +26,7 @@ fn derive_feature_capabilities(
         "streaming",
         "usage",
     ];
-    FEATURE_KEYS
+    let mut capabilities = FEATURE_KEYS
         .iter()
         .filter_map(|key| {
             let value = metadata.get(*key)?.as_str()?;
@@ -34,7 +36,25 @@ fn derive_feature_capabilities(
             .ok()?;
             Some(((*key).to_owned(), support))
         })
-        .collect()
+        .collect::<std::collections::BTreeMap<_, _>>();
+    if let Some(modalities) = metadata
+        .get("input_modalities")
+        .and_then(Value::as_array)
+        .filter(|modalities| modalities.iter().all(Value::is_string))
+    {
+        let supports_images = modalities
+            .iter()
+            .any(|modality| modality.as_str() == Some("image"));
+        capabilities.insert(
+            "vision".to_owned(),
+            if supports_images {
+                CapabilitySupport::Supported
+            } else {
+                CapabilitySupport::Unsupported
+            },
+        );
+    }
+    capabilities
 }
 
 impl ControlPlane {
@@ -210,5 +230,34 @@ impl ControlPlane {
             )));
         }
         self.finish_write(tx).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::derive_feature_capabilities;
+    use crate::domain::catalog::CapabilitySupport;
+    use serde_json::json;
+
+    #[test]
+    fn derives_vision_from_declared_input_modalities() {
+        let multimodal = derive_feature_capabilities(&json!({
+            "input_modalities": ["text", "image", "video"]
+        }));
+        assert_eq!(
+            multimodal.get("vision"),
+            Some(&CapabilitySupport::Supported)
+        );
+
+        let text_only = derive_feature_capabilities(&json!({
+            "input_modalities": ["text"]
+        }));
+        assert_eq!(
+            text_only.get("vision"),
+            Some(&CapabilitySupport::Unsupported)
+        );
+
+        let undeclared = derive_feature_capabilities(&json!({}));
+        assert!(!undeclared.contains_key("vision"));
     }
 }

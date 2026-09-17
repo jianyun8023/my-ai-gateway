@@ -62,6 +62,8 @@ Virtual Key 鉴权时，默认使用 key 的 `name`；若 `name` 为空则回退
 
 迁移 `0026_kimi_code_cn_discovery.sql` 一次性将已有 `kimi_code` Source 的预设版本升级到 `@5`，只替换快照中的 discovery 声明；Source Base URL、认证、endpoint、协议能力、已确认模型和路由保持原值。Source 和关联 Account 的旧默认名称 `Kimi Code` 更新为 `Kimi Code CN`，自定义名称保留。历史 `@1`–`@4` 的名称与定义保持不可变；普通启动注册新版本不会改写 Source，后续启动重放本次迁移也不会覆盖用户修改。
 
+ModelPreset v2 补齐 `deepseek-flash`、`k3`、`k3-256k`、`kimi-for-coding` 与 `kimi-for-coding-highspeed` 的图片/视频输入模态和当前上下文窗口，并将 Kimi 标准版与 HighSpeed 拆为独立预设。迁移 `0027_multimodal_model_capabilities.sql` 更新这些模型的非用户覆盖元数据和既有协议能力行，使有效能力矩阵将图片输入报告为 `vision=native`；显式用户元数据继续保留。
+
 ## 创建 Source 快照
 
 `POST /admin/sources`
@@ -475,7 +477,7 @@ dry-run 只统计候选，不删除数据。正式清理按 attempt → logical 
 
 `POST /admin/control-plane/import` 接受导出 JSON，或 `{ "data": <export>, "replace": true, "requested_by": "..." }` 包装。非空目标必须显式 `replace=true`。导入按 FK 顺序恢复并重置 serial sequence；提交后重新构建 snapshot，只有 fingerprint 与导出一致才返回 `verified=true` 和新的 `snapshot_revision`。目标环境必须自行注入导出中列出的 Secret。
 
-`GET /admin/ops/schema`（`/admin/schema` 为同义入口）返回当前 `schema_version`、`migration_version`、应用版本和 UTC 更新时间。网关启动时会顺序应用仓库中的迁移；当前版本为 26，`migrations/0026_kimi_code_cn_discovery.sql` 启用 Kimi Code CN 模型发现并更新存量 Source。迁移 0025 增加的逻辑模型总请求超时与重试设置仍包含在控制面导出中，runtime snapshot fingerprint 同时覆盖策略和请求设置。
+`GET /admin/ops/schema`（`/admin/schema` 为同义入口）返回当前 `schema_version`、`migration_version`、应用版本和 UTC 更新时间。网关启动时会顺序应用仓库中的迁移；当前版本为 27，`migrations/0027_multimodal_model_capabilities.sql` 修正 DeepSeek Flash 与 Kimi Code 模型的多模态元数据和存量 `vision` 能力。迁移 0025 增加的逻辑模型总请求超时与重试设置仍包含在控制面导出中，runtime snapshot fingerprint 同时覆盖策略和请求设置。
 
 完整的 PostgreSQL `pg_dump`、新库恢复、Docker Compose 和本地 CLI 步骤见 [`docs/operations.md`](./operations.md)。物理 dump 可能包含数据库内的加密凭据和全部历史，必须按高敏感备份保护；脱敏迁移请使用控制面 JSON 导出。
 
