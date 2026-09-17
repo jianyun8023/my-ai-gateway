@@ -2,10 +2,11 @@ import { clearOperationNotification, notifySuccess } from '@/components/ui/notif
 import { Table } from '@mantine/core';
 import type {
   Account,
+  AdminErrorShape,
   GatewayAdminResources,
   Source
 } from '@/admin-api';
-import { GATEWAY_PROTOCOLS } from '@/admin-api';
+import { GATEWAY_PROTOCOLS, normalizeAdminError } from '@/admin-api';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { TextField } from '@/components/ui/FormField';
@@ -33,7 +34,7 @@ import { PROTOCOL_LABELS, PROTOCOL_SHORT_LABELS } from '@/lib/protocols';
 import sourceStyles from './sources/SourcesPage.module.scss';
 import { sourceRouteHash, type SourceSection } from '@/lib/consoleNavigation';
 import { formatDateTime } from '@/utils/format';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 interface SourcesPageProps {
@@ -46,14 +47,20 @@ interface SourcesPageProps {
 interface SourcesData {
   sources: Source[];
   accounts: Account[];
-  stats: Record<string, SourceSyncStats>;
 }
+
+type SourceStatsState =
+  | { status: 'loading' }
+  | { status: 'ready'; data: SourceSyncStats }
+  | { status: 'error'; error: AdminErrorShape };
 
 export function SourcesPage({ api, refreshRevision = 0, onBusyChange, onOpenSource }: SourcesPageProps) {
   const { t } = useTranslation('console');
   const [search, setSearch] = useState('');
   const [checkingIds, setCheckingIds] = useState<ReadonlySet<string>>(() => new Set());
   const [actionError, setActionError] = useState<string>();
+  const [statsBySource, setStatsBySource] = useState<Record<string, SourceStatsState>>({});
+  const statsControllers = useRef(new Map<string, AbortController>());
 
   const openSource = (sourceId: string, section?: SourceSection) => {
     if (onOpenSource) {
@@ -68,17 +75,40 @@ export function SourcesPage({ api, refreshRevision = 0, onBusyChange, onOpenSour
       api.sources(signal),
       api.accounts(signal),
     ]);
-    const pairs = await Promise.all(sources.map(async (source) => {
-      const [latest, models] = await Promise.all([
-        api.latestDiscovery(source.id, signal),
-        api.sourceModels(source.id, {}, signal),
-      ]);
-      return [source.id, buildSyncStats(latest, models)] as const;
-    }));
-    return { sources, accounts, stats: Object.fromEntries(pairs) };
+    return { sources, accounts };
   }, [api]);
   const query = useAdminQuery({ load, refreshRevision, onBusyChange });
   const data = query.data;
+
+  const loadSourceStats = useCallback((sourceId: string) => {
+    statsControllers.current.get(sourceId)?.abort();
+    const controller = new AbortController();
+    statsControllers.current.set(sourceId, controller);
+    setStatsBySource((current) => ({ ...current, [sourceId]: { status: 'loading' } }));
+    void Promise.all([
+      api.latestDiscovery(sourceId, controller.signal),
+      api.sourceModels(sourceId, {}, controller.signal),
+    ]).then(([latest, models]) => {
+      if (controller.signal.aborted || statsControllers.current.get(sourceId) !== controller) return;
+      setStatsBySource((current) => ({ ...current, [sourceId]: { status: 'ready', data: buildSyncStats(latest, models) } }));
+    }).catch((error) => {
+      if (controller.signal.aborted || statsControllers.current.get(sourceId) !== controller) return;
+      setStatsBySource((current) => ({ ...current, [sourceId]: { status: 'error', error: normalizeAdminError(error) } }));
+    }).finally(() => {
+      if (statsControllers.current.get(sourceId) === controller) statsControllers.current.delete(sourceId);
+    });
+  }, [api]);
+
+  useEffect(() => {
+    const controllers = statsControllers.current;
+    const sourceIds = new Set(data?.sources.map((source) => source.id) ?? []);
+    setStatsBySource((current) => Object.fromEntries(Object.entries(current).filter(([sourceId]) => sourceIds.has(sourceId))));
+    for (const sourceId of sourceIds) loadSourceStats(sourceId);
+    return () => {
+      for (const controller of controllers.values()) controller.abort();
+      controllers.clear();
+    };
+  }, [data?.sources, loadSourceStats]);
 
   const enabledAccount = (sourceId: string) => (
     data?.accounts.find((account) => account.source_id === sourceId && account.enabled)
@@ -177,9 +207,18 @@ export function SourcesPage({ api, refreshRevision = 0, onBusyChange, onOpenSour
 
   const enabledSources = data.sources.filter((source) => source.enabled).length;
   const healthyAccounts = data.accounts.filter((account) => account.health_status === 'healthy').length;
-  const totalModels = Object.values(data.stats).reduce((sum, stats) => sum + stats.models.length, 0);
-  const totalPending = Object.values(data.stats).reduce((sum, stats) => sum + stats.pendingCount, 0);
-  const pendingSources = data.sources.filter((source) => (data.stats[source.id]?.pendingCount ?? 0) > 0).length;
+  const readyStats = data.sources.flatMap((source) => {
+    const state = statsBySource[source.id];
+    return state?.status === 'ready' ? [state.data] : [];
+  });
+  const statsComplete = readyStats.length === data.sources.length;
+  const statsFailed = data.sources.filter((source) => statsBySource[source.id]?.status === 'error').length;
+  const totalModels = readyStats.reduce((sum, stats) => sum + stats.models.length, 0);
+  const totalPending = readyStats.reduce((sum, stats) => sum + stats.pendingCount, 0);
+  const pendingSources = readyStats.filter((stats) => stats.pendingCount > 0).length;
+  const statsHint = statsFailed > 0
+    ? t('sources.list.summary.stats_failed', { failed: statsFailed, total: data.sources.length })
+    : t('sources.list.summary.stats_loading', { ready: readyStats.length, total: data.sources.length });
   const batchTargets = data.sources.filter((source) => enabledAccount(source.id)).length;
 
   return (
@@ -187,8 +226,8 @@ export function SourcesPage({ api, refreshRevision = 0, onBusyChange, onOpenSour
       <div className={`${styles.statsGrid} ${sourceStyles.summary}`}>
         <MetricCard compact label={t('sources.list.summary.sources')} value={String(data.sources.length)} hint={t('sources.list.summary.sources_hint', { count: enabledSources })} />
         <MetricCard compact label={t('sources.list.summary.accounts')} value={String(healthyAccounts)} hint={t('sources.list.summary.accounts_hint', { total: data.accounts.length })} tone={healthyAccounts < data.accounts.length ? 'warning' : undefined} />
-        <MetricCard compact label={t('sources.list.summary.models')} value={String(totalModels)} hint={t('sources.list.summary.models_hint')} />
-        <MetricCard compact label={t('sources.list.summary.pending')} value={String(totalPending)} exact={String(totalPending)} hint={t('sources.list.summary.pending_hint', { count: pendingSources })} tone={totalPending > 0 ? 'warning' : undefined} />
+        <MetricCard compact label={t('sources.list.summary.models')} value={statsComplete ? String(totalModels) : '—'} hint={statsComplete ? t('sources.list.summary.models_hint') : statsHint} />
+        <MetricCard compact label={t('sources.list.summary.pending')} value={statsComplete ? String(totalPending) : '—'} exact={statsComplete ? String(totalPending) : undefined} hint={statsComplete ? t('sources.list.summary.pending_hint', { count: pendingSources }) : statsHint} tone={statsComplete && totalPending > 0 ? 'warning' : undefined} />
       </div>
 
       {query.error && <ErrorState error={query.error} onRetry={query.reload} />}
@@ -238,7 +277,8 @@ export function SourcesPage({ api, refreshRevision = 0, onBusyChange, onOpenSour
                   <Table.Th scope="col">{t('common.actions')}</Table.Th>
                 </Table.Tr></Table.Thead>
                 <Table.Tbody>{filteredSources.map((source) => {
-                  const stats = data.stats[source.id];
+                  const statsState = statsBySource[source.id];
+                  const stats = statsState?.status === 'ready' ? statsState.data : undefined;
                   const accounts = data.accounts.filter((account) => account.source_id === source.id);
                   const connection = sourceConnection(accounts);
                   const checking = checkingIds.has(source.id);
@@ -254,7 +294,13 @@ export function SourcesPage({ api, refreshRevision = 0, onBusyChange, onOpenSour
                           {connection.total > 0 && <small className={styles.secondaryText}>{t('sources.list.connection_ratio', { healthy: connection.healthy, total: connection.total })}</small>}
                         </span>
                       </Table.Td>
-                      <Table.Td>{!stats || (stats.latest === null && stats.models.length === 0) ? <span className={styles.secondaryText}>{t('sources.list.never_synced')}</span> : (
+                      <Table.Td>{!statsState || statsState.status === 'loading' ? <LoadingState layout="inline" label={t('sources.list.stats_loading')} /> : statsState.status === 'error' ? (
+                        <span className={styles.primaryText}>
+                          <strong>{t('sources.list.stats_failed')}</strong>
+                          {statsState.error.code && <small><code>{statsState.error.code}</code></small>}
+                          <Button size="sm" variant="ghost" onClick={(event) => { event.stopPropagation(); loadSourceStats(source.id); }}>{t('common.retry')}</Button>
+                        </span>
+                      ) : !stats ? null : (stats.latest === null && stats.models.length === 0) ? <span className={styles.secondaryText}>{t('sources.list.never_synced')}</span> : (
                         <span className={styles.primaryText}>
                           <strong>{t('sources.list.model_count', { count: stats.models.length })}</strong>
                           {stats.pendingCount > 0 && <StatusPill tone="warning">{t('sources.list.pending_count', { count: stats.pendingCount })}</StatusPill>}
@@ -265,7 +311,7 @@ export function SourcesPage({ api, refreshRevision = 0, onBusyChange, onOpenSour
                           <span>{formatDateTime(stats.lastSyncAt, { dateStyle: 'short' })}</span>
                           <small>{formatDateTime(stats.lastSyncAt, { timeStyle: 'short' })}</small>
                         </time>
-                      ) : <span className={styles.secondaryText}>—</span>}</Table.Td>
+                      ) : statsState?.status === 'ready' ? <span className={styles.secondaryText}>—</span> : <span className={styles.secondaryText}>{t('sources.list.stats_unknown')}</span>}</Table.Td>
                       <Table.Td><span className={sourceStyles.protocols}>
                         {GATEWAY_PROTOCOLS.map((protocol) => {
                           const mode = source.protocol_capabilities[protocol]?.mode;

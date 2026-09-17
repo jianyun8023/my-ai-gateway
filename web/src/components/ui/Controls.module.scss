@@ -49,3 +49,7 @@ textarea.input { min-height: 88px; resize: vertical; }
   .input { --input-height: 44px; }
   .checkbox { min-height: 44px; }
 }
+
+@media (pointer: coarse) {
+  .input { font-size: var(--keeper-touch-input-font-size); }
+}

@@ -16,6 +16,7 @@ export const sources = {
 
   // 表单校验
   form: {
+    validate_required: 'This field is required.',
     validate_required_source: 'Source ID, display name, provider preset, and Base URL are required.',
     validate_preset: 'Please select a valid provider preset version.',
     validate_adapter_mode: 'Adapter mode requires an upstream protocol and an adapter name.',
@@ -38,6 +39,7 @@ export const sources = {
     credential_env_hint_no_echo: 'Existing references are not echoed; re-enter the variable name to save it.',
     credential_env_hint_name_only: 'Only the variable name is submitted, never the credential value.',
     verify_on_submit: 'Verify on submit',
+    adapter_unavailable: 'No production adapters are registered, so conversion settings cannot be created or changed. Existing values are shown read-only.',
   },
 
   // 字段
@@ -79,6 +81,8 @@ export const sources = {
     test_failed: 'Failed',
     test_button: 'Test',
     test_no_http: 'no HTTP',
+    test_saved_hint: 'Tests use the saved source configuration. Select an enabled account; only protocols declared native can be tested.',
+    test_protocol_unavailable: 'Not testable with the current capability declaration',
     back_to_list: 'Sources',
     missing_title: 'Source {{id}} does not exist',
     missing_desc: 'It may have been deleted. Return to Sources.',
@@ -207,6 +211,8 @@ export const sources = {
       models_hint: 'Synced models',
       pending: 'Pending changes',
       pending_hint: 'Across {{count}} sources',
+      stats_loading: 'Loading sync statistics for {{ready}}/{{total}} sources',
+      stats_failed: 'Sync statistics failed for {{failed}}/{{total}} sources',
     },
     card_title: 'All Sources {{count}}',
     search: 'Search sources',
@@ -227,6 +233,9 @@ export const sources = {
     model_count: '{{count}} models',
     pending_count: '{{count}} pending',
     never_synced: 'Not synced',
+    stats_loading: 'Loading sync statistics…',
+    stats_failed: 'Sync statistics failed',
+    stats_unknown: 'Unknown',
     check_updates_aria: 'Check model updates for {{id}}',
     flow_title: 'How source management works',
     flow_steps: 'New Source → Test Connection → Check Model Updates → Review & Confirm → Use in Models & Routes',
@@ -264,12 +273,14 @@ export const sources = {
     flow_step_4_desc: 'Confirmed models become selectable in Models & Routes',
     verify_card: 'Recent Verification',
     verify_health: 'Account health',
-    verify_connection: 'Connection test (Chat)',
+    verify_connection: 'Connection test',
     verify_ok: 'OK · {{latency}} ms',
     verify_failed: 'Failed',
     verify_none: 'Not verified yet',
     verify_probe: 'Last probe',
     verify_saved_hint: 'Connection tests use the saved configuration and account; unsaved drafts are not verified.',
+    verify_on_detail: 'Choose an account and protocol on the source details page',
+    open_connection_test: 'Test Saved Configuration',
   },
 
   // Model update review page

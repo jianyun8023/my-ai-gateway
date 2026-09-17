@@ -50,6 +50,7 @@ interface GatewayConsoleShellProps {
   navigationItems: readonly GatewayConsoleNavItem[];
   onNavigate: (page: string) => void;
   title: string;
+  focusKey?: string;
   refreshable?: boolean;
   children: (context: GatewayConsoleContentContext) => ReactNode;
 }
@@ -77,6 +78,7 @@ export function GatewayConsoleShell({
   navigationItems,
   onNavigate,
   title,
+  focusKey = activePage,
   refreshable = false,
   children,
 }: GatewayConsoleShellProps) {
@@ -89,6 +91,8 @@ export function GatewayConsoleShell({
   const [refreshing, setRefreshing] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [connectionOpen, setConnectionOpen] = useState(false);
+  const pageTitleRef = useRef<HTMLHeadingElement>(null);
+  const previousFocusKey = useRef(focusKey);
   const mobile = useMediaQuery('(max-width: 920px)');
   const resolvedTheme = useThemeStore((state) => state.resolvedTheme);
   const setTheme = useThemeStore((state) => state.setTheme);
@@ -111,6 +115,11 @@ export function GatewayConsoleShell({
   useEffect(() => { setMobileNavOpen(false); }, [activePage]);
   useEffect(() => { if (!mobile) setMobileNavOpen(false); }, [mobile]);
   useEffect(() => { if (mobile) setConnectionOpen(false); }, [mobile]);
+  useEffect(() => {
+    if (previousFocusKey.current === focusKey) return;
+    previousFocusKey.current = focusKey;
+    pageTitleRef.current?.focus({ preventScroll: true });
+  }, [focusKey]);
 
   const applyAdminKey = () => {
     const k = adminKeyDraft.trim();
@@ -233,7 +242,7 @@ export function GatewayConsoleShell({
 
         <div className={styles.content}>
           <div className={styles.pageHeader}>
-            <Title order={1}>{title}</Title>
+            <Title ref={pageTitleRef} order={1} tabIndex={-1}>{title}</Title>
           </div>
           {/* eslint-disable-next-line react-hooks/refs -- render prop pattern; ref callbacks are memoized */}
           {children(contentContext)}

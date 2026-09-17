@@ -2,10 +2,16 @@ import { ActionIcon, Tooltip } from '@mantine/core';
 import type { PropsWithChildren, ButtonHTMLAttributes } from 'react';
 import styles from './Controls.module.scss';
 
-export function IconButton({ label, className = '', children, ...props
-}: PropsWithChildren<ButtonHTMLAttributes<HTMLButtonElement> & { label: string; loading?: boolean }>) {
+interface IconButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
+  label: string;
+  loading?: boolean;
+  tooltipTouch?: boolean;
+}
+
+export function IconButton({ label, className = '', children, tooltipTouch = false, ...props
+}: PropsWithChildren<IconButtonProps>) {
   const { disabled, onClick, ...buttonProps } = props;
-  return <Tooltip label={label} events={{ hover: true, focus: true, touch: false }}>
+  return <Tooltip label={label} events={{ hover: true, focus: true, touch: tooltipTouch }}>
     <ActionIcon type="button" data-ui="icon-button" variant="subtle"
       vars={() => ({ root: { '--ai-size': 'var(--console-icon-size)', '--ai-bg': 'transparent',
         '--ai-color': 'var(--muted)', '--ai-hover': 'var(--bg-hover)', '--ai-hover-color': 'var(--fg)' } })}

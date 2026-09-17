@@ -39,6 +39,7 @@ interface RuntimeEventsPageProps {
   api: GatewayAdminResources;
   refreshRevision?: number;
   onBusyChange?: (busy: boolean) => void;
+  initialCorrelationId?: string;
 }
 
 interface DraftFilters {
@@ -75,6 +76,11 @@ const isoTimestamp = (value: string): string | undefined => {
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
 };
+
+const initialDraftFilters = (correlationId?: string): DraftFilters => ({
+  ...EMPTY_FILTERS,
+  correlationId: correlationId?.trim() ?? '',
+});
 
 const appliedFilters = (draft: DraftFilters): RuntimeEventFilters => ({
   category: draft.category || undefined,
@@ -137,14 +143,16 @@ function EventDetails({ event, onClose }: { event: RuntimeEventRecord; onClose: 
   );
 }
 
-export function RuntimeEventsPage({ api, refreshRevision = 0, onBusyChange }: RuntimeEventsPageProps) {
+export function RuntimeEventsPage({ api, refreshRevision = 0, onBusyChange, initialCorrelationId }: RuntimeEventsPageProps) {
   const { t } = useTranslation('console');
-  const [draft, setDraft] = useState<DraftFilters>({ ...EMPTY_FILTERS });
+  const initialDraft = useMemo(() => initialDraftFilters(initialCorrelationId), [initialCorrelationId]);
+  const [draft, setDraft] = useState<DraftFilters>(initialDraft);
   const optionFrom = isoTimestamp(draft.from);
   const optionTo = isoTimestamp(draft.to);
   const loadEventTypes = useCallback((search: string, signal: AbortSignal) =>
     api.eventTypeOptions({ from: optionFrom, to: optionTo }, search, signal), [api, optionFrom, optionTo]);
-  const [filters, setFilters] = useState<RuntimeEventFilters>(() => appliedFilters(EMPTY_FILTERS));
+  const [filters, setFilters] = useState<RuntimeEventFilters>(() => appliedFilters(initialDraft));
+  const [timeRangeError, setTimeRangeError] = useState('');
   const [selected, setSelected] = useState<RuntimeEventRecord>();
   const [appended, setAppended] = useState<AppendedPageState>({ data: [], hasMore: false });
   const [loadingMoreSession, setLoadingMoreSession] = useState<QuerySession<RuntimeEventResponse>>();
@@ -177,6 +185,17 @@ export function RuntimeEventsPage({ api, refreshRevision = 0, onBusyChange }: Ru
   const visibleLoadMoreError = loadMoreError?.session === query.session ? loadMoreError?.error : undefined;
 
   const apply = () => {
+    const from = draft.from ? new Date(draft.from) : undefined;
+    const to = draft.to ? new Date(draft.to) : undefined;
+    if ((from && Number.isNaN(from.getTime())) || (to && Number.isNaN(to.getTime()))) {
+      setTimeRangeError(t('runtimeEvents.invalid_time'));
+      return;
+    }
+    if (from && to && from >= to) {
+      setTimeRangeError(t('runtimeEvents.invalid_range'));
+      return;
+    }
+    setTimeRangeError('');
     clearPagination();
     setSelected(undefined);
     setFilters(appliedFilters(draft));
@@ -184,6 +203,7 @@ export function RuntimeEventsPage({ api, refreshRevision = 0, onBusyChange }: Ru
   const reset = () => {
     clearPagination();
     const empty = { ...EMPTY_FILTERS };
+    setTimeRangeError('');
     setDraft(empty);
     setSelected(undefined);
     setFilters(appliedFilters(empty));
@@ -216,17 +236,15 @@ export function RuntimeEventsPage({ api, refreshRevision = 0, onBusyChange }: Ru
     }
   };
 
-  if (query.loading && !response) return <LoadingState label={t('runtimeEvents.loading')} />;
-  if (query.error && !response) return <QueryError error={query.error} retry={query.reload} />;
-  if (!response) return null;
-
   return (
     <section className={styles.page} data-od-id="page-runtime-events">
       <div className={styles.pageActions}>
         <div className={styles.feedMeta}>
-          <StatusPill tone="accent">{response.version}</StatusPill>
-          <StatusPill>{response.fact_source}</StatusPill>
-          <span>{t('runtimeEvents.range', { boundary: response.range.boundary })}</span>
+          {response && <>
+            <StatusPill tone="accent">{response.version}</StatusPill>
+            <StatusPill>{response.fact_source}</StatusPill>
+            <span>{t('runtimeEvents.range', { boundary: response.range.boundary })}</span>
+          </>}
         </div>
         <Button variant="secondary" onClick={reload} loading={query.refreshing}>
           <IconRefreshCw size={14} />{t('runtimeEvents.refresh')}
@@ -264,8 +282,8 @@ export function RuntimeEventsPage({ api, refreshRevision = 0, onBusyChange }: Ru
         <RemoteFilterField label={t('runtimeEvents.event_type')} value={draft.eventType} loadOptions={loadEventTypes} contextKey={String(refreshRevision)} onChange={(eventType) => setDraft((current) => ({ ...current, eventType }))} />
         <TextField label={t('runtimeEvents.subject')} value={draft.subjectId} placeholder={t('runtimeEvents.subject_placeholder')} onChange={(event) => setDraft((current) => ({ ...current, subjectId: event.currentTarget.value }))} />
         <TextField label={t('runtimeEvents.correlation')} value={draft.correlationId} placeholder={t('runtimeEvents.correlation_placeholder')} onChange={(event) => setDraft((current) => ({ ...current, correlationId: event.currentTarget.value }))} />
-        <TextField type="datetime-local" label={t('runtimeEvents.from')} value={draft.from} onChange={(event) => setDraft((current) => ({ ...current, from: event.currentTarget.value }))} />
-        <TextField type="datetime-local" label={t('runtimeEvents.to')} value={draft.to} onChange={(event) => setDraft((current) => ({ ...current, to: event.currentTarget.value }))} />
+        <TextField type="datetime-local" label={t('runtimeEvents.from')} value={draft.from} error={timeRangeError || undefined} onChange={(event) => { const value = event.currentTarget.value; setTimeRangeError(''); setDraft((current) => ({ ...current, from: value })); }} />
+        <TextField type="datetime-local" label={t('runtimeEvents.to')} value={draft.to} error={timeRangeError || undefined} onChange={(event) => { const value = event.currentTarget.value; setTimeRangeError(''); setDraft((current) => ({ ...current, to: value })); }} />
         <div className={styles.filterActions}>
           <Button variant="secondary" onClick={reset}>{t('runtimeEvents.reset')}</Button>
           <Button onClick={apply}>{t('common.apply')}</Button>
@@ -280,7 +298,7 @@ export function RuntimeEventsPage({ api, refreshRevision = 0, onBusyChange }: Ru
         subtitle={t('runtimeEvents.subtitle')}
         titleMeta={<StatusPill>{t('runtimeEvents.count', { count: rows.length })}</StatusPill>}
       >
-        {rows.length === 0 ? (
+        {query.loading && !response ? <LoadingState label={t('runtimeEvents.loading')} /> : !response ? null : rows.length === 0 ? (
           <EmptyState title={t('runtimeEvents.empty_title')} description={t('runtimeEvents.empty_description')} layout="centered" />
         ) : (
           <TableScroll label={t('runtimeEvents.title')}>

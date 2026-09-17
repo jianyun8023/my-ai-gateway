@@ -28,6 +28,7 @@ describe('usage event details', () => {
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
+    window.location.hash = '#events';
   });
   afterEach(() => {
     act(() => root.unmount());
@@ -87,5 +88,20 @@ describe('usage event details', () => {
     act(() => root.render(null));
     expect(signal.aborted).toBe(true);
     expect(document.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it('links request attribution to runtime events, model search, and source details', async () => {
+    fetchImpl.mockResolvedValue(new Response(JSON.stringify({ attempts: [] })));
+    await render();
+    const dialog = document.querySelector('[role="dialog"]')!;
+    const clickText = async (text: string) => {
+      await act(async () => [...dialog.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === text)!.click());
+    };
+    await clickText(event.requestId);
+    expect(window.location.hash).toBe(`#runtime-events?correlation_id=${encodeURIComponent(event.requestId)}`);
+    await clickText(event.logicalModel);
+    expect(window.location.hash).toBe(`#models?model=${encodeURIComponent(event.logicalModel)}`);
+    await clickText(event.sourceId);
+    expect(window.location.hash).toBe(`#sources/${encodeURIComponent(event.sourceId)}`);
   });
 });

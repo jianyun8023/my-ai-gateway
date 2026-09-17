@@ -16,6 +16,8 @@ export const runtimeEvents = {
   load_more: '加载更多',
   load_more_failed: '下一页事件加载失败。',
   query_failed: '运行事件加载失败。',
+  invalid_time: '请输入有效的起止时间。',
+  invalid_range: '结束时间必须晚于开始时间。修改时间范围后重新应用。',
   title: '统一事件时间线',
   subtitle: '汇总系统事件，以及审计、健康、发现和失败或降级请求中的重要事实。',
   empty_title: '暂无运行事件',

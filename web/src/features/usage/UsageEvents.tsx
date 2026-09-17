@@ -2,7 +2,7 @@ import { Table } from '@mantine/core';
 import { IconButton } from '@/components/ui/IconButton';
 import { IconArrowRight, IconEye, IconInfoCircle } from '@/components/ui/icons';
 import { LoadingState } from '@/components/ui/LoadingState';
-import { Checkbox, Popover, Tooltip } from '@/components/ui/overlays';
+import { Checkbox, Popover } from '@/components/ui/overlays';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -48,9 +48,11 @@ const eventColumnHeader = (column: EventColumn, t: TFunction) => {
   return (
     <span className={styles.eventHeaderLabel}>
       {t(EVENT_COLUMN_LABELS[column])}
-      <Tooltip label={t(hintKey)} events={{ hover: true, focus: true, touch: false }}>
-        <IconInfoCircle size={13} />
-      </Tooltip>
+      <IconButton
+        label={t(hintKey)}
+        tooltipTouch
+        onClick={(event) => event.stopPropagation()}
+      ><IconInfoCircle size={13} /></IconButton>
     </span>
   );
 };

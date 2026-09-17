@@ -3,6 +3,7 @@
 export const usage = {
   // —— 字段名(筛选、维度卡、事件表列、详情共用)——
   field: {
+    request_id: '请求 ID',
     time: '时间',
     model: '模型',
     logical_model: '逻辑模型',

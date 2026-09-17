@@ -407,6 +407,35 @@ describe('production control-plane pages', () => {
     await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent === '前往模型与路由')!.click());
   });
 
+  it('routes edit-page connection testing to the saved source detail without issuing a fixed-protocol test', async () => {
+    const onOpenSource = vi.fn();
+    const fetchMock = vi.fn((input: RequestInfo | URL, _init?: RequestInit) => baseHandler(input));
+    vi.stubGlobal('fetch', fetchMock);
+    await renderPage('sources', { route: { page: 'sources', sourceId: 'source-a', section: 'edit' }, onOpenSource });
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === '测试已保存配置')!.click());
+    expect(onOpenSource).toHaveBeenLastCalledWith('source-a', undefined);
+    expect(fetchMock.mock.calls.some(([url, init]) => String(url).includes('/connection-tests') && init?.method === 'POST')).toBe(false);
+  });
+
+  it('publishes the source directory before per-source statistics and retries a failed source independently', async () => {
+    let failStats = true;
+    const latest = deferred<Response>();
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/admin/sources/source-a/discoveries/latest' && failStats) return latest.promise;
+      return baseHandler(input);
+    }));
+    await renderPage('sources');
+    expect(container.textContent).toContain('Source A');
+    expect(container.textContent).toContain('正在加载同步统计');
+    await act(async () => latest.resolve(jsonResponse({ error: { code: 'stats_failed', message: 'Synthetic stats failure' } }, 503)));
+    await waitFor(() => container.textContent?.includes('同步统计加载失败') ?? false);
+    expect(container.textContent).not.toContain('0 个模型');
+    failStats = false;
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === '重试')!.click());
+    await waitFor(() => container.textContent?.includes('1 个模型') ?? false);
+  });
+
   it('routes a completed check-updates action into the review page', async () => {
     let ran = false;
     const onOpenSource = vi.fn();
@@ -464,6 +493,9 @@ describe('production control-plane pages', () => {
     act(() => submit.click());
     expect(onSubmit).not.toHaveBeenCalled();
     expect(container.querySelector('[role="alert"]')).not.toBeNull();
+    expect(headers.getAttribute('aria-invalid')).toBe('true');
+    expect(headers.getAttribute('aria-describedby')).toContain('source-defaultHeaders-error');
+    expect(document.activeElement).toBe(headers);
     expect(name.value).toBe('Updated source');
     const mode = container.querySelector<HTMLInputElement>('input[role="combobox"]:not(:disabled)')!;
     act(() => setValue(headers, '{}'));
@@ -578,6 +610,28 @@ describe('production control-plane pages', () => {
     await act(async () => oldLatest.resolve(await baseHandler('/admin/sources/source-a/discoveries/latest')));
     expect(container.querySelector('tbody')?.textContent).toContain('upstream-b');
     expect(container.textContent).not.toContain('upstream-a');
+  });
+
+  it('clears edit drafts when the route switches to another source', async () => {
+    const sourceB = { ...source, id: 'source-b', display_name: 'Source B' };
+    const accountB = { ...account, id: 'account-b', source_id: 'source-b', display_name: 'Account B' };
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === '/admin/sources') return jsonResponse({ data: [source, sourceB] });
+      if (String(input) === '/admin/accounts') return jsonResponse({ data: [account, accountB] });
+      return baseHandler(input);
+    }));
+    await renderPage('sources', { route: { page: 'sources', sourceId: 'source-a', section: 'edit' } });
+    const sourceAName = container.querySelector<HTMLInputElement>('#source-displayName')!;
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(sourceAName, 'Leaked draft');
+      sourceAName.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(sourceAName.value).toBe('Leaked draft');
+
+    await renderPage('sources', { route: { page: 'sources', sourceId: 'source-b', section: 'edit' } });
+    expect(container.querySelector<HTMLInputElement>('#source-displayName')?.value).toBe('Source B');
+    expect(container.textContent).toContain('Account B');
+    expect(container.textContent).not.toContain('Leaked draft');
   });
 
   it('keeps a confirmed missing-source state visible when its background refresh fails', async () => {
@@ -1046,12 +1100,15 @@ describe('production control-plane pages', () => {
     expect(dialog.textContent).toContain('确认删除 source-a');
   });
 
-  it('shows create-form validation errors at the top of the form', async () => {
+  it('associates create-form validation errors with fields and focuses the first invalid field', async () => {
     await renderPage('sources', { route: { page: 'sources', sourceId: 'new', section: 'edit' } });
     await act(async () => container.querySelector<HTMLButtonElement>('button[form="source-editor-form"]')!.click());
     const form = container.querySelector('#source-editor-form')!;
-    const alert = form.querySelector('[role="alert"]');
-    expect(alert).not.toBeNull();
-    expect(container.querySelectorAll('#source-editor-form [role="alert"]')).toHaveLength(1);
+    const sourceId = form.querySelector<HTMLInputElement>('#source-id')!;
+    const displayName = form.querySelector<HTMLInputElement>('#source-displayName')!;
+    expect(sourceId.getAttribute('aria-invalid')).toBe('true');
+    expect(displayName.getAttribute('aria-invalid')).toBe('true');
+    expect(sourceId.getAttribute('aria-describedby')).toContain('source-id-error');
+    expect(document.activeElement).toBe(sourceId);
   });
 });

@@ -120,6 +120,7 @@ function App() {
           navigationItems={navigationItems}
           onNavigate={navigate}
           title={pageTitle}
+          focusKey={canonicalConsoleHash(window.location.hash)}
           refreshable
         >
           {({ getAdminKey, adminKeyConfigured, authGeneration, clearAdminKey, refreshRevision, setRefreshing }) => (

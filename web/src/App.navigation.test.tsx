@@ -83,5 +83,13 @@ describe('App console routing', () => {
     expect(container.querySelectorAll('nav button[aria-current="page"]')).toHaveLength(1);
     expect(container.querySelector('nav button[aria-current="page"]')?.textContent).toBe('来源管理');
     expect(container.querySelector('h1')?.textContent).toBe('来源管理');
+
+    await act(async () => {
+      window.location.hash = '#sources/source-a';
+      window.dispatchEvent(new HashChangeEvent('hashchange'));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(container.querySelector('h1')?.textContent).toBe('来源详情');
+    expect(document.activeElement).toBe(container.querySelector('h1'));
   });
 });

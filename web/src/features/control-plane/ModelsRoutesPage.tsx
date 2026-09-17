@@ -32,6 +32,7 @@ interface ModelsRoutesPageProps {
   api: GatewayAdminResources;
   refreshRevision?: number;
   onBusyChange?: (busy: boolean) => void;
+  initialSearch?: string;
 }
 
 const statusTones: Record<string, StatusTone> = {
@@ -39,10 +40,10 @@ const statusTones: Record<string, StatusTone> = {
   disabled: 'muted', pending: 'warning', unknown: 'muted',
 };
 
-export function ModelsRoutesPage({ api, refreshRevision = 0, onBusyChange }: ModelsRoutesPageProps) {
+export function ModelsRoutesPage({ api, refreshRevision = 0, onBusyChange, initialSearch = '' }: ModelsRoutesPageProps) {
   const { t } = useTranslation('console');
   const apiErrorText = useLocalizedApiError();
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(initialSearch);
   const editor = useOverlayState<{ id?: string }>();
   const capabilityDetails = useOverlayState<{ model: LogicalModel; protocol?: GatewayProtocol }>();
   const deletion = useOverlayState<LogicalModel>();

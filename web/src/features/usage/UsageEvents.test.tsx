@@ -393,4 +393,15 @@ describe('virtual event table', () => {
     expect(region.scrollTop).toBe(scrollTop);
   });
 
+  it('uses named focusable metric explanations in table headers', async () => {
+    const client = new GatewayUsageClient(new AdminClient({ fetchImpl: vi.fn<typeof fetch>() }));
+    await act(async () => root.render(<EventsTable events={[base]} hasMore={false} loadingMore={false} onLoadMore={() => {}}
+      visibleColumns={['tokens', 'tps', 'cache']} onVisibleColumnsChange={() => {}} onExport={() => {}} client={client} />));
+    const explanation = container.querySelector<HTMLButtonElement>('button[aria-label="最终逻辑请求口径,不因回退重复累计"]')!;
+    expect(explanation).not.toBeNull();
+    expect(explanation.type).toBe('button');
+    await act(async () => explanation.focus());
+    expect(document.activeElement).toBe(explanation);
+  });
+
 });

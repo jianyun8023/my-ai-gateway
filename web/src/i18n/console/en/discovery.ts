@@ -91,6 +91,7 @@ export const discovery = {
   capability_saved: '{{protocol}} capability saved.',
   capability_unknown_confirm_hint: 'Unknown capabilities cannot be confirmed.',
   capability_adapter_hint: 'Adapter mode requires a confirmed native upstream protocol.',
+  capability_adapter_unavailable: 'No production adapter is available. Existing adapter declarations are read-only and cannot be created or changed.',
 
   // Table
   column: {

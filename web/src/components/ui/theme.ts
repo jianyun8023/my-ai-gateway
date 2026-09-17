@@ -68,8 +68,13 @@ export const consoleTheme = createTheme({
 
 export const overlayDefaults = {
   zIndex: 1000,
-  transitionProps: { duration: 180 },
+  transitionProps: { duration: 180, timingFunction: 'cubic-bezier(0.23, 1, 0.32, 1)' },
   overlayProps: { backgroundOpacity: 0.4, color: '#000' },
+} as const;
+
+export const drawerTransition = {
+  duration: 180,
+  timingFunction: 'cubic-bezier(0.32, 0.72, 0, 1)',
 } as const;
 
 const semanticVariables = {

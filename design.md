@@ -25,6 +25,8 @@ Tech-Utility：冷灰底色、绿色强调、紧凑数据布局。使用固定�
 | 圆角 | 小控件 6px、常规容器 8px、卡片与弹窗 12px；状态标签为胶囊 |
 | 控件 | 桌面普通按钮 36px、小按钮 32px；触摸布局普通按钮、表单和分段控件至少 44px |
 
+触摸主指针下的输入、选择与文本域字号至少为 16px，避免 iOS 聚焦时自动放大；桌面仍使用紧凑的 12px 控件字号，不通过禁止页面缩放规避该行为。
+
 现有 `--keeper-*`、`--text-*` 等变量也由品牌层映射，页面不重复定义。Mantine 字体、间距、断点、组件默认值及语义变量映射集中在 [theme.ts](web/src/components/ui/theme.ts)。旧 `themes.scss`、`components.scss`、`layout.scss` 和 `mixins.scss` 已在确认无生产调用后删除，不再保留第二套主题或全局组件样式。
 
 加载顺序固定为全局 reset → 品牌 Token → [Mantine 按需样式](web/src/styles/mantine.css) → Root 引入的组件 CSS Modules。新增 Mantine 控件时在该入口补充组件样式及其内部依赖；例如 Select 同时依赖 Input、Popover、ScrollArea 与 Combobox。不要在页面导入全库样式或依赖加载顺序覆盖公共交互。

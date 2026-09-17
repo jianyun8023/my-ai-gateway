@@ -83,7 +83,7 @@ export function SourceDetailPage({ api, refreshRevision = 0, onBusyChange, sourc
     const [sources, accounts] = await Promise.all([api.sources(signal), api.accounts(signal)]);
     return { source: sources.find((item) => item.id === sourceId), accounts };
   }, [api, sourceId]);
-  const contextQuery = useAdminQuery({ load: loadContext, refreshRevision, onBusyChange });
+  const contextQuery = useAdminQuery({ load: loadContext, queryKey: sourceId, refreshRevision, onBusyChange });
   const context = contextQuery.data;
   const source = context?.source;
   const accounts = (context?.accounts ?? []).filter((account) => account.source_id === sourceId);
@@ -131,7 +131,8 @@ export function SourceDetailPage({ api, refreshRevision = 0, onBusyChange, sourc
     // 本次测试从头开始：历史成功结果不再保留，避免与本次失败混淆。
     setTestResults({});
     try {
-      const results = await Promise.all(GATEWAY_PROTOCOLS.map(async (protocol) => {
+      const testableProtocols = GATEWAY_PROTOCOLS.filter((protocol) => source?.protocol_capabilities[protocol]?.mode === 'native');
+      const results = await Promise.all(testableProtocols.map(async (protocol) => {
         try {
           return [protocol, await api.testConnection(sourceId, {
             account_id: effectiveAccountId,
@@ -217,7 +218,7 @@ export function SourceDetailPage({ api, refreshRevision = 0, onBusyChange, sourc
           </div>
           <div className={styles.rowActions}>
             <Button variant="secondary" onClick={() => openSource(source.id, 'edit')}><IconPencil size={14} />{t('sources.modal.edit_source')}</Button>
-            <Button variant="secondary" loading={testingAll} disabled={!effectiveAccountId || Boolean(testBusy)} onClick={() => void testAll()}>{t('sources.detail.test_connection')}</Button>
+            <Button variant="secondary" loading={testingAll} disabled={!effectiveAccountId || Boolean(testBusy) || !GATEWAY_PROTOCOLS.some((protocol) => source.protocol_capabilities[protocol]?.mode === 'native')} onClick={() => void testAll()}>{t('sources.detail.test_connection')}</Button>
             <Button variant="secondary" loading={checking} disabled={!effectiveAccountId || checking} onClick={() => void checkUpdates()}>{t('sources.detail.check_updates')}</Button>
             {(stats?.pendingCount ?? 0) > 0 && (
               <Button variant="primary" onClick={() => openSource(source.id, 'review')}>{t('sources.detail.review_changes')}</Button>
@@ -338,6 +339,7 @@ export function SourceDetailPage({ api, refreshRevision = 0, onBusyChange, sourc
         <Card title={t('sources.detail.connection_test')}>
           {enabledAccounts.length === 0 ? <EmptyTable title={t('sources.detail.test_no_account')} description={t('sources.detail.test_no_account_desc')} /> : (
             <div className={styles.stack}>
+              <p className={styles.secondaryText}>{t('sources.detail.test_saved_hint')}</p>
               <FormGrid>
                 <SelectField
                   label={t('common.account')}
@@ -353,6 +355,7 @@ export function SourceDetailPage({ api, refreshRevision = 0, onBusyChange, sourc
                 {GATEWAY_PROTOCOLS.map((protocol) => {
                   const result = testResults[protocol];
                   const succeeded = result?.status === 'succeeded';
+                  const testable = source.protocol_capabilities[protocol]?.mode === 'native';
                   return (
                     <div key={protocol} className={styles.protocolTestRow}>
                       <ProtocolPill protocol={protocol} />
@@ -363,7 +366,8 @@ export function SourceDetailPage({ api, refreshRevision = 0, onBusyChange, sourc
                           {result.error_code && <small>{result.error_code}: {result.error_message}</small>}
                         </span>
                       )}
-                      <Button size="sm" variant="secondary" loading={testBusy === protocol} disabled={Boolean(testBusy && testBusy !== protocol) || testingAll} onClick={() => void runTest(protocol)}>
+                      {!testable && <small className={styles.secondaryText}>{t('sources.detail.test_protocol_unavailable')}</small>}
+                      <Button size="sm" variant="secondary" loading={testBusy === protocol} disabled={!testable || Boolean(testBusy && testBusy !== protocol) || testingAll} onClick={() => void runTest(protocol)}>
                         <IconPlay size={14} />{t('sources.detail.test_button')}
                       </Button>
                     </div>
@@ -399,7 +403,7 @@ export function SourceDetailPage({ api, refreshRevision = 0, onBusyChange, sourc
 function PresetDiffCard({ api, source }: { api: GatewayAdminResources; source: Source }) {
   const { t } = useTranslation('console');
   const loadDiff = useCallback((signal: AbortSignal) => api.sourcePresetDiff(source.id, signal), [api, source.id]);
-  const diffQuery = useAdminQuery({ load: loadDiff });
+  const diffQuery = useAdminQuery({ load: loadDiff, queryKey: source.id });
   const { data: diff, error: diffError } = diffQuery;
   return (
     <Card title={t('sources.detail.preset_diff')}>

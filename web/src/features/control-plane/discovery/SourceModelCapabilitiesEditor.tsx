@@ -25,8 +25,6 @@ import { PROTOCOL_LABELS } from '@/lib/protocols';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-const ADAPTER_OPTIONS: string[] = [];
-
 const CAPABILITY_MODES: SourceProtocolMode[] = ['unknown', 'native', 'adapter', 'unsupported'];
 
 const CAPABILITY_STATUSES: CatalogStatus[] = ['pending', 'confirmed', 'unavailable'];
@@ -154,7 +152,11 @@ export function SourceModelCapabilitiesEditor({
                 label={t('discovery.capability_mode')}
                 value={draft.mode}
                 disabled={Boolean(rowBusy)}
-                data={CAPABILITY_MODES.map((mode) => ({ value: mode, label: t(`values.mode.${mode}`) }))}
+                data={CAPABILITY_MODES.map((mode) => ({
+                  value: mode,
+                  label: t(`values.mode.${mode}`),
+                  disabled: mode === 'adapter' && draft.mode !== 'adapter',
+                }))}
                 onChange={(value) => updateDraft(protocol, { mode: value as SourceProtocolMode })}
               />
               <SelectField
@@ -169,7 +171,7 @@ export function SourceModelCapabilitiesEditor({
                   <SelectField
                     label={t('discovery.capability_source_protocol')}
                     value={draft.source_protocol}
-                    disabled={Boolean(rowBusy)}
+                    disabled
                     data={[
                       { value: '', label: t('discovery.none') },
                       ...GATEWAY_PROTOCOLS.filter((item) => item !== protocol)
@@ -180,15 +182,15 @@ export function SourceModelCapabilitiesEditor({
                   <SelectField
                     label={t('discovery.capability_adapter')}
                     value={draft.adapter}
-                    disabled={Boolean(rowBusy)}
-                    data={[{ value: '', label: t('discovery.none') }, ...ADAPTER_OPTIONS.map((name) => ({ value: name, label: name }))]}
+                    disabled
+                    data={draft.adapter ? [{ value: draft.adapter, label: draft.adapter }] : [{ value: '', label: t('discovery.none') }]}
                     onChange={(value) => updateDraft(protocol, { adapter: value })}
                   />
                 </>
               )}
             </FormGrid>
             {unknownConfirm && <small className={styles.secondaryText}>{t('discovery.capability_unknown_confirm_hint')}</small>}
-            {draft.mode === 'adapter' && <small className={styles.secondaryText}>{t('discovery.capability_adapter_hint')}</small>}
+            {draft.mode === 'adapter' && <small className={styles.secondaryText}>{t('discovery.capability_adapter_unavailable')}</small>}
             <FormError message={rowErrors[protocol]} />
             <div className={styles.rowActions}>
               <Button size="sm" variant="secondary" onClick={() => void save(protocol)} loading={rowBusy === protocol} disabled={saveDisabled}>

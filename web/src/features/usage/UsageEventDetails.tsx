@@ -13,6 +13,7 @@ import { GatewayUsageClient, type UsageAttemptViewModel, type UsageEventViewMode
 import { useAdminQuery } from '@/hooks/useAdminQuery';
 import { useLocalizedApiError } from '@/hooks/useLocalizedApiError';
 import { formatPercent } from '@/utils/formatCompact';
+import { modelRouteHash, runtimeEventsRouteHash, sourceRouteHash } from '@/lib/consoleNavigation';
 import { useCallback, useState, type PropsWithChildren } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -65,6 +66,9 @@ export function EventDetails({ event, onClose, client }: { event: UsageEventView
         )}
         <DrawerSection title={t('usage.detail.section_basic')}>
           <DetailList>
+            <DetailItem label={t('usage.field.request_id')}>
+              <Button size="sm" variant="ghost" onClick={() => { window.location.hash = runtimeEventsRouteHash(event.requestId); }}>{event.requestId}</Button>
+            </DetailItem>
             <DetailItem label={t('usage.field.time')}><strong>{formatTime(event.createdAt)}</strong></DetailItem>
             <DetailItem label={t('usage.field.client_source')}><strong>{event.clientSource}</strong></DetailItem>
             <DetailItem label={t('usage.field.account')}><strong>{event.account}</strong></DetailItem>
@@ -80,10 +84,10 @@ export function EventDetails({ event, onClose, client }: { event: UsageEventView
         </DrawerSection>
         <DrawerSection title={t('usage.detail.section_routing')}>
           <DetailList>
-            <DetailItem label={t('usage.field.logical_model')}><strong>{event.logicalModel}</strong></DetailItem>
+            <DetailItem label={t('usage.field.logical_model')}><Button size="sm" variant="ghost" onClick={() => { window.location.hash = modelRouteHash(event.logicalModel); }}>{event.logicalModel}</Button></DetailItem>
             <DetailItem label={t('usage.field.upstream_model')}><strong>{event.upstreamModel}</strong></DetailItem>
             <DetailItem label={t('usage.field.provider')}><strong>{event.provider}</strong></DetailItem>
-            <DetailItem label={t('usage.field.source_id')}><strong>{event.sourceId}</strong></DetailItem>
+            <DetailItem label={t('usage.field.source_id')}><Button size="sm" variant="ghost" onClick={() => { window.location.hash = sourceRouteHash(event.sourceId); }}>{event.sourceId}</Button></DetailItem>
           </DetailList>
         </DrawerSection>
         <DrawerSection title={t('usage.detail.token_title')} hint={t('usage.detail.token_subtitle')}>

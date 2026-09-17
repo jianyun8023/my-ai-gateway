@@ -16,6 +16,8 @@ export const runtimeEvents = {
   load_more: 'Load more',
   load_more_failed: 'The next event page could not be loaded.',
   query_failed: 'Runtime events could not be loaded.',
+  invalid_time: 'Enter a valid start and end time.',
+  invalid_range: 'The end time must be later than the start time. Correct the range and apply again.',
   title: 'Unified event timeline',
   subtitle: 'System events and notable facts from audit, health, discovery, and failed or degraded requests.',
   empty_title: 'No runtime events',
