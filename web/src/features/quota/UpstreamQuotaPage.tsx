@@ -26,6 +26,8 @@ interface UpstreamQuotaPageProps {
   onBusyChange?: (busy: boolean) => void;
 }
 
+type QuotaTranslation = ReturnType<typeof useTranslation<'console'>>['t'];
+
 const FAILED_STATUSES = new Set<UpstreamQuotaStatus>(['refresh_failed', 'auth_error']);
 const PROBLEM_STATUSES = new Set<UpstreamQuotaStatus>([
   'low',
@@ -98,6 +100,13 @@ const displayError = (error: unknown): string => (
   error instanceof Error ? error.message : String(error)
 );
 
+const formatCompactDateTime = (value: string): string => formatDateTime(value, {
+  month: 'short',
+  day: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+});
+
 const formatBalance = (resource: QuotaResource): string => {
   const value = resource.remaining;
   if (value === undefined || value === null) return '—';
@@ -118,7 +127,7 @@ const formatBalance = (resource: QuotaResource): string => {
 function WindowCell({ resource, unsupported, t }: {
   resource?: QuotaResource;
   unsupported: boolean;
-  t: ReturnType<typeof useTranslation<'console'>>['t'];
+  t: QuotaTranslation;
 }) {
   if (!resource || resource.remaining === undefined || resource.remaining === null) {
     return <span className={styles.secondary}>{unsupported ? t('quota.not_applicable') : '—'}</span>;
@@ -131,12 +140,12 @@ function WindowCell({ resource, unsupported, t }: {
         <span>{t('quota.remaining')}</span>
         <strong>{Math.round(remaining)}%</strong>
       </div>
-      <div className={styles.quotaTrack} aria-hidden="true">
+      <div className={styles.quotaTrack} data-tone={tone} aria-hidden="true">
         <span data-tone={tone} style={{ width: `${remaining}%` }} />
       </div>
       <span className={styles.quotaReset}>
         {resource.reset_at
-          ? t('quota.reset_at', { time: formatDateTime(resource.reset_at) })
+          ? t('quota.reset_at', { time: formatCompactDateTime(resource.reset_at) })
           : t('quota.reset_unknown')}
       </span>
     </div>
@@ -146,15 +155,34 @@ function WindowCell({ resource, unsupported, t }: {
 function SnapshotStatus({ snapshot, refreshing, t }: {
   snapshot: UpstreamQuotaSnapshot;
   refreshing: boolean;
-  t: ReturnType<typeof useTranslation<'console'>>['t'];
+  t: QuotaTranslation;
 }) {
   if (refreshing) {
     return <StatusPill tone="accent">{t('quota.status.refreshing')}</StatusPill>;
   }
+  const detail = snapshot.stale && snapshot.fetched_at
+    ? t('quota.status_context.stale_snapshot', { time: formatCompactDateTime(snapshot.fetched_at) })
+    : snapshot.status === 'exhausted'
+      ? t('quota.status_context.exhausted_source')
+      : undefined;
   return (
-    <StatusPill tone={statusTone(snapshot.status)}>
-      {t(`quota.status.${snapshot.status}`)}
-    </StatusPill>
+    <span className={styles.statusCell}>
+      <StatusPill tone={statusTone(snapshot.status)}>
+        {t(`quota.status.${snapshot.status}`)}
+      </StatusPill>
+      {detail && <small>{detail}</small>}
+    </span>
+  );
+}
+
+function SnapshotTime({ value }: { value?: string | null }) {
+  if (!value) return <span className={styles.secondary}>—</span>;
+  const exact = formatDateTime(value);
+  return (
+    <time className={styles.snapshotTime} dateTime={value} title={exact} aria-label={exact}>
+      <span>{formatDateTime(value, { dateStyle: 'short' })}</span>
+      <small>{formatDateTime(value, { timeStyle: 'short' })}</small>
+    </time>
   );
 }
 
@@ -262,7 +290,7 @@ function ListPage({ client, refreshRevision = 0, onBusyChange }: Omit<UpstreamQu
   }, [items, onlyProblems, provider, search, status]);
 
   const usable = items.filter((item) => item.status === 'ok' || item.status === 'low').length;
-  const low = items.filter((item) => item.status === 'low').length;
+  const quotaAlerts = items.filter((item) => item.status === 'low' || item.status === 'exhausted').length;
   const failed = items.filter((item) => FAILED_STATUSES.has(item.status)).length;
   const enabled = items.filter((item) => item.account.enabled).length;
 
@@ -276,7 +304,7 @@ function ListPage({ client, refreshRevision = 0, onBusyChange }: Omit<UpstreamQu
       <div className={styles.summaryGrid}>
         <MetricCard compact label={t('quota.summary.accounts')} value={String(items.length)} hint={t('quota.summary.accounts_hint', { count: enabled })} />
         <MetricCard compact label={t('quota.summary.available')} value={String(usable)} hint={t('quota.summary.available_hint')} tone={usable === 0 && items.length > 0 ? 'warning' : undefined} />
-        <MetricCard compact label={t('quota.summary.low')} value={String(low)} hint={t('quota.summary.low_hint')} tone={low > 0 ? 'warning' : undefined} />
+        <MetricCard compact label={t('quota.summary.alerts')} value={String(quotaAlerts)} hint={t('quota.summary.alerts_hint')} tone={quotaAlerts > 0 ? 'warning' : undefined} />
         <MetricCard compact label={t('quota.summary.failed')} value={String(failed)} hint={t('quota.summary.failed_hint')} tone={failed > 0 ? 'warning' : undefined} />
       </div>
 
@@ -333,14 +361,14 @@ function ListPage({ client, refreshRevision = 0, onBusyChange }: Omit<UpstreamQu
         <TableScroll label={t('quota.table_region')}>
           <Table className={styles.table}>
             <Table.Thead><Table.Tr>
-              <Table.Th>{t('quota.column.account')}</Table.Th>
-              <Table.Th>{t('quota.column.provider')}</Table.Th>
-              <Table.Th>{t('quota.column.window_5h')}</Table.Th>
-              <Table.Th>{t('quota.column.window_7d')}</Table.Th>
-              <Table.Th>{t('quota.column.balance')}</Table.Th>
-              <Table.Th>{t('quota.column.status')}</Table.Th>
-              <Table.Th>{t('quota.column.updated')}</Table.Th>
-              <Table.Th>{t('quota.column.actions')}</Table.Th>
+              <Table.Th scope="col">{t('quota.column.account')}</Table.Th>
+              <Table.Th scope="col">{t('quota.column.provider')}</Table.Th>
+              <Table.Th scope="col">{t('quota.column.window_5h')}</Table.Th>
+              <Table.Th scope="col">{t('quota.column.window_7d')}</Table.Th>
+              <Table.Th scope="col">{t('quota.column.balance')}</Table.Th>
+              <Table.Th scope="col">{t('quota.column.status')}</Table.Th>
+              <Table.Th scope="col">{t('quota.column.updated')}</Table.Th>
+              <Table.Th scope="col">{t('quota.column.actions')}</Table.Th>
             </Table.Tr></Table.Thead>
             <Table.Tbody>
               {filtered.map((snapshot) => {
@@ -361,18 +389,7 @@ function ListPage({ client, refreshRevision = 0, onBusyChange }: Omit<UpstreamQu
                     <Table.Td><WindowCell resource={resourceByKey(snapshot, '7d')} unsupported={unsupportedWindows} t={t} /></Table.Td>
                     <Table.Td><BalanceCell snapshot={snapshot} /></Table.Td>
                     <Table.Td><SnapshotStatus snapshot={snapshot} refreshing={refreshing} t={t} /></Table.Td>
-                    <Table.Td>
-                      {snapshot.stale && snapshot.refresh_error ? (
-                        <span className={styles.stale}>
-                          <strong>{t('quota.refresh_failed')}</strong>
-                          <small>{snapshot.fetched_at ? formatDateTime(snapshot.fetched_at) : '—'}</small>
-                        </span>
-                      ) : (
-                        <span className={styles.secondary}>
-                          {snapshot.fetched_at ? formatDateTime(snapshot.fetched_at) : '—'}
-                        </span>
-                      )}
-                    </Table.Td>
+                    <Table.Td><SnapshotTime value={snapshot.fetched_at} /></Table.Td>
                     <Table.Td>
                       <div className={styles.actions}>
                         <Button variant="ghost" size="sm" loading={refreshing} disabled={snapshot.status === 'unsupported' || snapshot.status === 'disabled'} onClick={() => void refreshOne(accountId)}>
@@ -389,7 +406,7 @@ function ListPage({ client, refreshRevision = 0, onBusyChange }: Omit<UpstreamQu
             </Table.Tbody>
           </Table>
         </TableScroll>
-        <p className={styles.note}>{t('quota.snapshot_note')}</p>
+        <p className={styles.listNote}>{t('quota.snapshot_note')}</p>
       </Card>
     </section>
   );
@@ -492,7 +509,7 @@ function DetailPage({ client, accountId, refreshRevision = 0, onBusyChange }: Up
                         <strong>{resource.label}</strong>
                         <span>{t('quota.remaining')} {Math.round(remaining)}%</span>
                       </div>
-                      <div className={styles.quotaTrack}>
+                      <div className={styles.quotaTrack} data-tone={quotaTone(remaining)}>
                         <span data-tone={quotaTone(remaining)} style={{ width: `${Math.max(0, Math.min(100, remaining))}%` }} />
                       </div>
                       <div className={styles.resourceMeta}>
