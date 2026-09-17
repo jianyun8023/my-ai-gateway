@@ -80,10 +80,12 @@ describe('console overlay composition', () => {
 
   it('applies the existing theme state to Mantine while an overlay is open', async () => {
     await act(async () => root.render(<Modal open title="主题" onClose={() => {}}>内容</Modal>));
-    act(() => useThemeStore.getState().setTheme('dark'));
+    act(() => useThemeStore.getState().setMode('dark'));
     expect(document.documentElement.getAttribute('data-mantine-color-scheme')).toBe('dark');
-    expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
-    act(() => useThemeStore.getState().setTheme('white'));
+    expect(document.documentElement.getAttribute('data-color-scheme')).toBe('dark');
+    act(() => useThemeStore.getState().setStyle('nebula'));
+    expect(document.documentElement.getAttribute('data-theme-style')).toBe('nebula');
+    act(() => useThemeStore.getState().setMode('light'));
     expect(document.documentElement.getAttribute('data-mantine-color-scheme')).toBe('light');
   });
 

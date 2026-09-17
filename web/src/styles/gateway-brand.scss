@@ -1,29 +1,11 @@
 /*
- * Runtime design tokens for the active gateway console (see /design.md).
- * The legacy Keeper variable names remain mapped so shared Card/Button
- * components consume one source of truth without changing their public API.
+ * Runtime design tokens for the gateway console (see /design.md).
  *
- * Brand, typography and spacing live on :root so that Mantine variables and React
- * Portal overlays (modals, drawers, notifications) rendered outside
- * .app-frame still resolve var(--radius) etc.
+ * `data-theme-style` selects a visual family. `data-color-scheme` selects its
+ * light or dark palette. Semantic aliases stay stable so pages, Mantine and
+ * Portal content never branch on a named theme.
  */
 :root {
-  --bg: oklch(98% 0.005 250);
-  --surface: oklch(100% 0 0);
-  --fg: oklch(22% 0.02 240);
-  --muted: oklch(50% 0.018 240);
-  --border: oklch(90% 0.008 240);
-  --accent: oklch(58% 0.16 145);
-
-  --accent-soft: color-mix(in oklch, var(--accent) 14%, transparent);
-  --fg-soft: color-mix(in oklch, var(--fg) 6%, transparent);
-  --success: oklch(62% 0.16 145);
-  --success-soft: color-mix(in oklch, var(--success) 12%, transparent);
-  --warn: oklch(70% 0.16 80);
-  --warn-soft: color-mix(in oklch, var(--warn) 12%, transparent);
-  --danger: oklch(58% 0.2 25);
-  --danger-soft: color-mix(in oklch, var(--danger) 12%, transparent);
-
   --font-display: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', system-ui, sans-serif;
   --font-body: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', 'IBM Plex Mono', ui-monospace, Menlo, monospace;
@@ -41,9 +23,11 @@
   --gap-lg: 24px;
   --gap-xl: 32px;
 
-  --radius: 8px;
-  --radius-sm: 6px;
-  --radius-lg: 12px;
+  --accent-soft: color-mix(in oklch, var(--accent) 14%, transparent);
+  --fg-soft: color-mix(in oklch, var(--fg) 6%, transparent);
+  --success-soft: color-mix(in oklch, var(--success) 12%, transparent);
+  --warn-soft: color-mix(in oklch, var(--warn) 12%, transparent);
+  --danger-soft: color-mix(in oklch, var(--danger) 12%, transparent);
 
   --bg-secondary: var(--bg);
   --bg-primary: color-mix(in oklch, var(--fg) 3%, var(--surface));
@@ -88,13 +72,33 @@
   --keeper-control-height-sm: 32px;
   --keeper-control-height-md: 36px;
   --focus-ring: 2px solid var(--accent);
+
   color-scheme: light;
   font-family: var(--font-body);
 }
 
-/* Dark theme uses the same semantic tokens as light. */
-:root[data-theme='dark'] {
-  color-scheme: dark;
+:root[data-color-scheme='dark'] { color-scheme: dark; }
+
+/* Console Green — the existing Tech-Utility baseline. */
+:root,
+:root[data-theme-style='utility'] {
+  --bg: oklch(98% 0.005 250);
+  --surface: oklch(100% 0 0);
+  --fg: oklch(22% 0.02 240);
+  --muted: oklch(50% 0.018 240);
+  --border: oklch(90% 0.008 240);
+  --accent: oklch(58% 0.16 145);
+  --success: oklch(62% 0.16 145);
+  --warn: oklch(70% 0.16 80);
+  --danger: oklch(58% 0.2 25);
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+}
+
+:root[data-theme-style='utility'][data-color-scheme='dark'] {
   --bg: oklch(17% 0.012 250);
   --surface: oklch(22% 0.012 245);
   --fg: oklch(94% 0.006 250);
@@ -108,4 +112,106 @@
   --text-tertiary: color-mix(in oklch, var(--muted) 80%, transparent);
   --text-quaternary: color-mix(in oklch, var(--muted) 55%, transparent);
   --primary-contrast: oklch(16% 0.01 250);
+}
+
+/* Deep Ocean — blue-gray surfaces with a cyan signal color. */
+:root[data-theme-style='ocean'] {
+  --bg: oklch(97% 0.014 235);
+  --surface: oklch(99.5% 0.005 230);
+  --fg: oklch(23% 0.035 245);
+  --muted: oklch(49% 0.035 240);
+  --border: oklch(87% 0.025 235);
+  --accent: oklch(57% 0.16 220);
+  --success: oklch(61% 0.15 155);
+  --warn: oklch(69% 0.16 78);
+  --danger: oklch(58% 0.2 25);
+  --radius-xs: 5px;
+  --radius-sm: 7px;
+  --radius: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+}
+
+:root[data-theme-style='ocean'][data-color-scheme='dark'] {
+  --bg: oklch(15% 0.025 245);
+  --surface: oklch(20% 0.028 245);
+  --fg: oklch(94% 0.01 225);
+  --muted: oklch(72% 0.025 230);
+  --border: oklch(32% 0.035 240);
+  --accent: oklch(72% 0.14 210);
+  --success: oklch(72% 0.14 155);
+  --warn: oklch(77% 0.14 80);
+  --danger: oklch(71% 0.17 25);
+  --bg-primary: color-mix(in oklch, var(--surface) 88%, var(--fg));
+  --text-tertiary: color-mix(in oklch, var(--muted) 80%, transparent);
+  --text-quaternary: color-mix(in oklch, var(--muted) 55%, transparent);
+  --primary-contrast: oklch(17% 0.025 245);
+}
+
+/* Nebula — a more expressive indigo-violet interface. */
+:root[data-theme-style='nebula'] {
+  --bg: oklch(97.5% 0.014 285);
+  --surface: oklch(99.5% 0.006 285);
+  --fg: oklch(23% 0.04 280);
+  --muted: oklch(49% 0.035 280);
+  --border: oklch(88% 0.025 285);
+  --accent: oklch(57% 0.19 290);
+  --success: oklch(60% 0.15 150);
+  --warn: oklch(69% 0.16 78);
+  --danger: oklch(58% 0.2 25);
+  --radius-xs: 6px;
+  --radius-sm: 9px;
+  --radius: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 22px;
+}
+
+:root[data-theme-style='nebula'][data-color-scheme='dark'] {
+  --bg: oklch(16% 0.025 285);
+  --surface: oklch(21% 0.03 285);
+  --fg: oklch(95% 0.012 285);
+  --muted: oklch(72% 0.03 285);
+  --border: oklch(34% 0.04 285);
+  --accent: oklch(72% 0.17 295);
+  --success: oklch(72% 0.14 150);
+  --warn: oklch(77% 0.14 80);
+  --danger: oklch(71% 0.17 25);
+  --bg-primary: color-mix(in oklch, var(--surface) 88%, var(--fg));
+  --text-tertiary: color-mix(in oklch, var(--muted) 80%, transparent);
+  --text-quaternary: color-mix(in oklch, var(--muted) 55%, transparent);
+  --primary-contrast: oklch(17% 0.025 285);
+}
+
+/* Sandstone — warm paper neutrals with an amber operation color. */
+:root[data-theme-style='sandstone'] {
+  --bg: oklch(97% 0.018 75);
+  --surface: oklch(99.5% 0.008 75);
+  --fg: oklch(25% 0.03 50);
+  --muted: oklch(49% 0.035 55);
+  --border: oklch(86% 0.03 70);
+  --accent: oklch(60% 0.16 60);
+  --success: oklch(59% 0.13 145);
+  --warn: oklch(67% 0.16 80);
+  --danger: oklch(57% 0.19 25);
+  --radius-xs: 3px;
+  --radius-sm: 5px;
+  --radius: 7px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
+}
+
+:root[data-theme-style='sandstone'][data-color-scheme='dark'] {
+  --bg: oklch(18% 0.02 55);
+  --surface: oklch(23% 0.022 55);
+  --fg: oklch(93% 0.018 75);
+  --muted: oklch(70% 0.03 70);
+  --border: oklch(35% 0.04 60);
+  --accent: oklch(72% 0.15 70);
+  --success: oklch(70% 0.13 145);
+  --warn: oklch(76% 0.14 82);
+  --danger: oklch(70% 0.17 25);
+  --bg-primary: color-mix(in oklch, var(--surface) 88%, var(--fg));
+  --text-tertiary: color-mix(in oklch, var(--muted) 80%, transparent);
+  --text-quaternary: color-mix(in oklch, var(--muted) 55%, transparent);
+  --primary-contrast: oklch(19% 0.02 55);
 }

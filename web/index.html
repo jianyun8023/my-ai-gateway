@@ -6,6 +6,26 @@
     <title>My AI Gateway · 控制台</title>
     <script>
       window.__APP_BASE_PATH__ = "__APP_BASE_PATH__";
+      (() => {
+        const styles = ['utility', 'ocean', 'nebula', 'sandstone'];
+        const modes = ['auto', 'light', 'dark'];
+        let style = 'utility';
+        let mode = 'auto';
+
+        try {
+          const stored = JSON.parse(localStorage.getItem('my-ai-gateway-theme') || 'null')?.state;
+          if (styles.includes(stored?.style)) style = stored.style;
+          if (modes.includes(stored?.mode)) mode = stored.mode;
+        } catch {
+          // Ignore malformed or unavailable storage and keep the defaults.
+        }
+
+        const colorScheme = mode === 'auto'
+          ? (window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+          : mode;
+        document.documentElement.dataset.themeStyle = style;
+        document.documentElement.dataset.colorScheme = colorScheme;
+      })();
     </script>
   </head>
   <body>

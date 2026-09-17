@@ -12,7 +12,7 @@ function DrawerStackBridge({ children }: PropsWithChildren) {
 }
 
 export function ConsoleProvider({ children, env }: PropsWithChildren<{ env?: 'test' }>) {
-  const colorScheme = useThemeStore((state) => state.resolvedTheme);
+  const colorScheme = useThemeStore((state) => state.resolvedColorScheme);
   useEffect(() => () => notifications.clean(), []);
   return (
     <MantineProvider theme={consoleTheme} cssVariablesResolver={consoleCssVariables} forceColorScheme={colorScheme} env={env}>

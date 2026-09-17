@@ -1,111 +1,90 @@
-/** Gateway console theme state. */
+/** Gateway console appearance state. */
 
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { Theme } from '@/types';
 import { STORAGE_KEY_THEME } from '@/utils/constants';
 
-type ResolvedTheme = 'light' | 'dark';
-type AppliedTheme = ResolvedTheme | 'white';
+export const THEME_MODES = ['auto', 'light', 'dark'] as const;
+export const THEME_STYLES = ['utility', 'ocean', 'nebula', 'sandstone'] as const;
+
+export type ThemeMode = (typeof THEME_MODES)[number];
+export type ThemeStyle = (typeof THEME_STYLES)[number];
+export type ResolvedColorScheme = Exclude<ThemeMode, 'auto'>;
 
 interface ThemeState {
-  theme: Theme;
-  resolvedTheme: ResolvedTheme;
-  setTheme: (theme: Theme) => void;
-  cycleTheme: () => void;
+  mode: ThemeMode;
+  style: ThemeStyle;
+  resolvedColorScheme: ResolvedColorScheme;
+  setMode: (mode: ThemeMode) => void;
+  setStyle: (style: ThemeStyle) => void;
   initializeTheme: () => () => void;
 }
 
-const getSystemTheme = (): ResolvedTheme => {
-  if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-    return 'dark';
-  }
+const getSystemColorScheme = (): ResolvedColorScheme => {
+  if (window.matchMedia?.('(prefers-color-scheme: dark)').matches) return 'dark';
   return 'light';
 };
 
-const resolveAutoTheme = (): AppliedTheme => {
-  return getSystemTheme() === 'dark' ? 'dark' : 'white';
-};
+const resolveColorScheme = (mode: ThemeMode): ResolvedColorScheme => (
+  mode === 'auto' ? getSystemColorScheme() : mode
+);
 
-const normalizeResolvedTheme = (theme: AppliedTheme): ResolvedTheme => {
-  return theme === 'dark' ? 'dark' : 'light';
-};
-
-const resolveTheme = (theme: Theme): AppliedTheme => {
-  if (theme === 'auto') {
-    return resolveAutoTheme();
-  }
-  if (theme === 'white') {
-    return 'white';
-  }
-  return theme;
-};
-
-const applyTheme = (resolved: AppliedTheme) => {
-  if (resolved === 'dark') {
-    document.documentElement.setAttribute('data-theme', 'dark');
-    return;
-  }
-
-  if (resolved === 'white') {
-    document.documentElement.setAttribute('data-theme', 'white');
-    return;
-  }
-
-  document.documentElement.removeAttribute('data-theme');
+const applyAppearance = (style: ThemeStyle, colorScheme: ResolvedColorScheme) => {
+  document.documentElement.setAttribute('data-theme-style', style);
+  document.documentElement.setAttribute('data-color-scheme', colorScheme);
 };
 
 export const useThemeStore = create<ThemeState>()(
   persist(
     (set, get) => ({
-      theme: 'auto',
-      resolvedTheme: 'light',
+      mode: 'auto',
+      style: 'utility',
+      resolvedColorScheme: 'light',
 
-      setTheme: (theme) => {
-        const resolved = resolveTheme(theme);
-        applyTheme(resolved);
-        set({
-          theme,
-          resolvedTheme: normalizeResolvedTheme(resolved),
-        });
+      setMode: (mode) => {
+        const resolvedColorScheme = resolveColorScheme(mode);
+        applyAppearance(get().style, resolvedColorScheme);
+        set({ mode, resolvedColorScheme });
       },
 
-      cycleTheme: () => {
-        const { theme, setTheme } = get();
-        const order: Theme[] = ['light', 'white', 'dark', 'auto'];
-        const currentIndex = order.indexOf(theme);
-        const nextTheme = order[(currentIndex + 1) % order.length];
-        setTheme(nextTheme);
+      setStyle: (style) => {
+        applyAppearance(style, get().resolvedColorScheme);
+        set({ style });
       },
 
       initializeTheme: () => {
-        const { theme, setTheme } = get();
+        const { mode, style } = get();
+        const resolvedColorScheme = resolveColorScheme(mode);
+        applyAppearance(style, resolvedColorScheme);
+        set({ resolvedColorScheme });
 
-        // 应用已保存的主题
-        setTheme(theme);
-
-        // 监听系统主题变化（仅在 auto 模式下生效）
-        if (!window.matchMedia) {
-          return () => {};
-        }
-
+        if (!window.matchMedia) return () => {};
         const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
         const listener = () => {
-          const { theme: currentTheme } = get();
-          if (currentTheme === 'auto') {
-            const resolved = resolveAutoTheme();
-            applyTheme(resolved);
-            set({ resolvedTheme: normalizeResolvedTheme(resolved) });
-          }
+          const state = get();
+          if (state.mode !== 'auto') return;
+          const nextColorScheme = getSystemColorScheme();
+          applyAppearance(state.style, nextColorScheme);
+          set({ resolvedColorScheme: nextColorScheme });
         };
 
         mediaQuery.addEventListener('change', listener);
-
         return () => mediaQuery.removeEventListener('change', listener);
       },
     }),
     {
       name: STORAGE_KEY_THEME,
-    }
-  )
+      partialize: ({ mode, style }) => ({ mode, style }),
+    },
+  ),
 );
+
+/** Keep the first React render aligned with the synchronous document bootstrap. */
+export const applyThemeBeforeRender = () => {
+  const { mode, style, resolvedColorScheme } = useThemeStore.getState();
+  const nextColorScheme = resolveColorScheme(mode);
+  applyAppearance(style, nextColorScheme);
+  if (nextColorScheme !== resolvedColorScheme) {
+    useThemeStore.setState({ resolvedColorScheme: nextColorScheme });
+  }
+};
