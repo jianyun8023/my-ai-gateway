@@ -172,7 +172,7 @@ export function GatewayConsoleShell({
         <div className={styles.brand}>
           <div className={styles.brandIcon}>AG</div>
           <span className={styles.brandText}>{t('shell.brand_name')}</span>
-          <span className={styles.brandVersion}>v0.2.0</span>
+          <span className={styles.brandVersion}>v{__APP_VERSION__}</span>
         </div>
 
         {/* Flat navigation with section headers */}
