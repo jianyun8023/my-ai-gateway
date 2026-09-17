@@ -116,8 +116,9 @@ const server = createServer(async (request, response) => {
     response.writeHead(200, { 'content-type': `${mime(filePath)}; charset=utf-8` });
     response.end(body);
   } catch (error) {
+    console.error('Failed to serve frontend smoke asset:', error);
     response.writeHead(500);
-    response.end(String(error));
+    response.end('Internal Server Error');
   }
 });
 
