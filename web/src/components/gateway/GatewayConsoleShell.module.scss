@@ -187,6 +187,7 @@
 
   .pageHeader { flex-direction: column; align-items: flex-start; gap: 12px; }
   .pageHeader h1 { font-size: 22px; }
+  .keyInput > [data-ui='button'] { --button-height-sm: 44px; }
 }
 
 /* ─── responsive: phone ≤ 600px ────────────────────────────── */

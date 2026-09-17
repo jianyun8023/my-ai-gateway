@@ -16,6 +16,7 @@ export const sources = {
 
   // 表单校验
   form: {
+    validate_required: '此字段为必填项。',
     validate_required_source: '来源 ID、显示名称、提供商预设与 Base URL 均为必填项。',
     validate_preset: '请选择有效的提供商预设版本。',
     validate_adapter_mode: '转换模式必须同时指定上游协议与适配器名称。',
@@ -38,6 +39,7 @@ export const sources = {
     credential_env_hint_no_echo: '现有引用不会回显;如需保存请重新输入环境变量名。',
     credential_env_hint_name_only: '仅提交环境变量名,不提交凭据值。',
     verify_on_submit: '提交后验证',
+    adapter_unavailable: '当前生产环境未注册可用适配器，因此不能新建或修改转换配置；已有配置仅只读展示。',
   },
 
   // 字段
@@ -79,6 +81,8 @@ export const sources = {
     test_failed: '连接失败',
     test_button: '测试',
     test_no_http: '无 HTTP',
+    test_saved_hint: '测试使用已保存的来源配置。请选择启用账号；仅可测试明确声明为原生的协议。',
+    test_protocol_unavailable: '当前能力声明不可测试',
     back_to_list: '来源管理',
     missing_title: '来源 {{id}} 不存在',
     missing_desc: '该来源可能已被删除，请返回来源管理。',
@@ -207,6 +211,8 @@ export const sources = {
       models_hint: '已同步模型',
       pending: '待审核变更',
       pending_hint: '涉及 {{count}} 个来源',
+      stats_loading: '正在加载 {{ready}}/{{total}} 个来源的同步统计',
+      stats_failed: '{{failed}}/{{total}} 个来源的同步统计加载失败',
     },
     card_title: '全部来源 {{count}}',
     search: '搜索来源',
@@ -227,6 +233,9 @@ export const sources = {
     model_count: '{{count}} 个模型',
     pending_count: '{{count}} 待审核',
     never_synced: '未同步',
+    stats_loading: '正在加载同步统计…',
+    stats_failed: '同步统计加载失败',
+    stats_unknown: '未知',
     check_updates_aria: '检查 {{id}} 的模型更新',
     flow_title: '来源管理使用流程',
     flow_steps: '新增来源 → 测试连接 → 检查模型更新 → 审核并确认 → 用于模型与路由',
@@ -264,12 +273,14 @@ export const sources = {
     flow_step_4_desc: '确认后模型可用于模型与路由',
     verify_card: '最近验证状态',
     verify_health: '账号健康状态',
-    verify_connection: '连接测试 (Chat)',
+    verify_connection: '连接测试',
     verify_ok: '正常 · {{latency}} ms',
     verify_failed: '失败',
     verify_none: '尚未验证',
     verify_probe: '最近探测',
     verify_saved_hint: '连接测试基于已保存的配置与账号，不会验证未保存的草稿。',
+    verify_on_detail: '请在来源详情中选择账号与协议进行测试',
+    open_connection_test: '测试已保存配置',
   },
 
   // 模型更新审核页

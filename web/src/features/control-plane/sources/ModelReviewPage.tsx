@@ -86,7 +86,7 @@ export function ModelReviewPage({ api, refreshRevision = 0, onBusyChange, source
       enabledAccounts: accounts.filter((account) => account.source_id === sourceId && account.enabled),
     };
   }, [api, sourceId]);
-  const contextQuery = useAdminQuery({ load: loadContext, refreshRevision, onBusyChange });
+  const contextQuery = useAdminQuery({ load: loadContext, queryKey: sourceId, refreshRevision, onBusyChange });
   const context = contextQuery.data;
   const enabledAccounts = context?.enabledAccounts ?? [];
 

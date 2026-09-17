@@ -55,11 +55,12 @@ export function GatewayManagementPage({
     const sourceRoute = route?.page === 'sources' ? route : undefined;
     const sourceId = sourceRoute?.sourceId;
     if (sourceId && sourceId !== 'new' && sourceRoute?.section === 'review') {
-      return <ModelReviewPage {...shared} sourceId={sourceId} onOpenSource={onOpenSource} onNavigatePage={onNavigatePage} />;
+      return <ModelReviewPage key={`review:${sourceId}`} {...shared} sourceId={sourceId} onOpenSource={onOpenSource} onNavigatePage={onNavigatePage} />;
     }
     if (sourceId && sourceRoute?.section === 'edit') {
       return (
         <SourceEditPage
+          key={`edit:${sourceId}`}
           {...shared}
           sourceId={sourceId === 'new' ? undefined : sourceId}
           onOpenSource={onOpenSource}
@@ -67,12 +68,12 @@ export function GatewayManagementPage({
       );
     }
     if (sourceId) {
-      return <SourceDetailPage {...shared} sourceId={sourceId} onOpenSource={onOpenSource} />;
+      return <SourceDetailPage key={`detail:${sourceId}`} {...shared} sourceId={sourceId} onOpenSource={onOpenSource} />;
     }
     return <SourcesPage {...shared} onOpenSource={onOpenSource} />;
   }
-  if (page === 'runtime-events') return <RuntimeEventsPage {...shared} />;
-  if (page === 'models') return <ModelsRoutesPage {...shared} />;
+  if (page === 'runtime-events') return <RuntimeEventsPage key={`runtime-events:${route?.correlationId ?? ''}`} {...shared} initialCorrelationId={route?.correlationId} />;
+  if (page === 'models') return <ModelsRoutesPage key={`models:${route?.modelSearch ?? ''}`} {...shared} initialSearch={route?.modelSearch} />;
   return (
     <SettingsPage
       {...shared}

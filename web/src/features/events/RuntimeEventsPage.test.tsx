@@ -243,4 +243,46 @@ describe('RuntimeEventsPage', () => {
     expect(container.querySelectorAll('tbody tr')).toHaveLength(1);
     expect(container.textContent).not.toContain('Second event');
   });
+
+  it('keeps filters available after a failed query, validates the time range, and recovers after reset', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('category=database')) {
+        return new Response(JSON.stringify({ error: { code: 'events_query_failed', message: 'Synthetic failure' } }), { status: 503 });
+      }
+      return new Response(JSON.stringify(response([event])), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await renderPage();
+    await waitFor(() => container.textContent?.includes('database.connection_failed') ?? false);
+
+    const input = (label: string) => {
+      const id = [...container.querySelectorAll('label')].find((item) => item.textContent === label)!.htmlFor;
+      return document.getElementById(id) as HTMLInputElement;
+    };
+    const setValue = (element: HTMLInputElement, value: string) => act(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(element, value);
+      element.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    setValue(input('起始时间（本地）'), '2026-09-10T12:00');
+    setValue(input('结束时间（本地）'), '2026-09-10T11:00');
+    const apply = [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === '应用')!;
+    const requestsBeforeInvalidApply = fetchMock.mock.calls.length;
+    await act(async () => apply.click());
+    expect(fetchMock).toHaveBeenCalledTimes(requestsBeforeInvalidApply);
+    expect(input('结束时间（本地）').getAttribute('aria-invalid')).toBe('true');
+    expect(container.textContent).toContain('结束时间必须晚于开始时间');
+
+    setValue(input('起始时间（本地）'), '');
+    setValue(input('结束时间（本地）'), '');
+    await selectComboboxValue(input('分类'), 'database');
+    await act(async () => apply.click());
+    await waitFor(() => container.textContent?.includes('events_query_failed') ?? false);
+    expect(container.querySelector('section[aria-label="运行事件筛选"]')).not.toBeNull();
+    expect([...container.querySelectorAll('button')].some((button) => button.textContent === '重置')).toBe(true);
+
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === '重置')!.click());
+    await waitFor(() => !container.textContent?.includes('events_query_failed'));
+    expect(container.textContent).toContain('database.connection_failed');
+  });
 });

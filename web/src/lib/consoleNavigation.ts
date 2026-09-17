@@ -31,15 +31,24 @@ export interface ConsoleRoute {
   section?: SourceSection;
   /** page === 'upstream-quotas' 时存在，表示账号额度详情。 */
   accountId?: string;
+  /** page === 'runtime-events' 时从请求事件带入的关联 ID。 */
+  correlationId?: string;
+  /** page === 'models' 时从请求事件带入的逻辑模型搜索词。 */
+  modelSearch?: string;
 }
 
 export function isUsagePage(page: ConsolePage): page is GatewayUsageTab {
   return CONSOLE_PAGE_DEFINITIONS.some((entry) => entry.id === page && entry.space === 'usage');
 }
 
-const normalizeHash = (hash: string): string[] => hash
+const splitHash = (hash: string): { path: string; params: URLSearchParams } => {
+  const normalized = hash.trim().replace(/^#/, '');
+  const [path, query = ''] = normalized.split('?', 2);
+  return { path, params: new URLSearchParams(query) };
+};
+
+const normalizeHash = (hash: string): string[] => splitHash(hash).path
   .trim()
-  .replace(/^#/, '')
   .replace(/^\/+/, '')
   .replace(/\/+$/, '')
   .split('/')
@@ -48,6 +57,7 @@ const normalizeHash = (hash: string): string[] => hash
 
 export const resolveConsoleRoute = (hash: string): ConsoleRoute => {
   const segments = normalizeHash(hash);
+  const { params } = splitHash(hash);
   const head = segments[0] as ConsolePage | undefined;
   if (!head || !CONSOLE_PAGES.includes(head)) return { page: 'overview' };
   if (head === 'sources' && segments[1]) {
@@ -56,6 +66,12 @@ export const resolveConsoleRoute = (hash: string): ConsoleRoute => {
   }
   if (head === 'upstream-quotas' && segments[1]) {
     return { page: 'upstream-quotas', accountId: segments[1] };
+  }
+  if (head === 'runtime-events') {
+    return { page: head, correlationId: params.get('correlation_id')?.trim() || undefined };
+  }
+  if (head === 'models') {
+    return { page: head, modelSearch: params.get('model')?.trim() || undefined };
   }
   return { page: head };
 };
@@ -72,10 +88,18 @@ export const upstreamQuotaRouteHash = (accountId?: string): string => (
   accountId ? `#upstream-quotas/${encodeURIComponent(accountId)}` : '#upstream-quotas'
 );
 
+export const runtimeEventsRouteHash = (correlationId: string): string => (
+  `#runtime-events?correlation_id=${encodeURIComponent(correlationId)}`
+);
+
+export const modelRouteHash = (model: string): string => `#models?model=${encodeURIComponent(model)}`;
+
 /** 将任意 hash 归一化为规范形式，无法识别时回退到总览。 */
 export const canonicalConsoleHash = (hash: string): string => {
   const route = resolveConsoleRoute(hash);
   if (route.page === 'sources' && route.sourceId) return sourceRouteHash(route.sourceId, route.section);
   if (route.page === 'upstream-quotas') return upstreamQuotaRouteHash(route.accountId);
+  if (route.page === 'runtime-events' && route.correlationId) return runtimeEventsRouteHash(route.correlationId);
+  if (route.page === 'models' && route.modelSearch) return modelRouteHash(route.modelSearch);
   return consolePageHash(route.page);
 };

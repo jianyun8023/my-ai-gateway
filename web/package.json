@@ -8,6 +8,7 @@
     "build": "vite build",
     "lint": "eslint . --max-warnings 0 && npm run check:dead-code",
     "test": "vitest run",
+    "test:browser-smoke": "npm run build && node ../scripts/frontend-browser-smoke.mjs",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
     "preview": "vite preview",
     "check:dead-code": "knip && knip --production --include files,dependencies,unlisted,unresolved"

@@ -14,6 +14,8 @@ import { PROTOCOL_LABELS } from '@/lib/protocols';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
+type SourceField = 'id' | 'displayName' | 'preset' | 'baseUrl' | 'authHeader' | 'defaultHeaders' | `mode-${GatewayProtocol}`;
+
 const presetEndpoints = (preset?: ProviderPreset): Partial<Record<GatewayProtocol, string>> => {
   const endpoints: Partial<Record<GatewayProtocol, string>> = {};
   for (const protocol of GATEWAY_PROTOCOLS) {
@@ -101,7 +103,7 @@ export function SourceForm({
   const [authPrefix, setAuthPrefix] = useState(() => authField(initialAuthConfig, 'prefix'));
   const [defaultHeaders, setDefaultHeaders] = useState(() => defaultHeadersJson(initialAuthConfig));
   const [enabled, setEnabled] = useState(record?.enabled ?? true);
-  const [validationError, setValidationError] = useState('');
+  const [fieldErrors, setFieldErrors] = useState<Partial<Record<SourceField, string>>>({});
 
   // 让页面级摘要等展示与表单一致的草稿。
   useEffect(() => {
@@ -110,7 +112,23 @@ export function SourceForm({
 
   const selectedPreset = orderedPresets.find((preset) => `${preset.id}@${preset.version}` === presetKey);
 
+  const clearFieldError = (field: SourceField) => {
+    setFieldErrors((current) => {
+      if (!current[field]) return current;
+      const next = { ...current };
+      delete next[field];
+      return next;
+    });
+  };
+
+  const rejectSubmission = (errors: Partial<Record<SourceField, string>>, focusOrder: SourceField[]) => {
+    setFieldErrors(errors);
+    const first = focusOrder.find((field) => errors[field]);
+    if (first) document.getElementById(`source-${first}`)?.focus();
+  };
+
   const selectPreset = (nextKey: string) => {
+    clearFieldError('preset');
     setPresetKey(nextKey);
     const preset = orderedPresets.find((candidate) => `${candidate.id}@${candidate.version}` === nextKey);
     if (!preset || record) return;
@@ -143,47 +161,50 @@ export function SourceForm({
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    if (!id.trim() || !displayName.trim() || !presetKey || !baseUrl.trim()) {
-      setValidationError(t('sources.form.validate_required_source'));
-      return;
-    }
+    const errors: Partial<Record<SourceField, string>> = {};
+    const requiredMessage = t('sources.form.validate_required');
+    if (!id.trim()) errors.id = requiredMessage;
+    if (!displayName.trim()) errors.displayName = requiredMessage;
+    if (!presetKey) errors.preset = requiredMessage;
+    if (!baseUrl.trim()) errors.baseUrl = requiredMessage;
     if (!selectedPreset && !record) {
-      setValidationError(t('sources.form.validate_preset'));
-      return;
+      errors.preset = t('sources.form.validate_preset');
     }
-    const invalidAdapter = GATEWAY_PROTOCOLS.some((protocol) => {
+    GATEWAY_PROTOCOLS.forEach((protocol) => {
       const capability = capabilities[protocol];
-      return capability?.mode === 'adapter'
-        && (!capability.source_protocol || !capability.adapter?.trim());
+      if (capability?.mode === 'adapter' && (!capability.source_protocol || !capability.adapter?.trim())) {
+        errors[`mode-${protocol}`] = t('sources.form.validate_adapter_mode');
+      }
     });
-    if (invalidAdapter) {
-      setValidationError(t('sources.form.validate_adapter_mode'));
-      return;
-    }
     let parsedHeaders: unknown;
     try {
       parsedHeaders = JSON.parse(defaultHeaders || '{}');
     } catch {
-      setValidationError(t('sources.form.validate_headers_json'));
-      return;
+      errors.defaultHeaders = t('sources.form.validate_headers_json');
     }
-    if (!parsedHeaders || typeof parsedHeaders !== 'object' || Array.isArray(parsedHeaders)) {
-      setValidationError(t('sources.form.validate_headers_object'));
-      return;
+    if (!errors.defaultHeaders && (!parsedHeaders || typeof parsedHeaders !== 'object' || Array.isArray(parsedHeaders))) {
+      errors.defaultHeaders = t('sources.form.validate_headers_object');
     }
     if (!authHeader.trim()) {
-      setValidationError(t('sources.form.validate_headers_nonempty'));
-      return;
+      errors.authHeader = t('sources.form.validate_headers_nonempty');
     }
-    if (!Object.values(parsedHeaders).every((value) => typeof value === 'string')) {
-      setValidationError(t('sources.form.validate_headers_string'));
+    if (!errors.defaultHeaders && !Object.values(parsedHeaders as Record<string, unknown>).every((value) => typeof value === 'string')) {
+      errors.defaultHeaders = t('sources.form.validate_headers_string');
+    }
+    const focusOrder: SourceField[] = [
+      'id', 'displayName', 'preset', 'baseUrl',
+      ...GATEWAY_PROTOCOLS.map((protocol) => `mode-${protocol}` as const),
+      'authHeader', 'defaultHeaders',
+    ];
+    if (Object.keys(errors).length > 0) {
+      rejectSubmission(errors, focusOrder);
       return;
     }
     const authConfig = {
       credential_header: { header: authHeader.trim(), prefix: authPrefix },
       default_headers: parsedHeaders as Record<string, string>,
     };
-    setValidationError('');
+    setFieldErrors({});
     if (record) {
       onSubmit({
         id: record.id,
@@ -213,13 +234,15 @@ export function SourceForm({
 
   return (
     <form id="source-editor-form" className={styles.page} onSubmit={submit}>
-      <FormError message={validationError || error} />
+      <FormError message={error} />
       <FormGrid>
-        <TextField label={t('sources.field.source_id')} value={id} disabled={Boolean(record) || busy} onChange={(event) => setId(event.target.value)} autoComplete="off" />
-        <TextField label={t('sources.field.display_name')} value={displayName} disabled={busy} onChange={(event) => setDisplayName(event.target.value)} autoComplete="off" />
+        <TextField id="source-id" label={t('sources.field.source_id')} value={id} error={fieldErrors.id} disabled={Boolean(record) || busy} onChange={(event) => { clearFieldError('id'); setId(event.target.value); }} autoComplete="off" />
+        <TextField id="source-displayName" label={t('sources.field.display_name')} value={displayName} error={fieldErrors.displayName} disabled={busy} onChange={(event) => { clearFieldError('displayName'); setDisplayName(event.target.value); }} autoComplete="off" />
         <SelectField
+          id="source-preset"
           label={t('sources.field.provider_preset')}
           value={presetKey}
+          error={fieldErrors.preset}
           disabled={Boolean(record) || busy || orderedPresets.length === 0}
           data={orderedPresets.length === 0
             ? [{ value: '', label: t('sources.form.no_preset') }]
@@ -229,7 +252,7 @@ export function SourceForm({
               }))}
           onChange={selectPreset}
         />
-        <TextField label={t('sources.field.base_url')} type="url" value={baseUrl} disabled={busy} onChange={(event) => setBaseUrl(event.target.value)} autoComplete="off" />
+        <TextField id="source-baseUrl" label={t('sources.field.base_url')} type="url" value={baseUrl} error={fieldErrors.baseUrl} disabled={busy} onChange={(event) => { clearFieldError('baseUrl'); setBaseUrl(event.target.value); }} autoComplete="off" />
         {(['openai_chat_completions', 'openai_responses', 'anthropic_messages'] as const).map((protocol) => (
           <TextField
             key={protocol}
@@ -244,7 +267,7 @@ export function SourceForm({
           <CheckboxField checked={enabled} disabled={busy} onChange={setEnabled} label={t('sources.field.enable_source')} />
         </div>
       </FormGrid>
-      <DrawerSection title={t('sources.form.section_capabilities')}>
+      <DrawerSection title={t('sources.form.section_capabilities')} hint={t('sources.form.adapter_unavailable')}>
         <div className={styles.protocolCapabilityEditor}>
           {GATEWAY_PROTOCOLS.map((protocol) => {
             const capability = capabilities[protocol];
@@ -253,23 +276,25 @@ export function SourceForm({
               <div key={protocol}>
                 <strong>{PROTOCOL_LABELS[protocol]}</strong>
                 <SelectField
+                  id={`source-mode-${protocol}`}
                   label={t('sources.form.mode')}
                   value={mode}
+                  error={fieldErrors[`mode-${protocol}`]}
                   disabled={busy}
                   data={[
                     { value: 'native', label: t('sources.mode.native') },
-                    { value: 'adapter', label: t('sources.mode.adapter') },
+                    { value: 'adapter', label: t('sources.mode.adapter'), disabled: mode !== 'adapter' },
                     { value: 'unsupported', label: t('sources.mode.unsupported') },
                     { value: 'unknown', label: t('sources.mode.unknown'), disabled: true },
                   ]}
-                  onChange={(value) => changeCapabilityMode(protocol, value as SourceProtocolMode)}
+                  onChange={(value) => { clearFieldError(`mode-${protocol}`); changeCapabilityMode(protocol, value as SourceProtocolMode); }}
                 />
                 {mode === 'adapter' && (
                   <>
                     <SelectField
                       label={t('sources.form.upstream_protocol')}
                       value={capability?.source_protocol ?? ''}
-                      disabled={busy}
+                      disabled
                       data={GATEWAY_PROTOCOLS.filter((candidate) => candidate !== protocol)
                         .map((candidate) => ({ value: candidate, label: PROTOCOL_LABELS[candidate] }))}
                       onChange={(value) => setCapabilities((current) => ({
@@ -282,7 +307,7 @@ export function SourceForm({
                         },
                       }))}
                     />
-                    <TextField label={t('sources.form.adapter')} value={capability?.adapter ?? ''} disabled={busy} onChange={(event) => setCapabilities((current) => ({
+                    <TextField label={t('sources.form.adapter')} value={capability?.adapter ?? ''} disabled onChange={(event) => setCapabilities((current) => ({
                       ...current,
                       [protocol]: {
                         ...current[protocol],
@@ -300,9 +325,9 @@ export function SourceForm({
       </DrawerSection>
       <DrawerSection title={t('sources.form.section_auth')}>
         <FormGrid>
-          <TextField label={t('sources.form.credential_headers')} value={authHeader} disabled={busy} onChange={(event) => setAuthHeader(event.target.value)} autoComplete="off" spellCheck={false} />
+          <TextField id="source-authHeader" label={t('sources.form.credential_headers')} value={authHeader} error={fieldErrors.authHeader} disabled={busy} onChange={(event) => { clearFieldError('authHeader'); setAuthHeader(event.target.value); }} autoComplete="off" spellCheck={false} />
           <TextField label={t('sources.form.header_prefix')} value={authPrefix} disabled={busy} onChange={(event) => setAuthPrefix(event.target.value)} autoComplete="off" spellCheck={false} />
-          <TextAreaField label={t('sources.form.default_headers')} value={defaultHeaders} disabled={busy} onChange={(event) => setDefaultHeaders(event.target.value)} spellCheck={false} />
+          <TextAreaField id="source-defaultHeaders" label={t('sources.form.default_headers')} value={defaultHeaders} error={fieldErrors.defaultHeaders} disabled={busy} onChange={(event) => { clearFieldError('defaultHeaders'); setDefaultHeaders(event.target.value); }} spellCheck={false} />
         </FormGrid>
       </DrawerSection>
     </form>

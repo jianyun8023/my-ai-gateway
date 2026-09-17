@@ -4,8 +4,10 @@ import {
   CONSOLE_PAGES,
   consolePageHash,
   isUsagePage,
+  modelRouteHash,
   resolveConsolePage,
   resolveConsoleRoute,
+  runtimeEventsRouteHash,
   sourceRouteHash,
   upstreamQuotaRouteHash,
 } from './consoleNavigation';
@@ -34,6 +36,13 @@ describe('console navigation', () => {
     expect(resolveConsoleRoute('#upstream-quotas/kimi-main')).toEqual({ page: 'upstream-quotas', accountId: 'kimi-main' });
     expect(canonicalConsoleHash('#/upstream-quotas/kimi%20main/')).toBe('#upstream-quotas/kimi%20main');
     expect(upstreamQuotaRouteHash('kimi main')).toBe('#upstream-quotas/kimi%20main');
+  });
+  it('round-trips focused runtime-event and model routes', () => {
+    expect(resolveConsoleRoute('#runtime-events?correlation_id=request%2F1')).toEqual({ page: 'runtime-events', correlationId: 'request/1' });
+    expect(runtimeEventsRouteHash('request/1')).toBe('#runtime-events?correlation_id=request%2F1');
+    expect(resolveConsoleRoute('#models?model=logical%20one')).toEqual({ page: 'models', modelSearch: 'logical one' });
+    expect(modelRouteHash('logical one')).toBe('#models?model=logical%20one');
+    expect(canonicalConsoleHash('#models?model=logical%20one')).toBe('#models?model=logical%20one');
   });
   it('canonicalizes unknown and removed routes to overview', () => {
     for (const hash of ['', '#ranking', '#management/sources', '#unknown', '#/api/v1', '#discovery', '#capabilities']) expect(resolveConsolePage(hash)).toBe('overview');

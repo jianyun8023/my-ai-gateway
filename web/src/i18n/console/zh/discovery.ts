@@ -91,6 +91,7 @@ export const discovery = {
   capability_saved: '{{protocol}} 能力已保存。',
   capability_unknown_confirm_hint: '未知能力不能被确认。',
   capability_adapter_hint: '转换模式要求上游协议已确认为原生。',
+  capability_adapter_unavailable: '当前生产环境没有可用转换器；已有转换声明只读展示，不能新建或修改。',
 
   // 表格
   column: {

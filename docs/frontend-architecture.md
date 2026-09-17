@@ -33,6 +33,8 @@ App → GatewayManagementPage → features/events → useAdminQuery / 游标合�
 
 页面负责组合，表单、详情和局部展示放到所属功能目录。来源与账号（来源列表/详情/编辑）、模型更新审核、逻辑模型与 Binding/Route 的职责保持分离；拆组件不能改变提交字段或能力判断。
 
+来源列表先发布 `sources + accounts` 基础目录，再按来源独立加载最新发现与模型统计；单个来源失败只影响该行并提供局部重试，汇总在统计不完整时显示不可用而不是把未知折算为零。来源详情、编辑和审核按完整 `sourceId + section` 路由重新建立页面会话，同时所有来源上下文查询显式使用 `sourceId` 查询键，旧来源草稿、连接测试结果与迟到响应不得进入新来源。生产 Adapter 注册表为空时，来源和来源模型能力表单只读展示已有 adapter 声明，不能创建或修改转换配置。
+
 模型列表通过协议标识或查看按钮打开 `models/ModelCapabilitiesDrawer.tsx` 的只读有效能力详情，不需要进入编辑/保存流程。`modelCapabilities.ts` 按模型与实际路由覆盖的协议选择 `/admin/capabilities` 快照单元格；三条分别处理 Chat、Responses、Messages 的路由不会再生成一张含大量无关不可路由单元格的页面。真实解析错误、未发布线路及其禁用/待确认/冷却状态仍需保留；缺失快照不能从 Provider 预设推断为支持。协议完全解析失败且错误附于其他模型路由行时，按模型/协议展示该错误，不将其他行的 Source/Account 当作失败归因。有效功能、转换/降级、端点/路由诊断和快照信息在模型内查看；来源模型的能力声明与确认仍属于来源管理。旧 `#capabilities` 与其他已移除 hash 一样回到总览，不保留兼容页面。
 
 模型与路由按 [#195 V3](design/model-routing-ui/implementation-v3.md) 以逻辑模型为唯一列表对象。`routingPresentation` 将配置与运行时能力聚合为线路、协议和健康摘要，`ModelRoutePath` 展示请求路径；不同协议的实际顺序不同时保留差异，旧加权备用池不能显示为确定顺序。模型列表同时读取请求设置；当重试上限限制回退时，显示最多尝试的可用线路数并省去无条件的失败箭头，保留全部候选线路以表达冷却跳过不消耗次数。`ModelRoutingEditor` 用现有字段与抽屉维护有序线路，通过 `GatewayAdminResources.createModelRouting` 创建或 `saveModelRouting` 更新，一次保存到模型级事务接口，不在浏览器顺序调用多种资源写接口。新增模型 ID 由服务端生成，不用公开名称命中更新路径。Binding / Route 的领域职责和 Admin API 保留，独立 CRUD 表单与详情页已移除；实现信息仅在抽屉底部 Accordion 只读展示。
@@ -70,13 +72,13 @@ App → GatewayManagementPage → features/events → useAdminQuery / 游标合�
 
 `useUsageData` 通过该原语加载首屏，将解析后的时间窗口和数据一起发布；仅保留用量领域的聚合、游标、分页失败重试与导出状态。分页和导出使用已发布结果的固定窗口；刷新过程中暂停分页，刷新失败后恢复原窗口与游标。分页在请求发起前同步加锁，按事件 ID 去重，避免滚动回调重复请求同一游标。
 
-`useAdminQuery` 在同一原语上追加 Admin 错误归一化，供控制面、运行事件首屏和事件详情使用。运行事件后续分页也绑定共享 session，在刷新开始时取消，按 namespaced `event_id` 去重；刷新失败保留已加载页，成功后以新首屏替换。详情与筛选草稿属于领域组件，连接身份变化时随管理空间一起重置。
+`useAdminQuery` 在同一原语上追加 Admin 错误归一化，供控制面、运行事件首屏和事件详情使用。运行事件后续分页也绑定共享 session，在刷新开始时取消，按 namespaced `event_id` 去重；刷新失败保留已加载页，成功后以新首屏替换。详情与筛选草稿属于领域组件，连接身份变化时随管理空间一起重置。运行事件首屏错误只替换结果区，筛选与重置入口持续可用；前端在提交前拒绝无效时间和 `from >= to`，修正草稿后可开启新一轮查询。
 
 ## 组件与布局
 
 用量筛选与运行事件类型复用 `RemoteFilterField`（#193）。该通用组件只接收异步候选加载函数，不依赖业务 API；端点与时间范围由 `GatewayUsageClient` / `GatewayAdminResources` 和功能组件提供。展开时按需请求、搜索防抖 250ms，关闭/卸载或变更搜索/时间/身份时取消旧请求；响应发布前检查取消信号，渲染时按查询上下文隐藏旧候选。输入与候选数据独立，失败可重试或手输，清空代表全部，选择只修改草稿。候选不写入持久化存储。Mantine Combobox 负责 Portal、键盘选项导航和滚动，固定枚举继续使用 `SelectField`。
 
-请求事件与运行事件详情复用 `Modal` drawer，统一关闭、Escape、焦点约束与恢复。宽表通过 `TableScroll` 或事件列表自己的滚动容器滚动；控制台 flex / grid 子项必须允许收缩，不能让表格撑宽整页。日期预设在窄屏换行。
+请求事件与运行事件详情复用 `Modal` drawer，统一关闭、Escape、焦点约束与恢复。请求事件详情把请求 ID、逻辑模型和 Source 分别连接到带关联筛选的运行事件、带搜索词的模型目录和来源详情；上游模型仍按实际归因独立显示，不能和逻辑模型混写。完整 hash 路由变化后焦点落到新页面一级标题，数据刷新不触发该行为，Modal/Drawer 自己的 focus trap/return 不受影响。宽表通过 `TableScroll` 或事件列表自己的滚动容器滚动；控制台 flex / grid 子项必须允许收缩，不能让表格撑宽整页。日期预设在窄屏换行。
 
 删除没有生产调用方的旧组件、图标、路由辅助函数与独占样式。测试夹具统一放在 `src/test/fixtures/`，不混入生产数据层。保留 CPA Usage Keeper 的 MIT 许可与来源说明。
 
@@ -104,8 +106,11 @@ mise exec -- npm --prefix web run lint
 mise exec -- npm --prefix web run typecheck
 mise exec -- npm --prefix web test
 mise exec -- npm --prefix web run build
+mise exec -- npm --prefix web run test:browser-smoke
 TZ=America/New_York mise exec -- npm --prefix web test -- src/gateway-usage/filterState.test.ts
 ```
+
+`test:browser-smoke` 使用生产构建、临时 localhost 合成 Admin API 与本机 Chrome/Chromium，重复验证运行事件错误恢复、来源路由会话隔离、标题焦点以及真实 Portal/Escape/焦点返回；不读取生产凭据，也不发送真实 Provider 请求。若浏览器不在默认 macOS 路径，通过 `CHROME_BIN` 指定可执行文件。
 
 - ESLint 对未使用符号、React Hooks 和 Fast Refresh 报错；本地架构规则检查 alias、相对路径与静态动态导入的分层约束，网络规则约束统一传输入口。
 - `lint` 包含 `check:dead-code`：Knip 全量检查未用文件、依赖及导出等问题，再以生产入口检查文件与依赖，识别“只有测试引用”的遗留实现。Knip 配置包含 SCSS，以检查孤立样式文件；不扫描单个 CSS 选择器或类方法的可达性。

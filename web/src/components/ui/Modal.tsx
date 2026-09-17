@@ -2,7 +2,7 @@ import { useContext, useEffect, useEffectEvent, useId, type PropsWithChildren, t
 import { Drawer, Modal as MantineModal, ModalStackContext } from '@mantine/core';
 import { useFocusReturn, useMediaQuery, useMounted } from '@mantine/hooks';
 import { useTranslation } from 'react-i18next';
-import { overlayDefaults } from './theme';
+import { drawerTransition, overlayDefaults } from './theme';
 import { IconX } from './icons';
 import styles from './Overlay.module.scss';
 
@@ -36,6 +36,7 @@ export function Modal({ open, title, onClose, onExitTransitionEnd, footer, width
   useEffect(() => () => unregister(), []);
   const props = {
     ...overlayDefaults,
+    transitionProps: variant === 'drawer' ? drawerTransition : overlayDefaults.transitionProps,
     opened,
     returnFocus: false,
     inert: !opened,

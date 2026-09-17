@@ -7,7 +7,6 @@ import type {
   Account,
   AccountWriteInput,
   AdminErrorShape,
-  ConnectionTestResult,
   GatewayAdminResources,
   ProviderPreset,
   Source,
@@ -71,8 +70,6 @@ export function SourceEditPage({ api, refreshRevision = 0, onBusyChange, sourceI
   const [draft, setDraft] = useState<{ enabled: boolean; capabilities: Source['protocol_capabilities'] }>();
   const [mutationBusy, setMutationBusy] = useState(false);
   const [mutationError, setMutationError] = useState<AdminErrorShape>();
-  const [testBusy, setTestBusy] = useState(false);
-  const [testResult, setTestResult] = useState<ConnectionTestResult>();
 
   const openSource = (targetId: string, section?: SourceSection) => {
     if (onOpenSource) {
@@ -90,11 +87,11 @@ export function SourceEditPage({ api, refreshRevision = 0, onBusyChange, sourceI
     ]);
     return { source: sources.find((item) => item.id === sourceId), accounts, presets };
   }, [api, sourceId]);
-  const query = useAdminQuery({ load, refreshRevision, onBusyChange });
+  const query = useAdminQuery({ load, queryKey: sourceId ?? 'new', refreshRevision, onBusyChange });
   const data = query.data;
   const source = data?.source;
   const sourceAccounts = (data?.accounts ?? []).filter((account) => account.source_id === sourceId);
-  const enabledAccounts = sourceAccounts.filter((account) => account.enabled);
+  const primaryEnabledAccount = sourceAccounts.find((account) => account.enabled);
   const formErrorMessage = mutationError ? localizeError(mutationError) : undefined;
 
   const mutate = async (operation: () => Promise<unknown>, successMessage: string, after?: () => void) => {
@@ -161,25 +158,6 @@ export function SourceEditPage({ api, refreshRevision = 0, onBusyChange, sourceI
     );
   };
 
-  const runConnectionTest = async () => {
-    const account = enabledAccounts[0];
-    if (!account || testBusy) return;
-    setTestBusy(true);
-    setMutationError(undefined);
-    try {
-      const result = await api.testConnection(sourceId!, {
-        account_id: account.id,
-        protocol: 'openai_chat_completions',
-        requested_by: 'admin-ui',
-      });
-      setTestResult(result);
-    } catch (error) {
-      setMutationError(normalizeAdminError(error));
-    } finally {
-      setTestBusy(false);
-    }
-  };
-
   if (query.loading && !data) return <LoadingState label={t('sources.loading')} />;
   if (query.error && !data) return <ErrorState error={query.error} onRetry={query.reload} />;
   if (data && !isCreate && !source) {
@@ -208,8 +186,8 @@ export function SourceEditPage({ api, refreshRevision = 0, onBusyChange, sourceI
         <span className={styles.secondaryText}>{t('sources.edit.subtitle')}</span>
         <div className={styles.rowActions}>
           {!isCreate && (
-            <Button variant="secondary" loading={testBusy} disabled={enabledAccounts.length === 0} onClick={() => void runConnectionTest()}>
-              <IconPlay size={14} />{t('sources.detail.test_connection')}
+            <Button variant="secondary" onClick={() => openSource(sourceId!)}>
+              <IconPlay size={14} />{t('sources.edit.open_connection_test')}
             </Button>
           )}
           <FormActions
@@ -329,17 +307,15 @@ export function SourceEditPage({ api, refreshRevision = 0, onBusyChange, sourceI
             <Card title={t('sources.edit.verify_card')}>
               <DetailList>
                 <DetailItem label={t('sources.edit.verify_health')}>
-                  {enabledAccounts[0]
-                    ? <StatusPill tone={enabledAccounts[0].health_status === 'healthy' ? 'success' : enabledAccounts[0].health_status === 'unknown' ? 'accent' : 'warning'}>{t(`values.health.${enabledAccounts[0].health_status || 'unknown'}`, { defaultValue: enabledAccounts[0].health_status || 'unknown' })}</StatusPill>
+                  {primaryEnabledAccount
+                    ? <StatusPill tone={primaryEnabledAccount.health_status === 'healthy' ? 'success' : primaryEnabledAccount.health_status === 'unknown' ? 'accent' : 'warning'}>{t(`values.health.${primaryEnabledAccount.health_status || 'unknown'}`, { defaultValue: primaryEnabledAccount.health_status || 'unknown' })}</StatusPill>
                     : <span className={styles.secondaryText}>—</span>}
                 </DetailItem>
                 <DetailItem label={t('sources.edit.verify_connection')}>
-                  {testResult
-                    ? <StatusPill tone={testResult.status === 'succeeded' ? 'success' : 'danger'}>{testResult.status === 'succeeded' ? t('sources.edit.verify_ok', { latency: testResult.latency_ms }) : t('sources.edit.verify_failed')}</StatusPill>
-                    : <span className={styles.secondaryText}>{t('sources.edit.verify_none')}</span>}
+                  <span className={styles.secondaryText}>{t('sources.edit.verify_on_detail')}</span>
                 </DetailItem>
                 <DetailItem label={t('sources.edit.verify_probe')}>
-                  {enabledAccounts[0]?.last_probe_at ? formatDateTime(enabledAccounts[0].last_probe_at) : t('sources.edit.verify_none')}
+                  {primaryEnabledAccount?.last_probe_at ? formatDateTime(primaryEnabledAccount.last_probe_at) : t('sources.edit.verify_none')}
                 </DetailItem>
               </DetailList>
               <p className={styles.secondaryText}>{t('sources.edit.verify_saved_hint')}</p>

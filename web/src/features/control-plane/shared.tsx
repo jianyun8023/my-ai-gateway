@@ -75,8 +75,12 @@ export function FormError({ message }: { message?: string }) {
   return <Notice>{message}</Notice>;
 }
 
-export function DrawerSection({ title, children }: PropsWithChildren<{ title: string }>) {
-  return <section className={styles.drawerSection}><h3>{title}</h3>{children}</section>;
+export function DrawerSection({ title, hint, children }: PropsWithChildren<{ title: string; hint?: string }>) {
+  return <section className={styles.drawerSection}>
+    <h3>{title}</h3>
+    {hint && <p className={styles.secondaryText}>{hint}</p>}
+    {children}
+  </section>;
 }
 
 export function EmptyTable({ title, description }: { title: string; description?: string }) {
