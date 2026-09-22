@@ -1,6 +1,9 @@
-import { Checkbox, Select, Table } from '@mantine/core';
+import { Select, Table } from '@mantine/core';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
+import { CheckboxField } from '@/components/ui/CheckboxField';
+import { DetailItem, DetailList } from '@/components/ui/DetailList';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { TextField } from '@/components/ui/FormField';
 import { IconRefreshCw } from '@/components/ui/icons';
 import { LoadingState } from '@/components/ui/LoadingState';
@@ -206,6 +209,7 @@ function ListPage({ client, refreshRevision = 0, onBusyChange }: Omit<UpstreamQu
   const [refreshingAll, setRefreshingAll] = useState(false);
   const [refreshingIds, setRefreshingIds] = useState<ReadonlySet<string>>(() => new Set());
   const [refreshSummary, setRefreshSummary] = useState<string>();
+  const [listRetry, setListRetry] = useState(0);
   const [search, setSearch] = useState('');
   const [provider, setProvider] = useState('all');
   const [status, setStatus] = useState('all');
@@ -228,7 +232,9 @@ function ListPage({ client, refreshRevision = 0, onBusyChange }: Omit<UpstreamQu
         }
       });
     return () => controller.abort();
-  }, [client, refreshRevision, onBusyChange]);
+  }, [client, listRetry, refreshRevision, onBusyChange]);
+
+  const retryList = () => setListRetry((current) => current + 1);
 
   const refreshAll = async () => {
     if (refreshingAll) return;
@@ -296,10 +302,46 @@ function ListPage({ client, refreshRevision = 0, onBusyChange }: Omit<UpstreamQu
 
   if (loading && items.length === 0) return <LoadingState label={t('quota.loading')} />;
 
+  if (error && items.length === 0) {
+    return (
+      <section className={styles.page} data-od-id="page-upstream-quotas">
+        <Notice action={<Button size="sm" variant="secondary" onClick={retryList}><IconRefreshCw size={14} />{t('common.retry')}</Button>}>
+          <strong>{t('quota.load_failed')}</strong>
+          <span>{error}</span>
+        </Notice>
+      </section>
+    );
+  }
+
+  if (items.length === 0) {
+    return (
+      <section className={styles.page} data-od-id="page-upstream-quotas">
+        <EmptyState
+          title={t('quota.empty_accounts_title')}
+          description={t('quota.empty_accounts_description')}
+          layout="centered"
+          action={<Button variant="secondary" onClick={() => { window.location.hash = '#sources'; }}>{t('quota.configure_accounts')}</Button>}
+        />
+      </section>
+    );
+  }
+
+  const resetFilters = () => {
+    setSearch('');
+    setProvider('all');
+    setStatus('all');
+    setOnlyProblems(false);
+  };
+
   return (
     <section className={styles.page} data-od-id="page-upstream-quotas">
       {refreshSummary && <Notice tone={failed > 0 ? 'warning' : 'success'}>{refreshSummary}</Notice>}
-      {error && <Notice>{error}</Notice>}
+      {error && (
+        <Notice action={<Button size="sm" variant="secondary" onClick={retryList}><IconRefreshCw size={14} />{t('common.retry')}</Button>}>
+          <strong>{t('quota.load_failed')}</strong>
+          <span>{error}</span>
+        </Notice>
+      )}
 
       <div className={styles.summaryGrid}>
         <MetricCard compact label={t('quota.summary.accounts')} value={String(items.length)} hint={t('quota.summary.accounts_hint', { count: enabled })} />
@@ -350,15 +392,23 @@ function ListPage({ client, refreshRevision = 0, onBusyChange }: Omit<UpstreamQu
             ]}
             allowDeselect={false}
           />
-          <Checkbox
-            className={styles.check}
-            label={t('quota.only_problems')}
-            checked={onlyProblems}
-            onChange={(event) => setOnlyProblems(event.currentTarget.checked)}
-          />
+          <div className={styles.check}>
+            <CheckboxField
+              label={t('quota.only_problems')}
+              checked={onlyProblems}
+              onChange={setOnlyProblems}
+            />
+          </div>
         </div>
 
-        <TableScroll label={t('quota.table_region')}>
+        {filtered.length === 0 ? (
+          <EmptyState
+            title={t('quota.empty_filtered_title')}
+            description={t('quota.empty_filtered_description')}
+            layout="centered"
+            action={<Button variant="secondary" onClick={resetFilters}>{t('quota.reset_filters')}</Button>}
+          />
+        ) : <TableScroll label={t('quota.table_region')}>
           <Table className={styles.table}>
             <Table.Thead><Table.Tr>
               <Table.Th scope="col">{t('quota.column.account')}</Table.Th>
@@ -405,7 +455,7 @@ function ListPage({ client, refreshRevision = 0, onBusyChange }: Omit<UpstreamQu
               })}
             </Table.Tbody>
           </Table>
-        </TableScroll>
+        </TableScroll>}
         <p className={styles.listNote}>{t('quota.snapshot_note')}</p>
       </Card>
     </section>
@@ -419,6 +469,7 @@ function DetailPage({ client, accountId, refreshRevision = 0, onBusyChange }: Up
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string>();
   const [attempts, setAttempts] = useState<UpstreamQuotaSnapshot[]>([]);
+  const [detailRetry, setDetailRetry] = useState(0);
 
   const applySnapshot = useCallback((next: UpstreamQuotaSnapshot) => {
     setSnapshot((current) => mergeSnapshot(current, next));
@@ -442,7 +493,7 @@ function DetailPage({ client, accountId, refreshRevision = 0, onBusyChange }: Up
         }
       });
     return () => controller.abort();
-  }, [accountId, applySnapshot, client, onBusyChange, refreshRevision]);
+  }, [accountId, applySnapshot, client, detailRetry, onBusyChange, refreshRevision]);
 
   const refresh = async () => {
     if (refreshing) return;
@@ -460,7 +511,21 @@ function DetailPage({ client, accountId, refreshRevision = 0, onBusyChange }: Up
   };
 
   if (loading && !snapshot) return <LoadingState label={t('quota.loading')} />;
-  if (!snapshot) return <Notice>{error ?? t('quota.missing')}</Notice>;
+  if (!snapshot) {
+    return (
+      <section className={styles.page} data-od-id="page-upstream-quota-detail">
+        <div>
+          <Button variant="ghost" size="sm" onClick={() => { window.location.hash = '#upstream-quotas'; }}>
+            ← {t('quota.back')}
+          </Button>
+        </div>
+        <Notice action={<Button size="sm" variant="secondary" onClick={() => setDetailRetry((current) => current + 1)}><IconRefreshCw size={14} />{t('common.retry')}</Button>}>
+          <strong>{error ? t('quota.load_failed') : t('quota.missing')}</strong>
+          {error && <span>{error}</span>}
+        </Notice>
+      </section>
+    );
+  }
 
   const windows = snapshot.resources.filter((resource) => resource.type === 'window');
   const balances = snapshot.resources.filter((resource) => resource.type === 'balance');
@@ -472,7 +537,12 @@ function DetailPage({ client, accountId, refreshRevision = 0, onBusyChange }: Up
           ← {t('quota.back')}
         </Button>
       </div>
-      {error && <Notice>{error}</Notice>}
+      {error && (
+        <Notice action={<Button size="sm" variant="secondary" onClick={() => setDetailRetry((current) => current + 1)}><IconRefreshCw size={14} />{t('common.retry')}</Button>}>
+          <strong>{t('quota.load_failed')}</strong>
+          <span>{error}</span>
+        </Notice>
+      )}
       {snapshot.stale && snapshot.refresh_error && (
         <Notice tone="warning">
           {t('quota.stale_warning', { message: snapshot.refresh_error.message })}
@@ -535,44 +605,46 @@ function DetailPage({ client, accountId, refreshRevision = 0, onBusyChange }: Up
           </Card>
 
           <Card title={t('quota.session_attempts')}>
-            <Table>
-              <Table.Thead><Table.Tr>
-                <Table.Th>{t('quota.column.updated')}</Table.Th>
-                <Table.Th>{t('quota.column.status')}</Table.Th>
-                <Table.Th>{t('quota.latency')}</Table.Th>
-              </Table.Tr></Table.Thead>
-              <Table.Tbody>
-                {attempts.map((attempt, index) => (
-                  <Table.Tr key={`${attempt.attempted_at}-${index}`}>
-                    <Table.Td>{formatDateTime(attempt.attempted_at)}</Table.Td>
-                    <Table.Td><StatusPill tone={statusTone(attempt.status)}>{t(`quota.status.${attempt.status}`)}</StatusPill></Table.Td>
-                    <Table.Td>{attempt.latency_ms} ms</Table.Td>
-                  </Table.Tr>
-                ))}
-              </Table.Tbody>
-            </Table>
+            <TableScroll label={t('quota.session_attempts')}>
+              <Table className={styles.attemptTable}>
+                <Table.Thead><Table.Tr>
+                  <Table.Th scope="col">{t('quota.column.updated')}</Table.Th>
+                  <Table.Th scope="col">{t('quota.column.status')}</Table.Th>
+                  <Table.Th scope="col">{t('quota.latency')}</Table.Th>
+                </Table.Tr></Table.Thead>
+                <Table.Tbody>
+                  {attempts.map((attempt, index) => (
+                    <Table.Tr key={`${attempt.attempted_at}-${index}`}>
+                      <Table.Td className={styles.attemptTime}>{formatDateTime(attempt.attempted_at)}</Table.Td>
+                      <Table.Td><StatusPill className={styles.attemptStatus} tone={statusTone(attempt.status)}>{t(`quota.status.${attempt.status}`)}</StatusPill></Table.Td>
+                      <Table.Td className={styles.attemptLatency}>{attempt.latency_ms} ms</Table.Td>
+                    </Table.Tr>
+                  ))}
+                </Table.Tbody>
+              </Table>
+            </TableScroll>
             <p className={styles.note}>{t('quota.session_attempts_note')}</p>
           </Card>
         </div>
 
         <div className={styles.stack}>
           <Card title={t('quota.account_info')}>
-            <dl className={styles.detailList}>
-              <div><dt>{t('quota.provider')}</dt><dd>{providerLabel(snapshot.account.provider_id)}</dd></div>
-              <div><dt>{t('quota.source')}</dt><dd>{snapshot.account.source_display_name} · {snapshot.account.source_id}</dd></div>
-              <div><dt>{t('quota.column.account')}</dt><dd>{snapshot.account.account_id}</dd></div>
-              <div><dt>{t('quota.enabled')}</dt><dd>{snapshot.account.enabled ? t('common.yes') : t('common.no')}</dd></div>
-            </dl>
+            <DetailList>
+              <DetailItem label={t('quota.provider')}>{providerLabel(snapshot.account.provider_id)}</DetailItem>
+              <DetailItem label={t('quota.source')}>{snapshot.account.source_display_name} · {snapshot.account.source_id}</DetailItem>
+              <DetailItem label={t('quota.column.account')}>{snapshot.account.account_id}</DetailItem>
+              <DetailItem label={t('quota.enabled')}>{snapshot.account.enabled ? t('common.yes') : t('common.no')}</DetailItem>
+            </DetailList>
           </Card>
 
           <Card title={t('quota.data_state')}>
-            <dl className={styles.detailList}>
-              <div><dt>{t('quota.column.status')}</dt><dd>{t(`quota.status.${snapshot.status}`)}</dd></div>
-              <div><dt>{t('quota.fetched_at')}</dt><dd>{snapshot.fetched_at ? formatDateTime(snapshot.fetched_at) : '—'}</dd></div>
-              <div><dt>{t('quota.attempted_at')}</dt><dd>{formatDateTime(snapshot.attempted_at)}</dd></div>
-              <div><dt>{t('quota.latency')}</dt><dd>{snapshot.latency_ms} ms</dd></div>
-              <div><dt>{t('quota.data_source')}</dt><dd>upstream API</dd></div>
-            </dl>
+            <DetailList>
+              <DetailItem label={t('quota.column.status')}>{t(`quota.status.${snapshot.status}`)}</DetailItem>
+              <DetailItem label={t('quota.fetched_at')}>{snapshot.fetched_at ? formatDateTime(snapshot.fetched_at) : '—'}</DetailItem>
+              <DetailItem label={t('quota.attempted_at')}>{formatDateTime(snapshot.attempted_at)}</DetailItem>
+              <DetailItem label={t('quota.latency')}>{snapshot.latency_ms} ms</DetailItem>
+              <DetailItem label={t('quota.data_source')}>{t('quota.data_source_upstream_api')}</DetailItem>
+            </DetailList>
           </Card>
         </div>
       </div>

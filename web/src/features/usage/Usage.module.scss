@@ -179,15 +179,21 @@
 .badgeTarget { display: inline-flex; }
 .numericColumn { text-align: right; font-variant-numeric: tabular-nums; }
 .metricValue {
+  min-height: 32px;
   padding: 3px 7px;
+  border: 0;
   border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
   font-variant-numeric: tabular-nums;
-  cursor: default;
+  cursor: pointer;
   text-decoration: underline dotted transparent;
   text-underline-offset: 3px;
   transition: background-color 120ms ease, text-decoration-color 120ms ease;
 
-  &:hover { background: var(--accent-soft); text-decoration-color: var(--muted); }
+  &:hover, &[aria-expanded='true'] { background: var(--accent-soft); text-decoration-color: var(--muted); }
+  &:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 }
 
 .latencyCell { display: inline-flex; flex-direction: column; gap: 4px; width: 100%; font-variant-numeric: tabular-nums; }
@@ -208,14 +214,14 @@
 .retryValue { display: inline-flex; align-items: center; gap: 4px; color: var(--warn); }
 .retryValue > svg { flex: 0 0 auto; }
 
-// Hover breakdown popovers for the Token / cache event columns.
-.metricPopover { display: grid; gap: 8px; min-width: 210px; }
-.metricPopoverTitle { font-size: var(--fs-meta); }
+// Event metric breakdowns use a portal and must fit narrow viewports.
+.metricPopover { display: grid; gap: 8px; min-width: min(210px, calc(100vw - 32px)); max-width: min(320px, calc(100vw - 32px)); }
+.metricPopoverTitle { font-size: var(--fs-meta); overflow-wrap: anywhere; }
 .metricPopover dl { margin: 0; display: grid; gap: 6px; }
-.metricPopover dl > div { display: flex; align-items: baseline; justify-content: space-between; gap: 18px; }
-.metricPopover dt { color: var(--muted); font-size: var(--fs-small); }
-.metricPopover dd { margin: 0; font-family: var(--font-mono); font-size: var(--fs-small); font-variant-numeric: tabular-nums; }
-.metricPopoverNote { margin: 0; color: var(--muted); font-size: var(--fs-small); }
+.metricPopover dl > div { display: flex; align-items: baseline; justify-content: space-between; gap: 18px; min-width: 0; }
+.metricPopover dt { min-width: 0; color: var(--muted); font-size: var(--fs-small); overflow-wrap: anywhere; }
+.metricPopover dd { min-width: 0; margin: 0; font-family: var(--font-mono); font-size: var(--fs-small); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.metricPopoverNote { margin: 0; color: var(--muted); font-size: var(--fs-small); overflow-wrap: anywhere; }
 .metricPopoverSource {
   display: flex;
   align-items: center;
@@ -225,6 +231,11 @@
   border-top: 1px solid var(--border-color);
   color: var(--muted);
   font-size: var(--fs-small);
+}
+.metricPopoverSource > * { min-width: 0; overflow-wrap: anywhere; }
+
+@media (max-width: 920px), (pointer: coarse) {
+  .metricValue { min-height: 44px; min-width: 44px; }
 }
 
 // Event detail drawer: grouped label/value sections instead of stacked cards.

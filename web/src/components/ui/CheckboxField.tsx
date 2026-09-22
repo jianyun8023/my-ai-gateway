@@ -9,5 +9,5 @@ export function CheckboxField({ checked, onChange, label, hint, disabled = false
   disabled?: boolean;
 }) {
   return <Checkbox checked={checked} onChange={(event) => onChange(event.currentTarget.checked)}
-    label={label} description={hint} disabled={disabled} className={styles.checkbox} />;
+    label={label} description={hint} disabled={disabled} className={styles.checkbox} classNames={{ label: styles.checkboxLabel }} />;
 }
