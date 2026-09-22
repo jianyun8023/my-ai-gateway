@@ -40,6 +40,14 @@ flowchart LR
 
 ## 数据面与公共能力
 
+上游额度查询遵循相同分层：`api/upstream_quota.rs` 只处理 HTTP 输入和响应；
+`control_plane/quota` 提供只读查询服务，`repository.rs` 读取账号/来源，
+`providers.rs` 解析各 Provider 的额度格式。服务显式接收连接池、共享
+`SourceHttpClient` 和 `SecretResolver`，不依赖 `AppState` 或 Axum 响应类型。
+列表不返回原始上游内容；详情、状态码、鉴权、10 秒超时及 1 MiB 响应上限保持原有契约。
+`tests/architecture_tests.rs` 随默认 Rust 测试运行，检查 API 直接 SQL 调用及额度服务的
+HTTP handler 依赖。这是源码级边界检查，不替代完整依赖审查。
+
 `proxy/service.rs` 保留北向请求编排。`attribution.rs` 处理客户端来源，`policy.rs` 处理重试与健康结果，`forward.rs` 执行上游转发，`fallback.rs` 选择和尝试候选账号，`accounting.rs` 结算流式请求及 attempts。`stream.rs`、`transport.rs`、`usage.rs` 继续负责流生命周期、HTTP transport 和 usage 解析。
 
 首选账号、实际 Source/Provider/upstream model 归因、协议顺序、截断与取消语义沿用原有实现。非生产 Adapter 测试替身只存在于 `cfg(test)`；生产注册表仍为空。

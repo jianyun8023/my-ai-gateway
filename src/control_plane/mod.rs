@@ -1,5 +1,6 @@
 pub(crate) mod model_catalog;
 pub(crate) mod model_discovery;
+pub(crate) mod quota;
 
 mod accounts;
 mod bindings;
