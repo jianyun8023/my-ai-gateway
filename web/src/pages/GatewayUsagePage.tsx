@@ -4,6 +4,7 @@ import { LoadingState } from '@/components/ui/LoadingState';
 import { Notice } from '@/components/ui/Notice';
 import { SegmentedTabs } from '@/components/ui/SegmentedTabs';
 import { useEventColumns } from '@/features/usage/useEventColumns';
+import { DeepLinkedEventDetails } from '@/features/usage/DeepLinkedEventDetails';
 import type { TrendMetric } from '@/features/usage/model';
 import styles from '@/features/usage/Usage.module.scss';
 import { Analysis } from '@/features/usage/UsageAnalysis';
@@ -20,13 +21,14 @@ import { useTranslation } from 'react-i18next';
 
 interface GatewayUsagePageProps {
   activeTab: GatewayUsageTab;
+  requestId?: string;
   getAdminKey: () => string;
   authGeneration: number;
   refreshRevision: number;
   onLoadingChange?: (loading: boolean) => void;
 }
 
-export function GatewayUsagePage({ activeTab, getAdminKey, authGeneration, refreshRevision, onLoadingChange }: GatewayUsagePageProps) {
+export function GatewayUsagePage({ activeTab, requestId, getAdminKey, authGeneration, refreshRevision, onLoadingChange }: GatewayUsagePageProps) {
   const { t } = useTranslation('console');
   const localizeError = useLocalizedApiError();
   const client = useMemo(() => new GatewayUsageClient(new AdminClient({ getAdminKey })), [getAdminKey]);
@@ -86,6 +88,7 @@ export function GatewayUsagePage({ activeTab, getAdminKey, authGeneration, refre
               onExport={data.exportEvents} exportingFormat={data.exportingFormat} exportError={exportError} onRetryExport={data.retryExport}
               client={client} />
       ) : null}
+      {activeTab === 'events' && requestId && <DeepLinkedEventDetails key={`${authGeneration}:${requestId}`} requestId={requestId} client={client} />}
     </section>
   );
 }

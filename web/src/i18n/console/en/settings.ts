@@ -49,8 +49,12 @@ export const settings = {
   snapshot_field: {
     revision: 'Revision',
     generated_at: 'Generated at',
-    fact_source: 'Fact source',
-    published_rows: 'Published rows',
+    fact_source: 'Configuration source',
+    published_entries: 'Capability matrix',
+  },
+  snapshot_value: {
+    runtime_snapshot: 'Current active runtime configuration',
+    published_entries: '{{count}} capability entries',
   },
 
   // 虚拟密钥表

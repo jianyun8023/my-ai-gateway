@@ -80,6 +80,10 @@ App → GatewayManagementPage → features/events → useAdminQuery / 游标合�
 
 请求事件与运行事件详情复用 `Modal` drawer，统一关闭、Escape、焦点约束与恢复。请求事件详情把请求 ID、逻辑模型和 Source 分别连接到带关联筛选的运行事件、带搜索词的模型目录和来源详情；上游模型仍按实际归因独立显示，不能和逻辑模型混写。完整 hash 路由变化后焦点落到新页面一级标题，数据刷新不触发该行为，Modal/Drawer 自己的 focus trap/return 不受影响。宽表通过 `TableScroll` 或事件列表自己的滚动容器滚动；控制台 flex / grid 子项必须允许收缩，不能让表格撑宽整页。日期预设在窄屏换行。
 
+运行事件通过 `#events?request_id=...` 反向打开请求详情。该入口按精确请求 ID 读取既有 `/admin/usage/events/:request_id` 的完整事件与 attempts，不依赖当天列表或其他用量筛选；加载失败提供重试和关闭，关闭后清除详情路由参数。请求 ID 或管理身份改变时重建详情查询会话，防止旧结果覆盖新请求。事件列表优先展示已有脱敏错误摘要、HTTP 状态及模型/来源上下文；完整 ID、复制操作和技术元数据保留在详情。事件时间按浏览器时区显示，并显式标注该时区，UTC 持久化语义保持不变。
+
+系统设置的版本、生成时间与能力矩阵条目数来自同一次最新能力查询；运行时重载成功后触发查询刷新，不以历史 mutation 响应永久覆盖后续查询。设置页与运行事件页按本页列语义约束短状态、时间和操作布局，长模型名仍允许换行，不改变公共 `StatusPill` 对长文本的支持。
+
 删除没有生产调用方的旧组件、图标、路由辅助函数与独占样式。测试夹具统一放在 `src/test/fixtures/`，不混入生产数据层。保留 CPA Usage Keeper 的 MIT 许可与来源说明。
 
 ## 与 Mantine 全局治理 #166 的衔接
@@ -110,7 +114,7 @@ mise exec -- npm --prefix web run test:browser-smoke
 TZ=America/New_York mise exec -- npm --prefix web test -- src/gateway-usage/filterState.test.ts
 ```
 
-`test:browser-smoke` 使用生产构建、临时 localhost 合成 Admin API 与本机 Chrome/Chromium，重复验证运行事件错误恢复、来源路由会话隔离、标题焦点以及真实 Portal/Escape/焦点返回；不读取生产凭据，也不发送真实 Provider 请求。若浏览器不在默认 macOS 路径，通过 `CHROME_BIN` 指定可执行文件。
+`test:browser-smoke` 使用生产构建、临时 localhost 合成 Admin API 与本机 Chrome/Chromium，重复验证运行事件错误恢复与请求详情跳转、重载后的设置快照刷新、桌面/窄屏表格布局、来源路由会话隔离、标题焦点以及真实 Portal/Escape/焦点返回；不读取生产凭据，也不发送真实 Provider 请求。若浏览器不在默认 macOS 路径，通过 `CHROME_BIN` 指定可执行文件；可设置 `FRONTEND_SMOKE_SCREENSHOT_DIR` 保存合成数据截图。
 
 - ESLint 对未使用符号、React Hooks 和 Fast Refresh 报错；本地架构规则检查 alias、相对路径与静态动态导入的分层约束，网络规则约束统一传输入口。
 - `lint` 包含 `check:dead-code`：Knip 全量检查未用文件、依赖及导出等问题，再以生产入口检查文件与依赖，识别“只有测试引用”的遗留实现。Knip 配置包含 SCSS，以检查孤立样式文件；不扫描单个 CSS 选择器或类方法的可达性。

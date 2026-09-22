@@ -53,6 +53,7 @@ describe('RuntimeEventsPage', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    window.location.hash = '';
     vi.unstubAllGlobals();
   });
 
@@ -94,7 +95,7 @@ describe('RuntimeEventsPage', () => {
     await renderPage();
 
     expect(fetchMock).toHaveBeenCalledWith('/admin/events?limit=100', expect.any(Object));
-    expect(container.textContent).toContain('database.connection_failed');
+    expect(container.textContent).toContain('数据库连接失败');
     const loadMore = [...container.querySelectorAll<HTMLButtonElement>('button')]
       .find((button) => button.textContent === '加载更多')!;
     await act(async () => loadMore.click());
@@ -254,7 +255,7 @@ describe('RuntimeEventsPage', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
     await renderPage();
-    await waitFor(() => container.textContent?.includes('database.connection_failed') ?? false);
+    await waitFor(() => container.textContent?.includes('数据库连接失败') ?? false);
 
     const input = (label: string) => {
       const id = [...container.querySelectorAll('label')].find((item) => item.textContent === label)!.htmlFor;
@@ -283,6 +284,52 @@ describe('RuntimeEventsPage', () => {
 
     await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === '重置')!.click());
     await waitFor(() => !container.textContent?.includes('events_query_failed'));
-    expect(container.textContent).toContain('database.connection_failed');
+    expect(container.textContent).toContain('数据库连接失败');
+  });
+
+  it('shows request failure details, copies a full ID, and links to its request, source, and account', async () => {
+    const request = {
+      ...event, event_id: 'request:hashed', event_type: 'request.failed', category: 'request',
+      subject_type: 'request', subject_id: 'req/abc', correlation_id: 'req/abc', source: 'usage_events',
+      message: 'Gateway request failed',
+      details: { error_summary: 'Upstream timed out', status_code: 504, logical_model: 'gpt-test', source_id: 'source/one', account_id: 'account one' },
+    };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(response([request]))));
+    vi.stubGlobal('fetch', fetchMock);
+    const writeText = vi.fn(async () => {});
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    await renderPage();
+    expect(container.textContent).toContain('请求失败');
+    expect(container.textContent).toContain('Upstream timed out');
+    expect(container.textContent).toContain('HTTP 504');
+    expect(container.textContent).toContain('gpt-test');
+    expect(container.querySelectorAll('thead th')).toHaveLength(6);
+    expect(container.querySelector('tbody')?.textContent).not.toContain('req/abc');
+    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="查看事件 request:hashed"]')!.click());
+    const buttons = [...document.body.querySelectorAll<HTMLButtonElement>('button')];
+    await act(async () => buttons.find((button) => button.textContent === '复制 ID')!.click());
+    expect(writeText).toHaveBeenCalledWith('request:hashed');
+    expect(document.body.textContent).toContain('已复制完整 ID');
+    expect(buttons.some((button) => button.textContent === '查看同关联事件')).toBe(true);
+    expect(buttons.some((button) => button.textContent === '查看来源详情')).toBe(true);
+    expect(buttons.some((button) => button.textContent === '查看账号额度')).toBe(true);
+    await act(async () => buttons.find((button) => button.textContent === '查看来源详情')!.click());
+    expect(window.location.hash).toBe('#sources/source%2Fone');
+    await act(async () => buttons.find((button) => button.textContent === '查看账号额度')!.click());
+    expect(window.location.hash).toBe('#upstream-quotas/account%20one');
+    await act(async () => buttons.find((button) => button.textContent === '查看请求详情')!.click());
+    expect(window.location.hash).toBe('#events?request_id=req%2Fabc');
+  });
+
+  it('filters related events and preserves unknown event types in the list', async () => {
+    const unknown = { ...event, event_type: 'vendor.new_failure', message: 'Specific issue' };
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => new Response(JSON.stringify(response([unknown]))));
+    vi.stubGlobal('fetch', fetchMock);
+    await renderPage();
+    expect(container.querySelector('tbody')?.textContent).toContain('vendor.new_failure');
+    expect(container.querySelector('tbody')?.textContent).toContain('Specific issue');
+    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="查看事件 system:1"]')!.click());
+    await act(async () => [...document.body.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === '查看同关联事件')!.click());
+    await waitFor(() => fetchMock.mock.calls.some(([url]) => String(url).includes('correlation_id=incident-one')));
   });
 });

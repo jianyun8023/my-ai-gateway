@@ -41,11 +41,13 @@ function AttemptRow({ attempt }: { attempt: UsageAttemptViewModel }) {
   );
 }
 
-export function EventDetails({ event, onClose, client }: { event: UsageEventViewModel; onClose: () => void; client: GatewayUsageClient }) {
+export function EventDetails({ event, onClose, client, initialAttempts }: { event: UsageEventViewModel; onClose: () => void; client: GatewayUsageClient; initialAttempts?: UsageAttemptViewModel[] }) {
   const { t } = useTranslation('console');
   const [open, setOpen] = useState(true);
   const localizeError = useLocalizedApiError();
-  const load = useCallback((signal: AbortSignal) => client.eventDetail(event.requestId, signal), [client, event.requestId]);
+  const load = useCallback((signal: AbortSignal) => initialAttempts !== undefined
+    ? Promise.resolve(initialAttempts)
+    : client.eventDetail(event.requestId, signal), [client, event.requestId, initialAttempts]);
   const query = useAdminQuery({ load });
   const loadingAttempts = query.loading || query.refreshing;
   const displayAttempts = query.data ?? event.attempts;

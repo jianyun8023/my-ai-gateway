@@ -217,3 +217,10 @@ export const adaptUsageEventPage = (payload: RawGatewayUsagePayload): UsageEvent
 export const adaptUsageEventAttempts = (payload: unknown): UsageAttemptViewModel[] => (
   asArray(asRecord(payload).attempts).map(adaptAttempt)
 );
+
+export const adaptUsageEventDetail = (payload: RawGatewayUsagePayload): UsageEventViewModel => {
+  const root = asRecord(payload);
+  const event = asRecord(root.data);
+  if (!readString(event, ['request_id'])) throw new Error('Invalid usage event detail');
+  return { ...adaptUsageEvent(event), attempts: adaptUsageEventAttempts(payload) };
+};

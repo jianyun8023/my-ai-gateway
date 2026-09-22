@@ -33,6 +33,8 @@ export interface ConsoleRoute {
   accountId?: string;
   /** page === 'runtime-events' 时从请求事件带入的关联 ID。 */
   correlationId?: string;
+  /** page === 'events' 时定位单条请求详情。 */
+  requestId?: string;
   /** page === 'models' 时从请求事件带入的逻辑模型搜索词。 */
   modelSearch?: string;
 }
@@ -70,6 +72,9 @@ export const resolveConsoleRoute = (hash: string): ConsoleRoute => {
   if (head === 'runtime-events') {
     return { page: head, correlationId: params.get('correlation_id')?.trim() || undefined };
   }
+  if (head === 'events') {
+    return { page: head, requestId: params.get('request_id')?.trim() || undefined };
+  }
   if (head === 'models') {
     return { page: head, modelSearch: params.get('model')?.trim() || undefined };
   }
@@ -92,6 +97,10 @@ export const runtimeEventsRouteHash = (correlationId: string): string => (
   `#runtime-events?correlation_id=${encodeURIComponent(correlationId)}`
 );
 
+export const usageEventRouteHash = (requestId: string): string => (
+  `#events?request_id=${encodeURIComponent(requestId)}`
+);
+
 export const modelRouteHash = (model: string): string => `#models?model=${encodeURIComponent(model)}`;
 
 /** 将任意 hash 归一化为规范形式，无法识别时回退到总览。 */
@@ -100,6 +109,7 @@ export const canonicalConsoleHash = (hash: string): string => {
   if (route.page === 'sources' && route.sourceId) return sourceRouteHash(route.sourceId, route.section);
   if (route.page === 'upstream-quotas') return upstreamQuotaRouteHash(route.accountId);
   if (route.page === 'runtime-events' && route.correlationId) return runtimeEventsRouteHash(route.correlationId);
+  if (route.page === 'events' && route.requestId) return usageEventRouteHash(route.requestId);
   if (route.page === 'models' && route.modelSearch) return modelRouteHash(route.modelSearch);
   return consolePageHash(route.page);
 };

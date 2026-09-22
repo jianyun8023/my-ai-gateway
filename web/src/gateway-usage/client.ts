@@ -3,6 +3,7 @@ import type { FilterOptionsRange, FilterOptionsResponse } from '@/admin-api/type
 import {
   adaptUsageBreakdown,
   adaptUsageEventAttempts,
+  adaptUsageEventDetail,
   adaptUsageEventPage,
   adaptUsageSummary,
   adaptUsageTimeseries,
@@ -13,6 +14,7 @@ import type {
   UsageBreakdownDimension,
   UsageBreakdownItem,
   UsageEventPageViewModel,
+  UsageEventViewModel,
   UsageOverviewViewModel,
   UsageSummaryViewModel,
   UsageTimeseriesPoint,
@@ -133,6 +135,12 @@ export class GatewayUsageClient {
 
   async eventDetail(requestId: string, signal?: AbortSignal): Promise<UsageAttemptViewModel[]> {
     return adaptUsageEventAttempts(await this.json(`${USAGE_API_ROOT}/events/${encodeURIComponent(requestId)}`, signal));
+  }
+
+  async eventByRequestId(requestId: string, signal?: AbortSignal): Promise<UsageEventViewModel> {
+    const event = adaptUsageEventDetail(await this.json(`${USAGE_API_ROOT}/events/${encodeURIComponent(requestId)}`, signal));
+    if (event.requestId !== requestId) throw new Error('Mismatched usage event detail');
+    return event;
   }
 
   async exportEvents(

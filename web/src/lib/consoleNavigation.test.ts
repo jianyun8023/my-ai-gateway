@@ -10,6 +10,7 @@ import {
   runtimeEventsRouteHash,
   sourceRouteHash,
   upstreamQuotaRouteHash,
+  usageEventRouteHash,
 } from './consoleNavigation';
 
 describe('console navigation', () => {
@@ -43,6 +44,14 @@ describe('console navigation', () => {
     expect(resolveConsoleRoute('#models?model=logical%20one')).toEqual({ page: 'models', modelSearch: 'logical one' });
     expect(modelRouteHash('logical one')).toBe('#models?model=logical%20one');
     expect(canonicalConsoleHash('#models?model=logical%20one')).toBe('#models?model=logical%20one');
+  });
+  it('round-trips a focused request with encoded IDs', () => {
+    const requestId = 'request/1 ?&';
+    const hash = '#events?request_id=request%2F1%20%3F%26';
+    expect(usageEventRouteHash(requestId)).toBe(hash);
+    expect(resolveConsoleRoute(hash)).toEqual({ page: 'events', requestId });
+    expect(canonicalConsoleHash('#/events/?request_id=request%2F1%20%3F%26')).toBe(hash);
+    expect(resolveConsoleRoute('#events')).toEqual({ page: 'events', requestId: undefined });
   });
   it('canonicalizes unknown and removed routes to overview', () => {
     for (const hash of ['', '#ranking', '#management/sources', '#unknown', '#/api/v1', '#discovery', '#capabilities']) expect(resolveConsolePage(hash)).toBe('overview');

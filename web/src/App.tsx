@@ -129,6 +129,7 @@ function App() {
                 ? (
                     <GatewayUsagePage
                       activeTab={page}
+                      requestId={route.requestId}
                       getAdminKey={getAdminKey}
                       authGeneration={authGeneration}
                       refreshRevision={refreshRevision}

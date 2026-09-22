@@ -21,6 +21,18 @@ const filters: GatewayUsageFilters = {
 };
 
 describe('GatewayUsageClient', () => {
+  it('loads one encoded request ID without a time filter and rejects a mismatched event', async () => {
+    const { gatewayUsageEventsFixture } = await import('@/test/fixtures/usage');
+    const raw = { ...gatewayUsageEventsFixture.items[0], request_id: 'request/1 ?&' };
+    const json = vi.fn().mockResolvedValue({ version: 'v1', data: raw, attempts: raw.attempts });
+    const client = new GatewayUsageClient({ json, blob: vi.fn() });
+    const signal = new AbortController().signal;
+    const event = await client.eventByRequestId(raw.request_id, signal);
+    expect(event).toMatchObject({ requestId: raw.request_id, logicalModel: raw.logical_model });
+    expect(event.attempts).toHaveLength(2);
+    expect(json).toHaveBeenCalledWith('/admin/usage/events/request%2F1%20%3F%26', { signal });
+    await expect(client.eventByRequestId('another-id')).rejects.toThrow('Mismatched usage event detail');
+  });
   it('fetches only candidate values with encoded literal search, time scope and cancellation', async () => {
     const json = vi.fn().mockResolvedValue({ data: ['a%_'], has_more: true });
     const client = new GatewayUsageClient({ json, blob: vi.fn() });
