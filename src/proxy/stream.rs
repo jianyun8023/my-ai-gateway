@@ -621,8 +621,12 @@ impl NativeState {
     }
 
     fn queue_failure(&mut self, termination: StreamTermination) {
-        if !self.tracker.safe_for_heartbeat() {
+        if !self.tracker.safe_for_heartbeat()
+            || termination == StreamTermination::BufferLimitExceeded
+        {
             // End an interrupted provider frame before our standalone error.
+            // Limits clear buffered text and stop scanning a chunk whose tail
+            // is still forwarded, so its final frame boundary is unknown.
             self.pending.push_back(Ok(Bytes::from_static(b"\n\n")));
         }
         self.pending
@@ -871,25 +875,62 @@ mod tests {
 
     #[tokio::test]
     async fn oversized_frames_emit_standalone_limit_error_for_every_protocol() {
+        for prefix in ["data: ", ": ", " "] {
+            for protocol in [
+                Protocol::OpenAiChatCompletions,
+                Protocol::OpenAiResponses,
+                Protocol::AnthropicMessages,
+            ] {
+                let payload = Bytes::from(format!("{prefix}{}", "x".repeat(MAX_SSE_FRAME_BYTES)));
+                let body = wrap_native_body(
+                    Body::from(payload.clone()),
+                    protocol,
+                    StreamConfig::default(),
+                    Instant::now(),
+                );
+                let result = axum::body::to_bytes(body, MAX_SSE_FRAME_BYTES + 2048)
+                    .await
+                    .unwrap();
+                assert!(result.starts_with(&payload));
+                let suffix = &result[payload.len()..];
+                assert!(suffix.starts_with(b"\n\n"));
+                assert!(String::from_utf8_lossy(suffix).contains("gateway_stream_buffer_limit"));
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn choice_limit_separates_error_from_unscanned_chunk_tail() {
         for protocol in [
             Protocol::OpenAiChatCompletions,
             Protocol::OpenAiResponses,
             Protocol::AnthropicMessages,
         ] {
-            let payload = Bytes::from(format!("data: {}", "x".repeat(MAX_SSE_FRAME_BYTES)));
-            let body = wrap_native_body(
-                Body::from(payload.clone()),
-                protocol,
-                StreamConfig::default(),
-                Instant::now(),
-            );
-            let result = axum::body::to_bytes(body, MAX_SSE_FRAME_BYTES + 2048)
-                .await
-                .unwrap();
-            assert!(result.starts_with(&payload));
-            let suffix = &result[payload.len()..];
-            assert!(suffix.starts_with(b"\n\n"));
-            assert!(String::from_utf8_lossy(suffix).contains("gateway_stream_buffer_limit"));
+            for tail in [": partial", "data: {\"content\":"] {
+                let mut payload = String::new();
+                for index in 0..=MAX_TRACKED_CHAT_CHOICES {
+                    payload.push_str(&format!(
+                        "data: {{\"choices\":[{{\"index\":{index}}}]}}\n\n"
+                    ));
+                }
+                payload.push_str(tail);
+                let body = wrap_native_body(
+                    Body::from(payload.clone()),
+                    protocol,
+                    StreamConfig::default(),
+                    Instant::now(),
+                );
+                let result = axum::body::to_bytes(body, MAX_SSE_FRAME_BYTES)
+                    .await
+                    .unwrap();
+                assert!(result.starts_with(payload.as_bytes()));
+                let suffix = &result[payload.len()..];
+                assert!(suffix.starts_with(b"\n\n"));
+                assert_eq!(
+                    &suffix[2..],
+                    gateway_error_frame(protocol, StreamTermination::BufferLimitExceeded).as_ref(),
+                );
+            }
         }
     }
 
