@@ -1,67 +1,37 @@
-use super::accounting::{is_event_stream, wrap_stream_usage};
+use super::attempt::AttemptContext;
+use super::completion::{FinalUpstream, RequestCompletion};
 use super::fallback::{available_fallback_candidates, FallbackCandidate};
-use super::forward::forward_fallback;
 use super::policy::{
-    is_retryable, primary_unavailable_reason, record_response_health, transport_error_status,
-    warn_degraded_features,
+    is_retryable, primary_unavailable_reason, transport_error_status, warn_degraded_features,
 };
-use super::service::finish_proxy;
-use super::settlement::SettlementPermit;
 use super::{stream, transport};
-use crate::domain::{config::GatewayConfig, protocol::Protocol, routing::ResolvedRoute};
+use crate::domain::config::GatewayConfig;
 use crate::http::response::data_plane_error_response;
-use crate::infra::{db, observability};
-use crate::state::AppState;
-use axum::body::{Body, Bytes};
-use axum::http::{HeaderMap, Response, StatusCode};
-use std::time::Instant;
+use axum::body::Body;
+use axum::http::{Response, StatusCode};
 
-/// Ordered routes have a separate attempt loop so the existing weighted
-/// primary/fallback policy, including its Retry-After behavior, is unchanged.
-#[allow(clippy::too_many_arguments)]
+/// Ordered selection owns its retry allowance and stop conditions; attempt
+/// execution and request settlement are the same as the weighted policy.
 pub(super) async fn proxy_ordered(
-    state: &AppState,
     config: &GatewayConfig,
-    route: &ResolvedRoute,
-    headers: &HeaderMap,
-    body: Bytes,
-    protocol: Protocol,
-    model: &str,
-    request_id: &str,
-    virtual_key_id: Option<i64>,
-    client_source: String,
-    is_streamed: bool,
-    settlement_permit: Option<SettlementPermit>,
-    stream_config: &stream::StreamConfig,
-    started: Instant,
+    context: &AttemptContext<'_>,
+    completion: RequestCompletion<'_>,
 ) -> Response<Body> {
+    let route = completion.route;
     let mut candidates = Vec::new();
     let mut fallback_reason = None;
     if let (Some(account), Some(provider)) = (
         config.account(&route.primary_account_id),
         config.provider(&route.source_id),
     ) {
-        let health = state.health.get_health(&account.id).await;
+        let health = context.health.get_health(&account.id).await;
         if account.enabled && health.available {
-            candidates.push(FallbackCandidate {
+            candidates.push(FallbackCandidate::primary(
+                route,
                 account,
                 provider,
-                provider_id: route.provider_id.clone(),
-                source_id: route.source_id.clone(),
-                upstream_model: if route.binding_id.is_none() {
-                    account
-                        .model_map
-                        .get(model)
-                        .cloned()
-                        .unwrap_or_else(|| route.upstream_model_id.clone())
-                } else {
-                    route.upstream_model_id.clone()
-                },
-                protocol_upstream: route.protocol_upstream,
-                mode: route.mode.clone(),
-                upstream_endpoint: Some(route.upstream_endpoint.clone()),
-                degraded_features: route.degraded_features.clone(),
-            });
+                context.model,
+            ));
         } else {
             fallback_reason = Some(if account.enabled {
                 primary_unavailable_reason(&health)
@@ -70,8 +40,16 @@ pub(super) async fn proxy_ordered(
             });
         }
     }
-    candidates
-        .extend(available_fallback_candidates(config, &state.health, route, model, protocol).await);
+    candidates.extend(
+        available_fallback_candidates(
+            config,
+            context.health,
+            route,
+            context.model,
+            context.protocol,
+        )
+        .await,
+    );
     let attempt_limit = route
         .max_retries
         .map(|value| value as usize + 1)
@@ -79,87 +57,55 @@ pub(super) async fn proxy_ordered(
     let mut attempts = Vec::new();
     let mut last_response = None;
     let mut final_candidate = None;
-    let mut usage_request_body = body.clone();
+    let mut usage_request_body = context.body.clone();
     let mut total_timeout = false;
     for candidate in &candidates {
         if attempts.len() >= attempt_limit {
             break;
         }
-        // A preceding attempt can put this same account into cooldown. A
-        // skipped line never consumes the request's retry allowance.
-        if !state.health.is_available(&candidate.account.id).await {
+        // A preceding attempt can cool down the same account. Skipped lines
+        // do not consume the request's retry allowance.
+        if !context.health.is_available(&candidate.account.id).await {
             continue;
         }
-        if !stream_config.total_timeout.is_zero()
-            && started.elapsed() >= stream_config.total_timeout
+        if !context.stream_config.total_timeout.is_zero()
+            && context.started.elapsed() >= context.stream_config.total_timeout
         {
             total_timeout = true;
             last_response = Some(data_plane_error_response(
-                protocol,
+                context.protocol,
                 StatusCode::GATEWAY_TIMEOUT,
                 "gateway_total_timeout",
                 stream::StreamTermination::TotalTimeout.message(),
-                request_id,
+                context.request_id,
             ));
             break;
         }
-        let prepared = transport::prepare_model_request(&body, model, &candidate.upstream_model);
-        usage_request_body = prepared.body.clone();
-        let attempt_started = Instant::now();
-        let result = forward_fallback(
-            &state.secrets,
-            &state.events,
-            &state.http,
-            candidate.provider,
-            candidate.account,
-            &candidate.source_id,
-            request_id,
-            candidate.protocol_upstream,
-            &candidate.mode,
-            candidate.upstream_endpoint.as_deref(),
-            headers,
-            prepared.body,
-            stream_config,
-            started,
-        )
-        .await;
-        let (response, status_code, success, retryable) = match result {
+        let is_fallback = !attempts.is_empty()
+            || fallback_reason
+                .as_deref()
+                .is_some_and(|reason| reason.starts_with("account_"));
+        let attempted = context
+            .execute(candidate, attempts.len(), is_fallback)
+            .await;
+        usage_request_body = attempted.request_body;
+        attempts.push(attempted.usage);
+        let (response, retryable) = match attempted.result {
             Ok(response) => {
-                let status = response.status();
-                record_response_health(
-                    &state.health,
-                    &candidate.source_id,
-                    &candidate.account.id,
-                    status,
-                )
-                .await;
-                if is_retryable(status) && fallback_reason.is_none() {
-                    fallback_reason = Some(format!("upstream_http_{}", status.as_u16()));
+                let retryable = is_retryable(response.status());
+                if retryable && fallback_reason.is_none() {
+                    fallback_reason = Some(format!("upstream_http_{}", response.status().as_u16()));
                 }
-                (
-                    response,
-                    status.as_u16() as i32,
-                    status.is_success(),
-                    is_retryable(status),
-                )
+                (response, retryable)
             }
             Err(error) => {
-                state
-                    .health
-                    .mark_failure_with_details(
-                        &candidate.account.id,
-                        "passive",
-                        Some("upstream_transport_error"),
-                        Some("upstream request failed"),
-                    )
-                    .await;
                 fallback_reason.get_or_insert_with(|| "upstream_transport_error".to_owned());
                 total_timeout = matches!(
                     error,
                     transport::TransportError::Timeout(stream::StreamTermination::TotalTimeout)
                 );
                 let response = data_plane_error_response(
-                    protocol,
+                    context.protocol,
                     transport_error_status(&error),
                     if total_timeout {
                         "gateway_total_timeout"
@@ -167,31 +113,11 @@ pub(super) async fn proxy_ordered(
                         "upstream_request_failed"
                     },
                     error.message(),
-                    request_id,
+                    context.request_id,
                 );
-                (response, error.status_code(), false, !total_timeout)
+                (response, !total_timeout)
             }
         };
-        observability::record_attempt(
-            &protocol.to_string(),
-            &candidate.source_id,
-            &candidate.account.id,
-            status_code as u16,
-            !attempts.is_empty()
-                || fallback_reason
-                    .as_deref()
-                    .is_some_and(|reason| reason.starts_with("account_")),
-        );
-        attempts.push(db::UsageAttempt {
-            attempt_no: attempts.len() as i32,
-            provider_id: candidate.provider_id.clone(),
-            source_id: candidate.source_id.clone(),
-            account_id: candidate.account.id.clone(),
-            upstream_model_id: Some(prepared.upstream_model_id),
-            status_code,
-            success,
-            latency_ms: attempt_started.elapsed().as_millis() as i64,
-        });
         final_candidate = Some(candidate);
         last_response = Some(response);
         if !retryable {
@@ -200,113 +126,38 @@ pub(super) async fn proxy_ordered(
     }
     let response = last_response.unwrap_or_else(|| {
         data_plane_error_response(
-            protocol,
+            context.protocol,
             StatusCode::SERVICE_UNAVAILABLE,
             "route_unavailable",
             "no upstream line is currently available",
-            request_id,
+            context.request_id,
         )
     });
-    let final_source = final_candidate
-        .map(|candidate| candidate.source_id.as_str())
-        .unwrap_or(&route.source_id);
-    let final_provider = final_candidate
-        .map(|candidate| candidate.provider_id.as_str())
-        .unwrap_or(&route.provider_id);
-    let final_account = final_candidate
-        .map(|candidate| candidate.account.id.as_str())
-        .unwrap_or(&route.primary_account_id);
-    let final_model = final_candidate
-        .map(|candidate| candidate.upstream_model.as_str())
-        .unwrap_or(&route.upstream_model_id);
-    let final_protocol = final_candidate
-        .map(|candidate| candidate.protocol_upstream)
-        .unwrap_or(route.protocol_upstream);
-    let final_mode = final_candidate
-        .map(|candidate| candidate.mode.as_str())
-        .unwrap_or(&route.mode);
     let degraded_features = final_candidate
         .map(|candidate| candidate.degraded_features.as_slice())
         .unwrap_or(&route.degraded_features);
-    let degraded = !degraded_features.is_empty();
-    if degraded {
-        warn_degraded_features(request_id, &route.route_id, degraded_features);
+    if !degraded_features.is_empty() {
+        warn_degraded_features(context.request_id, &route.route_id, degraded_features);
     }
-    if let Some(database) = &state.db {
-        let usage = transport::usage_from_response(&response);
-        let event = db::UsageEvent {
-            request_id: request_id.to_owned(),
-            virtual_key_id,
-            provider_id: final_provider.to_owned(),
-            account_id: final_account.to_owned(),
-            model: model.to_owned(),
-            logical_model: model.to_owned(),
-            upstream_model_id: Some(final_model.to_owned()),
-            source_id: final_source.to_owned(),
-            client_source,
-            protocol_in: protocol.to_string(),
-            protocol_upstream: final_protocol.to_string(),
-            mode: final_mode.to_owned(),
-            status_code: response.status().as_u16() as i32,
-            success: response.status().is_success(),
-            retry_count: attempts.len().saturating_sub(1) as i32,
-            latency_ms: started.elapsed().as_millis() as i64,
-            ttft_ms: None,
-            input_tokens: usage.as_ref().map(|value| value.input_tokens).unwrap_or(0),
-            output_tokens: usage.as_ref().map(|value| value.output_tokens).unwrap_or(0),
-            reasoning_tokens: usage
-                .as_ref()
-                .map(|value| value.reasoning_tokens)
-                .unwrap_or(0),
-            cached_tokens: usage.as_ref().map(|value| value.cached_tokens).unwrap_or(0),
-            cache_read_tokens: usage
-                .as_ref()
-                .map(|value| value.cache_read_tokens)
-                .unwrap_or(0),
-            cache_creation_tokens: usage
-                .as_ref()
-                .map(|value| value.cache_creation_tokens)
-                .unwrap_or(0),
-            total_tokens: usage.as_ref().map(|value| value.total_tokens).unwrap_or(0),
-            usage_source: usage
-                .as_ref()
-                .map(|value| value.source.clone())
-                .unwrap_or_else(|| "missing".to_owned()),
-            degraded,
-            route_id: Some(route.route_id.clone()),
-            streamed: is_streamed,
-            error_summary: if total_timeout {
-                Some("gateway_total_timeout".to_owned())
-            } else {
-                (!response.status().is_success())
-                    .then(|| format!("HTTP {}", response.status().as_u16()))
-            },
-            fallback_reason: (attempts.len() > 1
-                || fallback_reason
-                    .as_deref()
-                    .is_some_and(|reason| reason.starts_with("account_")))
-            .then_some(fallback_reason)
-            .flatten(),
-        };
-        if is_event_stream(&response) {
-            return wrap_stream_usage(
-                response,
-                database.clone(),
-                settlement_permit.expect("database backed requests reserve settlement capacity"),
-                event,
-                usage_request_body,
-                attempts,
-                started,
-                state.health.clone(),
-                protocol,
-                model,
-            );
-        }
-        if let Err(error) = database.insert_usage_with_attempts(&event, &attempts).await {
-            tracing::warn!(%error, "failed to persist usage event");
-        }
-    }
-    finish_proxy(protocol, model, started, is_streamed, response)
+    let upstream = final_candidate
+        .map(FinalUpstream::candidate)
+        .unwrap_or_else(|| FinalUpstream::route(route));
+    let fallback_reason = (attempts.len() > 1
+        || fallback_reason
+            .as_deref()
+            .is_some_and(|reason| reason.starts_with("account_")))
+    .then_some(fallback_reason)
+    .flatten();
+    completion
+        .finish(
+            response,
+            upstream,
+            attempts,
+            usage_request_body,
+            fallback_reason,
+            total_timeout.then(|| "gateway_total_timeout".to_owned()),
+        )
+        .await
 }
 
 #[cfg(test)]
@@ -314,13 +165,18 @@ mod tests {
     use super::*;
     use crate::auth::AdminAuth;
     use crate::domain::config::Capabilities;
+    use crate::domain::protocol::Protocol;
     use crate::domain::routing::{RouteResolver, RuntimeBinding, RuntimeRoute};
+    use crate::infra::observability;
     use crate::infra::{events, health, secrets};
+    use crate::state::AppState;
     use crate::state::LiveConfig;
     use crate::test_helpers::{EnvRestore, ENV_LOCK, TEST_ADMIN_KEY};
     use axum::{body::to_bytes, Json, Router};
+    use axum::{body::Bytes, http::HeaderMap};
     use futures_util::{stream as futures_stream, StreamExt};
     use serde_json::{json, Value};
+    use std::time::Instant;
     use std::{
         convert::Infallible,
         sync::{Arc, Mutex, RwLock},
@@ -555,46 +411,71 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ordered_request_timeout_is_shared_across_fallback_attempts() {
+    async fn request_timeout_is_shared_across_policies_and_protocols() {
         let _lock = ENV_LOCK.lock().await;
         let _key = EnvRestore::set("GATEWAY_API_KEY", TEST_ADMIN_KEY);
-        let calls = Arc::new(Mutex::new(Vec::new()));
-        let recorded = calls.clone();
-        let (url, task) = upstream(Router::new().fallback(move |Json(body): Json<Value>| {
-            recorded
-                .lock()
-                .unwrap()
-                .push(body["model"].as_str().unwrap().to_owned());
-            async move {
-                tokio::time::sleep(Duration::from_millis(if body["model"] == "a" {
-                    50
-                } else {
-                    200
-                }))
-                .await;
-                (
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    Json(json!({"error":"unavailable"})),
-                )
+        for strategy in ["primary_then_weighted_fallback", "ordered_fallback"] {
+            for protocol in [
+                Protocol::OpenAiChatCompletions,
+                Protocol::OpenAiResponses,
+                Protocol::AnthropicMessages,
+            ] {
+                let calls = Arc::new(Mutex::new(Vec::new()));
+                let recorded = calls.clone();
+                let (url, task) =
+                    upstream(Router::new().fallback(move |Json(body): Json<Value>| {
+                        recorded
+                            .lock()
+                            .unwrap()
+                            .push(body["model"].as_str().unwrap().to_owned());
+                        async move {
+                            tokio::time::sleep(Duration::from_millis(if body["model"] == "a" {
+                                50
+                            } else {
+                                200
+                            }))
+                            .await;
+                            (
+                                StatusCode::SERVICE_UNAVAILABLE,
+                                Json(json!({"error":"unavailable"})),
+                            )
+                        }
+                    }))
+                    .await;
+                let started = Instant::now();
+                let state = state(&url, protocol, None, Some(120));
+                configure_strategy(&state, strategy, 2);
+                let response = request(state, protocol, false).await;
+                // Weighted fallback retains the primary HTTP error if its fallback
+                // transport times out; ordered routes return the last timeout.
+                assert_eq!(
+                    response.status(),
+                    if strategy == "ordered_fallback" {
+                        StatusCode::GATEWAY_TIMEOUT
+                    } else {
+                        StatusCode::SERVICE_UNAVAILABLE
+                    }
+                );
+                assert_eq!(*calls.lock().unwrap(), vec!["a", "b"]);
+                assert!(started.elapsed() < Duration::from_millis(500));
+                task.abort();
             }
-        }))
-        .await;
-        let protocol = Protocol::OpenAiChatCompletions;
-        let started = Instant::now();
-        let response = request(state(&url, protocol, None, Some(120)), protocol, false).await;
-        assert_eq!(response.status(), StatusCode::GATEWAY_TIMEOUT);
-        assert_eq!(*calls.lock().unwrap(), vec!["a", "b"]);
-        assert!(started.elapsed() < Duration::from_millis(500));
-        task.abort();
+        }
     }
 
     #[tokio::test]
-    async fn ordered_request_timeout_terminates_sse_without_replaying_on_backup() {
+    async fn request_timeout_terminates_sse_without_replaying_on_backup() {
         let _lock = ENV_LOCK.lock().await;
         let _key = EnvRestore::set("GATEWAY_API_KEY", TEST_ADMIN_KEY);
-        let calls = Arc::new(Mutex::new(Vec::new()));
-        let recorded = calls.clone();
-        let (url, task) = upstream(Router::new().fallback(move |Json(body):Json<Value>| {
+        for strategy in ["primary_then_weighted_fallback", "ordered_fallback"] {
+            for protocol in [
+                Protocol::OpenAiChatCompletions,
+                Protocol::OpenAiResponses,
+                Protocol::AnthropicMessages,
+            ] {
+                let calls = Arc::new(Mutex::new(Vec::new()));
+                let recorded = calls.clone();
+                let (url, task) = upstream(Router::new().fallback(move |Json(body):Json<Value>| {
             recorded.lock().unwrap().push(body["model"].as_str().unwrap().to_owned());
             async {
                 let first = futures_stream::once(async { Ok::<_,Infallible>(Bytes::from_static(b"data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hello\"}}]}\n\n")) });
@@ -602,20 +483,242 @@ mod tests {
                     .body(Body::from_stream(first.chain(futures_stream::pending()))).unwrap()
             }
         })).await;
-        let protocol = Protocol::OpenAiChatCompletions;
-        let response = request(state(&url, protocol, None, Some(80)), protocol, true).await;
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = tokio::time::timeout(
-            Duration::from_secs(1),
-            to_bytes(response.into_body(), 64 * 1024),
-        )
-        .await
-        .unwrap()
-        .unwrap();
-        let body = String::from_utf8(body.to_vec()).unwrap();
-        assert!(body.contains("hello"));
-        assert!(body.contains("gateway_total_timeout"), "{body}");
-        assert_eq!(*calls.lock().unwrap(), vec!["a"]);
-        task.abort();
+                let state = state(&url, protocol, None, Some(80));
+                configure_strategy(&state, strategy, 2);
+                let response = request(state, protocol, true).await;
+                assert_eq!(response.status(), StatusCode::OK);
+                let body = tokio::time::timeout(
+                    Duration::from_secs(1),
+                    to_bytes(response.into_body(), 64 * 1024),
+                )
+                .await
+                .unwrap()
+                .unwrap();
+                let body = String::from_utf8(body.to_vec()).unwrap();
+                assert!(body.contains("hello"));
+                assert!(body.contains("gateway_total_timeout"), "{body}");
+                assert_eq!(*calls.lock().unwrap(), vec!["a"]);
+                task.abort();
+            }
+        }
+    }
+    fn configure_strategy(state: &AppState, strategy: &str, lines: usize) {
+        let mut live = state.live.write().unwrap();
+        let mut routes = live.resolver.runtime_routes().unwrap().to_vec();
+        routes[0].strategy = strategy.to_owned();
+        routes[0].bindings.truncate(lines);
+        live.resolver = RouteResolver::from_runtime(live.config.clone(), routes);
+    }
+
+    fn attempt_count(
+        state: &AppState,
+        protocol: Protocol,
+        account: &str,
+        status: u16,
+        fallback: bool,
+    ) -> u64 {
+        let labels = [
+            format!("protocol=\"{protocol}\""),
+            format!("account=\"{account}\""),
+            format!("status=\"{status}\""),
+            format!("fallback=\"{fallback}\""),
+            "source=\"source\"".to_owned(),
+        ];
+        state
+            .prometheus_handle
+            .render()
+            .lines()
+            .filter(|line| line.starts_with("gateway_upstream_attempts_total{"))
+            .find(|line| labels.iter().all(|label| line.contains(label)))
+            .map(|line| line.rsplit(' ').next().unwrap().parse().unwrap())
+            .unwrap_or(0)
+    }
+
+    #[tokio::test]
+    async fn both_policies_preserve_retryable_statuses_and_primary_priority() {
+        let _lock = ENV_LOCK.lock().await;
+        let _key = EnvRestore::set("GATEWAY_API_KEY", TEST_ADMIN_KEY);
+        for strategy in ["primary_then_weighted_fallback", "ordered_fallback"] {
+            for protocol in [
+                Protocol::OpenAiChatCompletions,
+                Protocol::OpenAiResponses,
+                Protocol::AnthropicMessages,
+            ] {
+                for status in [400, 401, 403, 404, 408, 429, 500, 502, 503] {
+                    let calls = Arc::new(Mutex::new(Vec::new()));
+                    let recorded = calls.clone();
+                    let (url, task) =
+                        upstream(Router::new().fallback(move |Json(body): Json<Value>| {
+                            recorded
+                                .lock()
+                                .unwrap()
+                                .push(body["model"].as_str().unwrap().to_owned());
+                            async move {
+                                Response::builder()
+                                    .status(if body["model"] == "a" { status } else { 201 })
+                                    .header("content-type", "application/json")
+                                    .header("x-provider-extension", "preserved")
+                                    .body(Body::from(body.to_string()))
+                                    .unwrap()
+                            }
+                        }))
+                        .await;
+                    let state = state(&url, protocol, None, None);
+                    configure_strategy(&state, strategy, 2);
+                    let primary_before = attempt_count(&state, protocol, "a", status, false);
+                    let backup_before = attempt_count(&state, protocol, "b", 201, true);
+                    let response = request(state.clone(), protocol, false).await;
+                    let retryable = status == 408 || status == 429 || status >= 500;
+                    assert_eq!(
+                        response.status().as_u16(),
+                        if retryable { 201 } else { status },
+                        "{strategy} {protocol} {status}"
+                    );
+                    assert_eq!(response.headers()["x-provider-extension"], "preserved");
+                    assert_eq!(
+                        *calls.lock().unwrap(),
+                        if retryable { vec!["a", "b"] } else { vec!["a"] }
+                    );
+                    assert_eq!(
+                        attempt_count(&state, protocol, "a", status, false),
+                        primary_before + 1
+                    );
+                    assert_eq!(
+                        attempt_count(&state, protocol, "b", 201, true),
+                        backup_before + u64::from(retryable)
+                    );
+                    let primary_health = state.health.get_health("a").await;
+                    assert_eq!(
+                        primary_health.consecutive_failures,
+                        if retryable { 1 } else { 0 }
+                    );
+                    task.abort();
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn transport_failures_preserve_each_policy_response_mapping() {
+        let _lock = ENV_LOCK.lock().await;
+        let _key = EnvRestore::set("GATEWAY_API_KEY", TEST_ADMIN_KEY);
+        for strategy in ["primary_then_weighted_fallback", "ordered_fallback"] {
+            for protocol in [
+                Protocol::OpenAiChatCompletions,
+                Protocol::OpenAiResponses,
+                Protocol::AnthropicMessages,
+            ] {
+                for primary in ["http", "transport", "disabled"] {
+                    let (url, task) = upstream(Router::new().fallback(|| async {
+                        (
+                            StatusCode::TOO_MANY_REQUESTS,
+                            Json(json!({"error":{"message":"primary rate limit"}})),
+                        )
+                    }))
+                    .await;
+                    let state = state(&url, protocol, None, None);
+                    configure_strategy(&state, strategy, 2);
+                    {
+                        let mut live = state.live.write().unwrap();
+                        let mut routes = live.resolver.runtime_routes().unwrap().to_vec();
+                        routes[0].bindings[1].upstream_endpoint = "invalid URL".into();
+                        if primary == "transport" {
+                            routes[0].bindings[0].upstream_endpoint = "invalid URL".into();
+                        } else if primary == "disabled" {
+                            let mut config = (*live.config).clone();
+                            config.accounts[0].enabled = false;
+                            live.config = Arc::new(config);
+                        }
+                        live.resolver = RouteResolver::from_runtime(live.config.clone(), routes);
+                    }
+                    let backup_before = attempt_count(&state, protocol, "b", 599, true);
+                    let response = request(state.clone(), protocol, false).await;
+                    assert_eq!(
+                        attempt_count(&state, protocol, "b", 599, true),
+                        backup_before + 1
+                    );
+                    let expected = match (strategy, primary) {
+                        ("primary_then_weighted_fallback", "http") => 429,
+                        ("primary_then_weighted_fallback", "disabled") => 503,
+                        _ => 502,
+                    };
+                    assert_eq!(
+                        response.status().as_u16(),
+                        expected,
+                        "{strategy} {protocol} {primary}"
+                    );
+                    let text = String::from_utf8(
+                        to_bytes(response.into_body(), 64 * 1024)
+                            .await
+                            .unwrap()
+                            .to_vec(),
+                    )
+                    .unwrap();
+                    assert!(
+                        text.contains(if expected == 429 {
+                            "primary rate limit"
+                        } else if expected == 503 {
+                            "account_disabled"
+                        } else {
+                            "upstream_request_failed"
+                        }),
+                        "{text}"
+                    );
+                    assert_eq!(state.health.get_health("b").await.consecutive_failures, 1);
+                    task.abort();
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn only_weighted_policy_retries_short_retry_after_without_backup() {
+        let _lock = ENV_LOCK.lock().await;
+        let _key = EnvRestore::set("GATEWAY_API_KEY", TEST_ADMIN_KEY);
+        for strategy in ["primary_then_weighted_fallback", "ordered_fallback"] {
+            for protocol in [
+                Protocol::OpenAiChatCompletions,
+                Protocol::OpenAiResponses,
+                Protocol::AnthropicMessages,
+            ] {
+                let calls = Arc::new(Mutex::new(Vec::new()));
+                let recorded = calls.clone();
+                let (url, task) =
+                    upstream(Router::new().fallback(move |Json(body): Json<Value>| {
+                        let mut calls = recorded.lock().unwrap();
+                        calls.push(body["model"].as_str().unwrap().to_owned());
+                        let status = if calls.len() == 1 { 429 } else { 200 };
+                        async move {
+                            Response::builder()
+                                .status(status)
+                                .header("retry-after", "0")
+                                .header("content-type", "application/json")
+                                .body(Body::from("{}"))
+                                .unwrap()
+                        }
+                    }))
+                    .await;
+                let state = state(&url, protocol, None, None);
+                configure_strategy(&state, strategy, 1);
+                let rate_limited_before = attempt_count(&state, protocol, "a", 429, false);
+                let success_before = attempt_count(&state, protocol, "a", 200, false);
+                let response = request(state.clone(), protocol, false).await;
+                let weighted = strategy == "primary_then_weighted_fallback";
+                assert_eq!(
+                    attempt_count(&state, protocol, "a", 429, false),
+                    rate_limited_before + 1
+                );
+                assert_eq!(
+                    attempt_count(&state, protocol, "a", 200, false),
+                    success_before + u64::from(weighted)
+                );
+                assert_eq!(response.status().as_u16(), if weighted { 200 } else { 429 });
+                assert_eq!(
+                    *calls.lock().unwrap(),
+                    if weighted { vec!["a", "a"] } else { vec!["a"] }
+                );
+                task.abort();
+            }
+        }
     }
 }

@@ -10,10 +10,11 @@ use crate::{
     infra::{db, health, observability, secrets},
     proxy::{
         accounting::finalize_stream_usage,
-        fallback::try_fallback_error,
+        attempt::AttemptContext,
+        fallback::select_fallback_candidate,
         service::proxy as proxy_fn,
         stream::{StreamConfig, StreamTermination},
-        transport, usage,
+        usage,
     },
     state::{AppState, LiveConfig},
 };
@@ -432,7 +433,7 @@ async fn long_retry_after_is_not_retried_on_the_same_account() {
 }
 
 #[tokio::test]
-async fn transport_error_path_uses_fallback_and_records_its_actual_model() {
+async fn fallback_attempt_records_its_actual_model() {
     let (base_url, recorded) = spawn_upstream(|_| {
         Response::builder()
             .header(header::CONTENT_TYPE, "application/json")
@@ -452,23 +453,32 @@ async fn transport_error_path_uses_fallback_and_records_its_actual_model() {
     let resolved = RouteResolver::new(config.clone())
         .resolve_detailed(Protocol::OpenAiChatCompletions, "logical-model")
         .unwrap();
-    let (response, attempts) = try_fallback_error(
+    let candidate = select_fallback_candidate(
         &config,
-        &secrets::SecretResolver::empty(),
-        &crate::infra::events::EventRepository::disabled(),
         &health::HealthRegistry::new(Duration::from_secs(1)),
-        &http::test_client().unwrap(),
         &resolved,
         "logical-model",
         Protocol::OpenAiChatCompletions,
-        &HeaderMap::new(),
-        Bytes::from_static(br#"{"model":"logical-model","messages":[]}"#),
-        transport::TransportError::Request,
-        &StreamConfig::default(),
-        Instant::now(),
-        "test-request-id",
     )
+    .await
+    .unwrap();
+    let attempted = AttemptContext {
+        secrets: &secrets::SecretResolver::empty(),
+        events: &crate::infra::events::EventRepository::disabled(),
+        health: &health::HealthRegistry::new(Duration::from_secs(1)),
+        http: &http::test_client().unwrap(),
+        model: "logical-model",
+        protocol: Protocol::OpenAiChatCompletions,
+        headers: &HeaderMap::new(),
+        body: &Bytes::from_static(br#"{"model":"logical-model","messages":[]}"#),
+        stream_config: &StreamConfig::default(),
+        started: Instant::now(),
+        request_id: "test-request-id",
+    }
+    .execute(&candidate, 1, true)
     .await;
+    let attempts = [attempted.usage];
+    let response = attempted.result.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(attempts.len(), 1);
     assert_eq!(attempts[0].account_id, "fallback");
@@ -485,7 +495,7 @@ async fn transport_error_path_uses_fallback_and_records_its_actual_model() {
 }
 
 #[tokio::test]
-async fn fallback_transport_failure_is_retained_as_the_final_actual_attempt() {
+async fn fallback_transport_failure_records_the_actual_attempt() {
     let config = Arc::new(GatewayConfig {
         listen_addr: "127.0.0.1:0".into(),
         providers: vec![provider("not a valid upstream URL".into())],
@@ -498,24 +508,49 @@ async fn fallback_transport_failure_is_retained_as_the_final_actual_attempt() {
     let resolved = RouteResolver::new(config.clone())
         .resolve_detailed(Protocol::OpenAiChatCompletions, "logical-model")
         .unwrap();
-    let (response, attempts) = try_fallback_error(
+    let candidate = select_fallback_candidate(
         &config,
-        &secrets::SecretResolver::empty(),
-        &crate::infra::events::EventRepository::disabled(),
         &health::HealthRegistry::new(Duration::from_secs(1)),
-        &http::test_client().unwrap(),
         &resolved,
         "logical-model",
         Protocol::OpenAiChatCompletions,
-        &HeaderMap::new(),
-        Bytes::from_static(br#"{"model":"logical-model","messages":[]}"#),
-        transport::TransportError::Request,
-        &StreamConfig::default(),
-        Instant::now(),
-        "test-request-id",
     )
+    .await
+    .unwrap();
+    struct SlowHealthClock;
+    impl health::HealthClock for SlowHealthClock {
+        fn now(&self) -> chrono::DateTime<chrono::Utc> {
+            // Model a slow health update independently of upstream transport.
+            std::thread::sleep(Duration::from_millis(40));
+            chrono::Utc::now()
+        }
+    }
+    let health = health::HealthRegistry::with_config_and_clock(
+        health::HealthConfig::default(),
+        Arc::new(SlowHealthClock),
+    );
+    let started = Instant::now();
+    let attempted = AttemptContext {
+        secrets: &secrets::SecretResolver::empty(),
+        events: &crate::infra::events::EventRepository::disabled(),
+        health: &health,
+        http: &http::test_client().unwrap(),
+        model: "logical-model",
+        protocol: Protocol::OpenAiChatCompletions,
+        headers: &HeaderMap::new(),
+        body: &Bytes::from_static(br#"{"model":"logical-model","messages":[]}"#),
+        stream_config: &StreamConfig::default(),
+        started: Instant::now(),
+        request_id: "test-request-id",
+    }
+    .execute(&candidate, 1, true)
     .await;
-    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    assert!(
+        started.elapsed().as_millis() as i64 - attempted.usage.latency_ms >= 40,
+        "attempt latency must exclude health update time"
+    );
+    let attempts = [attempted.usage];
+    assert_eq!(attempted.result.unwrap_err().status_code(), 599);
     assert_eq!(attempts.len(), 1);
     assert_eq!(attempts[0].status_code, 599);
     assert!(!attempts[0].success);

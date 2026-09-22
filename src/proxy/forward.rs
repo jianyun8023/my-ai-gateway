@@ -1,61 +1,11 @@
 use super::{stream, transport};
 use crate::domain::config;
 use crate::domain::protocol::Protocol;
-use crate::domain::routing::ResolvedRoute;
 use crate::http::SourceHttpClient;
 use crate::infra::{events, secrets};
 use axum::body::{Body, Bytes};
 use axum::http::{HeaderMap, Response};
 use std::time::Instant;
-
-#[allow(clippy::too_many_arguments)]
-#[tracing::instrument(name = "gateway.forward", skip_all, fields(
-    source_id = %route.source_id,
-    account_id = %account.id,
-    upstream_model = %route.upstream_model_id,
-))]
-pub(super) async fn forward_account(
-    secrets: &secrets::SecretResolver,
-    events: &events::EventRepository,
-    http: &SourceHttpClient,
-    route: &ResolvedRoute,
-    account: &config::AccountConfig,
-    request_id: &str,
-    headers: &HeaderMap,
-    body: Bytes,
-    stream_config: &stream::StreamConfig,
-    request_started: Instant,
-) -> Result<Response<Body>, transport::TransportError> {
-    let credential =
-        resolve_credential(secrets, events, &route.source_id, account, request_id).await;
-    if route.mode == "adapter" {
-        return dispatch_adapter(
-            http,
-            Some(route.upstream_endpoint.as_str()),
-            account,
-            credential.as_deref(),
-            route.protocol_upstream,
-            headers,
-            body,
-            stream_config,
-            request_started,
-        )
-        .await;
-    } else {
-        transport::forward_url_with_config(
-            http,
-            &route.upstream_endpoint,
-            account,
-            credential.as_deref(),
-            route.protocol_upstream,
-            headers,
-            body,
-            stream_config,
-            request_started,
-        )
-        .await
-    }
-}
 
 /// Execute an adapter-mode upstream call.
 ///
