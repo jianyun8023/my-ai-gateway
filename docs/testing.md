@@ -37,6 +37,8 @@
 └──────────────────────────────────────────────────────────────┘
 ```
 
+#237 的回归覆盖三协议 thinking/reasoning 参数、显式 disabled、历史 signature / encrypted reasoning 与 Provider 扩展字段保留。`tests/contract_tests/reasoning.rs` 检查原生请求和同来源 fallback，`src/proxy/ordered.rs` 的 runtime bindings 测试检查跨来源 fallback；两种 fallback 策略均验证逐 attempt 模型映射与其余字段独立保留。运行 `cargo test --features test-support native_thinking -- --test-threads=1`；测试使用本地 Mock，不发送真实模型请求，也不验证或回写生产历史用量。
+
 ## 3. 工具选型定稿
 
 ### 3.1 选型总览

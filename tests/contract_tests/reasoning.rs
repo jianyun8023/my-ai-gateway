@@ -459,3 +459,128 @@ async fn chat_reasoning_usage_tokens() {
         "final text content preserved"
     );
 }
+
+// #237: Native requests must not infer a loss of thinking from history shape.
+fn native_thinking_requests() -> Vec<(&'static str, &'static str, serde_json::Value)> {
+    let chat = json!({
+        "model": MODEL,
+        "messages": [
+            {"role": "assistant", "content": "Previous answer without reasoning"},
+            {"role": "user", "content": "Continue"}
+        ],
+        "thinking": {"type": "enabled", "budget_tokens": 4096},
+        "reasoning_effort": "high",
+        "reasoning_split": true,
+        "provider_extension": {"opaque": [1, "keep", null]}
+    });
+    let mut disabled = chat.clone();
+    disabled["thinking"] = json!({"type": "disabled"});
+    disabled["tool_choice"] = json!("auto");
+    let mut chat_reasoning = chat.clone();
+    chat_reasoning["messages"][0]["reasoning_content"] = json!("previous reasoning");
+    chat_reasoning["messages"][0]["reasoning_details"] =
+        json!([{"signature": "opaque-chat-signature", "provider_field": true}]);
+    let responses = json!({
+        "model": MODEL,
+        "input": [
+            {"role": "assistant", "content": [{"type": "output_text", "text": "Previous answer"}]},
+            {"type": "function_call", "call_id": "call_1", "name": "lookup", "arguments": "{}"},
+            {"type": "function_call_output", "call_id": "call_1", "output": "result"}
+        ],
+        "reasoning": {"effort": "high", "summary": "auto", "provider_field": true},
+        "provider_extension": {"opaque": "keep"}
+    });
+    let mut responses_reasoning = responses.clone();
+    responses_reasoning["input"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({
+            "type": "reasoning", "id": "rs_1", "encrypted_content": "opaque-reasoning",
+            "summary": [], "signature": "opaque-responses-signature"
+        }));
+    let messages = json!({
+        "model": MODEL,
+        "max_tokens": 8192,
+        "thinking": {"type": "enabled", "budget_tokens": 4096},
+        "messages": [
+            {"role": "assistant", "content": [
+                {"type": "thinking", "thinking": "previous thinking", "signature": "opaque-signature"},
+                {"type": "redacted_thinking", "data": "opaque-data"},
+                {"type": "text", "text": "Previous answer"}
+            ]},
+            {"role": "user", "content": "Continue"}
+        ],
+        "provider_extension": {"opaque": "keep"}
+    });
+    vec![
+        ("/v1/chat/completions", "chat.reasoning.basic", chat),
+        ("/v1/chat/completions", "chat.reasoning.basic", disabled),
+        (
+            "/v1/chat/completions",
+            "chat.reasoning.basic",
+            chat_reasoning,
+        ),
+        ("/v1/responses", "responses.reasoning.basic", responses),
+        (
+            "/v1/responses",
+            "responses.reasoning.basic",
+            responses_reasoning,
+        ),
+        ("/v1/messages", "messages.thinking.basic", messages),
+    ]
+}
+
+#[tokio::test]
+async fn native_thinking_parameters_and_history_are_preserved() {
+    for (uri, case, body) in native_thinking_requests() {
+        let mock = spawn_mock_with_catalog().await;
+        let router = test_gateway_router(native_config(mock.base_url(), MODEL));
+        let response = gateway_post(&router, uri, case, &body.to_string()).await;
+        assert_status(&response, StatusCode::OK);
+        let requests = mock.take_requests();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].body, body, "native fields changed for {uri}");
+    }
+}
+
+#[tokio::test]
+async fn native_thinking_fallback_attempts_preserve_original_fields() {
+    for strategy in ["primary_then_weighted_fallback", "ordered_fallback"] {
+        for (uri, case, body) in native_thinking_requests() {
+            let mock = crate::support::mock_provider::MockProvider::builder()
+                .sequence(vec![
+                    crate::support::fixtures::catalog::error_503(),
+                    crate::support::fixtures::catalog::all_first_batch()[case].clone(),
+                ])
+                .build()
+                .spawn()
+                .await;
+            let mut config = native_config(mock.base_url(), MODEL);
+            let mut fallback_account = config.accounts[0].clone();
+            fallback_account.id = "fallback-account".into();
+            fallback_account
+                .model_map
+                .insert(MODEL.into(), "fallback-model".into());
+            config.accounts.push(fallback_account);
+            config.accounts[0]
+                .model_map
+                .insert(MODEL.into(), "primary-model".into());
+            config.routes[0].fallback_accounts = vec!["fallback-account".into()];
+            config.routes[0].strategy = strategy.into();
+            let router = test_gateway_router(config);
+            let response = gateway_post(&router, uri, case, &body.to_string()).await;
+            let status = response.status();
+            let response_body = text_body(response).await;
+            assert_eq!(status, StatusCode::OK, "{strategy}: {uri}: {response_body}");
+
+            let mut expected_primary = body.clone();
+            expected_primary["model"] = json!("primary-model");
+            let mut expected_fallback = body;
+            expected_fallback["model"] = json!("fallback-model");
+            let requests = mock.take_requests();
+            assert_eq!(requests.len(), 2, "{strategy}: {uri}");
+            assert_eq!(requests[0].body, expected_primary, "{strategy}: {uri}");
+            assert_eq!(requests[1].body, expected_fallback, "{strategy}: {uri}");
+        }
+    }
+}
