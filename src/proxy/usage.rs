@@ -7,9 +7,12 @@
 use axum::body::{Body, Bytes};
 use futures_util::{stream, StreamExt};
 use serde_json::{Map, Value};
-use std::time::Instant;
+use std::{sync::LazyLock, time::Instant};
 
-use super::stream::{is_gateway_heartbeat, SseEventTracker, StreamTermination, HEARTBEAT_MARKER};
+static TOKENIZER: LazyLock<tiktoken_rs::CoreBPE> =
+    LazyLock::new(|| tiktoken_rs::cl100k_base().expect("cl100k tokenizer initialization"));
+
+use super::stream::{is_gateway_heartbeat, SseEventTracker, StreamTermination};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct UsageReport {
@@ -23,12 +26,105 @@ pub(crate) struct UsageReport {
     pub(crate) source: String,
 }
 
+pub(crate) const MAX_ESTIMATE_BYTES: usize = 256 * 1024;
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct SseUsageAccumulator {
+    counters: Map<String, Value>,
+    data_event_count: u64,
+    json_parse_failures: u64,
+    json_without_usage: u64,
+}
+
+impl SseUsageAccumulator {
+    pub(crate) fn observe(&mut self, data: &str, parsed: Option<&Value>) {
+        if data.is_empty() || data == "[DONE]" {
+            return;
+        }
+        self.data_event_count = self.data_event_count.saturating_add(1);
+        if let Some(value) = parsed {
+            if let Some(usage) = usage_value(value) {
+                merge_sse_usage(&mut self.counters, usage);
+            } else {
+                self.json_without_usage = self.json_without_usage.saturating_add(1);
+            }
+        } else {
+            self.json_parse_failures = self.json_parse_failures.saturating_add(1);
+        }
+    }
+
+    pub(crate) fn report(&self) -> Option<UsageReport> {
+        (!self.counters.is_empty()).then(|| {
+            let mut report = report_from_usage(&Value::Object(self.counters.clone()));
+            report.source = "parsed".into();
+            report
+        })
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct StreamObservation {
     pub(crate) captured: Vec<u8>,
+    pub(crate) capture_truncated: bool,
+    pub(crate) parsed_usage: Option<UsageReport>,
+    pub(crate) estimated_reasoning_tokens: Option<i64>,
     pub(crate) ttft_ms: Option<i64>,
     pub(crate) failed: bool,
     pub(crate) termination: StreamTermination,
+}
+
+/// Keep at most one bounded reasoning block; completed blocks are tokenized
+/// immediately. Marker lookbehind permits tags split across transport chunks.
+#[derive(Default)]
+struct ThinkingEstimate {
+    pending: Vec<u8>,
+    inside: bool,
+    unavailable: bool,
+    tokens: i64,
+    processed_bytes: usize,
+}
+
+impl ThinkingEstimate {
+    fn feed(&mut self, bytes: &[u8]) {
+        if self.unavailable {
+            return;
+        }
+        for byte in bytes {
+            self.pending.push(*byte);
+            if self.inside {
+                self.processed_bytes += 1;
+                if self.processed_bytes > MAX_ESTIMATE_BYTES {
+                    self.unavailable = true;
+                    self.pending.clear();
+                    return;
+                }
+                if self.pending.ends_with(b"</think>") {
+                    self.pending
+                        .truncate(self.pending.len() - b"</think>".len());
+                    self.tokens = self.tokens.saturating_add(
+                        TOKENIZER
+                            .encode_with_special_tokens(&String::from_utf8_lossy(&self.pending))
+                            .len() as i64,
+                    );
+                    self.pending.clear();
+                    self.inside = false;
+                } else if self.pending.len() >= MAX_ESTIMATE_BYTES {
+                    self.unavailable = true;
+                    self.pending.clear();
+                    return;
+                }
+            } else if self.pending.ends_with(b"<think>") {
+                self.pending.clear();
+                self.inside = true;
+            } else if self.pending.len() >= b"<think>".len() {
+                self.pending.remove(0);
+            }
+        }
+    }
+
+    fn result(&self) -> Option<i64> {
+        (!self.unavailable && !self.inside).then_some(self.tokens)
+    }
 }
 
 struct ObservationGuard<F>
@@ -36,7 +132,11 @@ where
     F: FnOnce(StreamObservation) + Send + 'static,
 {
     callback: Option<F>,
+    request_id: String,
+    thinking: ThinkingEstimate,
     captured: Vec<u8>,
+    streamed_bytes: u64,
+    capture_truncated: bool,
     ttft_ms: Option<i64>,
     termination: Option<StreamTermination>,
     tracker: SseEventTracker,
@@ -47,10 +147,14 @@ impl<F> ObservationGuard<F>
 where
     F: FnOnce(StreamObservation) + Send + 'static,
 {
-    fn new(callback: F, request_started: Instant) -> Self {
+    fn new(callback: F, request_started: Instant, request_id: &str) -> Self {
         Self {
             callback: Some(callback),
+            request_id: request_id.to_owned(),
+            thinking: ThinkingEstimate::default(),
             captured: Vec::new(),
+            streamed_bytes: 0,
+            capture_truncated: false,
             ttft_ms: None,
             termination: None,
             tracker: SseEventTracker::default(),
@@ -60,13 +164,22 @@ where
 
     fn observe(&mut self, chunk: &Bytes) {
         let activity = self.tracker.feed(chunk);
-        let provider_bytes = without_gateway_heartbeats(chunk);
-        if !provider_bytes.is_empty() {
-            self.captured.extend_from_slice(&provider_bytes);
+        let mut provider_activity = false;
+        for bytes in chunk.split_inclusive(|byte| *byte == b'\n') {
+            if is_gateway_heartbeat(bytes) {
+                continue;
+            }
+            self.thinking.feed(bytes);
+            self.streamed_bytes = self.streamed_bytes.saturating_add(bytes.len() as u64);
+            let remaining = MAX_ESTIMATE_BYTES - self.captured.len();
+            self.capture_truncated |= bytes.len() > remaining;
+            self.captured
+                .extend_from_slice(&bytes[..bytes.len().min(remaining)]);
+            provider_activity |= has_provider_bytes(bytes);
         }
         if self.ttft_ms.is_none()
             && !(activity.error && !activity.provider_event)
-            && has_provider_bytes(&provider_bytes)
+            && provider_activity
         {
             self.ttft_ms = Some(self.request_started.elapsed().as_millis() as i64);
         }
@@ -90,13 +203,23 @@ where
         self.termination = Some(termination);
         if let Some(callback) = self.callback.take() {
             tracing::info!(
+                request_id = %self.request_id,
                 stream_termination = termination.code(),
-                streamed_bytes = self.captured.len(),
+                reasoning_estimate_unavailable = self.thinking.result().is_none(),
+                streamed_bytes = self.streamed_bytes,
+                captured_bytes = self.captured.len(),
+                capture_truncated = self.capture_truncated,
+                data_event_count = self.tracker.usage.data_event_count,
+                json_parse_failures = self.tracker.usage.json_parse_failures,
+                json_without_usage = self.tracker.usage.json_without_usage,
                 ttft_ms = ?self.ttft_ms,
                 "stream lifecycle"
             );
             callback(StreamObservation {
                 captured: std::mem::take(&mut self.captured),
+                capture_truncated: self.capture_truncated,
+                parsed_usage: self.tracker.usage.report(),
+                estimated_reasoning_tokens: self.thinking.result(),
                 ttft_ms: self.ttft_ms,
                 failed: termination.is_failure(),
                 termination,
@@ -116,32 +239,6 @@ fn has_provider_bytes(bytes: &[u8]) -> bool {
     }) || (!text.contains('\n') && !text.trim().is_empty())
 }
 
-fn without_gateway_heartbeats(chunk: &Bytes) -> Vec<u8> {
-    if is_gateway_heartbeat(chunk) {
-        return Vec::new();
-    }
-    if !String::from_utf8_lossy(chunk).contains(HEARTBEAT_MARKER) {
-        return chunk.to_vec();
-    }
-    let text = String::from_utf8_lossy(chunk);
-    let mut filtered = String::with_capacity(text.len());
-    for line in text.split_inclusive('\n') {
-        let content = line.trim_end_matches(['\r', '\n']);
-        if content.trim() == HEARTBEAT_MARKER {
-            continue;
-        }
-        filtered.push_str(line);
-    }
-    if !text.ends_with('\n')
-        && text
-            .rsplit_once('\n')
-            .is_some_and(|(_, tail)| tail.trim() == HEARTBEAT_MARKER)
-    {
-        filtered = filtered.trim_end_matches(HEARTBEAT_MARKER).to_owned();
-    }
-    filtered.into_bytes()
-}
-
 impl<F> Drop for ObservationGuard<F>
 where
     F: FnOnce(StreamObservation) + Send + 'static,
@@ -158,12 +255,17 @@ where
 /// the same order. The upstream is polled once per downstream demand, so this
 /// does not prefetch the response or alter backpressure. Completion is reported
 /// on clean EOF or immediately on a body-stream error.
-pub(crate) fn observe_stream_body<F>(body: Body, request_started: Instant, on_complete: F) -> Body
+pub(crate) fn observe_stream_body<F>(
+    body: Body,
+    request_started: Instant,
+    request_id: &str,
+    on_complete: F,
+) -> Body
 where
     F: FnOnce(StreamObservation) + Send + 'static,
 {
     let upstream = body.into_data_stream();
-    let guard = ObservationGuard::new(on_complete, request_started);
+    let guard = ObservationGuard::new(on_complete, request_started, request_id);
     let stream = stream::unfold((upstream, guard), |(mut upstream, mut guard)| async move {
         match upstream.next().await {
             Some(Ok(chunk)) => {
@@ -171,7 +273,7 @@ where
                 Some((Ok::<Bytes, std::io::Error>(chunk), (upstream, guard)))
             }
             Some(Err(error)) => {
-                guard.complete(StreamTermination::UpstreamError);
+                guard.complete(StreamTermination::TransportError);
                 Some((
                     Err(std::io::Error::other(error.to_string())),
                     (upstream, guard),
@@ -180,11 +282,15 @@ where
             None => {
                 let activity = guard.tracker.finish_eof();
                 if activity.error {
-                    guard.complete(StreamTermination::UpstreamError);
+                    guard.complete(
+                        activity
+                            .terminal
+                            .unwrap_or(StreamTermination::UpstreamError),
+                    );
                 } else if guard.tracker.saw_provider_event() {
                     let termination = guard.tracker.terminal().unwrap_or_else(|| {
                         if guard.tracker.saw_sse_frame() {
-                            StreamTermination::UpstreamError
+                            StreamTermination::IncompleteStream
                         } else {
                             StreamTermination::Completed
                         }
@@ -203,11 +309,10 @@ where
 /// Conservative fallback estimate used when an upstream omits usage.
 /// This is intentionally marked as estimated; it is not a billing value.
 pub(crate) fn estimate(input: &[u8], output: &[u8]) -> UsageReport {
-    let tokenizer = tiktoken_rs::cl100k_base().expect("cl100k tokenizer initialization");
     let input_text = String::from_utf8_lossy(input);
     let output_text = String::from_utf8_lossy(output);
-    let input_tokens = tokenizer.encode_with_special_tokens(&input_text).len() as i64;
-    let output_tokens = tokenizer.encode_with_special_tokens(&output_text).len() as i64;
+    let input_tokens = TOKENIZER.encode_with_special_tokens(&input_text).len() as i64;
+    let output_tokens = TOKENIZER.encode_with_special_tokens(&output_text).len() as i64;
     UsageReport {
         input_tokens,
         output_tokens,
@@ -226,6 +331,7 @@ pub(crate) fn estimate(input: &[u8], output: &[u8]) -> UsageReport {
 /// The scanner is byte-oriented so it stays allocation-light on large
 /// streams; it only materialises the concatenated text between the matching
 /// tags and tokenises that substring once.
+#[cfg(test)]
 pub(crate) fn minimax_chat_thinking_tokens(captured: &[u8]) -> i64 {
     let tokenizer = match tiktoken_rs::cl100k_base() {
         Ok(t) => t,
@@ -245,20 +351,6 @@ pub(crate) fn minimax_chat_thinking_tokens(captured: &[u8]) -> i64 {
         cursor = close_abs + "</think>".len();
     }
     total
-}
-
-fn merge_thinking_into_report(report: &mut UsageReport, captured: &[u8]) {
-    let reasoning = minimax_chat_thinking_tokens(captured);
-    if reasoning <= 0 {
-        return;
-    }
-    if report.reasoning_tokens == 0 {
-        report.reasoning_tokens = reasoning;
-    }
-    // `total_tokens` excludes `reasoning_tokens` per the documented contract
-    // (see migrations/0018_document_token_count_semantics.sql), so do not
-    // touch the total here.  Downstream billing that wants to count
-    // thinking tokens adds `reasoning_tokens` on top of `total_tokens`.
 }
 
 impl UsageReport {
@@ -423,94 +515,65 @@ fn merge_sse_usage(current: &mut Map<String, Value>, usage: &Value) {
 }
 
 /// Extract cumulative usage from SSE, ignoring comments and `[DONE]`.
+#[cfg(test)]
 pub(crate) fn extract_sse(text: &str) -> Option<UsageReport> {
-    let mut counters = Map::new();
-    for line in text.lines() {
-        let Some(data) = line.strip_prefix("data:").map(str::trim) else {
-            continue;
-        };
-        if data.is_empty() || data == "[DONE]" {
-            continue;
-        }
-        if let Ok(value) = serde_json::from_str::<Value>(data) {
-            if let Some(usage) = usage_value(&value) {
-                merge_sse_usage(&mut counters, usage);
-            }
-        }
-    }
-    (!counters.is_empty()).then(|| {
-        let mut report = report_from_usage(&Value::Object(counters));
-        report.source = "parsed".into();
-        report
-    })
+    let mut tracker = SseEventTracker::default();
+    tracker.feed(text.as_bytes());
+    tracker.finish_eof();
+    tracker.usage.report()
 }
 
-/// Resolve usage after an SSE response ends. A failed stream with no
-/// provider-confirmed usage remains missing instead of inventing tokens.
-///
-/// When `extract_sse` returns `None` and we have to fall back to the
-/// tiktoken-based `estimate`, log metadata-only diagnostics for issue #98.
-/// Never emit response bytes, reversible previews, or body fingerprints.
+/// Resolve the bounded live observation without reparsing a captured prefix.
+pub(crate) fn usage_for_stream_observation(
+    request_id: &str,
+    success: bool,
+    request: &[u8],
+    observation: &StreamObservation,
+) -> UsageReport {
+    let mut report = observation.parsed_usage.clone().unwrap_or_else(|| {
+        let can_estimate = success && !observation.capture_truncated;
+        tracing::warn!(
+            request_id,
+            success,
+            capture_truncated = observation.capture_truncated,
+            captured_bytes = observation.captured.len(),
+            usage_source = if can_estimate { "estimated" } else { "missing" },
+            "SSE usage unavailable"
+        );
+        if can_estimate {
+            estimate(request, &observation.captured)
+        } else {
+            UsageReport::missing()
+        }
+    });
+    if report.reasoning_tokens == 0 && report.source != "missing" {
+        report.reasoning_tokens = observation.estimated_reasoning_tokens.unwrap_or(0);
+    }
+    report
+}
+
+/// Fixture helper exercising the same incremental observer as live traffic.
+#[cfg(test)]
 pub(crate) fn usage_for_sse_response(
     request_id: &str,
     success: bool,
     request: &[u8],
     captured: &[u8],
 ) -> UsageReport {
-    let text = String::from_utf8_lossy(captured);
-    let mut report = extract_sse(&text).unwrap_or_else(|| {
-        log_sse_extraction_failure(request_id, success, captured);
-        if success {
-            estimate(request, captured)
-        } else {
-            UsageReport::missing()
-        }
-    });
-    // MiniMax-M3 emits thinking text inside delta.content wrapped in
-    // `<think>...</think>` and never reports reasoning_tokens upstream.
-    // Scan the captured stream and credit those tokens so per-vendor
-    // reasoning usage is not silently zero (issue #99).
-    merge_thinking_into_report(&mut report, captured);
-    report
-}
-
-fn log_sse_extraction_failure(request_id: &str, success: bool, captured: &[u8]) {
-    let text = String::from_utf8_lossy(captured);
-    let mut data_line_count = 0usize;
-    let mut json_parse_failures = 0usize;
-    let mut json_without_usage = 0usize;
-    for line in text.lines() {
-        let Some(data) = line.strip_prefix("data:").map(str::trim) else {
-            continue;
-        };
-        if data.is_empty() || data == "[DONE]" {
-            continue;
-        }
-        data_line_count += 1;
-        match serde_json::from_str::<Value>(data) {
-            Ok(value) => {
-                if value.get("usage").is_none()
-                    && value.get("response").and_then(|v| v.get("usage")).is_none()
-                    && value.get("message").and_then(|v| v.get("usage")).is_none()
-                    && value.get("delta").and_then(|v| v.get("usage")).is_none()
-                {
-                    json_without_usage += 1;
-                }
-            }
-            Err(_) => json_parse_failures += 1,
-        }
-    }
-    tracing::warn!(
-        request_id = %request_id,
-        success,
-        captured_len = captured.len(),
-        line_count = text.lines().count(),
-        data_line_count,
-        json_parse_failures,
-        json_without_usage,
-        usage_source = if success { "estimated" } else { "missing" },
-        "SSE usage extraction failed; no provider-confirmed usage"
+    let (tx, rx) = std::sync::mpsc::channel();
+    let mut guard = ObservationGuard::new(
+        move |observation| tx.send(observation).unwrap(),
+        Instant::now(),
+        request_id,
     );
+    guard.observe(&Bytes::copy_from_slice(captured));
+    guard.tracker.finish_eof();
+    guard.complete(if success {
+        StreamTermination::Completed
+    } else {
+        StreamTermination::UpstreamError
+    });
+    usage_for_stream_observation(request_id, success, request, &rx.recv().unwrap())
 }
 
 #[cfg(test)]
@@ -526,6 +589,108 @@ mod tests {
         },
         time::Duration,
     };
+
+    #[test]
+    fn large_stream_retains_late_usage_for_all_protocols_without_retaining_body() {
+        for tail in [
+            "data: {\"usage\":{\"prompt_tokens\":9,\"completion_tokens\":4,\"prompt_tokens_details\":{\"cached_tokens\":2},\"completion_tokens_details\":{\"reasoning_tokens\":3}}}\n\ndata: [DONE]\n\n",
+            "event: response.completed\ndata: {\"response\":{\"usage\":{\"input_tokens\":9,\"output_tokens\":4,\"input_tokens_details\":{\"cached_tokens\":2},\"output_tokens_details\":{\"reasoning_tokens\":3}}}}\n\n",
+            "event: message_delta\ndata: {\"usage\":{\"input_tokens\":9,\"output_tokens\":4,\"cache_read_input_tokens\":2,\"reasoning_tokens\":3}}\n\nevent: message_stop\ndata: {}\n\n",
+        ] {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let mut guard = ObservationGuard::new(move |value| tx.send(value).unwrap(), Instant::now(), "large-request");
+            let delta = Bytes::from(format!("data: {{\"text\":\"{}\"}}\n\n", "x".repeat(4096)));
+            for _ in 0..1024 {
+                guard.observe(&delta);
+                assert!(guard.captured.len() <= MAX_ESTIMATE_BYTES);
+            }
+            for chunk in tail.as_bytes().chunks(3) { guard.observe(&Bytes::copy_from_slice(chunk)); }
+            guard.complete(StreamTermination::Completed);
+            let observation = rx.recv().unwrap();
+            assert!(observation.capture_truncated);
+            let report = usage_for_stream_observation("large-request", true, b"{}", &observation);
+            assert_eq!((report.input_tokens, report.output_tokens, report.cache_read_tokens, report.reasoning_tokens), (9,4,2,3));
+            assert_eq!(report.source, "parsed");
+        }
+    }
+
+    #[tokio::test]
+    async fn large_final_response_usage_is_observed_at_eof_without_blank_line() {
+        let frame = Bytes::from(format!("event: response.completed\ndata: {{\"response\":{{\"output\":\"{}\",\"usage\":{{\"input_tokens\":2,\"output_tokens\":3}}}}}}", "x".repeat(900 * 1024)));
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let body = observe_stream_body(
+            Body::from(frame.clone()),
+            Instant::now(),
+            "large-final",
+            move |observation| {
+                tx.send(observation).unwrap();
+            },
+        );
+        assert_eq!(to_bytes(body, 1024 * 1024).await.unwrap(), frame);
+        let observation = rx.await.unwrap();
+        assert!(observation.capture_truncated);
+        assert_eq!(observation.termination, StreamTermination::Completed);
+        assert_eq!(observation.parsed_usage.unwrap().total_tokens, 5);
+    }
+
+    #[test]
+    fn multiline_crlf_usage_survives_every_chunk_boundary() {
+        let frame = b"event: response.completed\r\ndata: {\"response\":\r\ndata: {\"usage\":{\"input_tokens\":12,\"output_tokens\":7}}}\r\n\r\n";
+        for split in 0..frame.len() {
+            let mut tracker = SseEventTracker::default();
+            tracker.feed(&frame[..split]);
+            tracker.feed(&frame[split..]);
+            assert_eq!(tracker.usage.report().unwrap().total_tokens, 19);
+            assert_eq!(tracker.terminal(), Some(StreamTermination::Completed));
+        }
+    }
+
+    #[test]
+    fn truncated_estimates_and_failed_streams_never_invent_usage() {
+        for termination in [
+            StreamTermination::Completed,
+            StreamTermination::TransportError,
+            StreamTermination::ClientCancelled,
+            StreamTermination::IdleTimeout,
+        ] {
+            let observation = StreamObservation {
+                captured: b"<think>private</think>".to_vec(),
+                capture_truncated: true,
+                parsed_usage: None,
+                estimated_reasoning_tokens: Some(4),
+                ttft_ms: None,
+                failed: termination.is_failure(),
+                termination,
+            };
+            assert_eq!(
+                usage_for_stream_observation(
+                    "truncated-request",
+                    !observation.failed,
+                    b"{}",
+                    &observation
+                ),
+                UsageReport::missing()
+            );
+        }
+    }
+
+    #[test]
+    fn reasoning_estimate_is_incremental_bounded_and_preserves_complete_blocks() {
+        let mut estimate = ThinkingEstimate::default();
+        let raw = b"data: {\"content\":\"<think>careful reasoning</think>\"}\n\n";
+        for byte in raw {
+            estimate.feed(&[*byte]);
+        }
+        assert_eq!(estimate.result(), Some(minimax_chat_thinking_tokens(raw)));
+        for _ in 0..1024 {
+            estimate.feed(b"ordinary data without thinking");
+        }
+        assert!(estimate.pending.len() < 8);
+        estimate.feed(b"<think>");
+        estimate.feed(&vec![b'x'; MAX_ESTIMATE_BYTES]);
+        assert_eq!(estimate.result(), None);
+        assert!(estimate.pending.is_empty());
+    }
 
     #[test]
     fn sse_extraction_diagnostics_only_emit_metadata() {
@@ -568,26 +733,30 @@ mod tests {
             }
         });
         let records = events.0.lock().unwrap();
-        assert_eq!(records.len(), 2, "diagnostics must actually be captured");
+        assert_eq!(records.len(), 4, "diagnostics must actually be captured");
         let allowed = [
-            "captured_len",
-            "data_line_count",
+            "captured_bytes",
+            "capture_truncated",
+            "data_event_count",
             "json_parse_failures",
             "json_without_usage",
-            "line_count",
             "message",
             "request_id",
             "success",
             "usage_source",
+            "stream_termination",
+            "streamed_bytes",
+            "ttft_ms",
+            "reasoning_estimate_unavailable",
         ];
         for record in records.iter() {
-            assert_eq!(
-                record.keys().map(String::as_str).collect::<Vec<_>>(),
-                allowed
-            );
-            assert_eq!(record["data_line_count"], "2");
-            assert_eq!(record["json_parse_failures"], "1");
-            assert_eq!(record["json_without_usage"], "1");
+            assert!(record.keys().all(|key| allowed.contains(&key.as_str())));
+            assert!(record["request_id"].contains("diagnostic-request"));
+            if record.contains_key("data_event_count") {
+                assert_eq!(record["data_event_count"], "2");
+                assert_eq!(record["json_parse_failures"], "1");
+                assert_eq!(record["json_without_usage"], "1");
+            }
             assert!(!format!("{record:?}").contains("PRIVATE-"));
         }
     }
@@ -1022,6 +1191,7 @@ mod tests {
         let body = observe_stream_body(
             Body::from_stream(source),
             Instant::now() - Duration::from_millis(20),
+            "test-request",
             move |observation| {
                 tx.send(observation).expect("stream observation receiver");
             },
@@ -1040,9 +1210,14 @@ mod tests {
     #[tokio::test]
     async fn empty_stream_completes_without_inventing_ttft() {
         let (tx, rx) = tokio::sync::oneshot::channel();
-        let body = observe_stream_body(Body::empty(), Instant::now(), move |observation| {
-            tx.send(observation).expect("stream observation receiver");
-        });
+        let body = observe_stream_body(
+            Body::empty(),
+            Instant::now(),
+            "test-request",
+            move |observation| {
+                tx.send(observation).expect("stream observation receiver");
+            },
+        );
         assert!(to_bytes(body, 1024).await.expect("empty stream").is_empty());
         let observation = rx.await.expect("empty stream observation");
         assert_eq!(observation.ttft_ms, None);
@@ -1058,9 +1233,14 @@ mod tests {
             Err(std::io::Error::other("upstream body failed")),
         ]);
         let (tx, rx) = tokio::sync::oneshot::channel();
-        let body = observe_stream_body(Body::from_stream(source), Instant::now(), move |result| {
-            tx.send(result).expect("stream observation receiver");
-        });
+        let body = observe_stream_body(
+            Body::from_stream(source),
+            Instant::now(),
+            "test-request",
+            move |result| {
+                tx.send(result).expect("stream observation receiver");
+            },
+        );
         assert!(to_bytes(body, 1024).await.is_err());
         let observation = rx.await.expect("failed stream observation");
         assert_eq!(observation.captured, b"first");
@@ -1074,9 +1254,14 @@ mod tests {
             "upstream body failed",
         ))]);
         let (tx, rx) = tokio::sync::oneshot::channel();
-        let body = observe_stream_body(Body::from_stream(source), Instant::now(), move |result| {
-            tx.send(result).expect("stream observation receiver");
-        });
+        let body = observe_stream_body(
+            Body::from_stream(source),
+            Instant::now(),
+            "test-request",
+            move |result| {
+                tx.send(result).expect("stream observation receiver");
+            },
+        );
         assert!(to_bytes(body, 1024).await.is_err());
         let observation = rx.await.expect("failed stream observation");
         assert!(observation.captured.is_empty());
@@ -1093,9 +1278,14 @@ mod tests {
             )),
         ]);
         let (tx, rx) = tokio::sync::oneshot::channel();
-        let body = observe_stream_body(Body::from_stream(source), Instant::now(), move |result| {
-            tx.send(result).expect("heartbeat observation");
-        });
+        let body = observe_stream_body(
+            Body::from_stream(source),
+            Instant::now(),
+            "test-request",
+            move |result| {
+                tx.send(result).expect("heartbeat observation");
+            },
+        );
         let forwarded = to_bytes(body, 1024).await.expect("heartbeat body");
         let observation = rx.await.expect("heartbeat result");
         assert!(String::from_utf8_lossy(&forwarded).contains(": gateway-heartbeat"));
@@ -1110,9 +1300,14 @@ mod tests {
             b": gateway-heartbeat\n\ndata: {\"x\":1}\n\n",
         ))]);
         let (tx, rx) = tokio::sync::oneshot::channel();
-        let body = observe_stream_body(Body::from_stream(source), Instant::now(), move |result| {
-            tx.send(result).expect("coalesced heartbeat observation");
-        });
+        let body = observe_stream_body(
+            Body::from_stream(source),
+            Instant::now(),
+            "test-request",
+            move |result| {
+                tx.send(result).expect("coalesced heartbeat observation");
+            },
+        );
         let _ = to_bytes(body, 1024)
             .await
             .expect("coalesced heartbeat body");
@@ -1129,9 +1324,14 @@ mod tests {
         );
         let source = stream::iter([Ok::<Bytes, std::io::Error>(frame)]);
         let (tx, rx) = tokio::sync::oneshot::channel();
-        let body = observe_stream_body(Body::from_stream(source), Instant::now(), move |result| {
-            tx.send(result).expect("timeout observation");
-        });
+        let body = observe_stream_body(
+            Body::from_stream(source),
+            Instant::now(),
+            "test-request",
+            move |result| {
+                tx.send(result).expect("timeout observation");
+            },
+        );
         let _ = to_bytes(body, 1024).await.expect("timeout body");
         let observation = rx.await.expect("timeout result");
         assert_eq!(observation.termination, StreamTermination::IdleTimeout);
@@ -1145,14 +1345,19 @@ mod tests {
             b"data: {\"delta\":\"partial\"}\n\n",
         ))]);
         let (tx, rx) = tokio::sync::oneshot::channel();
-        let body = observe_stream_body(Body::from_stream(source), Instant::now(), move |result| {
-            tx.send(result).expect("unterminated stream observation");
-        });
+        let body = observe_stream_body(
+            Body::from_stream(source),
+            Instant::now(),
+            "test-request",
+            move |result| {
+                tx.send(result).expect("unterminated stream observation");
+            },
+        );
         let _ = to_bytes(body, 1024)
             .await
             .expect("unterminated stream body");
         let observation = rx.await.expect("unterminated stream result");
-        assert_eq!(observation.termination, StreamTermination::UpstreamError);
+        assert_eq!(observation.termination, StreamTermination::IncompleteStream);
         assert!(observation.failed);
     }
 
@@ -1190,6 +1395,7 @@ data: {"response":{"error":{"code":"gateway_first_event_timeout"}}}
         let body = observe_stream_body(
             Body::from_stream(stream::pending::<Result<Bytes, std::io::Error>>()),
             Instant::now(),
+            "test-request",
             move |observation| {
                 tx.send(observation).expect("cancellation observation");
             },

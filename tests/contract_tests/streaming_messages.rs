@@ -272,7 +272,7 @@ async fn messages_stream_incomplete() {
 
     let has_error_or_gateway = events.iter().any(|e| {
         let is_error_type = e.event_type.as_deref() == Some("error");
-        let data_has_gateway = e.data.contains("gateway_upstream_error")
+        let data_has_gateway = e.data.contains("gateway_incomplete_stream")
             || e.data.contains("gateway_empty_stream")
             || e.data.contains("gateway_");
         is_error_type || data_has_gateway

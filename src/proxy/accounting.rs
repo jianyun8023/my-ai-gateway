@@ -32,11 +32,21 @@ pub(super) fn wrap_stream_usage(
     let model = model.to_owned();
     let protocol = protocol.to_string();
     let (parts, body) = response.into_parts();
-    let body = usage::observe_stream_body(body, request_started, move |observation| {
+    let request_id = event.request_id.clone();
+    let body = usage::observe_stream_body(body, request_started, &request_id, move |observation| {
         observability::track_stream_end();
         event.latency_ms = request_started.elapsed().as_millis() as i64;
         let account_id = attempts.last().map(|attempt| attempt.account_id.clone());
         let ttft_ms = observation.ttft_ms;
+        let upstream_failure = (observation.failed && !observation.termination.is_failure())
+            || matches!(
+                observation.termination,
+                stream::StreamTermination::UpstreamError
+                    | stream::StreamTermination::TransportError
+                    | stream::StreamTermination::IncompleteStream
+                    | stream::StreamTermination::BufferLimitExceeded
+            );
+
         finalize_stream_usage(&mut event, &mut attempts, &request_body, observation);
         observability::record_proxy_request(
             &protocol,
@@ -55,26 +65,26 @@ pub(super) fn wrap_stream_usage(
             observability::record_tokens(&model, "output", event.output_tokens as u64);
         }
         permit.spawn(async move {
-            if let Err(error) = retry_usage_write(&event.request_id, || {
-                database.insert_usage_with_attempts(&event, &attempts)
-            })
-            .await
-            {
-                tracing::error!(request_id = %event.request_id, %error, "failed to persist streaming usage after retries");
-            }
-            if event.error_summary.as_deref() == Some("upstream stream error") {
-                if let Some(account_id) = account_id {
-                    health
-                        .mark_failure_with_details(
-                            &account_id,
-                            "passive",
-                            Some("upstream_stream_error"),
-                            Some("upstream stream failed"),
-                        )
-                        .await;
+                if let Err(error) = retry_usage_write(&event.request_id, || {
+                    database.insert_usage_with_attempts(&event, &attempts)
+                })
+                .await
+                {
+                    tracing::error!(request_id = %event.request_id, %error, "failed to persist streaming usage after retries");
                 }
-            }
-        });
+                if upstream_failure {
+                    if let Some(account_id) = account_id {
+                        health
+                            .mark_failure_with_details(
+                                &account_id,
+                                "passive",
+                                Some("upstream_stream_error"),
+                                Some("upstream stream failed"),
+                            )
+                            .await;
+                    }
+                }
+            });
     });
     Response::from_parts(parts, body)
 }
@@ -111,6 +121,7 @@ pub(crate) fn finalize_stream_usage(
         observation.termination
     };
     tracing::debug!(
+        request_id = %event.request_id,
         termination = termination.code(),
         ttft_ms = ?observation.ttft_ms,
         "stream terminated"
@@ -121,6 +132,13 @@ pub(crate) fn finalize_stream_usage(
         event.error_summary = Some(
             match termination {
                 stream::StreamTermination::UpstreamError => "upstream stream error",
+                stream::StreamTermination::TransportError => "upstream body transport error",
+                stream::StreamTermination::IncompleteStream => {
+                    "upstream stream ended without a terminal event"
+                }
+                stream::StreamTermination::BufferLimitExceeded => {
+                    "upstream stream observation limit exceeded"
+                }
                 stream::StreamTermination::EmptyStream => "upstream stream ended without an event",
                 stream::StreamTermination::ClientCancelled => "client disconnected",
                 stream::StreamTermination::ConnectionTimeout => "upstream connection timeout",
@@ -136,11 +154,11 @@ pub(crate) fn finalize_stream_usage(
             attempt.success = false;
         }
     }
-    let report = usage::usage_for_sse_response(
+    let report = usage::usage_for_stream_observation(
         &event.request_id,
         event.success,
         request_body,
-        &observation.captured,
+        &observation,
     );
     event.input_tokens = report.input_tokens;
     event.output_tokens = report.output_tokens;

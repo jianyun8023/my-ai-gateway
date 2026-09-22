@@ -61,21 +61,6 @@ pub(crate) async fn proxy(
         .and_then(Value::as_bool)
         .unwrap_or(false);
 
-    // Strip thinking / reasoning parameters when the conversation history is
-    // missing provider-specific reasoning fields.  OpenAI-compatible clients
-    // often drop non-standard fields (reasoning_content, reasoning_details,
-    // reasoning_text, or type:"reasoning" items) when rebuilding history,
-    // which makes MiniMax / DeepSeek return HTTP 400.
-    let mut body = body;
-    if transport::sanitize_thinking_params(&mut body, protocol) {
-        tracing::warn!(
-            request_id = %request_id,
-            model = %model.unwrap_or("<missing>"),
-            protocol = %protocol,
-            "stripped thinking/reasoning parameters: conversation history lacks reasoning fields"
-        );
-    }
-
     let auth_identity = match authorized_with_db(state.db.as_ref(), &headers, model).await {
         Some(identity) => identity,
         None => {

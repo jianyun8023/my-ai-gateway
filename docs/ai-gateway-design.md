@@ -131,6 +131,8 @@ MiniMax、DeepSeek 等 Provider 如果同时提供三种协议接口，则为每
 
 Web Search、Tools、Thinking、Vision、Provider 扩展字段在原生透传路径中保持原始 JSON 和 SSE 语义。
 
+原生请求不会因历史 assistant 消息缺少 reasoning 字段而删除 `thinking`、`reasoning_effort`、`reasoning_split` 或 Responses `reasoning`，显式 `thinking: {"type": "disabled"}`、历史 reasoning/signature 与 Provider 扩展字段均保留。网关不按 Provider 名称猜测参数兼容性；上游拒绝请求时沿用错误透传与既有重试/fallback 规则，不通过隐式关闭 thinking 换取成功。每个 attempt 从原始请求独立构建，仅应用该 attempt 的顶层模型映射，避免跨来源污染。#237 移除全局清洗，没有新增来源级清洗策略，也不回写此前清洗请求的历史 `degraded` 数据。
+
 上游响应的 HTTP 压缩由网关协商：代理不转发客户端的 `Accept-Encoding`，共享 HTTP client 按已启用的解码能力协商 gzip，并在 JSON usage 解析、SSE 事件跟踪与转发前解压。解码后的响应移除原 `Content-Encoding` / `Content-Length`，保留解码后的正文内容及协议字段；gzip SSE 逐块解码，继续遵守首事件、空闲、总时限和取消约束。压缩体读取/校验失败按已有上游错误路径处理，不将压缩字节估算成成功请求 Token（#185）。
 
 SSE 用量按字段是否由上游提供进行合并：显式 `0` 覆盖旧值，缺失字段保留先前值；已知数值字段全部为零仍属于 `parsed`，不回退估算。缓存读写先分别合并，再计算 cached；input/output 发生更新且本帧未提供 total 时，使用合并后的 input + output，避免沿用较早事件的 total。当前帧明确提供的 total 保持上游值，缓存及 reasoning 不重复计入推导 total（#188）。
@@ -612,14 +614,17 @@ SSE 心跳和超时是进程级运行参数，不属于 PostgreSQL Source/Bindin
 SSE 事件后重置，总时限从逻辑请求开始计算。心跳固定为 `: gateway-heartbeat` SSE
 comment，单独作为下游 Body chunk 发送，不进入 Provider 事件、序列号、Usage 捕获或 TTFT。
 已发出响应头后不能 fallback：正常 EOF 保留原始顺序并结束；Chat 仅在所有已出现的 choice 都报告非空 `finish_reason` 时补缺失的 `[DONE]`，缺少完成证据则报告上游错误，后续 usage chunk 不提前截断。空流发送
-`gateway_empty_stream`，上游读取错误发送 `gateway_upstream_error`，首事件/空闲/总时限
+`gateway_empty_stream`，上游读取/解压错误发送 `gateway_transport_error`，缺少终态发送
+`gateway_incomplete_stream`，Provider 错误事件归类为 `gateway_upstream_error`，首事件/空闲/总时限
 分别发送对应的 `gateway_*_timeout` 错误帧后关闭。下游 Body 被丢弃时立即 drop Reqwest
 上游流，Usage 以 `499` 和 `client disconnected` 记录；这些错误摘要只含稳定脱敏文本，
 不保存 prompt/response 正文。每次流结束还通过 tracing 输出低基数的终止原因、TTFT 和
 转发字节数，并已接入 Prometheus/OpenTelemetry（#50）；不使用 request id、模型全文
 或凭据作为指标标签。
 
-SSE usage 解析失败日志只记录 request_id、成功状态、字节长度、行数、JSON 解析失败计数、无 usage 计数及最终 usage_source；不输出正文预览、Base64/hex 编码片段或正文指纹（2026-09-07 收尾修复）。
+SSE usage 按完整帧增量解析，支持跨 chunk 与多行 data。单帧原始字节上限 1 MiB，最多跟踪 1024 个未完成 Chat choice；超限以 `gateway_stream_buffer_limit` 失败关闭，不能跳过未知帧后报告成功。估算样本最多 256 KiB，超限后仍解析末尾上游 usage，无上游 usage 时标为 missing。既有 thinking 补充估算逐闭合块处理且单流累计工作量有界；未闭合/超限会记录补充估算不可用，保留上游计数。具体边界见 [运维说明](operations.md#sse-观察资源边界与诊断)。
+
+SSE 生命周期与 usage 诊断日志带 request_id，只记录成功状态、终止原因、字节长度、样本截断状态、事件数、JSON 解析失败计数、无 usage 计数、TTFT 及最终 usage_source；不输出正文预览、Base64/hex 编码片段或正文指纹。
 
 ### 7.6 测试
 

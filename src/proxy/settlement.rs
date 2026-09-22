@@ -1,6 +1,6 @@
-//! Bounds the number of live streaming responses awaiting final accounting.
-//! A permit is reserved before the response is returned and stays owned by the
-//! response body until its completion callback moves it into the write task.
+//! Bounds requests that may produce streaming responses and their accounting.
+//! A permit is reserved before the upstream request. Non-streaming requests
+//! release it on return; streaming bodies hand it to the final write task.
 use std::{
     future::Future,
     sync::{
@@ -11,7 +11,7 @@ use std::{
 
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
-const MAX_OUTSTANDING_STREAMS: u32 = 64;
+const MAX_OUTSTANDING_ACCOUNTED_REQUESTS: u32 = 64;
 const MAX_CONCURRENT_WRITES: usize = 8;
 
 #[derive(Clone)]
@@ -39,7 +39,7 @@ pub(crate) enum AdmissionError {
 
 impl Default for SettlementManager {
     fn default() -> Self {
-        Self::with_capacity(MAX_OUTSTANDING_STREAMS)
+        Self::with_capacity(MAX_OUTSTANDING_ACCOUNTED_REQUESTS)
     }
 }
 
@@ -197,6 +197,7 @@ mod tests {
         let body = crate::proxy::usage::observe_stream_body(
             axum::body::Body::empty(),
             std::time::Instant::now(),
+            "cancelled-settlement-test",
             move |observation| {
                 assert_eq!(
                     observation.termination,
