@@ -408,6 +408,85 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn native_thinking_cross_source_fallback_preserves_each_attempt() {
+        let _lock = ENV_LOCK.lock().await;
+        let _key = EnvRestore::set("GATEWAY_API_KEY", TEST_ADMIN_KEY);
+        for strategy in ["primary_then_weighted_fallback", "ordered_fallback"] {
+            for protocol in [
+                Protocol::OpenAiChatCompletions,
+                Protocol::OpenAiResponses,
+                Protocol::AnthropicMessages,
+            ] {
+                let calls = Arc::new(Mutex::new(Vec::new()));
+                let recorded = calls.clone();
+                let (url, task) =
+                    upstream(Router::new().fallback(move |Json(body): Json<Value>| {
+                        recorded.lock().unwrap().push(body.clone());
+                        async move {
+                            (
+                                if body["model"] == "b" {
+                                    StatusCode::OK
+                                } else {
+                                    StatusCode::SERVICE_UNAVAILABLE
+                                },
+                                Json(json!({"usage":{"input_tokens":1,"output_tokens":1}})),
+                            )
+                        }
+                    }))
+                    .await;
+                let state = state(&url, protocol, None, None);
+                // Runtime bindings, unlike legacy configs, permit cross-source fallback.
+                {
+                    let mut live = state.live.write().unwrap();
+                    let mut config = (*live.config).clone();
+                    let mut source = config.providers[0].clone();
+                    source.id = "second-source".into();
+                    config.providers.push(source);
+                    config.accounts[1].provider_id = "second-source".into();
+                    let mut routes = live.resolver.runtime_routes().unwrap().to_vec();
+                    routes[0].strategy = strategy.into();
+                    routes[0].bindings.truncate(2);
+                    routes[0].bindings[1].source_id = "second-source".into();
+                    routes[0].bindings[1].provider_id = "second-provider".into();
+                    live.config = Arc::new(config);
+                    live.resolver = RouteResolver::from_runtime(live.config.clone(), routes);
+                }
+                let body = json!({
+                    "model":"public-model",
+                    "messages":[{"role":"assistant","content":"answer without reasoning"}],
+                    "input":[{"role":"assistant","content":"answer without reasoning"}],
+                    "thinking":{"type":"enabled","budget_tokens":4096},
+                    "reasoning_effort":"high", "reasoning_split":true,
+                    "reasoning":{"effort":"high"},
+                    "provider_extension":{"signature":"opaque"}
+                });
+                let mut headers = HeaderMap::new();
+                headers.insert("content-type", "application/json".parse().unwrap());
+                headers.insert(
+                    "authorization",
+                    format!("Bearer {TEST_ADMIN_KEY}").parse().unwrap(),
+                );
+                let response = super::super::service::proxy(
+                    state,
+                    headers,
+                    Bytes::from(body.to_string()),
+                    protocol,
+                )
+                .await;
+                assert_eq!(response.status(), StatusCode::OK, "{strategy}: {protocol}");
+                let recorded = calls.lock().unwrap();
+                assert_eq!(recorded.len(), 2, "{strategy}: {protocol}");
+                for (actual, model) in recorded.iter().zip(["a", "b"]) {
+                    let mut expected = body.clone();
+                    expected["model"] = json!(model);
+                    assert_eq!(*actual, expected, "{strategy}: {protocol}");
+                }
+                task.abort();
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn ordered_lines_try_three_upstreams_in_order_for_each_protocol() {
         let _lock = ENV_LOCK.lock().await;
         let _key = EnvRestore::set("GATEWAY_API_KEY", TEST_ADMIN_KEY);
