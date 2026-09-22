@@ -1,4 +1,4 @@
-import { HoverCard } from '@/components/ui/overlays';
+import { Popover } from '@/components/ui/overlays';
 import { UsageBadge } from '@/features/usage/UsageBadge';
 import { formatDuration, formatTps, formatUsageTokens } from '@/features/usage/formatters';
 import { cacheHitRate, isUnreportedUsage, outputTokensPerSecond } from '@/features/usage/usageQuality';
@@ -6,7 +6,35 @@ import styles from '@/features/usage/Usage.module.scss';
 import type { UsageEventViewModel } from '@/gateway-usage';
 import { formatPercent } from '@/utils/formatCompact';
 import { useTranslation } from 'react-i18next';
-import type { CSSProperties } from 'react';
+import { useState, type CSSProperties, type ReactNode } from 'react';
+
+function MetricDetails({ label, value, children }: { label: string; value: string; children: ReactNode }) {
+  const [opened, setOpened] = useState(false);
+  return (
+    <Popover opened={opened} onChange={setOpened}
+      position="bottom-end" shadow="md" radius={8} withinPortal>
+      <Popover.Target>
+        <button type="button" className={styles.metricValue} aria-label={`${label}: ${value}`}
+          aria-expanded={opened}
+          onKeyDown={(event) => {
+            if (event.key !== 'Escape' || !opened) return;
+            event.preventDefault();
+            event.stopPropagation();
+            setOpened(false);
+          }}
+          onClick={(event) => {
+            event.stopPropagation();
+            setOpened((current) => !current);
+          }}>
+          {value}
+        </button>
+      </Popover.Target>
+      <Popover.Dropdown aria-label={label} onClick={(event) => event.stopPropagation()}>
+        {children}
+      </Popover.Dropdown>
+    </Popover>
+  );
+}
 
 export function LatencyCell({ value, max }: { value?: number; max: number }) {
   if (value === undefined || !Number.isFinite(value) || value < 0) return <span>—</span>;
@@ -22,7 +50,7 @@ export function LatencyCell({ value, max }: { value?: number; max: number }) {
   );
 }
 
-// Full token breakdown shown when hovering the compact Token cell. Exact
+// Full token breakdown shown from the compact Token cell. Exact
 // integer values; the row itself only carries the compact total.
 export function TokenBreakdown({ event }: { event: UsageEventViewModel }) {
   const { t } = useTranslation('console');
@@ -46,7 +74,7 @@ export function TokenBreakdown({ event }: { event: UsageEventViewModel }) {
   );
 }
 
-// Cache hit breakdown shown when hovering the compact cache-rate cell.
+// Cache hit breakdown shown from the compact cache-rate cell.
 export function CacheBreakdown({ event }: { event: UsageEventViewModel }) {
   const { t } = useTranslation('console');
   const rate = cacheHitRate(event.tokens);
@@ -84,47 +112,35 @@ export function TpsBreakdown({ event }: { event: UsageEventViewModel }) {
 }
 
 export function TokenCell({ event }: { event: UsageEventViewModel }) {
+  const { t } = useTranslation('console');
   if (event.tokens.total === 0 && isUnreportedUsage(event.usageSource)) {
     if (!event.success) return <span>—</span>;
     return <UsageBadge source={event.usageSource} />;
   }
   return (
-    <HoverCard position="bottom-end" shadow="md" radius={8} withinPortal>
-      <HoverCard.Target>
-        <span className={styles.metricValue}>{formatUsageTokens(event.tokens.total, event.usageSource)}</span>
-      </HoverCard.Target>
-      <HoverCard.Dropdown>
-        <TokenBreakdown event={event} />
-      </HoverCard.Dropdown>
-    </HoverCard>
+    <MetricDetails label={t('usage.events.token_details_title')} value={formatUsageTokens(event.tokens.total, event.usageSource)}>
+      <TokenBreakdown event={event} />
+    </MetricDetails>
   );
 }
 
 export function CacheCell({ event }: { event: UsageEventViewModel }) {
+  const { t } = useTranslation('console');
   const rate = cacheHitRate(event.tokens);
   return (
-    <HoverCard position="bottom-end" shadow="md" radius={8} withinPortal>
-      <HoverCard.Target>
-        <span className={styles.metricValue}>{rate === null ? '—' : formatPercent(rate)}</span>
-      </HoverCard.Target>
-      <HoverCard.Dropdown>
-        <CacheBreakdown event={event} />
-      </HoverCard.Dropdown>
-    </HoverCard>
+    <MetricDetails label={t('usage.events.cache_details_title')} value={rate === null ? '—' : formatPercent(rate)}>
+      <CacheBreakdown event={event} />
+    </MetricDetails>
   );
 }
 
 export function TpsCell({ event }: { event: UsageEventViewModel }) {
+  const { t } = useTranslation('console');
   const tps = outputTokensPerSecond(event);
-  if (tps === null) return <span className={styles.metricValue}>—</span>;
+  if (tps === null) return <span>—</span>;
   return (
-    <HoverCard position="bottom-end" shadow="md" radius={8} withinPortal>
-      <HoverCard.Target>
-        <span className={styles.metricValue}>{formatTps(tps)}</span>
-      </HoverCard.Target>
-      <HoverCard.Dropdown>
-        <TpsBreakdown event={event} />
-      </HoverCard.Dropdown>
-    </HoverCard>
+    <MetricDetails label={t('usage.events.tps_details_title')} value={formatTps(tps)}>
+      <TpsBreakdown event={event} />
+    </MetricDetails>
   );
 }

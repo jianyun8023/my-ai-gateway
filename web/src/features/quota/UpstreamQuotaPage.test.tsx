@@ -113,4 +113,79 @@ describe('UpstreamQuotaPage', () => {
     expect(row.textContent).toContain('成功快照');
     expect(container.textContent).toContain('刷新失败时会保留最近一次成功数据');
   });
+
+  it('keeps a first-load failure actionable instead of rendering empty metrics', async () => {
+    const list = vi.fn()
+      .mockRejectedValueOnce(new Error('quota service unavailable'))
+      .mockResolvedValueOnce([deepSeekSnapshot]);
+    const client = {
+      list,
+      refreshAll: vi.fn(),
+      refresh: vi.fn(),
+    } as unknown as UpstreamQuotaClient;
+
+    await act(async () => root.render(<UpstreamQuotaPage client={client} />));
+    await waitFor(() => container.textContent?.includes('获取上游额度失败') ?? false);
+    expect(container.textContent).toContain('quota service unavailable');
+    expect(container.querySelector('[data-ui="metric-card"]')).toBeNull();
+
+    const retry = [...container.querySelectorAll<HTMLButtonElement>('button')]
+      .find((button) => button.textContent?.includes('重试'))!;
+    await act(async () => retry.click());
+    await waitFor(() => container.querySelectorAll('tbody tr').length === 1);
+    expect(list).toHaveBeenCalledTimes(2);
+  });
+
+  it('uses separate empty states for missing accounts and filtered-out accounts', async () => {
+    const noAccountsClient = {
+      list: vi.fn(async () => []),
+      refreshAll: vi.fn(),
+      refresh: vi.fn(),
+    } as unknown as UpstreamQuotaClient;
+    await act(async () => root.render(<UpstreamQuotaPage client={noAccountsClient} />));
+    await waitFor(() => container.textContent?.includes('尚未配置可查看额度的账号') ?? false);
+    expect(container.textContent).toContain('配置账号');
+    const configureAccounts = [...container.querySelectorAll<HTMLButtonElement>('button')]
+      .find((button) => button.textContent?.includes('配置账号'))!;
+    await act(async () => configureAccounts.click());
+    expect(window.location.hash).toBe('#sources');
+
+    await act(async () => root.render(<UpstreamQuotaPage client={{
+      list: vi.fn(async () => [deepSeekSnapshot]),
+      refreshAll: vi.fn(),
+      refresh: vi.fn(),
+    } as unknown as UpstreamQuotaClient} />));
+    await waitFor(() => container.querySelectorAll('tbody tr').length === 1);
+
+    const onlyProblems = container.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+    await act(async () => onlyProblems.click());
+    await waitFor(() => container.textContent?.includes('没有符合筛选条件的账号') ?? false);
+
+    const reset = [...container.querySelectorAll<HTMLButtonElement>('button')]
+      .find((button) => button.textContent?.includes('重置筛选'))!;
+    await act(async () => reset.click());
+    await waitFor(() => container.querySelectorAll('tbody tr').length === 1);
+  });
+
+  it('keeps a detail fetch failure retryable with a back action', async () => {
+    const get = vi.fn()
+      .mockRejectedValueOnce(new Error('detail unavailable'))
+      .mockResolvedValueOnce(kimiSnapshot);
+    const client = {
+      get,
+      list: vi.fn(),
+      refreshAll: vi.fn(),
+      refresh: vi.fn(),
+    } as unknown as UpstreamQuotaClient;
+
+    await act(async () => root.render(<UpstreamQuotaPage client={client} accountId="kimi-main" />));
+    await waitFor(() => container.textContent?.includes('获取上游额度失败') ?? false);
+    expect(container.textContent).toContain('返回上游额度');
+
+    const retry = [...container.querySelectorAll<HTMLButtonElement>('button')]
+      .find((button) => button.textContent?.includes('重试'))!;
+    await act(async () => retry.click());
+    await waitFor(() => container.textContent?.includes('Kimi Code 主账号') ?? false);
+    expect(get).toHaveBeenCalledTimes(2);
+  });
 });

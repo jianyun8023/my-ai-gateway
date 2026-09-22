@@ -40,7 +40,11 @@ textarea.input { min-height: 88px; resize: vertical; }
 }
 .label { font-size: 12px; font-weight: 650; margin-bottom: 6px; }
 .description, .error { font-size: var(--fs-small); line-height: 1.45; overflow-wrap: anywhere; margin-top: 6px; }
-.checkbox { min-height: 36px; display: flex; align-items: center; }
+.checkbox { position: relative; min-height: 36px; display: flex; align-items: center; }
+// The associated label expands the native checkbox hit area without enlarging its icon.
+.checkboxLabel { cursor: pointer; }
+.checkboxLabel::before { content: ''; position: absolute; inset: 0; }
+.checkboxLabel[data-disabled] { cursor: not-allowed; }
 // Anchor the transparent hit area to the Switch root, including its touch height.
 .switchInput { inset: 0; }
 @media (max-width: 920px) {
@@ -51,5 +55,6 @@ textarea.input { min-height: 88px; resize: vertical; }
 }
 
 @media (pointer: coarse) {
+  .checkbox { min-height: 44px; }
   .input { font-size: var(--keeper-touch-input-font-size); }
 }

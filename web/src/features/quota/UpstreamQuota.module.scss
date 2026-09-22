@@ -53,7 +53,7 @@
 
 .detailHeader { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
 .detailIdentity { display: grid; gap: 4px; }
-.detailIdentity h2 { margin: 0; font-size: 24px; }
+.detailIdentity h2 { margin: 0; font-size: var(--keeper-card-title-size); line-height: var(--keeper-card-title-line-height); }
 .detailMeta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .detailGrid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(280px, .85fr); gap: 16px; align-items: start; }
 .stack { display: grid; gap: 16px; min-width: 0; }
@@ -65,11 +65,9 @@
 .resourceMeta { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); font-size: var(--fs-small); flex-wrap: wrap; }
 .balanceHero { display: grid; gap: 4px; padding: 4px 0 8px; }
 .balanceHero strong { font-family: var(--font-mono); font-size: 30px; font-variant-numeric: tabular-nums; }
-.detailList { margin: 0; display: grid; gap: 0; }
-.detailList > div { display: grid; grid-template-columns: 145px minmax(0, 1fr); gap: 16px; padding: 8px 0; border-bottom: 1px solid var(--border-color); }
-.detailList > div:last-child { border-bottom: 0; }
-.detailList dt { color: var(--muted); font-size: var(--fs-small); }
-.detailList dd { margin: 0; overflow-wrap: anywhere; font-size: var(--fs-meta); }
+.attemptTable { min-width: 440px; }
+.attemptTime, .attemptLatency { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.attemptStatus, .attemptStatus span { white-space: nowrap; }
 .raw { margin: 0; max-height: 280px; overflow: auto; padding: 16px; border-radius: 8px; background: var(--fg-soft); font-family: var(--font-mono); font-size: var(--fs-small); white-space: pre-wrap; overflow-wrap: anywhere; }
 .note { margin: 0; color: var(--muted); font-size: var(--fs-small); }
 
@@ -84,7 +82,6 @@
   .search { min-width: 0; width: 100%; }
   .select { flex-basis: 100%; width: 100%; }
   .check { width: 100%; margin: 0; }
-  .detailList > div { grid-template-columns: 1fr; gap: 4px; }
 }
 
 @media (max-width: 380px) {

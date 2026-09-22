@@ -25,6 +25,8 @@ Tech-Utility：冷灰底色、绿色强调、紧凑数据布局。使用固定�
 | 圆角 | 小控件 6px、常规容器 8px、卡片与弹窗 12px；状态标签为胶囊 |
 | 控件 | 桌面普通按钮 36px、小按钮 32px；触摸布局普通按钮、表单和分段控件至少 44px |
 
+复选框保留紧凑图标，关联 label 的点击区域覆盖字段外层；窄屏及触摸主指针下至少 44px，不能仅增加不可点击的留白。
+
 触摸主指针下的输入、选择与文本域字号至少为 16px，避免 iOS 聚焦时自动放大；桌面仍使用紧凑的 12px 控件字号，不通过禁止页面缩放规避该行为。
 
 现有 `--keeper-*`、`--text-*` 等变量也由品牌层映射，页面不重复定义。不同风格只覆盖品牌色与圆角尺度，不在业务页面增加主题名称分支；Mantine 字体、间距、圆角、断点、组件默认值及语义变量映射集中在 [theme.ts](web/src/components/ui/theme.ts)。旧 `themes.scss`、`components.scss`、`layout.scss`、`mixins.scss` 及 `variables.scss` 中未使用的旧调色板已在确认无生产调用后删除，不再保留第二套主题或全局组件样式。主题契约测试会校验每个风格的浅深语义 token、双语选择器文案、预览和首屏启动注册表。
@@ -111,6 +113,8 @@ Shell 保留原生 CSS Grid/Flex 布局与现有 hash 导航、刷新版本及 s
 ## 用量指标、数值与来源状态
 
 总览四项 KPI 使用 `MetricCard`，页面只保留网格布局；标签和辅助信息可换行，数字使用 mono 与 tabular-nums。`utils/formatCompact.ts` 保留既有 K/M/B/T 阈值，百分比统一由 `formatPercent` 接收比率并输出一位小数。`features/usage/formatters.ts` 的 `formatDuration` 用于总览、分析和事件：真实 0 为 `0 ms`，无值为 `—`，概览使用 ms/s，详情使用精确整数毫秒，不使用 K/M/B。详情 Token 使用带分隔符的精确数值。
+
+请求事件的 Token、缓存和 TPS 明细使用可聚焦按钮打开 Popover，鼠标点击、触摸及 Enter/Space 使用同一入口；Escape 或外部点击关闭。指标触发和浮层内容点击不触发行详情，关闭后的键盘焦点返回触发器。
 
 请求结果由 `UsageStatus` 映射公共 `StatusPill`，成功/失败必须有文字，不能只靠颜色点。`UsageBadge` 单独表达 upstream / parsed / estimated / missing / unknown；成功请求也可能 missing，不能用来源推导请求成功率。事件 missing/unknown 的零 Token 显示 `—` 或来源标签并提供说明，上游真实上报的零仍显示 0，unknown 的非零读数保留并标注来源不确定。
 

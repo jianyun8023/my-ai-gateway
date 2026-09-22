@@ -149,24 +149,58 @@ describe('event metric cells', () => {
     expect(cellsOf(rows[1])[2]).toBe('—');
   });
 
-  it('reveals the full token breakdown when hovering the token cell', async () => {
+  it('reveals the full token breakdown from the token button without opening the row', async () => {
     await renderTable([richEvent]);
     const tokenCell = container.querySelectorAll('tbody tr td')[1];
-    act(() => { tokenCell.querySelector('span')!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })); });
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 60)); });
+    const trigger = tokenCell.querySelector<HTMLButtonElement>('button')!;
+    expect(trigger.type).toBe('button');
+    expect(trigger.getAttribute('aria-label')).toContain('Token 用量详情');
+    await act(async () => { trigger.focus(); trigger.click(); });
+    expect(trigger.getAttribute('aria-expanded')).toBe('true');
+    expect(document.querySelector('[data-od-id="event-drawer"]')).toBeNull();
     const popover = document.querySelector('[data-od-id="token-breakdown"]');
     expect(popover?.textContent).toContain('Token 用量详情');
     expect(popover?.textContent).toContain('23,373');
     expect(popover?.textContent).toContain('22,528');
     expect(popover?.textContent).toContain('23,672');
     expect(popover?.textContent).toContain('上游流式');
+    await act(async () => { popover!.querySelector('dd')!.click(); });
+    expect(document.querySelector('[data-od-id="event-drawer"]')).toBeNull();
   });
 
-  it('reveals cache hit details when hovering the cache cell', async () => {
+  it('closes metric details with Escape and outside click, then keeps normal row opening', async () => {
+    await renderTable([richEvent]);
+    const row = container.querySelector<HTMLTableRowElement>('tbody tr')!;
+    const trigger = row.querySelectorAll<HTMLButtonElement>('td button')[1];
+    await act(async () => { trigger.focus(); trigger.click(); });
+    expect(trigger.getAttribute('aria-expanded')).toBe('true');
+    expect(document.activeElement).toBe(trigger);
+    await act(async () => {
+      document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    expect(trigger.getAttribute('aria-expanded')).toBe('false');
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 30)); });
+    expect(document.activeElement).toBe(trigger);
+
+    await act(async () => { trigger.click(); });
+    expect(trigger.getAttribute('aria-expanded')).toBe('true');
+    const dropdown = document.querySelector<HTMLElement>('[data-od-id="token-breakdown"]')!.parentElement!;
+    dropdown.tabIndex = -1;
+    dropdown.focus();
+    await act(async () => { document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); });
+    expect(trigger.getAttribute('aria-expanded')).toBe('false');
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 30)); });
+    expect(document.activeElement).toBe(trigger);
+    expect(document.querySelector('[data-od-id="event-drawer"]')).toBeNull();
+
+    await act(async () => { row.click(); });
+    expect(document.querySelector('[data-od-id="event-drawer"]')).not.toBeNull();
+  });
+
+  it('reveals cache hit details from the cache button', async () => {
     await renderTable([richEvent]);
     const cacheCell = container.querySelectorAll('tbody tr td')[2];
-    act(() => { cacheCell.querySelector('span')!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })); });
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 60)); });
+    await act(async () => { cacheCell.querySelector<HTMLButtonElement>('button')!.click(); });
     const popover = document.querySelector('[data-od-id="cache-breakdown"]');
     expect(popover?.textContent).toContain('缓存详情');
     expect(popover?.textContent).toContain('96.4%');
@@ -182,8 +216,7 @@ describe('event metric cells', () => {
       visibleColumns={['tps']} onVisibleColumnsChange={() => {}} onExport={() => {}} client={client} />));
     const cell = container.querySelectorAll('tbody tr td')[1];
     expect(cell.textContent).toBe('29.9 t/s');
-    act(() => { cell.querySelector('span')!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })); });
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 60)); });
+    await act(async () => { cell.querySelector<HTMLButtonElement>('button')!.click(); });
     const popover = document.querySelector('[data-od-id="tps-breakdown"]');
     expect(popover?.textContent).toContain('平均输出速度');
     expect(popover?.textContent).toContain('首包时间');
