@@ -612,14 +612,17 @@ SSE 心跳和超时是进程级运行参数，不属于 PostgreSQL Source/Bindin
 SSE 事件后重置，总时限从逻辑请求开始计算。心跳固定为 `: gateway-heartbeat` SSE
 comment，单独作为下游 Body chunk 发送，不进入 Provider 事件、序列号、Usage 捕获或 TTFT。
 已发出响应头后不能 fallback：正常 EOF 保留原始顺序并结束；Chat 仅在所有已出现的 choice 都报告非空 `finish_reason` 时补缺失的 `[DONE]`，缺少完成证据则报告上游错误，后续 usage chunk 不提前截断。空流发送
-`gateway_empty_stream`，上游读取错误发送 `gateway_upstream_error`，首事件/空闲/总时限
+`gateway_empty_stream`，上游读取/解压错误发送 `gateway_transport_error`，缺少终态发送
+`gateway_incomplete_stream`，Provider 错误事件归类为 `gateway_upstream_error`，首事件/空闲/总时限
 分别发送对应的 `gateway_*_timeout` 错误帧后关闭。下游 Body 被丢弃时立即 drop Reqwest
 上游流，Usage 以 `499` 和 `client disconnected` 记录；这些错误摘要只含稳定脱敏文本，
 不保存 prompt/response 正文。每次流结束还通过 tracing 输出低基数的终止原因、TTFT 和
 转发字节数，并已接入 Prometheus/OpenTelemetry（#50）；不使用 request id、模型全文
 或凭据作为指标标签。
 
-SSE usage 解析失败日志只记录 request_id、成功状态、字节长度、行数、JSON 解析失败计数、无 usage 计数及最终 usage_source；不输出正文预览、Base64/hex 编码片段或正文指纹（2026-09-07 收尾修复）。
+SSE usage 按完整帧增量解析，支持跨 chunk 与多行 data。单帧原始字节上限 1 MiB，最多跟踪 1024 个未完成 Chat choice；超限以 `gateway_stream_buffer_limit` 失败关闭，不能跳过未知帧后报告成功。估算样本最多 256 KiB，超限后仍解析末尾上游 usage，无上游 usage 时标为 missing。既有 thinking 补充估算逐闭合块处理且单流累计工作量有界；未闭合/超限会记录补充估算不可用，保留上游计数。具体边界见 [运维说明](operations.md#sse-观察资源边界与诊断)。
+
+SSE 生命周期与 usage 诊断日志带 request_id，只记录成功状态、终止原因、字节长度、样本截断状态、事件数、JSON 解析失败计数、无 usage 计数、TTFT 及最终 usage_source；不输出正文预览、Base64/hex 编码片段或正文指纹。
 
 ### 7.6 测试
 

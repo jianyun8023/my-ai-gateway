@@ -184,7 +184,7 @@ cargo run -- ops control-plane-import --input control-plane.json --replace
 
 **计费口径**：跨厂商聚合需要 `input_tokens + output_tokens + cached_tokens`，把 `reasoning_tokens` 按厂商账单规则单算。下游报表若只读 `total_tokens`，对有缓存命中的长会话会大幅低估。CSV 导出（`/admin/usage/export`）与 JSON（`/admin/usage/events`、`/admin/usage/summary`）的 `total_tokens` 字段都按本约定。
 
-`usage_source` 标记 token 数来源：`upstream` 表示上游 usage 字段直接解析；`parsed` 表示按 SSE 事件顺序合并明确报告的 usage 字段（缺失字段保留，显式零值覆盖）；`estimated` 表示上游未报告，由 tiktoken 对请求体/响应体估算；`missing` 表示请求失败且无可用 usage。`estimated` 与 `missing` 行的 `total_tokens` 含义同上，但数值仅为粗估，**不可作为计费值**（Issue #98）。
+`usage_source` 标记 token 数来源：`upstream` 表示上游 usage 字段直接解析；`parsed` 表示按 SSE 事件顺序合并明确报告的 usage 字段（缺失字段保留，显式零值覆盖）；`estimated` 表示上游未报告，由 tiktoken 对请求体/响应体估算；`missing` 表示请求失败且无可用 usage，或成功 SSE 的估算样本已超限且没有上游 usage。`estimated` 与 `missing` 行的 `total_tokens` 含义同上，但数值仅为粗估，**不可作为计费值**（Issue #98）。
 
 ## Usage 事件回退原因
 
@@ -208,3 +208,18 @@ FROM usage_events
 WHERE logical_model = 'MiniMax-M3' AND fallback_reason IS NOT NULL
 ORDER BY created_at DESC LIMIT 20;
 ```
+
+
+### SSE 观察资源边界与诊断
+
+SSE 按完整事件增量合并 usage，支持跨网络 chunk 和多行 `data:`。每个事件只保留理解的数值计数器，长流末尾的 usage 仍会更新 input/output/cache/reasoning，缺失字段保留、显式零覆盖。
+
+资源上限为代码安全常量，不是环境配置，`GATEWAY_SSE_*` 时间限制设为 `0` 不会禁用它们：
+
+- 单帧原始字节（含行分隔）最多 1 MiB，未完成的 Chat choice 最多 1024 个；超过后返回 `gateway_stream_buffer_limit` 并关闭流。超限帧可能包含末尾 usage，网关不会跳过它并伪报完成；只保留此前完整解析的上游计数。
+- 用于缺失 usage 时估算的响应样本最多 256 KiB。超限后仍继续增量提取 usage，但无法取得上游计数时返回 `usage_source=missing` 与零 Token，不用前缀估算整个响应。失败、取消和超时也不凭内容估算 Token。
+- 既有 `<think>` reasoning 补充估算改为逐个闭合块处理，单流累计最多处理 256 KiB 的标签内原始字节（含闭合标签），单块缓存不超过 256 KiB，可跨 chunk；超限或未闭合时放弃此补充并记录 `reasoning_estimate_unavailable=true`，已报告的上游 reasoning 不受影响。该启发式仍沿用既有原始流标签语义，不是 Provider 计费数据。
+
+生命周期日志带 `request_id`，只记录终止代码、字节数、样本是否截断、数据事件数、JSON 解析失败数、缺失 usage 事件数和 TTFT。错误分类区分 `gateway_transport_error`（响应体读取/解压失败）、`gateway_incomplete_stream`（EOF 缺少终态）、`gateway_upstream_error`（Provider 错误事件）、`gateway_stream_buffer_limit`（观察资源超限）；空流、取消、连接/首事件/空闲/总超时保留各自代码。错误摘要同步写入请求事件；不记录正文、正文片段、编码预览、指纹或上游错误文本。
+
+资源边界由本地 Mock/单元/Contract 测试覆盖，不代表生产负载、真实 Provider 或生产历史问题复验通过。

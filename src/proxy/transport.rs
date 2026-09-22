@@ -794,7 +794,7 @@ mod tests {
                     .await
                     .unwrap();
                 let text = String::from_utf8(bytes.to_vec()).unwrap();
-                assert!(text.contains("gateway_upstream_error"));
+                assert!(text.contains("gateway_transport_error"));
                 assert!(!text.contains("response.completed"));
             } else {
                 assert!(matches!(response, Err(TransportError::Request)));

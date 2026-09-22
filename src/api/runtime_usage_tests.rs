@@ -579,6 +579,9 @@ fn failed_stream_keeps_ttft_absent_and_never_estimates_tokens() {
         &mut attempts,
         br#"{"model":"logical-model","stream":true}"#,
         usage::StreamObservation {
+            capture_truncated: false,
+            parsed_usage: None,
+            estimated_reasoning_tokens: None,
             captured: Vec::new(),
             ttft_ms: None,
             failed: true,
@@ -597,6 +600,21 @@ fn failed_stream_keeps_ttft_absent_and_never_estimates_tokens() {
 #[test]
 fn stream_termination_reasons_have_stable_usage_statuses_and_summaries() {
     let cases = [
+        (
+            StreamTermination::TransportError,
+            599,
+            "upstream body transport error",
+        ),
+        (
+            StreamTermination::IncompleteStream,
+            599,
+            "upstream stream ended without a terminal event",
+        ),
+        (
+            StreamTermination::BufferLimitExceeded,
+            599,
+            "upstream stream observation limit exceeded",
+        ),
         (
             StreamTermination::EmptyStream,
             599,
@@ -632,6 +650,9 @@ fn stream_termination_reasons_have_stable_usage_statuses_and_summaries() {
             &mut attempts,
             br#"{"model":"logical-model","stream":true}"#,
             usage::StreamObservation {
+                capture_truncated: false,
+                parsed_usage: None,
+                estimated_reasoning_tokens: None,
                 captured: Vec::new(),
                 ttft_ms: None,
                 failed: true,

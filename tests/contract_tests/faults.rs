@@ -208,8 +208,8 @@ async fn faults_first_event_and_idle_timeouts_are_distinct() {
 async fn faults_incomplete_invalid_and_empty_streams_cannot_complete_successfully() {
     for uri in URIS {
         for (body, expected) in [
-            ("data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"partial\"},\"finish_reason\":null}]}\n\n", "gateway_upstream_error"),
-            ("data: {invalid}\n\n", "gateway_upstream_error"),
+            ("data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"partial\"},\"finish_reason\":null}]}\n\n", "gateway_incomplete_stream"),
+            ("data: {invalid}\n\n", "gateway_incomplete_stream"),
             ("", "gateway_empty_stream"),
         ] {
             let mock = spawn_mock_with_default(CaseFixture::sse("fault", StatusCode::OK, body, SseChunkPlan::single_chunk())).await;
@@ -237,7 +237,7 @@ async fn faults_one_finished_choice_does_not_hide_another_truncated_choice() {
     assert!(request(&router, URIS[0], true)
         .await
         .1
-        .contains("gateway_upstream_error"));
+        .contains("gateway_incomplete_stream"));
 }
 
 #[tokio::test]
