@@ -29,48 +29,65 @@ pub(super) fn wrap_stream_usage(
     let model = model.to_owned();
     let protocol = protocol.to_string();
     let (parts, body) = response.into_parts();
-    let body = usage::observe_stream_body(body, request_started, move |observation| {
-        observability::track_stream_end();
-        event.latency_ms = request_started.elapsed().as_millis() as i64;
-        let account_id = attempts.last().map(|attempt| attempt.account_id.clone());
-        let ttft_ms = observation.ttft_ms;
-        finalize_stream_usage(&mut event, &mut attempts, &request_body, observation);
-        observability::record_proxy_request(
-            &protocol,
-            &model,
-            event.status_code as u16,
-            request_started,
-            true,
-        );
-        if let Some(ttft_ms) = ttft_ms {
-            observability::record_ttft(&protocol, &model, Duration::from_millis(ttft_ms as u64));
-        }
-        if event.input_tokens > 0 {
-            observability::record_tokens(&model, "input", event.input_tokens as u64);
-        }
-        if event.output_tokens > 0 {
-            observability::record_tokens(&model, "output", event.output_tokens as u64);
-        }
-        if event.error_summary.as_deref() == Some("upstream stream error") {
-            if let Some(account_id) = account_id {
-                tokio::spawn(async move {
-                    health
-                        .mark_failure_with_details(
-                            &account_id,
-                            "passive",
-                            Some("upstream_stream_error"),
-                            Some("upstream stream failed"),
-                        )
-                        .await;
-                });
+    let body = usage::observe_stream_body(
+        body,
+        request_started,
+        &event.request_id.clone(),
+        move |observation| {
+            observability::track_stream_end();
+            event.latency_ms = request_started.elapsed().as_millis() as i64;
+            let account_id = attempts.last().map(|attempt| attempt.account_id.clone());
+            let ttft_ms = observation.ttft_ms;
+            let upstream_failure = matches!(
+                observation.termination,
+                stream::StreamTermination::UpstreamError
+                    | stream::StreamTermination::TransportError
+                    | stream::StreamTermination::IncompleteStream
+                    | stream::StreamTermination::BufferLimitExceeded
+            );
+
+            finalize_stream_usage(&mut event, &mut attempts, &request_body, observation);
+            observability::record_proxy_request(
+                &protocol,
+                &model,
+                event.status_code as u16,
+                request_started,
+                true,
+            );
+            if let Some(ttft_ms) = ttft_ms {
+                observability::record_ttft(
+                    &protocol,
+                    &model,
+                    Duration::from_millis(ttft_ms as u64),
+                );
             }
-        }
-        tokio::spawn(async move {
-            if let Err(error) = database.insert_usage_with_attempts(&event, &attempts).await {
-                tracing::warn!(%error, "failed to persist streaming usage event");
+            if event.input_tokens > 0 {
+                observability::record_tokens(&model, "input", event.input_tokens as u64);
             }
-        });
-    });
+            if event.output_tokens > 0 {
+                observability::record_tokens(&model, "output", event.output_tokens as u64);
+            }
+            if upstream_failure {
+                if let Some(account_id) = account_id {
+                    tokio::spawn(async move {
+                        health
+                            .mark_failure_with_details(
+                                &account_id,
+                                "passive",
+                                Some("upstream_stream_error"),
+                                Some("upstream stream failed"),
+                            )
+                            .await;
+                    });
+                }
+            }
+            tokio::spawn(async move {
+                if let Err(error) = database.insert_usage_with_attempts(&event, &attempts).await {
+                    tracing::warn!(%error, "failed to persist streaming usage event");
+                }
+            });
+        },
+    );
     Response::from_parts(parts, body)
 }
 
@@ -87,6 +104,7 @@ pub(crate) fn finalize_stream_usage(
         observation.termination
     };
     tracing::debug!(
+        request_id = %event.request_id,
         termination = termination.code(),
         ttft_ms = ?observation.ttft_ms,
         "stream terminated"
@@ -97,6 +115,13 @@ pub(crate) fn finalize_stream_usage(
         event.error_summary = Some(
             match termination {
                 stream::StreamTermination::UpstreamError => "upstream stream error",
+                stream::StreamTermination::TransportError => "upstream body transport error",
+                stream::StreamTermination::IncompleteStream => {
+                    "upstream stream ended without a terminal event"
+                }
+                stream::StreamTermination::BufferLimitExceeded => {
+                    "upstream stream observation limit exceeded"
+                }
                 stream::StreamTermination::EmptyStream => "upstream stream ended without an event",
                 stream::StreamTermination::ClientCancelled => "client disconnected",
                 stream::StreamTermination::ConnectionTimeout => "upstream connection timeout",
@@ -112,11 +137,11 @@ pub(crate) fn finalize_stream_usage(
             attempt.success = false;
         }
     }
-    let report = usage::usage_for_sse_response(
+    let report = usage::usage_for_stream_observation(
         &event.request_id,
         event.success,
         request_body,
-        &observation.captured,
+        &observation,
     );
     event.input_tokens = report.input_tokens;
     event.output_tokens = report.output_tokens;

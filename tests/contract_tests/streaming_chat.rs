@@ -230,7 +230,7 @@ async fn chat_stream_incomplete() {
     assert!(!json_events.is_empty(), "at least one content event");
 
     assert!(
-        body.contains("gateway_upstream_error"),
+        body.contains("gateway_incomplete_stream"),
         "truncation must not look successful"
     );
     let has_done = events.iter().any(|e| e.is_done());

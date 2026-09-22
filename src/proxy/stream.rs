@@ -23,6 +23,10 @@ use crate::domain::protocol::Protocol;
 pub(crate) const HEARTBEAT_FRAME: &[u8] = b": gateway-heartbeat\n\n";
 pub(crate) const HEARTBEAT_MARKER: &str = ": gateway-heartbeat";
 
+// Fixed safety ceilings; timing environment variables never disable these.
+pub(crate) const MAX_SSE_FRAME_BYTES: usize = 1024 * 1024;
+const MAX_TRACKED_CHAT_CHOICES: usize = 1024;
+
 /// OpenAI Chat Completions termination frame.  Native providers that omit the
 /// `data: [DONE]` sentinel (for example MiniMax) still need it appended so
 /// strict OpenAI clients can detect end-of-stream.
@@ -149,6 +153,9 @@ pub(crate) enum StreamTermination {
     Completed,
     EmptyStream,
     UpstreamError,
+    TransportError,
+    IncompleteStream,
+    BufferLimitExceeded,
     ClientCancelled,
     ConnectionTimeout,
     FirstEventTimeout,
@@ -166,6 +173,9 @@ impl StreamTermination {
             Self::Completed => "completed",
             Self::EmptyStream => "gateway_empty_stream",
             Self::UpstreamError => "gateway_upstream_error",
+            Self::TransportError => "gateway_transport_error",
+            Self::IncompleteStream => "gateway_incomplete_stream",
+            Self::BufferLimitExceeded => "gateway_stream_buffer_limit",
             Self::ClientCancelled => "gateway_client_cancelled",
             Self::ConnectionTimeout => "gateway_connection_timeout",
             Self::FirstEventTimeout => "gateway_first_event_timeout",
@@ -179,6 +189,9 @@ impl StreamTermination {
             Self::Completed => "stream completed",
             Self::EmptyStream => "upstream stream ended without an event",
             Self::UpstreamError => "upstream stream failed",
+            Self::TransportError => "upstream body transport failed",
+            Self::IncompleteStream => "upstream stream ended without a terminal event",
+            Self::BufferLimitExceeded => "upstream stream exceeded observation limits",
             Self::ClientCancelled => "client disconnected while streaming",
             Self::ConnectionTimeout => "timed out waiting for the upstream connection",
             Self::FirstEventTimeout => "timed out waiting for the first upstream event",
@@ -195,7 +208,11 @@ impl StreamTermination {
             | Self::FirstEventTimeout
             | Self::IdleTimeout
             | Self::TotalTimeout => 504,
-            Self::EmptyStream | Self::UpstreamError => 599,
+            Self::EmptyStream
+            | Self::UpstreamError
+            | Self::TransportError
+            | Self::IncompleteStream
+            | Self::BufferLimitExceeded => 599,
         }
     }
 }
@@ -213,6 +230,8 @@ pub(crate) struct SseActivity {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct SseEventTracker {
     line: Vec<u8>,
+    frame_bytes: usize,
+    pub(crate) usage: super::usage::SseUsageAccumulator,
     event_name: String,
     data_lines: Vec<String>,
     frame_non_comment: bool,
@@ -226,6 +245,11 @@ pub(crate) struct SseEventTracker {
 impl SseEventTracker {
     pub(crate) fn feed(&mut self, bytes: &[u8]) -> SseActivity {
         let mut activity = SseActivity::default();
+        if self.terminal == Some(StreamTermination::BufferLimitExceeded) {
+            activity.error = true;
+            activity.terminal = self.terminal;
+            return activity;
+        }
         if self.line.is_empty()
             && self.data_lines.is_empty()
             && self.event_name.is_empty()
@@ -240,8 +264,16 @@ impl SseEventTracker {
             }
         }
         for byte in bytes {
+            if self.frame_bytes >= MAX_SSE_FRAME_BYTES {
+                self.limit_exceeded(&mut activity);
+                break;
+            }
+            self.frame_bytes += 1;
             if *byte == b'\n' {
                 self.process_line(&mut activity);
+                if self.terminal == Some(StreamTermination::BufferLimitExceeded) {
+                    break;
+                }
             } else if *byte != b'\r' {
                 self.line.push(*byte);
                 // A non-SSE body (some providers occasionally return a raw
@@ -252,6 +284,16 @@ impl SseEventTracker {
             }
         }
         activity
+    }
+
+    fn limit_exceeded(&mut self, activity: &mut SseActivity) {
+        self.line.clear();
+        self.data_lines.clear();
+        self.event_name.clear();
+        self.unfinished_chat_choices.clear();
+        self.terminal = Some(StreamTermination::BufferLimitExceeded);
+        activity.terminal = self.terminal;
+        activity.error = true;
     }
 
     pub(crate) fn finish_eof(&mut self) -> SseActivity {
@@ -293,6 +335,7 @@ impl SseEventTracker {
     fn process_line(&mut self, activity: &mut SseActivity) {
         let line = std::mem::take(&mut self.line);
         if line.is_empty() {
+            self.frame_bytes = 0;
             self.dispatch(activity);
             return;
         }
@@ -323,7 +366,9 @@ impl SseEventTracker {
         let frame_non_comment = std::mem::take(&mut self.frame_non_comment);
         // finish_reason is completion evidence only at clean EOF. Keep consuming
         // later usage chunks and wait for every observed choice to finish.
-        if let Ok(value) = serde_json::from_str::<Value>(&data) {
+        let parsed = serde_json::from_str::<Value>(&data);
+        self.usage.observe(&data, parsed.as_ref().ok());
+        if let Ok(value) = parsed {
             if let Some(choices) = value.get("choices").and_then(Value::as_array) {
                 for choice in choices {
                     let index = choice.get("index").and_then(Value::as_u64).unwrap_or(0);
@@ -335,6 +380,12 @@ impl SseEventTracker {
                         self.saw_chat_finish = true;
                         self.unfinished_chat_choices.remove(&index);
                     } else {
+                        if self.unfinished_chat_choices.len() >= MAX_TRACKED_CHAT_CHOICES
+                            && !self.unfinished_chat_choices.contains(&index)
+                        {
+                            self.limit_exceeded(activity);
+                            return;
+                        }
                         self.unfinished_chat_choices.insert(index);
                     }
                 }
@@ -486,6 +537,9 @@ fn termination_from_code(data: &str) -> Option<StreamTermination> {
     };
     Some(match code.as_str() {
         "gateway_empty_stream" => StreamTermination::EmptyStream,
+        "gateway_transport_error" => StreamTermination::TransportError,
+        "gateway_incomplete_stream" => StreamTermination::IncompleteStream,
+        "gateway_stream_buffer_limit" => StreamTermination::BufferLimitExceeded,
         "gateway_client_cancelled" => StreamTermination::ClientCancelled,
         "gateway_connection_timeout" => StreamTermination::ConnectionTimeout,
         "gateway_first_event_timeout" => StreamTermination::FirstEventTimeout,
@@ -567,6 +621,14 @@ impl NativeState {
     }
 
     fn queue_failure(&mut self, termination: StreamTermination) {
+        if !self.tracker.safe_for_heartbeat()
+            || termination == StreamTermination::BufferLimitExceeded
+        {
+            // End an interrupted provider frame before our standalone error.
+            // Limits clear buffered text and stop scanning a chunk whose tail
+            // is still forwarded, so its final frame boundary is unknown.
+            self.pending.push_back(Ok(Bytes::from_static(b"\n\n")));
+        }
         self.pending
             .push_back(Ok(gateway_error_frame(self.protocol, termination)));
         self.finish_after_pending = true;
@@ -688,12 +750,14 @@ async fn next_native(mut state: NativeState) -> Option<(Result<Bytes, io::Error>
                                 .flatten();
                         }
                         state.pending.push_back(Ok(bytes));
-                        if activity.error || activity.terminal.is_some() {
+                        if activity.terminal == Some(StreamTermination::BufferLimitExceeded) {
+                            state.queue_failure(StreamTermination::BufferLimitExceeded);
+                        } else if activity.error || activity.terminal.is_some() {
                             state.finish_after_pending = true;
                         }
                     }
                     Some(Err(_error)) => {
-                        state.queue_failure(StreamTermination::UpstreamError);
+                        state.queue_failure(StreamTermination::TransportError);
                     }
                     None => {
                         state.tracker.finish_eof();
@@ -726,7 +790,7 @@ async fn next_native(mut state: NativeState) -> Option<(Result<Bytes, io::Error>
                                         .push_back(Ok(Bytes::from_static(CHAT_DONE_FRAME)));
                                     state.finish_after_pending = true;
                                 } else {
-                                    state.queue_failure(StreamTermination::UpstreamError)
+                                    state.queue_failure(StreamTermination::IncompleteStream)
                                 }
                             }
                             None => state.finish_after_pending = true,
@@ -774,6 +838,99 @@ mod tests {
             first_event_timeout: Duration::from_millis(25),
             idle_timeout: Duration::from_millis(25),
             total_timeout: Duration::from_millis(150),
+        }
+    }
+
+    #[test]
+    fn frame_and_choice_limits_are_bounded_and_failure_is_sticky() {
+        for multiline in [false, true] {
+            let mut tracker = SseEventTracker::default();
+            let bytes: &[u8] = if multiline { b"data: x\n" } else { b"x" };
+            for _ in 0..=MAX_SSE_FRAME_BYTES / bytes.len() {
+                tracker.feed(bytes);
+                assert!(tracker.line.len() <= MAX_SSE_FRAME_BYTES);
+                assert!(tracker.frame_bytes <= MAX_SSE_FRAME_BYTES);
+            }
+            assert_eq!(
+                tracker.terminal(),
+                Some(StreamTermination::BufferLimitExceeded)
+            );
+            tracker.feed(b"\n\ndata: [DONE]\n\n");
+            assert_eq!(
+                tracker.terminal(),
+                Some(StreamTermination::BufferLimitExceeded)
+            );
+            assert!(tracker.line.is_empty());
+            assert!(tracker.data_lines.is_empty());
+        }
+        let mut tracker = SseEventTracker::default();
+        for index in 0..=MAX_TRACKED_CHAT_CHOICES {
+            tracker.feed(format!("data: {{\"choices\":[{{\"index\":{index}}}]}}\n\n").as_bytes());
+        }
+        assert_eq!(
+            tracker.terminal(),
+            Some(StreamTermination::BufferLimitExceeded)
+        );
+    }
+
+    #[tokio::test]
+    async fn oversized_frames_emit_standalone_limit_error_for_every_protocol() {
+        for prefix in ["data: ", ": ", " "] {
+            for protocol in [
+                Protocol::OpenAiChatCompletions,
+                Protocol::OpenAiResponses,
+                Protocol::AnthropicMessages,
+            ] {
+                let payload = Bytes::from(format!("{prefix}{}", "x".repeat(MAX_SSE_FRAME_BYTES)));
+                let body = wrap_native_body(
+                    Body::from(payload.clone()),
+                    protocol,
+                    StreamConfig::default(),
+                    Instant::now(),
+                );
+                let result = axum::body::to_bytes(body, MAX_SSE_FRAME_BYTES + 2048)
+                    .await
+                    .unwrap();
+                assert!(result.starts_with(&payload));
+                let suffix = &result[payload.len()..];
+                assert!(suffix.starts_with(b"\n\n"));
+                assert!(String::from_utf8_lossy(suffix).contains("gateway_stream_buffer_limit"));
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn choice_limit_separates_error_from_unscanned_chunk_tail() {
+        for protocol in [
+            Protocol::OpenAiChatCompletions,
+            Protocol::OpenAiResponses,
+            Protocol::AnthropicMessages,
+        ] {
+            for tail in [": partial", "data: {\"content\":"] {
+                let mut payload = String::new();
+                for index in 0..=MAX_TRACKED_CHAT_CHOICES {
+                    payload.push_str(&format!(
+                        "data: {{\"choices\":[{{\"index\":{index}}}]}}\n\n"
+                    ));
+                }
+                payload.push_str(tail);
+                let body = wrap_native_body(
+                    Body::from(payload.clone()),
+                    protocol,
+                    StreamConfig::default(),
+                    Instant::now(),
+                );
+                let result = axum::body::to_bytes(body, MAX_SSE_FRAME_BYTES)
+                    .await
+                    .unwrap();
+                assert!(result.starts_with(payload.as_bytes()));
+                let suffix = &result[payload.len()..];
+                assert!(suffix.starts_with(b"\n\n"));
+                assert_eq!(
+                    &suffix[2..],
+                    gateway_error_frame(protocol, StreamTermination::BufferLimitExceeded).as_ref(),
+                );
+            }
         }
     }
 
@@ -1008,7 +1165,7 @@ mod tests {
         );
         let mut failed = failed.into_data_stream();
         let failed_frame = failed.next().await.unwrap().unwrap();
-        assert!(String::from_utf8_lossy(&failed_frame).contains("gateway_upstream_error"));
+        assert!(String::from_utf8_lossy(&failed_frame).contains("gateway_transport_error"));
         assert!(failed.next().await.is_none());
     }
 
@@ -1034,7 +1191,7 @@ mod tests {
         let original = body.next().await.unwrap().unwrap();
         assert!(String::from_utf8_lossy(&original).contains("partial"));
         let error = body.next().await.unwrap().unwrap();
-        assert!(String::from_utf8_lossy(&error).contains("gateway_upstream_error"));
+        assert!(String::from_utf8_lossy(&error).contains("gateway_incomplete_stream"));
         assert!(body.next().await.is_none());
     }
 
