@@ -14,6 +14,8 @@ import { TableScroll } from '@/components/ui/TableScroll';
 import { formatDateTime } from '@/utils/format';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import type { AccountHealthView, GatewayAdminResources } from '@/admin-api';
+import { sourceRouteHash } from '@/lib/consoleNavigation';
 import { UpstreamQuotaClient } from '@/upstream-quota/client';
 import type {
   QuotaResource,
@@ -24,6 +26,7 @@ import styles from './UpstreamQuota.module.scss';
 
 interface UpstreamQuotaPageProps {
   client: UpstreamQuotaClient;
+  api: GatewayAdminResources;
   accountId?: string;
   refreshRevision?: number;
   onBusyChange?: (busy: boolean) => void;
@@ -39,6 +42,13 @@ const PROBLEM_STATUSES = new Set<UpstreamQuotaStatus>([
   'auth_error',
   'disabled',
 ]);
+
+const healthTone = (status: string): 'success' | 'warning' | 'danger' | 'muted' | 'accent' => {
+  if (status === 'healthy') return 'success';
+  if (status === 'unknown') return 'accent';
+  if (status === 'cooling_down' || status === 'unhealthy') return 'danger';
+  return 'warning';
+};
 
 const providerLabel = (provider: string): string => ({
   kimi_code: 'Kimi Code',
@@ -155,6 +165,26 @@ function WindowCell({ resource, unsupported, t }: {
   );
 }
 
+const quotaStatusLabel = (snapshot: UpstreamQuotaSnapshot, t: QuotaTranslation): string => {
+  if (snapshot.status === 'auth_error' && snapshot.refresh_error?.http_status === 403) {
+    return t('quota.status.quota_query_rejected');
+  }
+  return t(`quota.status.${snapshot.status}`);
+};
+
+const exhaustedWindow = (snapshot: UpstreamQuotaSnapshot, t: QuotaTranslation): string | undefined => {
+  const resource = snapshot.resources.find((item) => (
+    item.type === 'window'
+    && item.remaining !== undefined
+    && item.remaining !== null
+    && item.remaining <= 0
+  ));
+  if (!resource) return undefined;
+  if (resource.key === '5h') return t('quota.window_5h');
+  if (resource.key === '7d') return t('quota.window_7d');
+  return resource.label;
+};
+
 function SnapshotStatus({ snapshot, refreshing, t }: {
   snapshot: UpstreamQuotaSnapshot;
   refreshing: boolean;
@@ -163,17 +193,30 @@ function SnapshotStatus({ snapshot, refreshing, t }: {
   if (refreshing) {
     return <StatusPill tone="accent">{t('quota.status.refreshing')}</StatusPill>;
   }
-  const detail = snapshot.stale && snapshot.fetched_at
-    ? t('quota.status_context.stale_snapshot', { time: formatCompactDateTime(snapshot.fetched_at) })
-    : snapshot.status === 'exhausted'
-      ? t('quota.status_context.exhausted_source')
+  const staleDetail = snapshot.stale && snapshot.fetched_at
+    ? t('quota.status_context.stale_snapshot', {
+      time: formatCompactDateTime(snapshot.fetched_at),
+    })
+    : undefined;
+  const exhausted = exhaustedWindow(snapshot, t);
+  const quotaDetail = snapshot.status === 'exhausted'
+    ? exhausted
+      ? t('quota.status_context.exhausted_window', { window: exhausted })
+      : t('quota.status_context.exhausted_source')
+    : snapshot.status === 'auth_error' && snapshot.refresh_error?.http_status === 403
+      ? t('quota.status_context.quota_query_rejected')
       : undefined;
   return (
     <span className={styles.statusCell}>
-      <StatusPill tone={statusTone(snapshot.status)}>
-        {t(`quota.status.${snapshot.status}`)}
+      <StatusPill tone={snapshot.stale ? 'warning' : snapshot.status === 'auth_error' && snapshot.refresh_error?.http_status === 403 ? 'warning' : statusTone(snapshot.status)}>
+        {snapshot.stale ? t('quota.status.stale') : quotaStatusLabel(snapshot, t)}
       </StatusPill>
-      {detail && <small>{detail}</small>}
+      {staleDetail && <small>{staleDetail}</small>}
+      {snapshot.stale
+        ? snapshot.status === 'auth_error' && snapshot.refresh_error?.http_status === 403
+          ? quotaDetail && <small>{quotaDetail}</small>
+          : <small>{t('quota.status_context.latest_refresh', { status: quotaStatusLabel(snapshot, t) })}</small>
+        : quotaDetail && <small>{quotaDetail}</small>}
     </span>
   );
 }
@@ -201,9 +244,40 @@ function BalanceCell({ snapshot }: { snapshot: UpstreamQuotaSnapshot }) {
   );
 }
 
-function ListPage({ client, refreshRevision = 0, onBusyChange }: Omit<UpstreamQuotaPageProps, 'accountId'>) {
+function HealthCell({ health, t }: {
+  health?: AccountHealthView;
+  t: QuotaTranslation;
+}) {
+  if (!health) {
+    return <span className={styles.secondary}>{t('quota.health.unavailable')}</span>;
+  }
+  const recordedAt = health.health.updated_at ?? health.health_updated_at;
+  if (health.health.stale || health.stale) {
+    return (
+      <span className={styles.statusCell}>
+        <StatusPill tone="muted">{t('quota.health.review')}</StatusPill>
+        <small>{recordedAt
+          ? t('quota.health.recorded_at', { time: formatCompactDateTime(recordedAt) })
+          : t('quota.health.not_recorded')}</small>
+      </span>
+    );
+  }
+  return (
+    <span className={styles.statusCell}>
+      <StatusPill tone={healthTone(health.health.status)}>
+        {t(`values.health.${health.health.status || 'unknown'}`, { defaultValue: health.health.status || t('values.health.unknown') })}
+      </StatusPill>
+      <small>{recordedAt
+        ? t('quota.health.recorded_at', { time: formatCompactDateTime(recordedAt) })
+        : t('quota.health.not_recorded')}</small>
+    </span>
+  );
+}
+
+function ListPage({ client, api, refreshRevision = 0, onBusyChange }: Omit<UpstreamQuotaPageProps, 'accountId'>) {
   const { t } = useTranslation('console');
   const [items, setItems] = useState<UpstreamQuotaSnapshot[]>([]);
+  const [health, setHealth] = useState<AccountHealthView[]>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
   const [refreshingAll, setRefreshingAll] = useState(false);
@@ -214,6 +288,11 @@ function ListPage({ client, refreshRevision = 0, onBusyChange }: Omit<UpstreamQu
   const [provider, setProvider] = useState('all');
   const [status, setStatus] = useState('all');
   const [onlyProblems, setOnlyProblems] = useState(false);
+
+  const reloadHealth = useCallback(async (signal?: AbortSignal) => {
+    const response = await api.health(signal);
+    if (!signal?.aborted) setHealth(response.data);
+  }, [api]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -234,6 +313,15 @@ function ListPage({ client, refreshRevision = 0, onBusyChange }: Omit<UpstreamQu
     return () => controller.abort();
   }, [client, listRetry, refreshRevision, onBusyChange]);
 
+  useEffect(() => {
+    const controller = new AbortController();
+    void reloadHealth(controller.signal)
+      .catch(() => {
+        if (!controller.signal.aborted) setHealth(undefined);
+      });
+    return () => controller.abort();
+  }, [listRetry, refreshRevision, reloadHealth]);
+
   const retryList = () => setListRetry((current) => current + 1);
 
   const refreshAll = async () => {
@@ -245,6 +333,7 @@ function ListPage({ client, refreshRevision = 0, onBusyChange }: Omit<UpstreamQu
     try {
       const next = await client.refreshAll();
       setItems((current) => mergeSnapshots(current, next));
+      await reloadHealth().catch(() => setHealth(undefined));
       const failed = next.filter((item) => FAILED_STATUSES.has(item.status)).length;
       setRefreshSummary(t('quota.refresh_summary', {
         succeeded: next.length - failed,
@@ -267,6 +356,7 @@ function ListPage({ client, refreshRevision = 0, onBusyChange }: Omit<UpstreamQu
       setItems((current) => current.map((item) => (
         item.account.account_id === accountId ? mergeSnapshot(item, next) : item
       )));
+      await reloadHealth().catch(() => setHealth(undefined));
     } catch (cause) {
       setError(displayError(cause));
     } finally {
@@ -290,13 +380,14 @@ function ListPage({ client, refreshRevision = 0, onBusyChange }: Omit<UpstreamQu
       ].some((value) => value.toLowerCase().includes(term))) return false;
       if (provider !== 'all' && item.account.provider_id !== provider) return false;
       if (status !== 'all' && item.status !== status) return false;
-      if (onlyProblems && !PROBLEM_STATUSES.has(item.status)) return false;
+      if (onlyProblems && !item.stale && !PROBLEM_STATUSES.has(item.status)) return false;
       return true;
     });
   }, [items, onlyProblems, provider, search, status]);
 
-  const usable = items.filter((item) => item.status === 'ok' || item.status === 'low').length;
-  const quotaAlerts = items.filter((item) => item.status === 'low' || item.status === 'exhausted').length;
+  const freshQuota = items.filter((item) => !item.stale && (item.status === 'ok' || item.status === 'low')).length;
+  const quotaAlerts = items.filter((item) => !item.stale && (item.status === 'low' || item.status === 'exhausted')).length;
+  const stale = items.filter((item) => item.stale).length;
   const failed = items.filter((item) => FAILED_STATUSES.has(item.status)).length;
   const enabled = items.filter((item) => item.account.enabled).length;
 
@@ -345,8 +436,9 @@ function ListPage({ client, refreshRevision = 0, onBusyChange }: Omit<UpstreamQu
 
       <div className={styles.summaryGrid}>
         <MetricCard compact label={t('quota.summary.accounts')} value={String(items.length)} hint={t('quota.summary.accounts_hint', { count: enabled })} />
-        <MetricCard compact label={t('quota.summary.available')} value={String(usable)} hint={t('quota.summary.available_hint')} tone={usable === 0 && items.length > 0 ? 'warning' : undefined} />
+        <MetricCard compact label={t('quota.summary.fresh_quota')} value={String(freshQuota)} hint={t('quota.summary.fresh_quota_hint')} tone={freshQuota === 0 && items.length > 0 ? 'warning' : undefined} />
         <MetricCard compact label={t('quota.summary.alerts')} value={String(quotaAlerts)} hint={t('quota.summary.alerts_hint')} tone={quotaAlerts > 0 ? 'warning' : undefined} />
+        <MetricCard compact label={t('quota.summary.stale')} value={String(stale)} hint={t('quota.summary.stale_hint')} tone={stale > 0 ? 'warning' : undefined} />
         <MetricCard compact label={t('quota.summary.failed')} value={String(failed)} hint={t('quota.summary.failed_hint')} tone={failed > 0 ? 'warning' : undefined} />
       </div>
 
@@ -417,12 +509,14 @@ function ListPage({ client, refreshRevision = 0, onBusyChange }: Omit<UpstreamQu
               <Table.Th scope="col">{t('quota.column.window_7d')}</Table.Th>
               <Table.Th scope="col">{t('quota.column.balance')}</Table.Th>
               <Table.Th scope="col">{t('quota.column.status')}</Table.Th>
+              <Table.Th scope="col">{t('quota.column.health')}</Table.Th>
               <Table.Th scope="col">{t('quota.column.updated')}</Table.Th>
               <Table.Th scope="col">{t('quota.column.actions')}</Table.Th>
             </Table.Tr></Table.Thead>
             <Table.Tbody>
               {filtered.map((snapshot) => {
                 const accountId = snapshot.account.account_id;
+                const accountHealth = health?.find((item) => item.account_id === accountId);
                 const refreshing = refreshingIds.has(accountId);
                 const unsupportedWindows = snapshot.account.provider_id === 'deepseek' || snapshot.status === 'unsupported';
                 return (
@@ -439,6 +533,7 @@ function ListPage({ client, refreshRevision = 0, onBusyChange }: Omit<UpstreamQu
                     <Table.Td><WindowCell resource={resourceByKey(snapshot, '7d')} unsupported={unsupportedWindows} t={t} /></Table.Td>
                     <Table.Td><BalanceCell snapshot={snapshot} /></Table.Td>
                     <Table.Td><SnapshotStatus snapshot={snapshot} refreshing={refreshing} t={t} /></Table.Td>
+                    <Table.Td><HealthCell health={accountHealth} t={t} /></Table.Td>
                     <Table.Td><SnapshotTime value={snapshot.fetched_at} /></Table.Td>
                     <Table.Td>
                       <div className={styles.actions}>
@@ -447,6 +542,9 @@ function ListPage({ client, refreshRevision = 0, onBusyChange }: Omit<UpstreamQu
                         </Button>
                         <Button variant="ghost" size="sm" onClick={() => { window.location.hash = `#upstream-quotas/${encodeURIComponent(accountId)}`; }}>
                           {t('quota.details')}
+                        </Button>
+                        <Button variant="ghost" size="sm" onClick={() => { window.location.hash = sourceRouteHash(snapshot.account.source_id); }}>
+                          {t('quota.health.events')}
                         </Button>
                       </div>
                     </Table.Td>
@@ -462,14 +560,20 @@ function ListPage({ client, refreshRevision = 0, onBusyChange }: Omit<UpstreamQu
   );
 }
 
-function DetailPage({ client, accountId, refreshRevision = 0, onBusyChange }: UpstreamQuotaPageProps & { accountId: string }) {
+function DetailPage({ client, api, accountId, refreshRevision = 0, onBusyChange }: UpstreamQuotaPageProps & { accountId: string }) {
   const { t } = useTranslation('console');
   const [snapshot, setSnapshot] = useState<UpstreamQuotaSnapshot>();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string>();
   const [attempts, setAttempts] = useState<UpstreamQuotaSnapshot[]>([]);
+  const [health, setHealth] = useState<AccountHealthView>();
   const [detailRetry, setDetailRetry] = useState(0);
+
+  const reloadHealth = useCallback(async (signal?: AbortSignal) => {
+    const response = await api.health(signal);
+    if (!signal?.aborted) setHealth(response.data.find((item) => item.account_id === accountId));
+  }, [accountId, api]);
 
   const applySnapshot = useCallback((next: UpstreamQuotaSnapshot) => {
     setSnapshot((current) => mergeSnapshot(current, next));
@@ -495,6 +599,15 @@ function DetailPage({ client, accountId, refreshRevision = 0, onBusyChange }: Up
     return () => controller.abort();
   }, [accountId, applySnapshot, client, detailRetry, onBusyChange, refreshRevision]);
 
+  useEffect(() => {
+    const controller = new AbortController();
+    void reloadHealth(controller.signal)
+      .catch(() => {
+        if (!controller.signal.aborted) setHealth(undefined);
+      });
+    return () => controller.abort();
+  }, [detailRetry, refreshRevision, reloadHealth]);
+
   const refresh = async () => {
     if (refreshing) return;
     setRefreshing(true);
@@ -502,6 +615,7 @@ function DetailPage({ client, accountId, refreshRevision = 0, onBusyChange }: Up
     onBusyChange?.(true);
     try {
       applySnapshot(await client.refresh(accountId));
+      await reloadHealth().catch(() => setHealth(undefined));
     } catch (cause) {
       setError(displayError(cause));
     } finally {
@@ -568,7 +682,9 @@ function DetailPage({ client, accountId, refreshRevision = 0, onBusyChange }: Up
 
       <div className={styles.detailGrid}>
         <div className={styles.stack}>
-          <Card title={balances.length > 0 && windows.length === 0 ? t('quota.current_balance') : t('quota.current_quota')}>
+          <Card title={snapshot.stale
+            ? t('quota.historical_quota')
+            : balances.length > 0 && windows.length === 0 ? t('quota.current_balance') : t('quota.current_quota')}>
             {windows.length > 0 && (
               <div className={styles.resourceList}>
                 {windows.map((resource) => {
@@ -639,12 +755,27 @@ function DetailPage({ client, accountId, refreshRevision = 0, onBusyChange }: Up
 
           <Card title={t('quota.data_state')}>
             <DetailList>
-              <DetailItem label={t('quota.column.status')}>{t(`quota.status.${snapshot.status}`)}</DetailItem>
+              <DetailItem label={t('quota.column.status')}>{snapshot.stale ? t('quota.status.stale') : quotaStatusLabel(snapshot, t)}</DetailItem>
               <DetailItem label={t('quota.fetched_at')}>{snapshot.fetched_at ? formatDateTime(snapshot.fetched_at) : '—'}</DetailItem>
               <DetailItem label={t('quota.attempted_at')}>{formatDateTime(snapshot.attempted_at)}</DetailItem>
               <DetailItem label={t('quota.latency')}>{snapshot.latency_ms} ms</DetailItem>
               <DetailItem label={t('quota.data_source')}>{t('quota.data_source_upstream_api')}</DetailItem>
             </DetailList>
+          </Card>
+
+          <Card title={t('quota.health.title')}>
+            <DetailList>
+              <DetailItem label={t('quota.column.health')}><HealthCell health={health} t={t} /></DetailItem>
+              <DetailItem label={t('quota.health.last_probe')}>
+                {health?.health.last_probe_at ? formatDateTime(health.health.last_probe_at) : t('quota.health.not_recorded')}
+              </DetailItem>
+              {(health?.cooldown_until ?? health?.health.cooldown_until) && <DetailItem label={t('quota.health.cooldown_until')}>{formatDateTime(health.cooldown_until ?? health.health.cooldown_until!)}</DetailItem>}
+              {health?.health.last_error && <DetailItem label={t('quota.health.last_failure')}>{health.health.last_error}</DetailItem>}
+            </DetailList>
+            <p className={styles.note}>{t('quota.health.note')}</p>
+            <Button variant="secondary" size="sm" onClick={() => { window.location.hash = sourceRouteHash(snapshot.account.source_id); }}>
+              {t('quota.health.events')}
+            </Button>
           </Card>
         </div>
       </div>
@@ -658,6 +789,6 @@ function DetailPage({ client, accountId, refreshRevision = 0, onBusyChange }: Up
 
 export function UpstreamQuotaPage(props: UpstreamQuotaPageProps) {
   return props.accountId
-    ? <DetailPage {...props} accountId={props.accountId} />
+    ? <DetailPage key={props.accountId} {...props} accountId={props.accountId} />
     : <ListPage {...props} />;
 }

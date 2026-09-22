@@ -59,6 +59,34 @@ const accounts = sources.map((item) => ({
   updated_at: item.updated_at,
 }));
 
+const upstreamQuotas = [{
+  account: {
+    account_id: 'account-a', account_display_name: 'Account A', source_id: 'source-a',
+    source_display_name: 'Source A', provider_id: 'kimi_code', enabled: true,
+  },
+  status: 'exhausted',
+  resources: [
+    { type: 'window', key: '5h', label: '5 hours', unit: 'percent', remaining: 100, used: 0, limit: 100, reset_at: '2026-09-23T00:00:00Z' },
+    { type: 'window', key: '7d', label: '7 days', unit: 'percent', remaining: 0, used: 100, limit: 100, reset_at: '2026-09-25T00:00:00Z' },
+  ],
+  fetched_at: '2026-09-22T00:00:00Z', attempted_at: '2026-09-22T00:00:00Z', latency_ms: 120,
+  stale: false, refresh_error: null,
+}];
+
+const healthResponse = {
+  fact_source: 'postgresql', stale_after_secs: 600,
+  data: [{
+    account_id: 'account-a', source_id: 'source-a', display_name: 'Account A', enabled: true,
+    health_status: 'stale', health_updated_at: '2026-09-21T23:00:00Z', stale: true, cooldown_until: null,
+    health: {
+      available: true, source_enabled: true, consecutive_failures: 0, cooldown_remaining_ms: 0,
+      status: 'stale', source: 'passive', stale: true, updated_at: '2026-09-21T23:00:00Z',
+      cooldown_until: null, last_error: 'Synthetic health record is stale', last_success_at: null,
+      last_probe_at: null, last_probe_status: null, last_probe_error: null,
+    },
+  }],
+};
+
 const eventResponse = {
   version: 'v1',
   timezone: 'UTC',
@@ -111,6 +139,8 @@ const mime = (path) => ({
 const server = createServer(async (request, response) => {
   const url = new URL(request.url ?? '/', 'http://localhost');
   if (url.pathname === '/admin/keys') return json(response, 200, { data: virtualKeys });
+  if (url.pathname === '/admin/upstream-quotas') return json(response, 200, { data: upstreamQuotas });
+  if (url.pathname === '/admin/health') return json(response, 200, healthResponse);
   if (url.pathname === '/admin/capabilities') return json(response, 200, {
     version: 'v1', fact_source: 'runtime_snapshot', snapshot_revision: snapshotRevision,
     snapshot_generated_at: `2026-09-22T00:00:${String(snapshotRevision - 100).padStart(2, '0')}Z`, data: [],
@@ -348,6 +378,20 @@ const run = async () => {
     await waitFor(`document.body.textContent.includes('系统设置')`, 'restore Chinese');
     await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
 
+    await evaluate(`location.hash = '#upstream-quotas'`);
+    await waitFor(`Boolean(document.querySelector('[data-od-id="page-upstream-quotas"] tbody'))`, 'upstream quota list');
+    if (!(await evaluate(`document.querySelector('[data-od-id="page-upstream-quotas"]').textContent.includes('该快照中的 7 天窗口 已无剩余额度')`))) throw new Error('Quota window exhaustion evidence missing');
+    if (!(await evaluate(`document.querySelector('[data-od-id="page-upstream-quotas"]').textContent.includes('健康状态待复核')`))) throw new Error('Stale routing health was not separated from quota');
+    await assertLocalTableLayout('page-upstream-quotas', '已耗尽');
+    await screenshot('upstream-quotas-desktop');
+    await cdp.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: false });
+    await assertLocalTableLayout('page-upstream-quotas', '已耗尽');
+    await evaluate(`document.querySelector('[data-od-id="page-upstream-quotas"] table').scrollIntoView({ block: 'center' })`);
+    await screenshot('upstream-quotas-mobile-table');
+    await evaluate(`document.querySelector('[data-od-id="page-upstream-quotas"] [role="region"]').scrollLeft = 10000`);
+    await screenshot('upstream-quotas-mobile-actions');
+    await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
+
     await evaluate(`location.hash = '#sources/source-a/edit'`);
     await waitFor(`document.querySelector('#source-displayName')?.value === 'Source A'`, 'source A edit page');
     await evaluate(`(() => { const input = document.querySelector('#source-displayName'); const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; setter.call(input, 'Leaked draft'); input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
@@ -364,7 +408,7 @@ const run = async () => {
     await waitFor(`!document.querySelector('[role="dialog"]')`, 'Escape close');
     if (!(await evaluate(`document.activeElement?.textContent.trim() === '网关连接'`))) throw new Error('Focus did not return after Escape');
 
-    console.log('browser smoke passed: event recovery/context/detail navigation, snapshot refresh, desktop/mobile table layout, source isolation, route focus, Portal/Escape');
+    console.log('browser smoke passed: event recovery/context/detail navigation, quota and health state separation, snapshot refresh, desktop/mobile table layout, source isolation, route focus, Portal/Escape');
   } finally {
     cdp?.close();
     if (chrome.exitCode === null) {

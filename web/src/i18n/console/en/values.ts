@@ -12,6 +12,7 @@ export const values = {
     degraded: 'Degraded',
     unhealthy: 'Unhealthy',
     cooling_down: 'Cooling down',
+    stale: 'Stale',
   },
   availability: {
     unknown: 'Unknown',

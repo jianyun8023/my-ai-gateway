@@ -45,6 +45,7 @@ export function GatewayManagementPage({
     return (
       <UpstreamQuotaPage
         client={quotaClient}
+        api={api}
         accountId={quotaRoute?.accountId}
         refreshRevision={refreshRevision}
         onBusyChange={onLoadingChange}

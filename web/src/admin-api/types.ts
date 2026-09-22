@@ -158,6 +158,32 @@ export interface Account {
   updated_at: string;
 }
 
+export interface AccountHealthView {
+  account_id: string;
+  source_id: string;
+  display_name: string;
+  enabled: boolean;
+  health_status: string;
+  health_updated_at?: string | null;
+  stale: boolean;
+  cooldown_until?: string | null;
+  health: {
+    status: string;
+    stale: boolean;
+    updated_at?: string | null;
+    last_probe_at?: string | null;
+    cooldown_until?: string | null;
+    last_error?: string | null;
+    last_success_at?: string | null;
+  };
+}
+
+export interface AccountHealthResponse {
+  fact_source: string;
+  stale_after_secs: number;
+  data: AccountHealthView[];
+}
+
 export interface AccountWriteInput {
   id: string;
   source_id: string;
