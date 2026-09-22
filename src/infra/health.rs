@@ -1305,6 +1305,7 @@ mod tests {
             admin_auth: crate::auth::AdminAuth::test(),
             secrets: crate::infra::secrets::SecretResolver::empty(),
             prometheus_handle: crate::infra::observability::prometheus_handle(),
+            settlements: crate::proxy::settlement::SettlementManager::default(),
         };
         let response = crate::app::application(app_state)
             .oneshot(

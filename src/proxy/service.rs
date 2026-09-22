@@ -6,6 +6,7 @@ use super::policy::{
     is_retryable, primary_unavailable_reason, record_response_health, retry_after_delay,
     transport_error_status, warn_degraded_features, warn_degraded_route,
 };
+use super::settlement::AdmissionError;
 use super::{stream, transport};
 use crate::auth::authorized_with_db;
 use crate::domain::protocol::Protocol;
@@ -125,6 +126,35 @@ pub(crate) async fn proxy(
     if let Some(timeout_ms) = route.request_timeout_ms {
         stream_config.total_timeout = std::time::Duration::from_millis(timeout_ms as u64);
     }
+    // Reserve before the first upstream attempt. A provider may return an SSE
+    // content type even when the request did not declare `stream: true`.
+    let settlement_permit = if state.db.is_some() {
+        match state.settlements.try_reserve() {
+            Ok(permit) => Some(permit),
+            Err(reason) => {
+                let code = match reason {
+                    AdmissionError::Saturated => "settlement_capacity_exhausted",
+                    AdmissionError::Closing => "gateway_shutting_down",
+                };
+                tracing::warn!(%request_id, code, "stream settlement admission rejected before upstream request");
+                return finish_proxy(
+                    protocol,
+                    model,
+                    started,
+                    is_streamed,
+                    data_plane_error_response(
+                        protocol,
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        code,
+                        "stream accounting capacity is unavailable",
+                        &request_id,
+                    ),
+                );
+            }
+        }
+    } else {
+        None
+    };
     if route.strategy == "ordered_fallback" {
         return super::ordered::proxy_ordered(
             &state,
@@ -138,6 +168,7 @@ pub(crate) async fn proxy(
             virtual_key_id,
             client_source_from_headers(&headers, Some(&auth_identity)),
             is_streamed,
+            settlement_permit,
             &stream_config,
             started,
         )
@@ -386,6 +417,8 @@ pub(crate) async fn proxy(
                 return wrap_stream_usage(
                     response,
                     database.clone(),
+                    settlement_permit
+                        .expect("database backed requests reserve settlement capacity"),
                     event,
                     usage_request_body,
                     attempts,
@@ -694,6 +727,7 @@ pub(crate) async fn proxy(
             return wrap_stream_usage(
                 response,
                 database.clone(),
+                settlement_permit.expect("database backed requests reserve settlement capacity"),
                 event,
                 usage_request_body,
                 attempts,

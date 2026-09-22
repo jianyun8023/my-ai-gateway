@@ -162,6 +162,7 @@ mod admin_auth_tests {
             admin_auth,
             secrets: secrets::SecretResolver::empty(),
             prometheus_handle: observability::prometheus_handle(),
+            settlements: crate::proxy::settlement::SettlementManager::default(),
         }
     }
 
@@ -341,6 +342,7 @@ mod health_api_tests {
             admin_auth: AdminAuth::test(),
             secrets: secrets::SecretResolver::empty(),
             prometheus_handle: observability::prometheus_handle(),
+            settlements: crate::proxy::settlement::SettlementManager::default(),
         }
     }
 
@@ -501,6 +503,7 @@ mod audit_closeout_tests {
             admin_auth: AdminAuth::test(),
             secrets: secrets::SecretResolver::empty(),
             prometheus_handle: observability::prometheus_handle(),
+            settlements: crate::proxy::settlement::SettlementManager::default(),
         }
     }
 
@@ -1054,6 +1057,7 @@ mod usage_api_tests {
             admin_auth: AdminAuth::test(),
             secrets: secrets::SecretResolver::empty(),
             prometheus_handle: observability::prometheus_handle(),
+            settlements: crate::proxy::settlement::SettlementManager::default(),
         }
     }
 
@@ -1363,6 +1367,7 @@ mod ops_api_tests {
             admin_auth: AdminAuth::test(),
             secrets: secrets::SecretResolver::empty(),
             prometheus_handle: observability::prometheus_handle(),
+            settlements: crate::proxy::settlement::SettlementManager::default(),
         }
     }
 
@@ -1584,7 +1589,42 @@ mod stream_contract_e2e_tests {
             admin_auth: AdminAuth::test(),
             secrets: secrets::SecretResolver::empty(),
             prometheus_handle: observability::prometheus_handle(),
+            settlements: crate::proxy::settlement::SettlementManager::default(),
         }
+    }
+
+    #[tokio::test]
+    async fn saturated_stream_settlement_never_contacts_upstream() {
+        let _environment_lock = ENV_LOCK.lock().await;
+        let _api_key = EnvRestore::set("GATEWAY_API_KEY", "settlement-test-key");
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let mut state = native_state(&format!("http://{}", listener.local_addr().unwrap()));
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .connect_lazy("postgres://unused:unused@127.0.0.1:1/unused")
+            .unwrap();
+        state.db = Some(db::Database::from_pool(pool));
+        state.settlements = crate::proxy::settlement::SettlementManager::with_capacity(1);
+        let _occupied = state.settlements.try_reserve().unwrap();
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_static("Bearer settlement-test-key"),
+        );
+        let response = proxy_fn(
+            state,
+            headers,
+            Bytes::from_static(br#"{"model":"m","stream":true,"messages":[]}"#),
+            Protocol::OpenAiChatCompletions,
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let body = to_bytes(response.into_body(), 4096).await.unwrap();
+        assert!(String::from_utf8_lossy(&body).contains("settlement_capacity_exhausted"));
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), listener.accept())
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test]
@@ -1830,6 +1870,7 @@ mod multi_turn_tool_tests {
             admin_auth: AdminAuth::test(),
             secrets: secrets::SecretResolver::empty(),
             prometheus_handle: observability::prometheus_handle(),
+            settlements: crate::proxy::settlement::SettlementManager::default(),
         }
     }
 

@@ -490,6 +490,7 @@ async fn postgres_credential_rotation_commits_and_rolls_back_atomically() {
         admin_auth: AdminAuth::test(),
         secrets: resolver,
         prometheus_handle: crate::infra::observability::prometheus_handle(),
+        settlements: crate::proxy::settlement::SettlementManager::default(),
     };
     let app = crate::app::application(state.clone());
     let initial_revision = state.snapshot().revision;
@@ -1038,6 +1039,7 @@ async fn postgres_db_first_crud_rollback_snapshot_and_models_contract() {
         admin_auth: crate::auth::AdminAuth::test(),
         secrets: crate::infra::secrets::SecretResolver::empty(),
         prometheus_handle: crate::infra::observability::prometheus_handle(),
+        settlements: crate::proxy::settlement::SettlementManager::default(),
     };
     state.reload_snapshot(stable_snapshot.clone()).await;
     assert_eq!(state.snapshot().revision, active_revision);

@@ -164,6 +164,7 @@ pub(crate) async fn run() -> Result<(), Box<dyn std::error::Error>> {
         admin_auth,
         secrets,
         prometheus_handle,
+        settlements: crate::proxy::settlement::SettlementManager::default(),
     };
     spawn_health_probe_loop(state.clone());
     let app = crate::app::application(state.clone());
@@ -220,10 +221,12 @@ pub(crate) async fn run() -> Result<(), Box<dyn std::error::Error>> {
         )
         .await;
     tracing::info!(%addr, "AI gateway listening");
-    match axum::serve(listener, app)
+    let serve_result = axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
-        .await
-    {
+        .await;
+    tracing::info!("HTTP server stopped; draining stream settlements");
+    state.settlements.drain().await;
+    match serve_result {
         Ok(()) => {
             events
                 .record(

@@ -52,6 +52,7 @@ pub mod test_support {
             admin_auth: crate::auth::AdminAuth::from_key(None),
             secrets: crate::infra::secrets::SecretResolver::empty(),
             prometheus_handle: crate::infra::observability::prometheus_handle(),
+            settlements: crate::proxy::settlement::SettlementManager::default(),
         };
         crate::app::application(state)
     }

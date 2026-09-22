@@ -6,6 +6,7 @@ use super::policy::{
     warn_degraded_features,
 };
 use super::service::finish_proxy;
+use super::settlement::SettlementPermit;
 use super::{stream, transport};
 use crate::domain::{config::GatewayConfig, protocol::Protocol, routing::ResolvedRoute};
 use crate::http::response::data_plane_error_response;
@@ -30,6 +31,7 @@ pub(super) async fn proxy_ordered(
     virtual_key_id: Option<i64>,
     client_source: String,
     is_streamed: bool,
+    settlement_permit: Option<SettlementPermit>,
     stream_config: &stream::StreamConfig,
     started: Instant,
 ) -> Response<Body> {
@@ -290,6 +292,7 @@ pub(super) async fn proxy_ordered(
             return wrap_stream_usage(
                 response,
                 database.clone(),
+                settlement_permit.expect("database backed requests reserve settlement capacity"),
                 event,
                 usage_request_body,
                 attempts,
@@ -392,6 +395,7 @@ mod tests {
             admin_auth: AdminAuth::test(),
             secrets: secrets::SecretResolver::empty(),
             prometheus_handle: observability::prometheus_handle(),
+            settlements: crate::proxy::settlement::SettlementManager::default(),
         }
     }
 

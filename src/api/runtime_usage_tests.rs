@@ -206,6 +206,7 @@ fn state(config: GatewayConfig, database: Option<db::Database>) -> AppState {
         admin_auth: AdminAuth::test(),
         secrets: secrets::SecretResolver::empty(),
         prometheus_handle: observability::prometheus_handle(),
+        settlements: crate::proxy::settlement::SettlementManager::default(),
     }
 }
 
@@ -803,6 +804,7 @@ async fn postgres_ordered_routing_api_records_each_attempt_once_and_deadline_exh
         admin_auth: AdminAuth::test(),
         secrets: secrets::SecretResolver::empty(),
         prometheus_handle: observability::prometheus_handle(),
+        settlements: crate::proxy::settlement::SettlementManager::default(),
     };
     let app = crate::app::application(state.clone());
     let uri = format!("/admin/logical-models/{id}/routing");
@@ -1296,6 +1298,7 @@ async fn postgres_db_first_source_attribution_covers_primary_fallback_stream_and
         admin_auth: AdminAuth::test(),
         secrets: secrets::SecretResolver::empty(),
         prometheus_handle: observability::prometheus_handle(),
+        settlements: crate::proxy::settlement::SettlementManager::default(),
     };
 
     let suffix = Uuid::new_v4().to_string();
