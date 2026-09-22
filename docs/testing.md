@@ -39,6 +39,22 @@
 
 #237 的回归覆盖三协议 thinking/reasoning 参数、显式 disabled、历史 signature / encrypted reasoning 与 Provider 扩展字段保留。`tests/contract_tests/reasoning.rs` 检查原生请求和同来源 fallback，`src/proxy/ordered.rs` 的 runtime bindings 测试检查跨来源 fallback；两种 fallback 策略均验证逐 attempt 模型映射与其余字段独立保留。运行 `cargo test --features test-support native_thinking -- --test-threads=1`；测试使用本地 Mock，不发送真实模型请求，也不验证或回写生产历史用量。
 
+### Fallback 策略行为矩阵（#242）
+
+`src/proxy/ordered.rs` 的本地 Mock 回归对三协议分别运行两种策略，验证候选选择、状态映射、共享总超时、SSE 不重放和每次实际执行恰好一次的 attempt 指标。`src/api/runtime_usage_tests.rs` 检查真实 upstream model 归因及 transport 失败记录；其中 PostgreSQL 用例还检查最终事件与逐 attempt 的持久化归因，需要独立 `TEST_DATABASE_URL`。
+
+| 场景 | 首选账号 + 加权 fallback | 有序 fallback |
+| --- | --- | --- |
+| 首选可用 | 首选固定先执行，再选一个加权候选 | 首选固定先执行，再按配置顺序遍历 |
+| 不可重试 HTTP 错误 | 保留该响应并停止 | 保留该响应并停止 |
+| 408 / 429 / 5xx | 尝试一个可用 fallback | 在 `max_retries` 内继续可用候选 |
+| 429 + 短 Retry-After，无备选 | 同账号重试一次 | 不重放该候选 |
+| 首选 HTTP 失败，fallback transport 失败或超时 | 保留首选 HTTP 响应，attempt 记录 fallback 的实际错误 | 返回最后 transport 错误；总超时为 `gateway_total_timeout` |
+| 首选不可用，fallback 非超时 transport 失败 | 返回原主账号不可用的 503 | 返回最后 transport 错误的 502 |
+| 已返回 SSE 后失败或超时 | 流内终止，不再 fallback | 流内终止，不再 fallback |
+
+两种策略共享请求重写、上游执行、健康更新与 JSON/SSE 结算；attempt 延迟统一在上游转发返回时截取，不包含健康状态写入耗时。SSE attempt 延迟截至响应头返回；整个流的时长仍由流结束时更新 request 延迟。该重构还补齐加权主账号、同账号重试和主账号不可用时 fallback transport 失败的 attempt 指标；这些执行现在都计数一次。
+
 ## 3. 工具选型定稿
 
 ### 3.1 选型总览
