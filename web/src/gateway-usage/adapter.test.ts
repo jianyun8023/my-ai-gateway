@@ -1,8 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { adaptUsageBreakdown, adaptUsageEventAttempts, adaptUsageEventPage, adaptUsageSummary, adaptUsageTimeseries } from './adapter';
+import { adaptUsageBreakdown, adaptUsageEventAttempts, adaptUsageEventDetail, adaptUsageEventPage, adaptUsageSummary, adaptUsageTimeseries } from './adapter';
 import { gatewayUsageBreakdownFixture, gatewayUsageEventsFixture, gatewayUsageSummaryFixture, gatewayUsageSourcesFixture, gatewayUsageTimeseriesFixture } from '@/test/fixtures/usage';
 
 describe('gateway usage adapter', () => {
+  it('reads a single real event and its attempts from the detail envelope', () => {
+    const raw = gatewayUsageEventsFixture.items[0];
+    const event = adaptUsageEventDetail({ version: 'v1', data: raw, attempts: raw.attempts });
+    expect(event).toMatchObject({ requestId: 'req-fallback', logicalModel: 'reasoning-large', sourceId: 'source-tokyo', account: 'fallback-account' });
+    expect(event.attempts).toHaveLength(2);
+    expect(() => adaptUsageEventDetail({ version: 'v1', attempts: [] })).toThrow('Invalid usage event detail');
+  });
   it('preserves source P95 from the API and distinguishes absent percentiles from zero', () => {
     const items = adaptUsageBreakdown({ items: [{ key: 'slow', p95_latency_ms: 1500 }, { key: 'zero', p95_latency_ms: 0 }, { key: 'missing' }] });
     expect(items.map(item => item.p95LatencyMs)).toEqual([1500, 0, undefined]);

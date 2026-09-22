@@ -36,8 +36,41 @@
 }
 
 .table {
-  min-width: 1120px;
+  min-width: 980px;
+  table-layout: fixed;
 }
+
+.table th:nth-child(1) { width: 72px; }
+.table th:nth-child(2) { width: 190px; }
+.table th:nth-child(3) { width: 84px; }
+.table th:nth-child(4) { width: 300px; }
+.table th:nth-child(5) { width: 210px; }
+.table th:nth-child(6) { width: 142px; }
+
+.table th:nth-child(2),
+.table td:nth-child(2),
+.table th:nth-child(3),
+.table td:nth-child(3) {
+  white-space: nowrap;
+}
+
+.table td:nth-child(3) [data-ui='status-pill'],
+.table td:nth-child(3) [data-ui='status-pill'] * {
+  white-space: nowrap;
+}
+
+.table td:first-child button { min-width: 32px; }
+
+.table th:first-child,
+.table td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.table th:first-child { background: var(--bg-primary); }
 
 .table td {
   vertical-align: middle;
@@ -47,6 +80,8 @@
 .table code {
   font-size: 11px;
 }
+
+.table time { font-variant-numeric: tabular-nums; }
 
 .eventCell,
 .stack {
@@ -68,6 +103,8 @@
   font-size: var(--fs-small);
 }
 
+.stack span, .stack small { overflow-wrap: anywhere; }
+
 .eventCell [data-ui='status-pill'] {
   width: fit-content;
 }
@@ -88,14 +125,17 @@
   border-top: 1px solid var(--border-color);
 }
 
-.detailsSection h3 {
+.detailsSection summary {
   margin: 0 0 10px;
   color: var(--text-secondary);
-  font-family: var(--font-mono);
   font-size: var(--fs-small);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  cursor: pointer;
 }
+
+.detailActions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
+.copyId { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.copyId code { overflow-wrap: anywhere; }
+.copyFeedback { display: block; color: var(--text-secondary); font-size: var(--fs-small); }
 
 .detailsSection pre {
   max-height: 420px;

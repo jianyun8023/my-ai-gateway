@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -74,11 +74,30 @@ const eventResponse = {
     subject_id: 'req-browser',
     correlation_id: 'req-browser',
     message: 'Synthetic browser event',
-    details: { error_code: 'synthetic_failure' },
+    details: {
+      error_summary: 'Synthetic upstream rate limit', status_code: 429,
+      logical_model: 'reasoning-model-with-a-long-display-name',
+      source_id: 'source-a', account_id: 'account-a',
+    },
     source: 'usage_events',
   }],
   page: { limit: 100, has_more: false, next_cursor: null },
 };
+
+const usageEvent = {
+  request_id: 'req-browser', created_at: '2026-09-16T00:00:00Z',
+  logical_model: 'reasoning-model-with-a-long-display-name', upstream_model_id: 'upstream-model',
+  provider_id: 'synthetic', source_id: 'source-a', account_id: 'account-a',
+  protocol_in: 'openai_responses', protocol_upstream: 'openai_responses',
+  status_code: 429, success: false, retry_count: 0, usage_source: 'missing',
+  error_summary: 'Synthetic upstream rate limit', streamed: true,
+};
+const virtualKeys = [{
+  id: 1, name: 'codex-long-key-name', key_prefix: 'gw_d5ecc0f8', key_recoverable: true,
+  allowed_models: ['reasoning-model-with-a-long-display-name', 'kimi-for-coding-highspeed', 'k3'],
+  enabled: true, created_at: '2026-09-07T08:23:09Z', last_used_at: '2026-09-22T08:39:12Z',
+}];
+let snapshotRevision = 107;
 
 const json = (response, statusCode, body) => {
   response.writeHead(statusCode, { 'content-type': 'application/json; charset=utf-8' });
@@ -91,6 +110,20 @@ const mime = (path) => ({
 
 const server = createServer(async (request, response) => {
   const url = new URL(request.url ?? '/', 'http://localhost');
+  if (url.pathname === '/admin/keys') return json(response, 200, { data: virtualKeys });
+  if (url.pathname === '/admin/capabilities') return json(response, 200, {
+    version: 'v1', fact_source: 'runtime_snapshot', snapshot_revision: snapshotRevision,
+    snapshot_generated_at: `2026-09-22T00:00:${String(snapshotRevision - 100).padStart(2, '0')}Z`, data: [],
+  });
+  if (url.pathname === '/admin/config/reload') {
+    snapshotRevision += 1;
+    return json(response, 200, { status: 'reloaded', snapshot_revision: snapshotRevision, snapshot_generated_at: '2026-09-22T00:00:08Z' });
+  }
+  if (url.pathname === '/admin/usage/events/req-browser') return json(response, 200, {
+    version: 'v1', data: usageEvent,
+    attempts: [{ attempt_no: 0, account_id: 'account-a', source_id: 'source-a', status_code: 429, success: false }],
+  });
+  if (url.pathname === '/admin/usage/events') return json(response, 200, { version: 'v1', data: [], page: { has_more: false, next_cursor: null } });
   if (url.pathname === '/admin/events') {
     if (url.searchParams.get('subject_type') === 'source' || url.searchParams.get('correlation_id')) {
       return json(response, 200, url.searchParams.get('subject_type') === 'source' ? { ...eventResponse, data: [] } : eventResponse);
@@ -227,12 +260,93 @@ const run = async () => {
       button.click();
       return true;
     })()`);
+    const screenshot = async (name) => {
+      const directory = process.env.FRONTEND_SMOKE_SCREENSHOT_DIR;
+      if (!directory) return;
+      await mkdir(directory, { recursive: true });
+      const result = await cdp.send('Page.captureScreenshot', { format: 'png' });
+      await writeFile(join(directory, `${name}.png`), Buffer.from(result.data, 'base64'));
+    };
+    const assertLocalTableLayout = async (pageId, statusText) => {
+      const result = await evaluate(`(() => {
+        const page = document.querySelector('[data-od-id="${pageId}"]');
+        const pill = [...page.querySelectorAll('[data-ui="status-pill"]')].find(el => el.textContent === ${JSON.stringify(statusText)});
+        return {
+          overflow: document.documentElement.scrollWidth > innerWidth + 1,
+          statusHeight: pill?.getBoundingClientRect().height,
+          overflowingCells: [...page.querySelectorAll('tbody td')].filter(el => el.scrollWidth > el.clientWidth + 1).map(el => ({ column: el.cellIndex, text: el.textContent, width: el.clientWidth, content: el.scrollWidth })),
+        };
+      })()`);
+      if (result.overflow) throw new Error(`${pageId} overflows the viewport`);
+      if (!result.statusHeight || result.statusHeight > 32) throw new Error(`${pageId} short status wraps: ${JSON.stringify(result)}`);
+      if (result.overflowingCells.length) throw new Error(`${pageId} cell content overlaps: ${JSON.stringify(result.overflowingCells)}`);
+    };
 
     await waitFor(`document.body.textContent.includes('events_query_failed')`, 'initial runtime-event failure');
     if (!(await evaluate(`Boolean(document.querySelector('section[aria-label="运行事件筛选"]'))`))) throw new Error('Runtime event filters disappeared after failure');
     if (!(await setInput('关联 / 操作 ID', 'req-browser'))) throw new Error('Correlation field not found');
     if (!(await clickButton('应用'))) throw new Error('Apply button not found');
-    await waitFor(`document.body.textContent.includes('request.failed') && !document.body.textContent.includes('events_query_failed')`, 'runtime-event recovery');
+    await waitFor(`document.body.textContent.includes('Synthetic upstream rate limit') && !document.body.textContent.includes('events_query_failed')`, 'runtime-event recovery');
+    await assertLocalTableLayout('page-runtime-events', '错误');
+    if (await evaluate(`document.querySelector('[data-od-id="page-runtime-events"]').textContent.includes('postgresql_unified_read_model')`)) throw new Error('Internal read model leaked into the event list');
+    await screenshot('runtime-events-desktop');
+
+    await evaluate(`document.querySelector('[data-od-id="page-runtime-events"] tbody button').click()`);
+    await waitFor(`Boolean(document.querySelector('[role="dialog"]'))`, 'runtime event drawer');
+    if (!(await clickButton('查看请求详情'))) throw new Error('Request detail navigation missing');
+    await waitFor(`location.hash === '#events?request_id=req-browser' && Boolean(document.querySelector('[data-od-id="event-drawer"]'))`, 'historical request detail');
+    if (!(await evaluate(`document.querySelector('[data-od-id="event-drawer"]').textContent.includes('Synthetic upstream rate limit')`))) throw new Error('Deep-linked request details lost server data');
+    await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape' });
+    await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape' });
+    await waitFor(`!document.querySelector('[role="dialog"]') && location.hash === '#events'`, 'request detail close');
+
+    await evaluate(`location.hash = '#settings'`);
+    await waitFor(`document.body.textContent.includes('codex-long-key-name')`, 'settings page');
+    if (!(await clickButton('重新加载运行时'))) throw new Error('Runtime reload missing');
+    await waitFor(`document.querySelector('[data-od-id="page-settings"]').textContent.includes('108')`, 'runtime reload result');
+    snapshotRevision = 109;
+    if (!(await clickButton('刷新'))) throw new Error('Settings refresh missing');
+    await waitFor(`document.querySelector('[data-od-id="page-settings"]').textContent.includes('109')`, 'fresh snapshot after reload');
+    await evaluate(`document.querySelector('[role="status"] button')?.click()`);
+    await waitFor(`!document.querySelector('[role="status"] button')`, 'notification exit');
+    await assertLocalTableLayout('page-settings', '已启用');
+    const actionRows = await evaluate(`(() => {
+      const row = document.querySelector('[data-od-id="page-settings"] tbody tr');
+      return [...row.querySelectorAll('button')].map(el => el.getBoundingClientRect().top);
+    })()`);
+    if (new Set(actionRows).size !== 1) throw new Error('Key actions wrapped onto multiple rows');
+    await screenshot('settings-desktop');
+
+    await cdp.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: false });
+    await assertLocalTableLayout('page-settings', '已启用');
+    await evaluate(`document.querySelector('[data-od-id="page-settings"] table').scrollIntoView({ block: 'center' })`);
+    await screenshot('settings-mobile');
+    await evaluate(`location.hash = '#runtime-events?correlation_id=req-browser'`);
+    await waitFor(`Boolean(document.querySelector('[data-od-id="page-runtime-events"] tbody'))`, 'mobile event list');
+    await assertLocalTableLayout('page-runtime-events', '错误');
+    await evaluate(`document.querySelector('[data-od-id="page-runtime-events"] table').scrollIntoView({ block: 'center' })`);
+    await screenshot('runtime-events-mobile');
+    await evaluate(`localStorage.setItem('my-ai-gateway-language', 'en'); localStorage.setItem('my-ai-gateway-theme', JSON.stringify({ state: { mode: 'dark', style: 'nebula' }, version: 0 }))`);
+    await cdp.send('Page.reload');
+    await waitFor(`document.documentElement.dataset.colorScheme === 'dark' && document.body.textContent.includes('Request failed')`, 'dark English runtime events');
+    await assertLocalTableLayout('page-runtime-events', 'Error');
+    await evaluate(`document.querySelector('[data-od-id="page-runtime-events"] table').scrollIntoView({ block: 'center' })`);
+    await screenshot('runtime-events-dark-en-mobile');
+    await evaluate(`document.querySelector('[aria-label="Runtime events"]').scrollLeft = 500`);
+    const eventActionVisible = await evaluate(`(() => { const rect = document.querySelector('[data-od-id="page-runtime-events"] tbody button').getBoundingClientRect(); return rect.left >= 0 && rect.right <= innerWidth; })()`);
+    if (!eventActionVisible) throw new Error('Mobile event action disappeared during horizontal scrolling');
+    await screenshot('runtime-events-dark-en-mobile-context');
+    await evaluate(`location.hash = '#settings'`);
+    await waitFor(`document.body.textContent.includes('codex-long-key-name')`, 'dark English settings');
+    await assertLocalTableLayout('page-settings', 'Active');
+    await evaluate(`document.querySelector('[data-od-id="page-settings"] table').scrollIntoView({ block: 'center' })`);
+    await screenshot('settings-dark-en-mobile');
+    await evaluate(`document.querySelector('[aria-label="Virtual keys table"]').scrollLeft = 10000`);
+    await screenshot('settings-dark-en-mobile-actions');
+    await evaluate(`localStorage.setItem('my-ai-gateway-language', 'zh')`);
+    await cdp.send('Page.reload');
+    await waitFor(`document.body.textContent.includes('系统设置')`, 'restore Chinese');
+    await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
 
     await evaluate(`location.hash = '#sources/source-a/edit'`);
     await waitFor(`document.querySelector('#source-displayName')?.value === 'Source A'`, 'source A edit page');
@@ -250,7 +364,7 @@ const run = async () => {
     await waitFor(`!document.querySelector('[role="dialog"]')`, 'Escape close');
     if (!(await evaluate(`document.activeElement?.textContent.trim() === '网关连接'`))) throw new Error('Focus did not return after Escape');
 
-    console.log('browser smoke passed: error recovery, source isolation, route focus, Portal/Escape');
+    console.log('browser smoke passed: event recovery/context/detail navigation, snapshot refresh, desktop/mobile table layout, source isolation, route focus, Portal/Escape');
   } finally {
     cdp?.close();
     if (chrome.exitCode === null) {

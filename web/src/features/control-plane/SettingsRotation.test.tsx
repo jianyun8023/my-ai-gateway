@@ -2,7 +2,7 @@
 import { act } from 'react';
 import { createRoot } from '@/test/render';
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
-import { GatewayAdminResources, type VirtualKey } from '@/admin-api';
+import { GatewayAdminResources, type CapabilityMatrixResponse, type VirtualKey } from '@/admin-api';
 import type { AdminTransport } from '@/admin-api/client';
 import { setTestLanguage } from '@/test/setup';
 import { SettingsPage } from './SettingsPage';
@@ -20,6 +20,8 @@ describe('Virtual Key rotation', () => {
   let root: ReturnType<typeof createRoot>;
   let keys: VirtualKey[];
   let overlapUntil: string | null;
+  let capabilities: CapabilityMatrixResponse;
+  let failCapabilitiesRefresh = false;
   let rotate: Mock<(init?: RequestInit) => Promise<RotateResult>>;
   let json: Mock<AdminTransport['json']>;
 
@@ -31,13 +33,24 @@ describe('Virtual Key rotation', () => {
     root = createRoot(container);
     keys = [{ ...baseKey }];
     overlapUntil = new Date(Date.now() + 3600000).toISOString();
+    failCapabilitiesRefresh = false;
+    capabilities = {
+      version: 'v1', fact_source: 'runtime_snapshot', snapshot_revision: 1,
+      snapshot_generated_at: baseKey.created_at, data: [],
+    };
     rotate = vi.fn<(init?: RequestInit) => Promise<RotateResult>>(async () => {
       keys = [{ ...baseKey, replaced_by_id: 10, overlap_until: overlapUntil }, { ...baseKey, id: 10, key_recoverable: true }];
       return { old_id: 9, new_id: 10, key_prefix: 'gw_new', key: secret, overlap_until: overlapUntil };
     });
     json = vi.fn(async (path: string, init?: RequestInit) => {
       if (path === '/admin/keys') return { data: keys };
-      if (path === '/admin/capabilities') return { data: [], fact_source: 'runtime_snapshot', snapshot_revision: 1, snapshot_generated_at: baseKey.created_at };
+      if (path === '/admin/capabilities') {
+        if (failCapabilitiesRefresh) throw { code: 'capabilities_refresh_failed', message: 'Synthetic capabilities refresh failure', status: 503 };
+        return capabilities;
+      }
+      if (path === '/admin/config/reload') return {
+        status: 'reloaded', snapshot_revision: 2, snapshot_generated_at: '2026-09-02T00:00:00Z',
+      };
       if (path === '/admin/keys/9/rotate') return rotate(init);
       throw new Error(`Unexpected request ${path}`);
     }) as unknown as Mock<AdminTransport['json']>;
@@ -209,5 +222,51 @@ describe('Virtual Key rotation', () => {
     await act(async () => vi.advanceTimersByTime(1000));
     expect(container.textContent).toContain('已轮换');
     expect(container.textContent).not.toContain('重叠期');
+  });
+
+  it('renders every snapshot field from the refreshed capabilities query after a reload', async () => {
+    await render();
+    await waitFor(() => container.textContent?.includes('运行时版本 1') ?? false);
+    capabilities = {
+      ...capabilities,
+      snapshot_revision: 3,
+      snapshot_generated_at: '2026-09-03T00:00:00Z',
+      data: [{ route_id: 'route-a' }] as CapabilityMatrixResponse['data'],
+    };
+
+    await act(async () => button('重新加载运行时').click());
+    await waitFor(() => container.textContent?.includes('运行时版本 3') ?? false);
+
+    expect(container.textContent).toContain(formatDateTime(capabilities.snapshot_generated_at));
+    expect(container.textContent).toContain('1 条能力条目');
+    expect(container.textContent).not.toContain('运行时版本 2');
+    expect(json.mock.calls.filter(([path]) => path === '/admin/capabilities')).toHaveLength(2);
+  });
+
+  it('keeps the published snapshot when post-reload refresh fails', async () => {
+    await render();
+    await waitFor(() => container.textContent?.includes('运行时版本 1') ?? false);
+    failCapabilitiesRefresh = true;
+
+    await act(async () => button('重新加载运行时').click());
+    await waitFor(() => container.querySelector('[role="alert"]')?.textContent?.includes('capabilities_refresh_failed') ?? false);
+
+    expect(container.textContent).toContain('运行时版本 1');
+    expect(container.textContent).toContain(formatDateTime(baseKey.created_at));
+    expect(container.textContent).not.toContain('运行时版本 2');
+  });
+
+  it('keeps each virtual-key timestamp as date and time lines', async () => {
+    keys = [{ ...baseKey, last_used_at: '2026-09-02T12:34:56Z' }];
+    await render();
+    await waitFor(() => container.querySelector('tbody')?.textContent?.includes('editor') ?? false);
+
+    const timestamps = container.querySelectorAll<HTMLTimeElement>('time');
+    expect(timestamps).toHaveLength(2);
+    for (const timestamp of timestamps) {
+      expect(timestamp.dateTime).toMatch(/^2026-09/);
+      expect(timestamp.querySelectorAll('span')).toHaveLength(2);
+      expect(timestamp.textContent).toContain('2026');
+    }
   });
 });

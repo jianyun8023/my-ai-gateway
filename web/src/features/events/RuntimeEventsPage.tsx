@@ -30,6 +30,7 @@ import { TableScroll } from '@/components/ui/TableScroll';
 import { useAdminQuery } from '@/hooks/useAdminQuery';
 import type { QuerySession } from '@/hooks/useQuerySession';
 import { formatDateTime } from '@/utils/format';
+import { sourceRouteHash, upstreamQuotaRouteHash, usageEventRouteHash } from '@/lib/consoleNavigation';
 import { Table } from '@mantine/core';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -100,6 +101,24 @@ const levelTone = (level: RuntimeEventLevel): StatusTone => {
   return 'accent';
 };
 
+const detailText = (event: RuntimeEventRecord, key: string): string | undefined => {
+  const value = event.details[key];
+  return typeof value === 'string' && value.trim() ? value : typeof value === 'number' ? String(value) : undefined;
+};
+
+function CopyableId({ label, value }: { label: string; value?: string | null }) {
+  const { t } = useTranslation('console');
+  const [result, setResult] = useState<'copied' | 'failed'>();
+  if (!value) return <DetailItem label={label}>—</DetailItem>;
+  return <DetailItem label={label}>
+    <span className={styles.copyId}><code>{value}</code><Button size="sm" variant="ghost" onClick={async () => {
+      try { await navigator.clipboard.writeText(value); setResult('copied'); }
+      catch { setResult('failed'); }
+    }}>{t('runtimeEvents.copy_id')}</Button></span>
+    {result && <span role="status" className={styles.copyFeedback}>{t(`runtimeEvents.copy_${result}`)}</span>}
+  </DetailItem>;
+}
+
 function QueryError({ error, retry }: { error: AdminErrorShape; retry: () => void }) {
   const { t } = useTranslation('console');
   return (
@@ -110,9 +129,13 @@ function QueryError({ error, retry }: { error: AdminErrorShape; retry: () => voi
   );
 }
 
-function EventDetails({ event, onClose }: { event: RuntimeEventRecord; onClose: () => void }) {
+function EventDetails({ event, onClose, onRelated }: { event: RuntimeEventRecord; onClose: () => void; onRelated: (id: string) => void }) {
   const { t } = useTranslation('console');
   const [open, setOpen] = useState(true);
+  const [related, setRelated] = useState<string>();
+  const sourceId = detailText(event, 'source_id') ?? (event.subject_type === 'source' ? event.subject_id : undefined);
+  const accountId = detailText(event, 'account_id') ?? (event.subject_type === 'account' ? event.subject_id : undefined);
+  const requestId = event.subject_type === 'request' ? event.subject_id : undefined;
   return (
     <Modal
       open={open}
@@ -120,25 +143,34 @@ function EventDetails({ event, onClose }: { event: RuntimeEventRecord; onClose: 
       width={620}
       title={t('runtimeEvents.detail_title')}
       onClose={() => setOpen(false)}
-      onExitTransitionEnd={onClose}
+      onExitTransitionEnd={() => { onClose(); if (related) onRelated(related); }}
       footer={<Button variant="secondary" onClick={() => setOpen(false)}>{t('common.close')}</Button>}
     >
       <DetailList>
-        <DetailItem label={t('runtimeEvents.event_id')}><code>{event.event_id}</code></DetailItem>
+        <CopyableId label={t('runtimeEvents.event_id')} value={event.event_id} />
         <DetailItem label={t('runtimeEvents.occurred_at')}><time dateTime={event.occurred_at}>{formatDateTime(event.occurred_at)}</time></DetailItem>
         <DetailItem label={t('runtimeEvents.level')}><StatusPill tone={levelTone(event.level)}>{t(`runtimeEvents.levels.${event.level}`)}</StatusPill></DetailItem>
         <DetailItem label={t('runtimeEvents.category')}><StatusPill>{t(`runtimeEvents.categories.${event.category}`)}</StatusPill></DetailItem>
-        <DetailItem label={t('runtimeEvents.event_type')}><code>{event.event_type}</code></DetailItem>
+        <DetailItem label={t('runtimeEvents.event_type')}>{t(`runtimeEvents.eventTypes.${event.event_type}`, { defaultValue: event.event_type })}</DetailItem>
         <DetailItem label={t('runtimeEvents.message')}>{event.message}</DetailItem>
-        <DetailItem label={t('runtimeEvents.subject_type')}><code>{event.subject_type}</code></DetailItem>
-        <DetailItem label={t('runtimeEvents.subject_id')}><code>{event.subject_id ?? '—'}</code></DetailItem>
-        <DetailItem label={t('runtimeEvents.correlation_id')}><code>{event.correlation_id ?? '—'}</code></DetailItem>
-        <DetailItem label={t('runtimeEvents.fact_source')}><code>{event.source}</code></DetailItem>
+        <CopyableId label={t('runtimeEvents.subject_id')} value={event.subject_id} />
+        <CopyableId label={t('runtimeEvents.correlation_id')} value={event.correlation_id} />
+        <DetailItem label={t('runtimeEvents.fact_source')}>{t(`runtimeEvents.sources.${event.source}`, { defaultValue: event.source })}</DetailItem>
       </DetailList>
-      <section className={styles.detailsSection}>
-        <h3>{t('runtimeEvents.details')}</h3>
+      <div className={styles.detailActions}>
+        {event.correlation_id && event.correlation_id !== '[REDACTED]' && <Button size="sm" variant="secondary" onClick={() => { setRelated(event.correlation_id!); setOpen(false); }}>{t('runtimeEvents.related_events')}</Button>}
+        {sourceId && <Button size="sm" variant="secondary" onClick={() => { window.location.hash = sourceRouteHash(sourceId); }}>{t('runtimeEvents.open_source')}</Button>}
+        {accountId && <Button size="sm" variant="secondary" onClick={() => { window.location.hash = upstreamQuotaRouteHash(accountId); }}>{t('runtimeEvents.open_account_quota')}</Button>}
+        {requestId && <Button size="sm" variant="secondary" onClick={() => { window.location.hash = usageEventRouteHash(requestId); }}>{t('runtimeEvents.open_request')}</Button>}
+      </div>
+      <details className={styles.detailsSection}>
+        <summary>{t('runtimeEvents.technical_details')}</summary>
+        <DetailList>
+          <DetailItem label={t('runtimeEvents.event_type')}><code>{event.event_type}</code></DetailItem>
+          <DetailItem label={t('runtimeEvents.subject_type')}><code>{event.subject_type}</code></DetailItem>
+        </DetailList>
         <pre>{JSON.stringify(event.details, null, 2)}</pre>
-      </section>
+      </details>
     </Modal>
   );
 }
@@ -154,6 +186,7 @@ export function RuntimeEventsPage({ api, refreshRevision = 0, onBusyChange, init
   const [filters, setFilters] = useState<RuntimeEventFilters>(() => appliedFilters(initialDraft));
   const [timeRangeError, setTimeRangeError] = useState('');
   const [selected, setSelected] = useState<RuntimeEventRecord>();
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
   const [appended, setAppended] = useState<AppendedPageState>({ data: [], hasMore: false });
   const [loadingMoreSession, setLoadingMoreSession] = useState<QuerySession<RuntimeEventResponse>>();
   const [loadMoreError, setLoadMoreError] = useState<{ session: QuerySession<RuntimeEventResponse>; error: AdminErrorShape }>();
@@ -240,11 +273,7 @@ export function RuntimeEventsPage({ api, refreshRevision = 0, onBusyChange, init
     <section className={styles.page} data-od-id="page-runtime-events">
       <div className={styles.pageActions}>
         <div className={styles.feedMeta}>
-          {response && <>
-            <StatusPill tone="accent">{response.version}</StatusPill>
-            <StatusPill>{response.fact_source}</StatusPill>
-            <span>{t('runtimeEvents.range', { boundary: response.range.boundary })}</span>
-          </>}
+          <span>{t('runtimeEvents.local_time', { timezone })}</span>
         </div>
         <Button variant="secondary" onClick={reload} loading={query.refreshing}>
           <IconRefreshCw size={14} />{t('runtimeEvents.refresh')}
@@ -305,25 +334,23 @@ export function RuntimeEventsPage({ api, refreshRevision = 0, onBusyChange, init
             <Table className={styles.table}>
               <Table.Thead>
                 <Table.Tr>
+                  <Table.Th scope="col">{t('common.actions')}</Table.Th>
                   <Table.Th scope="col">{t('runtimeEvents.column_time')}</Table.Th>
                   <Table.Th scope="col">{t('runtimeEvents.column_level')}</Table.Th>
                   <Table.Th scope="col">{t('runtimeEvents.column_event')}</Table.Th>
-                  <Table.Th scope="col">{t('runtimeEvents.column_subject')}</Table.Th>
-                  <Table.Th scope="col">{t('runtimeEvents.column_correlation')}</Table.Th>
+                  <Table.Th scope="col">{t('runtimeEvents.column_context')}</Table.Th>
                   <Table.Th scope="col">{t('runtimeEvents.column_source')}</Table.Th>
-                  <Table.Th scope="col">{t('common.actions')}</Table.Th>
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
                 {rows.map((event) => (
                   <Table.Tr key={event.event_id}>
+                    <Table.Td><IconButton label={t('runtimeEvents.view_aria', { id: event.event_id })} onClick={() => setSelected(event)}><IconEye size={16} /></IconButton></Table.Td>
                     <Table.Td><time dateTime={event.occurred_at}>{formatDateTime(event.occurred_at)}</time></Table.Td>
                     <Table.Td><StatusPill tone={levelTone(event.level)}>{t(`runtimeEvents.levels.${event.level}`)}</StatusPill></Table.Td>
-                    <Table.Td><span className={styles.eventCell}><strong><code>{event.event_type}</code></strong><small>{event.message}</small><StatusPill>{t(`runtimeEvents.categories.${event.category}`)}</StatusPill></span></Table.Td>
-                    <Table.Td><span className={styles.stack}><code>{event.subject_type}</code><small>{event.subject_id ?? '—'}</small></span></Table.Td>
-                    <Table.Td><code className={styles.breakable}>{event.correlation_id ?? '—'}</code></Table.Td>
-                    <Table.Td><code>{event.source}</code></Table.Td>
-                    <Table.Td><IconButton label={t('runtimeEvents.view_aria', { id: event.event_id })} onClick={() => setSelected(event)}><IconEye size={16} /></IconButton></Table.Td>
+                    <Table.Td><span className={styles.eventCell}><strong>{t(`runtimeEvents.eventTypes.${event.event_type}`, { defaultValue: event.event_type })}</strong><small>{detailText(event, 'error_summary') ?? event.message}</small><StatusPill>{t(`runtimeEvents.categories.${event.category}`, { defaultValue: event.category })}</StatusPill></span></Table.Td>
+                    <Table.Td><span className={styles.stack}>{detailText(event, 'status_code') && <strong>HTTP {detailText(event, 'status_code')}</strong>}{detailText(event, 'logical_model') && <span>{t('runtimeEvents.model_context', { model: detailText(event, 'logical_model') })}</span>}{detailText(event, 'source_id') && <small>{t('runtimeEvents.source_context', { source: detailText(event, 'source_id') })}</small>}{detailText(event, 'account_id') && <small>{t('runtimeEvents.account_context', { account: detailText(event, 'account_id') })}</small>}{!detailText(event, 'status_code') && !detailText(event, 'logical_model') && !detailText(event, 'source_id') && !detailText(event, 'account_id') && <span>{event.subject_id && event.subject_id !== event.correlation_id ? event.subject_id : '—'}</span>}</span></Table.Td>
+                    <Table.Td>{t(`runtimeEvents.sources.${event.source}`, { defaultValue: event.source })}</Table.Td>
                   </Table.Tr>
                 ))}
               </Table.Tbody>
@@ -338,7 +365,7 @@ export function RuntimeEventsPage({ api, refreshRevision = 0, onBusyChange, init
         )}
       </Card>
 
-      {selected && <EventDetails key={selected.event_id} event={selected} onClose={() => setSelected(undefined)} />}
+      {selected && <EventDetails key={selected.event_id} event={selected} onClose={() => setSelected(undefined)} onRelated={(id) => { const next = { ...EMPTY_FILTERS, correlationId: id }; clearPagination(); setDraft(next); setFilters(appliedFilters(next)); }} />}
     </section>
   );
 }

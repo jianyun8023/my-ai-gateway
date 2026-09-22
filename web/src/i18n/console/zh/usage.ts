@@ -196,6 +196,8 @@ export const usage = {
 
   // —— 事件详情抽屉 ——
   detail: {
+    request_loading: '正在加载请求 {{id}}…',
+    request_load_failed: '无法加载请求 {{id}}',
     aria: '请求事件详情',
     kicker: '请求事件',
     section_basic: '基本信息',

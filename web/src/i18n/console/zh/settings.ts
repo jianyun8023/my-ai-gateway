@@ -49,8 +49,12 @@ export const settings = {
   snapshot_field: {
     revision: '版本',
     generated_at: '生成时间',
-    fact_source: '事实来源',
-    published_rows: '已发布行',
+    fact_source: '配置来源',
+    published_entries: '能力矩阵',
+  },
+  snapshot_value: {
+    runtime_snapshot: '当前生效的运行配置',
+    published_entries: '{{count}} 条能力条目',
   },
 
   // 虚拟密钥表

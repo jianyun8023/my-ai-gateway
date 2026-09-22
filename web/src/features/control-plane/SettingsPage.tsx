@@ -8,7 +8,6 @@ import type {
   AdminErrorShape,
   CapabilityMatrixResponse,
   GatewayAdminResources,
-  RuntimeReloadResult,
   VirtualKey,
   VirtualKeyRotateInput,
 } from '@/admin-api';
@@ -40,6 +39,7 @@ import { useLocalizedApiError } from '@/hooks/useLocalizedApiError';
 import { formatDateTime } from '@/utils/format';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import pageStyles from './SettingsPage.module.scss';
 
 interface SettingsPageProps {
   api: GatewayAdminResources;
@@ -61,6 +61,14 @@ interface RevealedKeyResult {
   message?: string;
 }
 
+function KeyTimestamp({ value }: { value?: string | null }) {
+  if (!value || Number.isNaN(Date.parse(value))) return <span className={pageStyles.keyTimestamp}>{formatDateTime(value)}</span>;
+  return <time dateTime={value} className={pageStyles.keyTimestamp}>
+    <span>{formatDateTime(value, { dateStyle: 'medium' })}</span>
+    <span>{formatDateTime(value, { timeStyle: 'medium' })}</span>
+  </time>;
+}
+
 export function SettingsPage({
   api,
   refreshRevision = 0,
@@ -79,7 +87,6 @@ export function SettingsPage({
   const [now, setNow] = useState(Date.now);
   const [mutationBusy, setMutationBusy] = useState(false);
   const [mutationError, setMutationError] = useState<AdminErrorShape>();
-  const [reloadResult, setReloadResult] = useState<RuntimeReloadResult>();
 
   const revealPendingKey = () => {
     const result = pendingRevealedKey.current;
@@ -184,8 +191,7 @@ export function SettingsPage({
 
   const reloadRuntime = () => {
     void mutate(async () => {
-      const result = await api.reloadRuntime();
-      setReloadResult(result);
+      await api.reloadRuntime();
       query.reload();
     }, t('settings.runtime_reloaded'));
   };
@@ -202,13 +208,13 @@ export function SettingsPage({
   if (query.error && !data) return <ErrorState error={query.error} onRetry={query.reload} />;
   if (!data) return null;
 
-  const snapshotRevision = reloadResult?.snapshot_revision ?? data.capabilities.snapshot_revision;
-  const snapshotGeneratedAt = reloadResult?.snapshot_generated_at ?? data.capabilities.snapshot_generated_at;
+  const snapshotRevision = data.capabilities.snapshot_revision;
+  const snapshotGeneratedAt = data.capabilities.snapshot_generated_at;
 
   return (
     <section className={styles.page} data-od-id="page-settings">
       <PageActions>
-        <div className={styles.snapshotMeta}>
+        <div className={pageStyles.snapshotMeta}>
           <span><strong>{t('settings.resources_card')}</strong></span>
           <StatusPill tone="accent">{t('settings.runtime_revision', { revision: snapshotRevision })}</StatusPill>
         </div>
@@ -217,35 +223,35 @@ export function SettingsPage({
       {query.error && <ErrorState error={query.error} onRetry={query.reload} />}
       {mutationError && !createOpen && !revokeTarget && !rotateTarget && <ErrorState error={mutationError} />}
 
-      <div className={styles.settingsGrid}>
-        <Card title={t('settings.card.key_session')} subtitle={t('settings.card.key_session_subtitle')}>
-          <div className={styles.settingsStatus}>
+      <div className={pageStyles.settingsGrid}>
+        <Card className={pageStyles.overviewCard} title={t('settings.card.key_session')} subtitle={t('settings.card.key_session_subtitle')}>
+          <div className={pageStyles.settingsStatus}>
             <IconShield size={20} />
             <span><strong>{adminKeyConfigured ? t('settings.card.key_configured') : t('settings.card.key_not_configured')}</strong>{!adminKeyConfigured && <small>{t('settings.card.key_hint')}</small>}</span>
           </div>
-          <div className={styles.cardActions}>
+          <div className={pageStyles.cardActions}>
             <Button variant="secondary" onClick={() => { onClearAdminKey(); notifySuccess(t('settings.key_cleared')); }} disabled={!adminKeyConfigured}>{t('settings.clear_key')}</Button>
           </div>
         </Card>
 
-        <Card title={t('settings.card.runtime')}>
-          <DetailList>
+        <Card className={pageStyles.overviewCard} title={t('settings.card.runtime')}>
+          <DetailList layout="grid">
             <DetailItem label={t('settings.snapshot_field.revision')}><code>{snapshotRevision}</code></DetailItem>
             <DetailItem label={t('settings.snapshot_field.generated_at')}>{formatDateTime(snapshotGeneratedAt)}</DetailItem>
-            <DetailItem label={t('settings.snapshot_field.fact_source')}><StatusPill tone="accent">{data.capabilities.fact_source}</StatusPill></DetailItem>
-            <DetailItem label={t('settings.snapshot_field.published_rows')}>{data.capabilities.data.length}</DetailItem>
+            <DetailItem label={t('settings.snapshot_field.fact_source')}><StatusPill tone="accent">{t(`settings.snapshot_value.${data.capabilities.fact_source}`)}</StatusPill></DetailItem>
+            <DetailItem label={t('settings.snapshot_field.published_entries')}>{t('settings.snapshot_value.published_entries', { count: data.capabilities.data.length })}</DetailItem>
           </DetailList>
-          <div className={styles.cardActions}>
+          <div className={pageStyles.cardActions}>
             <Button variant="secondary" onClick={reloadRuntime} loading={mutationBusy}><IconDatabase size={14} />{t('settings.reload_runtime')}</Button>
           </div>
         </Card>
 
-        <Card title={t('settings.card.export')}>
-          <div className={styles.settingsStatus}>
+        <Card className={pageStyles.overviewCard} title={t('settings.card.export')}>
+          <div className={pageStyles.settingsStatus}>
             <IconDownload size={20} />
             <span><strong>{t('settings.card.export_redacted')}</strong><small>{t('settings.card.export_redacted_hint')}</small></span>
           </div>
-          <div className={styles.cardActions}>
+          <div className={pageStyles.cardActions}>
             <Button variant="secondary" onClick={exportConfiguration} loading={mutationBusy}><IconDownload size={14} />{t('settings.export_json')}</Button>
           </div>
         </Card>
@@ -254,7 +260,16 @@ export function SettingsPage({
       <Card variant="flush" title={t('settings.card.keys')} extra={<Button size="sm" variant="primary" onClick={() => setCreateOpen(true)}><IconPlus size={14} />{t('settings.new_key')}</Button>}>
         {data.keys.length === 0 ? <EmptyTable title={t('settings.keys_empty')} /> : (
           <TableScroll label={t('settings.keys_table_aria')}>
-            <Table className={styles.table}>
+            <Table className={`${styles.table} ${pageStyles.keysTable}`}>
+              <colgroup>
+                <col className={pageStyles.keyNameColumn} />
+                <col className={pageStyles.keyPrefixColumn} />
+                <col className={pageStyles.keyModelsColumn} />
+                <col className={pageStyles.keyTimeColumn} />
+                <col className={pageStyles.keyTimeColumn} />
+                <col className={pageStyles.keyStatusColumn} />
+                <col className={pageStyles.keyActionsColumn} />
+              </colgroup>
               <Table.Thead><Table.Tr><Table.Th scope="col">{t('settings.keys_column.name')}</Table.Th><Table.Th scope="col">{t('settings.keys_column.prefix')}</Table.Th><Table.Th scope="col">{t('settings.keys_column.allowed_models')}</Table.Th><Table.Th scope="col">{t('settings.keys_column.created')}</Table.Th><Table.Th scope="col">{t('settings.keys_column.last_used')}</Table.Th><Table.Th scope="col">{t('settings.keys_column.status')}</Table.Th><Table.Th scope="col">{t('common.actions')}</Table.Th></Table.Tr></Table.Thead>
               <Table.Tbody>{data.keys.map((key) => {
                 const expired = Boolean(key.expires_at && Date.parse(key.expires_at) <= now);
@@ -267,12 +282,12 @@ export function SettingsPage({
                 return (
                 <Table.Tr key={key.id}>
                   <Table.Td><span className={styles.primaryText}><strong>{key.name}</strong><small>{t('settings.row_id', { id: key.id })}</small></span></Table.Td>
-                  <Table.Td><code>{key.key_prefix}…</code></Table.Td>
-                  <Table.Td>{key.allowed_models.length === 0 ? <StatusPill>{t('settings.all_models')}</StatusPill> : <span className={styles.inlineActions}>{key.allowed_models.map((model) => <StatusPill key={model}>{model}</StatusPill>)}</span>}</Table.Td>
-                  <Table.Td>{formatDateTime(key.created_at)}</Table.Td>
-                  <Table.Td>{formatDateTime(key.last_used_at)}</Table.Td>
-                  <Table.Td><span className={styles.primaryText}><StatusPill tone={status === 'active' ? 'success' : status === 'overlap' ? 'warning' : 'muted'}>{t(`settings.key_status.${status}`)}</StatusPill>{overlapActive && status === 'overlap' && <small>{t('settings.valid_until', { until: formatDateTime(validUntil) })}</small>}</span></Table.Td>
-                  <Table.Td><span className={styles.inlineActions}>
+                  <Table.Td><code className={pageStyles.keyPrefix}>{key.key_prefix}…</code></Table.Td>
+                  <Table.Td>{key.allowed_models.length === 0 ? <StatusPill>{t('settings.all_models')}</StatusPill> : <span className={pageStyles.allowedModels}>{key.allowed_models.map((model) => <StatusPill key={model}>{model}</StatusPill>)}</span>}</Table.Td>
+                  <Table.Td className={pageStyles.keyTime}><KeyTimestamp value={key.created_at} /></Table.Td>
+                  <Table.Td className={pageStyles.keyTime}><KeyTimestamp value={key.last_used_at} /></Table.Td>
+                  <Table.Td><span className={`${styles.primaryText} ${pageStyles.keyStatus}`}><StatusPill className={pageStyles.keyStatusPill} tone={status === 'active' ? 'success' : status === 'overlap' ? 'warning' : 'muted'}>{t(`settings.key_status.${status}`)}</StatusPill>{overlapActive && status === 'overlap' && <small>{t('settings.valid_until', { until: formatDateTime(validUntil) })}</small>}</span></Table.Td>
+                  <Table.Td><span className={pageStyles.keyActions}>
                     <IconButton label={key.key_recoverable ? t('settings.view_key_aria', { name: key.name }) : t('settings.view_key_unavailable_aria', { name: key.name })} disabled={mutationBusy || !key.key_recoverable} onClick={() => revealKey(key)}><IconEye size={16} /></IconButton>
                     <IconButton label={t('settings.rotate_key_aria', { name: key.name })} disabled={mutationBusy || status !== 'active'} onClick={() => { setMutationError(undefined); setRotateTarget(key); }}><IconRefreshCw size={16} /></IconButton>
                     <IconButton label={t('settings.revoke_key_aria', { name: key.name })} className={styles.dangerIcon} disabled={!key.enabled || Boolean(key.revoked_at)} onClick={() => setRevokeTarget(key)}><IconTrash2 size={16} /></IconButton>

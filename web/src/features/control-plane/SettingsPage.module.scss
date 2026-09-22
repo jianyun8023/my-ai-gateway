@@ -1,0 +1,139 @@
+.snapshotMeta {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.snapshotMeta > span:first-child {
+  margin-inline-end: 4px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+.settingsGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: start;
+  gap: 12px;
+}
+
+.overviewCard {
+  --keeper-card-padding: 14px 16px;
+  --keeper-card-header-padding-top: 14px;
+  --keeper-card-header-padding-bottom: 12px;
+}
+
+.settingsStatus {
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.settingsStatus > svg {
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+
+.settingsStatus > span {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.settingsStatus strong,
+.settingsStatus small {
+  overflow-wrap: anywhere;
+}
+
+.settingsStatus small {
+  color: var(--text-secondary);
+  font-size: var(--fs-small);
+  line-height: 1.5;
+}
+
+.cardActions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.keysTable {
+  width: 100%;
+  min-width: 1144px;
+  table-layout: fixed;
+}
+
+.keysTable th {
+  white-space: nowrap;
+}
+
+.keyNameColumn { width: 17%; }
+.keyPrefixColumn { width: 132px; }
+.keyModelsColumn { width: 27%; }
+.keyTimeColumn { width: 152px; }
+.keyStatusColumn { width: 136px; }
+.keyActionsColumn { width: 120px; }
+
+.keyPrefix {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.allowedModels {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.keyTime {
+  white-space: normal;
+}
+
+.keyTimestamp {
+  display: grid;
+  gap: 2px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.25;
+}
+
+.keyStatus {
+  justify-items: start;
+}
+
+.keyStatusPill {
+  max-width: none;
+  white-space: nowrap;
+}
+
+.keyStatusPill :global([class*='pillLabel']) {
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+
+.keyActions {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+@media (max-width: 920px) {
+  .settingsGrid { grid-template-columns: minmax(0, 1fr); }
+  .keyActionsColumn { width: 168px; }
+}
+
+@media (max-width: 600px) {
+  .cardActions > [data-ui='button'] { width: 100%; }
+}
