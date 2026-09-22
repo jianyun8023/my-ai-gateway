@@ -9,6 +9,7 @@ use crate::{
     domain::{catalog::PublishedModel, config::GatewayConfig, routing::RouteResolver},
     http,
     infra::{audit, db, events, health, observability, secrets},
+    proxy::settlement::SettlementManager,
 };
 
 #[derive(Clone)]
@@ -69,6 +70,7 @@ pub(crate) struct AppState {
     pub(crate) admin_auth: AdminAuth,
     pub(crate) secrets: secrets::SecretResolver,
     pub(crate) prometheus_handle: PrometheusHandle,
+    pub(crate) settlements: SettlementManager,
 }
 
 impl AppState {

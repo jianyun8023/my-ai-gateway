@@ -5,6 +5,7 @@ mod forward;
 mod ordered;
 mod policy;
 pub(crate) mod service;
+pub(crate) mod settlement;
 pub(crate) mod stream;
 pub(crate) mod transport;
 pub(crate) mod usage;

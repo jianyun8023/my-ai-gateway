@@ -1,8 +1,10 @@
+use super::settlement::SettlementPermit;
 use super::{stream, usage};
 use crate::domain::protocol::Protocol;
 use crate::infra::{db, health, observability};
 use axum::body::{Body, Bytes};
 use axum::http::Response;
+use std::future::Future;
 use std::time::{Duration, Instant};
 
 pub(super) fn is_event_stream(response: &Response<Body>) -> bool {
@@ -17,6 +19,7 @@ pub(super) fn is_event_stream(response: &Response<Body>) -> bool {
 pub(super) fn wrap_stream_usage(
     response: Response<Body>,
     database: db::Database,
+    permit: SettlementPermit,
     mut event: db::UsageEvent,
     request_body: Bytes,
     mut attempts: Vec<db::UsageAttempt>,
@@ -51,9 +54,16 @@ pub(super) fn wrap_stream_usage(
         if event.output_tokens > 0 {
             observability::record_tokens(&model, "output", event.output_tokens as u64);
         }
-        if event.error_summary.as_deref() == Some("upstream stream error") {
-            if let Some(account_id) = account_id {
-                tokio::spawn(async move {
+        permit.spawn(async move {
+            if let Err(error) = retry_usage_write(&event.request_id, || {
+                database.insert_usage_with_attempts(&event, &attempts)
+            })
+            .await
+            {
+                tracing::error!(request_id = %event.request_id, %error, "failed to persist streaming usage after retries");
+            }
+            if event.error_summary.as_deref() == Some("upstream stream error") {
+                if let Some(account_id) = account_id {
                     health
                         .mark_failure_with_details(
                             &account_id,
@@ -62,16 +72,30 @@ pub(super) fn wrap_stream_usage(
                             Some("upstream stream failed"),
                         )
                         .await;
-                });
-            }
-        }
-        tokio::spawn(async move {
-            if let Err(error) = database.insert_usage_with_attempts(&event, &attempts).await {
-                tracing::warn!(%error, "failed to persist streaming usage event");
+                }
             }
         });
     });
     Response::from_parts(parts, body)
+}
+
+async fn retry_usage_write<F, Fut, E>(request_id: &str, mut write: F) -> Result<(), E>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<(), E>>,
+    E: std::fmt::Display,
+{
+    for attempt in 1..=3 {
+        match write().await {
+            Ok(()) => return Ok(()),
+            Err(error) if attempt < 3 => {
+                tracing::warn!(request_id, %error, attempt, "retrying streaming usage write");
+                tokio::time::sleep(Duration::from_millis(100 * attempt)).await;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    unreachable!("the third attempt returns")
 }
 
 pub(crate) fn finalize_stream_usage(
@@ -126,4 +150,45 @@ pub(crate) fn finalize_stream_usage(
     event.cache_creation_tokens = report.cache_creation_tokens;
     event.total_tokens = report.total_tokens;
     event.usage_source = report.source;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::retry_usage_write;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
+    #[tokio::test]
+    async fn usage_write_retries_transient_failure() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let counter = calls.clone();
+        let result = retry_usage_write("request", move || {
+            let call = counter.fetch_add(1, Ordering::Relaxed);
+            async move {
+                if call == 0 {
+                    Err("transient")
+                } else {
+                    Ok(())
+                }
+            }
+        })
+        .await;
+        assert_eq!(result, Ok(()));
+        assert_eq!(calls.load(Ordering::Relaxed), 2);
+    }
+
+    #[tokio::test]
+    async fn usage_write_reports_permanent_failure_after_three_attempts() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let counter = calls.clone();
+        let result = retry_usage_write("request", move || {
+            counter.fetch_add(1, Ordering::Relaxed);
+            async { Err::<(), _>("database unavailable") }
+        })
+        .await;
+        assert_eq!(result, Err("database unavailable"));
+        assert_eq!(calls.load(Ordering::Relaxed), 3);
+    }
 }

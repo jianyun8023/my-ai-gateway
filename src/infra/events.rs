@@ -904,6 +904,7 @@ mod tests {
             admin_auth: AdminAuth::test(),
             secrets: SecretResolver::empty(),
             prometheus_handle: observability::prometheus_handle(),
+            settlements: crate::proxy::settlement::SettlementManager::default(),
         })
     }
 
@@ -1298,6 +1299,7 @@ mod tests {
             admin_auth: AdminAuth::test(),
             secrets: SecretResolver::empty(),
             prometheus_handle: observability::prometheus_handle(),
+            settlements: crate::proxy::settlement::SettlementManager::default(),
         };
         let response = crate::app::application(state)
             .oneshot(
