@@ -1,5 +1,6 @@
 import type {
   Account,
+  AccountHealthResponse,
   AccountWriteInput,
   AdminDataEnvelope,
   AdminMutationEnvelope,
@@ -107,6 +108,10 @@ export class GatewayAdminResources {
 
   async accounts(signal?: AbortSignal): Promise<Account[]> {
     return (await this.transport.json<AdminDataEnvelope<Account[]>>('/admin/accounts', { signal })).data;
+  }
+
+  health(signal?: AbortSignal): Promise<AccountHealthResponse> {
+    return this.transport.json('/admin/health', { signal });
   }
 
   async createAccount(input: AccountWriteInput, signal?: AbortSignal): Promise<AdminMutationEnvelope<Account>> {

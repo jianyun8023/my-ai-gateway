@@ -12,6 +12,7 @@ export const values = {
     degraded: '降级',
     unhealthy: '不健康',
     cooling_down: '冷却中',
+    stale: '已过期',
   },
   availability: {
     unknown: '未知',
