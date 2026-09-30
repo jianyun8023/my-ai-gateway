@@ -1190,6 +1190,135 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "requires TEST_DATABASE_URL and runs against an isolated PostgreSQL schema"]
+    async fn postgres_health_events_only_record_status_transitions() {
+        let url = std::env::var("TEST_DATABASE_URL")
+            .expect("TEST_DATABASE_URL must be set for PostgreSQL health regression");
+        let admin = PgPoolOptions::new()
+            .max_connections(2)
+            .connect(&url)
+            .await
+            .expect("connect PostgreSQL health admin pool");
+        let schema = format!("health_{}", uuid::Uuid::new_v4().simple());
+        sqlx::query(&format!("CREATE SCHEMA \"{schema}\""))
+            .execute(&admin)
+            .await
+            .expect("create isolated health schema");
+        let options = PgConnectOptions::from_str(&url)
+            .expect("parse TEST_DATABASE_URL")
+            .options([("search_path", schema.as_str())]);
+        let pool = PgPoolOptions::new()
+            .max_connections(8)
+            .connect_with(options)
+            .await
+            .expect("connect isolated health schema");
+        let database = Database::from_test_pool(pool.clone())
+            .await
+            .expect("migrate isolated health schema");
+        sqlx::query("INSERT INTO sources (id,display_name,provider_preset_id,provider_preset_version,provider_preset_snapshot,base_url,endpoints,auth_config,protocol_capabilities) VALUES ('transition-source','Transition Source','custom',1,'{}'::jsonb,'https://transition.example','{\"openai_chat_completions\":\"/chat/completions\"}'::jsonb,'{}'::jsonb,'{}'::jsonb)")
+            .execute(&pool)
+            .await
+            .expect("seed transition source");
+        sqlx::query("INSERT INTO accounts (id,source_id,display_name,enabled,weight) VALUES ('transition-account','transition-source','Transition Account',TRUE,100)")
+            .execute(&pool)
+            .await
+            .expect("seed transition account");
+
+        let clock = clock();
+        let config = HealthConfig {
+            cooldown: Duration::from_secs(30),
+            max_cooldown: Duration::from_secs(300),
+            failure_threshold: 3,
+            failure_window: Duration::from_secs(60),
+            ..HealthConfig::default()
+        };
+        let registry = HealthRegistry::with_database_config_and_clock(
+            database.clone(),
+            config,
+            Arc::new(clock.clone()),
+        );
+
+        // unknown -> healthy：首次成功是状态转换，写一条事件。
+        registry.mark_success("transition-account").await;
+        // healthy -> healthy：例行成功只刷新当前行，不写事件。
+        clock.advance(Duration::from_secs(5));
+        registry.mark_success("transition-account").await;
+        let row = database
+            .account_health("transition-account")
+            .await
+            .expect("read transition account health")
+            .expect("transition account exists");
+        assert_eq!(
+            row.last_success_at,
+            Some(clock.now()),
+            "无事件的例行成功仍必须更新 accounts 当前行"
+        );
+
+        // healthy -> unhealthy：窗口内首次失败写一条。
+        registry
+            .mark_failure_with_details(
+                "transition-account",
+                "passive",
+                Some("upstream_http_503"),
+                None,
+            )
+            .await;
+        // unhealthy 状态下的重复失败不再写事件。
+        registry
+            .mark_failure_with_details(
+                "transition-account",
+                "passive",
+                Some("upstream_http_503"),
+                None,
+            )
+            .await;
+        // 达到阈值：unhealthy -> cooling_down，写一条。
+        registry
+            .mark_failure_with_details(
+                "transition-account",
+                "passive",
+                Some("upstream_http_503"),
+                None,
+            )
+            .await;
+        // 冷却期间的重复失败不再写事件。
+        registry
+            .mark_failure_with_details(
+                "transition-account",
+                "passive",
+                Some("upstream_http_503"),
+                None,
+            )
+            .await;
+        // cooling_down -> healthy：真正的恢复，写一条。
+        registry.mark_success("transition-account").await;
+        // 恢复后的例行成功仍不写事件。
+        clock.advance(Duration::from_secs(5));
+        registry.mark_success("transition-account").await;
+
+        let statuses: Vec<String> = sqlx::query_scalar(
+            "SELECT status FROM account_health_events WHERE account_id='transition-account' ORDER BY id",
+        )
+        .fetch_all(&pool)
+        .await
+        .expect("read transition health events");
+        assert_eq!(
+            statuses,
+            ["healthy", "unhealthy", "cooling_down", "healthy"],
+            "account_health_events 只记录状态转换"
+        );
+
+        drop(registry);
+        drop(database);
+        pool.close().await;
+        sqlx::query(&format!("DROP SCHEMA \"{schema}\" CASCADE"))
+            .execute(&admin)
+            .await
+            .expect("drop isolated health schema");
+        admin.close().await;
+    }
+
+    #[tokio::test]
+    #[ignore = "requires TEST_DATABASE_URL and runs against an isolated PostgreSQL schema"]
     async fn postgres_probe_reuses_provider_preset_connection_test_without_discovery() {
         let url = std::env::var("TEST_DATABASE_URL")
             .expect("TEST_DATABASE_URL must be set for PostgreSQL probe regression");

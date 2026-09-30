@@ -292,21 +292,25 @@ impl Database {
         .bind(failure_window_started_at)
         .execute(&mut *tx)
         .await?;
-        sqlx::query(
-            "INSERT INTO account_health_events (account_id,status,source,observed_at,cooldown_until,consecutive_failures,error_code,error_message,connection_test_id,latency_ms) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
-        )
-        .bind(account_id)
-        .bind(status)
-        .bind(source)
-        .bind(observed_at)
-        .bind(cooldown_until)
-        .bind(i32::try_from(failures).unwrap_or(i32::MAX))
-        .bind(sanitize_health_code(error_code))
-        .bind(sanitize_health_error(error_message))
-        .bind(connection_test_id)
-        .bind(latency_ms)
-        .execute(&mut *tx)
-        .await?;
+        // account_health_events 是状态转换历史：只有持久化状态真正变化时才写事件，
+        // 已处于 unhealthy/cooling_down 时的重复失败只更新当前行，不向事件流追加噪声。
+        if status != current.health_status {
+            sqlx::query(
+                "INSERT INTO account_health_events (account_id,status,source,observed_at,cooldown_until,consecutive_failures,error_code,error_message,connection_test_id,latency_ms) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
+            )
+            .bind(account_id)
+            .bind(status)
+            .bind(source)
+            .bind(observed_at)
+            .bind(cooldown_until)
+            .bind(i32::try_from(failures).unwrap_or(i32::MAX))
+            .bind(sanitize_health_code(error_code))
+            .bind(sanitize_health_error(error_message))
+            .bind(connection_test_id)
+            .bind(latency_ms)
+            .execute(&mut *tx)
+            .await?;
+        }
         let cooldown_started = !active_cooldown && cooldown_until.is_some();
         tx.commit().await?;
         let health = self
@@ -360,6 +364,10 @@ impl Database {
         } else {
             "disabled"
         };
+        // 只有真正的恢复（此前不是 healthy）才写事件；健康账号上的例行成功
+        // （每次代理请求、每次周期探测）只刷新当前行，否则每次成功都会向
+        // account_health_events 追加一条 "healthy" 记录，淹没事件中心。
+        let recovered = current.health_status != status;
         sqlx::query(
             "UPDATE accounts SET health_status=$2,cooldown_until=NULL,last_error=NULL,last_success_at=$3,health_source=$4,health_updated_at=$3,consecutive_failures=0,failure_window_started_at=NULL,last_probe_at=CASE WHEN $4='probe' THEN $3 ELSE last_probe_at END,last_probe_status=CASE WHEN $4='probe' THEN 'succeeded' ELSE last_probe_status END,last_probe_error=CASE WHEN $4='probe' THEN NULL ELSE last_probe_error END WHERE id=$1",
         )
@@ -369,17 +377,19 @@ impl Database {
         .bind(source)
         .execute(&mut *tx)
         .await?;
-        sqlx::query(
-            "INSERT INTO account_health_events (account_id,status,source,observed_at,cooldown_until,consecutive_failures,connection_test_id,latency_ms) VALUES ($1,$2,$3,$4,NULL,0,$5,$6)",
-        )
-        .bind(account_id)
-        .bind(status)
-        .bind(source)
-        .bind(observed_at)
-        .bind(connection_test_id)
-        .bind(latency_ms)
-        .execute(&mut *tx)
-        .await?;
+        if recovered {
+            sqlx::query(
+                "INSERT INTO account_health_events (account_id,status,source,observed_at,cooldown_until,consecutive_failures,connection_test_id,latency_ms) VALUES ($1,$2,$3,$4,NULL,0,$5,$6)",
+            )
+            .bind(account_id)
+            .bind(status)
+            .bind(source)
+            .bind(observed_at)
+            .bind(connection_test_id)
+            .bind(latency_ms)
+            .execute(&mut *tx)
+            .await?;
+        }
         tx.commit().await?;
         self.account_health(account_id)
             .await?
