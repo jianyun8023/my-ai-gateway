@@ -95,3 +95,13 @@ docker compose --env-file .env.compose exec -T postgres \
 仓库提供 [`deploy/kubernetes/`](../deploy/kubernetes/) 作为脱敏 Kustomize 基线。它默认使用 `apps` 命名空间、`8787` 端口、Traefik Ingress 和 GHCR `main` 镜像，并依赖外部创建的数据库 Secret、Provider Secret 与 GHCR 拉取 Secret。
 
 不要直接把真实 Secret 写入该目录；请按 [`docs/kubernetes.md`](kubernetes.md) 准备外部资源后再应用清单。K3s 的实际集群入口、域名和 Argo CD 操作记录在本机私有的 `.private/k3s-deployment.md`，不会进入 Git。
+
+## 图片历史与请求体限制
+
+`/v1/chat/completions`、`/v1/responses`、`/v1/messages` 的请求体默认上限为 **32 MiB（33,554,432 bytes）**，可通过进程环境变量 `GATEWAY_MAX_REQUEST_BODY_BYTES` 调整，修改后需重启。只接受正整数字节数，`0`、空值或非法值会使启动失败；未设置时使用默认值。管理 API 保持原有独立限制。请求体包含 JSON、全部历史和 base64 图片，字节上限与模型 token/context 上限是不同约束。
+
+旧版未显式配置 Axum `Bytes` 上限，使用框架默认 2 MiB；超限会在进入代理服务之前返回纯文本 `Failed to buffer the request body: length limit exceeded`。新版超限返回 HTTP 413、协议 JSON `error.code=request_too_large` 和 `x-request-id`，不会调用上游；读取请求体失败也返回协议 JSON。启动日志会记录实际字节上限，不记录图片/正文。提高上限会增加并发请求的内存占用，32 MiB 是默认单请求限制，并非内存预算。
+
+入口反代的限制应不小于应用上限。Nginx 使用 `client_max_body_size 32m;`；ingress-nginx 使用 `nginx.ingress.kubernetes.io/proxy-body-size: "32m"`，并关闭 SSE 响应缓冲。Traefik 见 [`kubernetes.md`](kubernetes.md)；Nginx 注解不适用于 Traefik。
+
+客户端仍应压缩截图，并将已识别的信息转为文字，减少图片历史累积。网关原样转发图片与 Provider 扩展字段，不自动缩图、裁剪历史或丢弃内容；上游自身的图片、请求体和上下文限制仍然生效。

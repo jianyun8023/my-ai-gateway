@@ -1,6 +1,6 @@
 use axum::{
     body::Body,
-    extract::State,
+    extract::{DefaultBodyLimit, State},
     http::{Method, Request, Response, StatusCode},
     middleware::{self, Next},
     response::{IntoResponse, Redirect},
@@ -12,7 +12,31 @@ use tower_http::{services::ServeDir, trace::TraceLayer};
 
 use crate::{api, auth::AdminAuth, http::response::error_response, infra::audit, state::AppState};
 
+#[cfg(any(test, feature = "test-support"))]
 pub(crate) fn application(state: AppState) -> Router {
+    application_with_body_limit(state, DEFAULT_MAX_REQUEST_BODY_BYTES)
+}
+
+pub(crate) const DEFAULT_MAX_REQUEST_BODY_BYTES: usize = 32 * 1024 * 1024;
+
+pub(crate) fn max_request_body_bytes_from_env() -> Result<usize, String> {
+    match std::env::var("GATEWAY_MAX_REQUEST_BODY_BYTES") {
+        Err(std::env::VarError::NotPresent) => Ok(DEFAULT_MAX_REQUEST_BODY_BYTES),
+        Ok(raw) => raw
+            .parse::<usize>()
+            .ok()
+            .filter(|limit| *limit > 0)
+            .ok_or_else(|| {
+                "GATEWAY_MAX_REQUEST_BODY_BYTES must be a positive integer in bytes".into()
+            }),
+        Err(_) => Err("GATEWAY_MAX_REQUEST_BODY_BYTES must be a positive integer in bytes".into()),
+    }
+}
+
+pub(crate) fn application_with_body_limit(
+    state: AppState,
+    max_request_body_bytes: usize,
+) -> Router {
     use api::{
         admin, discovery, events, filter_options, health_admin, keys, ops, proxy, upstream_quota,
         usage,
@@ -246,13 +270,16 @@ pub(crate) fn application(state: AppState) -> Router {
             state.admin_auth.clone(),
             require_admin_auth,
         ));
+    let data_plane = Router::new()
+        .route("/v1/chat/completions", post(proxy::chat_completions))
+        .route("/v1/responses", post(proxy::responses))
+        .route("/v1/messages", post(proxy::messages))
+        .layer(DefaultBodyLimit::max(max_request_body_bytes));
     Router::new()
         .route("/healthz", get(proxy::healthz))
         .route("/metrics", get(proxy::metrics_handler))
         .route("/v1/models", get(proxy::models))
-        .route("/v1/chat/completions", post(proxy::chat_completions))
-        .route("/v1/responses", post(proxy::responses))
-        .route("/v1/messages", post(proxy::messages))
+        .merge(data_plane)
         .nest_service("/admin", ServeDir::new("web/dist"))
         .with_state(state)
         .merge(admin_api)

@@ -34,6 +34,8 @@ spec:
           env:
             - name: GATEWAY_LISTEN_ADDR
               value: 0.0.0.0:8787
+            - name: GATEWAY_MAX_REQUEST_BODY_BYTES
+              value: "33554432"
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:

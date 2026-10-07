@@ -1,6 +1,6 @@
 use axum::{
     body::{Body, Bytes},
-    extract::State,
+    extract::{rejection::BytesRejection, State},
     http::{header::CONTENT_TYPE, HeaderMap, Response, StatusCode},
     response::IntoResponse,
     Json,
@@ -68,23 +68,48 @@ pub(crate) async fn models(State(state): State<AppState>, headers: HeaderMap) ->
 pub(crate) async fn chat_completions(
     State(state): State<AppState>,
     headers: HeaderMap,
-    body: Bytes,
+    body: Result<Bytes, BytesRejection>,
 ) -> Response<Body> {
-    proxy_service::proxy(state, headers, body, Protocol::OpenAiChatCompletions).await
+    proxy_with_body(state, headers, body, Protocol::OpenAiChatCompletions).await
 }
 
 pub(crate) async fn responses(
     State(state): State<AppState>,
     headers: HeaderMap,
-    body: Bytes,
+    body: Result<Bytes, BytesRejection>,
 ) -> Response<Body> {
-    proxy_service::proxy(state, headers, body, Protocol::OpenAiResponses).await
+    proxy_with_body(state, headers, body, Protocol::OpenAiResponses).await
 }
 
 pub(crate) async fn messages(
     State(state): State<AppState>,
     headers: HeaderMap,
-    body: Bytes,
+    body: Result<Bytes, BytesRejection>,
 ) -> Response<Body> {
-    proxy_service::proxy(state, headers, body, Protocol::AnthropicMessages).await
+    proxy_with_body(state, headers, body, Protocol::AnthropicMessages).await
+}
+
+async fn proxy_with_body(
+    state: AppState,
+    headers: HeaderMap,
+    body: Result<Bytes, BytesRejection>,
+    protocol: Protocol,
+) -> Response<Body> {
+    match body {
+        Ok(body) => proxy_service::proxy(state, headers, body, protocol).await,
+        Err(error) => {
+            let request_id = Uuid::new_v4().to_string();
+            let status = error.status();
+            let (code, message) = if status == StatusCode::PAYLOAD_TOO_LARGE {
+                (
+                    "request_too_large",
+                    "request body exceeds the gateway size limit; reduce image/history size or increase GATEWAY_MAX_REQUEST_BODY_BYTES and the ingress body limit",
+                )
+            } else {
+                ("request_body_read_failed", "failed to read request body")
+            };
+            tracing::warn!(%request_id, %protocol, %status, code, "request body rejected");
+            data_plane_error_response(protocol, status, code, message, &request_id)
+        }
+    }
 }

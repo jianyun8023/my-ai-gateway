@@ -18,6 +18,7 @@ pub(crate) async fn run() -> Result<(), Box<dyn std::error::Error>> {
         return run_ops_cli(&command_line[1..]).await;
     }
     let _otel_provider = observability::init_tracing();
+    let max_request_body_bytes = crate::app::max_request_body_bytes_from_env()?;
     let database = db::Database::connect_from_env()
         .await?
         .ok_or("DATABASE_URL is required for the DB-first runtime")?;
@@ -167,7 +168,11 @@ pub(crate) async fn run() -> Result<(), Box<dyn std::error::Error>> {
         settlements: crate::proxy::settlement::SettlementManager::default(),
     };
     spawn_health_probe_loop(state.clone());
-    let app = crate::app::application(state.clone());
+    let app = crate::app::application_with_body_limit(state.clone(), max_request_body_bytes);
+    tracing::info!(
+        max_request_body_bytes,
+        "data-plane request body limit configured"
+    );
     let listener = match tokio::net::TcpListener::bind(addr).await {
         Ok(listener) => listener,
         Err(error) => {

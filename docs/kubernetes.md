@@ -136,6 +136,23 @@ kubectl -n apps exec deployment/my-ai-gateway -- curl -fsS http://127.0.0.1:8787
 - Pod Ready 但请求失败：检查 PostgreSQL 连通性、控制面是否已创建可用 Binding/Route，以及 Ingress 的 host/TLS/timeout；
 - 私有 Provider URL 被拒绝：按 [`docs/security.md`](security.md) 配置最小范围的 `GATEWAY_SOURCE_URL_ALLOWLIST`，不要通过客户端请求传入任意上游 URL。
 
+## 请求体与 Ingress 链路
+
+Deployment 显式设置 `GATEWAY_MAX_REQUEST_BODY_BYTES=33554432`（32 MiB）。此值只控制三协议数据面，完整契约见 [`deployment.md`](deployment.md#图片历史与请求体限制)。环境变量必须配合包含该修复的新镜像；向旧镜像注入变量不会改变 Axum 默认 2 MiB 限制。
+
+参考 Ingress 使用 Traefik，未挂载 buffering middleware。Traefik 的 buffering `maxRequestBodyBytes` 默认 `0`（不限制）；不要为提高应用请求体上限新增 buffering middleware，因为它还会缓冲响应，影响 SSE。如果现有网关 Ingress/IngressRoute 或 entryPoint 已挂载此 middleware，应检查实际限制并保证不低于应用上限；检查共享 middleware 是否会影响其他服务。ingress-nginx 的 `proxy-body-size` 注解对 Traefik 无效。
+
+排查 413 时用同一份 JSON 分别请求 Pod/Service 和 HTTPS 域名。两者都返回 Axum 的 `Failed to buffer the request body: length limit exceeded`，说明旧版应用提取器拒绝了请求；只有域名失败则继续检查 Ingress、外层反代/CDN。新镜像应在超过 2 MiB、低于 32 MiB 时进入正常鉴权/路由，超过上限时返回协议 JSON 413。可以发送无凭据的 `{}` 加 JSON 尾部空白测试传输边界：低于上限预期 401，高于上限预期 413，不发送真实 Provider 推理请求。
+
+```bash
+kubectl --context <context> -n apps get ingress my-ai-gateway-ingress -o yaml
+kubectl --context <context> get middleware.traefik.io -A
+kubectl --context <context> -n apps exec deployment/my-ai-gateway -- \
+  printenv GATEWAY_MAX_REQUEST_BODY_BYTES
+```
+
+发布后核对镜像 digest、启动日志中的 `max_request_body_bytes`、Pod Ready，再复测 Pod 与 HTTPS 两条路径。模型推理成功和 SSE 行为需单独验证，不能由无凭据传输检查推断。
+
 ## 升级与回滚
 
 升级顺序：备份 PostgreSQL → 在 GitOps overlay 更新镜像 digest → 等待 rollout → 检查 `/healthz`、migration 和控制面能力矩阵。不要用 `latest` 作为生产回滚依据。

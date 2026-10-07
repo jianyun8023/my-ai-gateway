@@ -79,6 +79,8 @@ fn anthropic_standard_error_type(gateway_code: &str) -> &'static str {
         | "unsupported_protocol"
         | "lossy_conversion_not_allowed" => "invalid_request_error",
         "unauthorized" => "authentication_error",
+        "request_too_large" => "request_too_large",
+        "request_body_read_failed" => "invalid_request_error",
         "route_not_found" => "not_found_error",
         "account_cooling_down" => "overloaded_error",
         "upstream_request_failed" => "api_error",

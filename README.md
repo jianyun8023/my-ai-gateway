@@ -64,6 +64,8 @@ curl -N http://127.0.0.1:8787/v1/responses \
 
 SSE 首事件、空闲和请求总时限分别为 30、60、300 秒，心跳间隔为 15 秒。完整参数见 [`.env.example`](.env.example)；反向代理需关闭流式缓冲并匹配超时设置。已有部署若设置了 `GATEWAY_SSE_CONNECTION_TIMEOUT_MS=10000`，需改为 `120000` 并重启。
 
+三协议请求体默认上限为 32 MiB（含 base64 图片和完整历史），通过 `GATEWAY_MAX_REQUEST_BODY_BYTES` 设置正整数字节数；入口反代限制需同步匹配。超限返回协议 JSON 413 和 request ID。部署与 Ingress 排查见 [部署说明](docs/deployment.md#图片历史与请求体限制)。
+
 ## 本地开发
 
 准备 PostgreSQL 16，使用 [Mise](https://mise.jdx.dev/) 安装仓库固定的 Rust 与 Node.js 工具链：

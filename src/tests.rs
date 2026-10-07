@@ -1598,6 +1598,149 @@ mod stream_contract_e2e_tests {
     }
 
     #[tokio::test]
+    async fn large_image_bodies_reach_upstream_intact_on_all_protocols() {
+        let _environment_lock = ENV_LOCK.lock().await;
+        let _api_key = EnvRestore::set("GATEWAY_API_KEY", "body-test-key");
+        let recorded = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let upstream = axum::Router::new().fallback({
+            let recorded = recorded.clone();
+            move |request: axum::extract::Request| {
+                let recorded = recorded.clone();
+                async move {
+                    let path = request.uri().path().to_owned();
+                    let bytes = to_bytes(request.into_body(), 32 * 1024 * 1024)
+                        .await
+                        .unwrap();
+                    recorded.lock().unwrap().push((path, bytes));
+                    axum::Json(json!({"usage":{"input_tokens":1,"output_tokens":1,"prompt_tokens":1,"completion_tokens":1}}))
+                }
+            }
+        });
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move { axum::serve(listener, upstream).await.unwrap() });
+        let app = application(native_state(&format!("http://{address}")));
+        // Six ~1 MiB base64 images reproduce the reported screenshot history size.
+        let image_data = "A".repeat(1024 * 1024);
+        let image_url = format!("data:image/png;base64,{image_data}");
+        for path in ["/v1/chat/completions", "/v1/responses", "/v1/messages"] {
+            let image = match path {
+                "/v1/chat/completions" => json!({"type":"image_url","image_url":{"url":image_url}}),
+                "/v1/responses" => json!({"type":"input_image","image_url":image_url}),
+                _ => {
+                    json!({"type":"image","source":{"type":"base64","media_type":"image/png","data":image_data}})
+                }
+            };
+            let content = vec![image; 6];
+            let payload = if path == "/v1/responses" {
+                json!({"model":"m","input":[{"role":"user","content":content}]})
+            } else {
+                json!({"model":"m","messages":[{"role":"user","content":content}],"max_tokens":1})
+            };
+            let body = Bytes::from(serde_json::to_vec(&payload).unwrap());
+            assert!(body.len() > 6 * 1024 * 1024);
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri(path)
+                        .header(header::AUTHORIZATION, "Bearer body-test-key")
+                        .header(header::CONTENT_TYPE, "application/json")
+                        .body(Body::from(body.clone()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK, "{path}");
+            let requests = recorded.lock().unwrap();
+            let (upstream_path, upstream_body) = requests.last().unwrap();
+            assert_eq!(upstream_path, path);
+            assert_eq!(upstream_body, &body);
+        }
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn body_limits_enforce_boundaries_and_chunked_bodies_with_protocol_errors() {
+        let _environment_lock = ENV_LOCK.lock().await;
+        let _api_key = EnvRestore::set("GATEWAY_API_KEY", "body-test-key");
+        // Unreachable upstream: rejected bodies must never be forwarded.
+        let state = native_state("http://127.0.0.1:1");
+        let app = app::application_with_body_limit(state.clone(), 1024);
+        for path in ["/v1/chat/completions", "/v1/responses", "/v1/messages"] {
+            for chunked in [false, true] {
+                for size in [1024, 1025] {
+                    let bytes = Bytes::from(format!("{{}}{}", " ".repeat(size - 2)));
+                    let mut request = Request::builder().method("POST").uri(path);
+                    let body = if chunked {
+                        let chunks = vec![
+                            Ok::<_, std::io::Error>(bytes.slice(..512)),
+                            Ok(bytes.slice(512..)),
+                        ];
+                        Body::from_stream(futures_util::stream::iter(chunks))
+                    } else {
+                        request = request.header(header::CONTENT_LENGTH, size);
+                        Body::from(bytes)
+                    };
+                    let response = app
+                        .clone()
+                        .oneshot(request.body(body).unwrap())
+                        .await
+                        .unwrap();
+                    if size == 1024 {
+                        // Valid JSON at the exact boundary reaches authentication.
+                        assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "{path}");
+                    } else {
+                        assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE, "{path}");
+                        assert_eq!(response.headers()[header::CONTENT_TYPE], "application/json");
+                        let request_id = response.headers()["x-request-id"]
+                            .to_str()
+                            .unwrap()
+                            .to_owned();
+                        let payload: Value = serde_json::from_slice(
+                            &to_bytes(response.into_body(), 4096).await.unwrap(),
+                        )
+                        .unwrap();
+                        assert_eq!(payload["request_id"], request_id);
+                        assert_eq!(payload["error"]["code"], "request_too_large");
+                        assert_eq!(payload["error"]["type"], "request_too_large");
+                        if path == "/v1/messages" {
+                            assert_eq!(payload["type"], "error");
+                        }
+                    }
+                }
+            }
+        }
+        // The actual default remains bounded, rather than disabling limits.
+        let response = application(state)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/responses")
+                    .body(Body::from(vec![
+                        b' ';
+                        app::DEFAULT_MAX_REQUEST_BODY_BYTES + 1
+                    ]))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    }
+
+    #[tokio::test]
+    async fn request_body_limit_environment_rejects_invalid_values() {
+        let _environment_lock = ENV_LOCK.lock().await;
+        for value in ["0", "-1", "32m", "", "184467440737095516160"] {
+            let _restore = EnvRestore::set("GATEWAY_MAX_REQUEST_BODY_BYTES", value);
+            assert!(app::max_request_body_bytes_from_env().is_err(), "{value}");
+        }
+        let _restore = EnvRestore::set("GATEWAY_MAX_REQUEST_BODY_BYTES", "8388608");
+        assert_eq!(app::max_request_body_bytes_from_env().unwrap(), 8388608);
+    }
+
+    #[tokio::test]
     async fn saturated_stream_settlement_never_contacts_upstream() {
         let _environment_lock = ENV_LOCK.lock().await;
         let _api_key = EnvRestore::set("GATEWAY_API_KEY", "settlement-test-key");
