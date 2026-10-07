@@ -1,0 +1,48 @@
+{
+  "base": "http://127.0.0.1:18788",
+  "utc": "2026-10-07T05:43:19.517Z",
+  "credential": "none",
+  "providerRequests": 0,
+  "results": [
+    {
+      "path": "/v1/chat/completions",
+      "bytes": 6291456,
+      "status": 401,
+      "code": "unauthorized",
+      "observedStatus": 401,
+      "requestId": "cf4013b1-ea9d-4f10-a5cc-ded7e84fabb8"
+    },
+    {
+      "path": "/v1/responses",
+      "bytes": 6291456,
+      "status": 401,
+      "code": "unauthorized",
+      "observedStatus": 401,
+      "requestId": "46b7be58-c918-4cb5-9c0c-2a3310877543"
+    },
+    {
+      "path": "/v1/messages",
+      "bytes": 6291456,
+      "status": 401,
+      "code": "unauthorized",
+      "observedStatus": 401,
+      "requestId": "9f1981cb-dcbc-41e6-bde5-27914ff04545"
+    },
+    {
+      "path": "/v1/responses",
+      "bytes": 33554432,
+      "status": 401,
+      "code": "unauthorized",
+      "observedStatus": 401,
+      "requestId": "bd38450a-232e-46f2-9b82-021e2fa70880"
+    },
+    {
+      "path": "/v1/responses",
+      "bytes": 33554433,
+      "status": 413,
+      "code": "request_too_large",
+      "observedStatus": 413,
+      "requestId": "698487f3-b2f8-4aff-a815-de49ecb65a9c"
+    }
+  ]
+}

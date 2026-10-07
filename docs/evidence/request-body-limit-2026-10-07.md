@@ -18,6 +18,18 @@
 - `cargo test --workspace --features test-support -- --test-threads=1`：243 单元 + 2 架构 + 92 Contract + 35 Mock，共 372 通过，13 ignored。未设置独立 `TEST_DATABASE_URL`，不据此宣称 PostgreSQL 集成验收完成。
 - 源码 Kubernetes 基线与实际 GitOps 配置显式设置 `33554432`；两份 Kustomize 渲染通过，实际 GitOps 清单通过 `home-oec` server dry-run。
 
-## 发布边界
+## 发布与生产验收
 
-本记录为发布前验证：尚未推送/合并源码与 GitOps 变更，尚未构建发布 Linux 镜像或更新生产镜像。旧镜像不识别新变量，必须发布新镜像后核对 digest、启动上限、Pod Ready，再复测 Pod 与 HTTPS 的 6 MiB/32 MiB 边界。真实 Provider、多图片识别、生产 SSE 和模型 context 限制尚未复验。
+- 用户授权后，将修复 `0f0ba1268abbc8298d4b9d8a6ffc4dd7f8a5823f` 快进推送 GitHub `main`；[镜像发布 37577253107](https://github.com/jianyun8023/my-ai-gateway/actions/runs/37577253107) 成功。多架构 digest 为 `sha256:3732e893fdbcfe4c0aaaabc13e7b447a1a1ee51752063c8b0d28576680fffff7`；linux/amd64 与 linux/arm64 的 revision 标签均匹配修复源码。
+- GitOps `main` 发布提交 `b9453ab44db246bbcee5d0c7eaf001c01ecd6b7d`，包含 32 MiB 配置；Deployment 与 Argo CD Application 的 Kustomize 镜像覆盖项同时固定到新 digest。此前 Application 的 `main` 覆盖项会覆盖 Deployment 中的 digest，本次已对齐。
+- `apps/my-ai-gateway` rollout 完成；新 Pod `my-ai-gateway-578cd86f4c-6zppr` Ready、重启 0、实际 imageID 匹配发布 digest。启动日志记录 `max_request_body_bytes=33554432`。网关与 root-app 均 `Synced / Healthy`，HTTPS `/healthz` 正常。
+- 滚动切换期间 HTTPS 健康检查出现一次 502，5 秒后复查恢复；完成以下边界验证时只有新 Pod 存活，未再出现 502。
+- 直连新 Pod（port-forward）与 HTTPS 分别完成相同的无凭据有效 JSON 请求测试，响应均为协议 JSON，且 `request_id` 与 `x-request-id` 一致：
+
+| 请求 | 字节数 | Pod / HTTPS 结果 |
+| --- | ---: | --- |
+| Chat、Responses、Messages | 各 6,291,456 | 401 `unauthorized`，已进入正常鉴权 |
+| Responses，精确默认边界 | 33,554,432 | 401 `unauthorized` |
+| Responses，超限一字节 | 33,554,433 | 413 `request_too_large` |
+
+原始验收元数据：[Pod](request-body-limit-pod-2026-10-07.json)、[HTTPS](request-body-limit-https-2026-10-07.json)。任务与发布进展见 [#249](https://github.com/jianyun8023/my-ai-gateway/issues/249)。这些测试未携带凭据、未发送真实 Provider 推理请求；真实图片识别、生产 SSE、模型 context 与 PostgreSQL 集成不属于此次传输边界复验结果。
