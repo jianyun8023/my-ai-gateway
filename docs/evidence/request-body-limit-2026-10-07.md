@@ -22,6 +22,8 @@
 
 - 用户授权后，将修复 `0f0ba1268abbc8298d4b9d8a6ffc4dd7f8a5823f` 快进推送 GitHub `main`；[镜像发布 37577253107](https://github.com/jianyun8023/my-ai-gateway/actions/runs/37577253107) 成功。多架构 digest 为 `sha256:3732e893fdbcfe4c0aaaabc13e7b447a1a1ee51752063c8b0d28576680fffff7`；linux/amd64 与 linux/arm64 的 revision 标签均匹配修复源码。
 - GitOps `main` 发布提交 `b9453ab44db246bbcee5d0c7eaf001c01ecd6b7d`，包含 32 MiB 配置；Deployment 与 Argo CD Application 的 Kustomize 镜像覆盖项同时固定到新 digest。此前 Application 的 `main` 覆盖项会覆盖 Deployment 中的 digest，本次已对齐。
+- 收尾观察到 Image Updater v1.1.1 的 `latest` 策略在 05:45:38 UTC 将固定 digest 改回 `main`，随后 root-app self-heal 恢复，Deployment generation 43 → 45。GitOps 提交 `23c75b6` 将本应用改为 `digest` 策略；只修改网关 Application，不改变共享 ImageUpdater 或其他应用规则。
+- 05:50:40–05:50:46 UTC 下一轮自动协调结果为 `images_updated=0, errors=0`；网关 digest 未被改写，Deployment generation 保持 45，同一 Pod Ready、重启 0，未再触发重复 rollout。
 - `apps/my-ai-gateway` rollout 完成；新 Pod `my-ai-gateway-578cd86f4c-6zppr` Ready、重启 0、实际 imageID 匹配发布 digest。启动日志记录 `max_request_body_bytes=33554432`。网关与 root-app 均 `Synced / Healthy`，HTTPS `/healthz` 正常。
 - 滚动切换期间 HTTPS 健康检查出现一次 502，5 秒后复查恢复；完成以下边界验证时只有新 Pod 存活，未再出现 502。
 - 直连新 Pod（port-forward）与 HTTPS 分别完成相同的无凭据有效 JSON 请求测试，响应均为协议 JSON，且 `request_id` 与 `x-request-id` 一致：
