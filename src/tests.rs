@@ -1160,6 +1160,9 @@ mod usage_api_tests {
             streamed: false,
             error_summary: None,
             fallback_reason: None,
+            response_model: Some("upstream-snapshot-2026-09-01".into()),
+            requested_reasoning_effort: Some("high".into()),
+            response_reasoning_effort: Some("low".into()),
         };
         let attempts = [
             db::UsageAttempt {
@@ -1239,6 +1242,12 @@ mod usage_api_tests {
         assert_eq!(events["data"][0]["logical_model"], logical_model);
         assert_eq!(events["data"][0]["source_id"], "source-api");
         assert_eq!(events["data"][0]["client_source"], "api-test");
+        assert_eq!(
+            events["data"][0]["response_model"],
+            "upstream-snapshot-2026-09-01"
+        );
+        assert_eq!(events["data"][0]["requested_reasoning_effort"], "high");
+        assert_eq!(events["data"][0]["response_reasoning_effort"], "low");
         assert!(events["data"][0].get("prompt").is_none());
 
         let detail = app
@@ -1257,6 +1266,12 @@ mod usage_api_tests {
         .unwrap();
         assert_eq!(detail["data"]["source_id"], "source-api");
         assert_eq!(detail["data"]["client_source"], "api-test");
+        assert_eq!(
+            detail["data"]["response_model"],
+            "upstream-snapshot-2026-09-01"
+        );
+        assert_eq!(detail["data"]["requested_reasoning_effort"], "high");
+        assert_eq!(detail["data"]["response_reasoning_effort"], "low");
         assert_eq!(detail["attempts"][0]["source_id"], "source-primary");
         assert_eq!(detail["attempts"][1]["source_id"], "source-api");
 
@@ -1278,6 +1293,10 @@ mod usage_api_tests {
         let export = String::from_utf8_lossy(&export);
         assert!(export.contains(&event.request_id));
         assert!(export.contains("provider_id,source_id,client_source,account_id"));
+        assert!(
+            export.contains("response_model,requested_reasoning_effort,response_reasoning_effort")
+        );
+        assert!(export.contains("upstream-snapshot-2026-09-01,high,low"));
 
         let json_export = app
             .oneshot(admin_request(&format!(
@@ -1294,6 +1313,10 @@ mod usage_api_tests {
         .unwrap();
         assert_eq!(json_export["data"][0]["source_id"], "source-api");
         assert_eq!(json_export["data"][0]["client_source"], "api-test");
+        assert_eq!(
+            json_export["data"][0]["response_model"],
+            "upstream-snapshot-2026-09-01"
+        );
         database
             .delete_usage_events_for_test(&prefix)
             .await

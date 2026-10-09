@@ -910,6 +910,9 @@ async fn postgres_parsed_usage_source_is_filterable() {
         streamed: true,
         error_summary: None,
         fallback_reason: Some("upstream_http_429".into()),
+        response_model: None,
+        requested_reasoning_effort: None,
+        response_reasoning_effort: None,
     };
     database
         .insert_usage(&event)
@@ -996,6 +999,9 @@ async fn postgres_source_deletion_preserves_usage_history() {
         streamed: false,
         error_summary: None,
         fallback_reason: None,
+        response_model: None,
+        requested_reasoning_effort: None,
+        response_reasoning_effort: None,
     };
     database
         .insert_usage_with_attempts(

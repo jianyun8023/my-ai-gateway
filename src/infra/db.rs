@@ -64,6 +64,9 @@ pub(crate) struct UsageEvent {
     pub(crate) streamed: bool,
     pub(crate) error_summary: Option<String>,
     pub(crate) fallback_reason: Option<String>,
+    pub(crate) response_model: Option<String>,
+    pub(crate) requested_reasoning_effort: Option<String>,
+    pub(crate) response_reasoning_effort: Option<String>,
 }
 
 #[derive(Debug, serde::Serialize, sqlx::FromRow)]
@@ -182,6 +185,9 @@ pub(crate) struct UsageEventRecord {
     pub(crate) streamed: bool,
     pub(crate) error_summary: Option<String>,
     pub(crate) fallback_reason: Option<String>,
+    pub(crate) response_model: Option<String>,
+    pub(crate) requested_reasoning_effort: Option<String>,
+    pub(crate) response_reasoning_effort: Option<String>,
     pub(crate) created_at: DateTime<Utc>,
 }
 
@@ -456,6 +462,11 @@ impl Database {
         .await?;
         sqlx::raw_sql(include_str!(
             "../../migrations/0027_multimodal_model_capabilities.sql"
+        ))
+        .execute(&mut *tx)
+        .await?;
+        sqlx::raw_sql(include_str!(
+            "../../migrations/0028_usage_response_identity.sql"
         ))
         .execute(&mut *tx)
         .await?;

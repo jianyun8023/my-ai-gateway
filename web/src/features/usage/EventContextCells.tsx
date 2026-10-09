@@ -1,4 +1,4 @@
-import { IconArrowRight, IconBot, IconCode, IconRefreshCw, IconRoute, IconTerminal } from '@/components/ui/icons';
+import { IconArrowRight, IconBot, IconBrain, IconCode, IconCornerDownRight, IconRefreshCw, IconRoute, IconTerminal } from '@/components/ui/icons';
 import type { UsageEventViewModel } from '@/gateway-usage';
 import { useTranslation } from 'react-i18next';
 import { formatEventTime, formatFallbackReason, formatTime } from './formatters';
@@ -16,14 +16,37 @@ export function ModelCell({ event }: { event: UsageEventViewModel }) {
   const fallbackLabel = event.fallbackReason
     ? `${t('usage.event.fallback_only')}: ${formatFallbackReason(t, event.fallbackReason)}`
     : t('usage.event.fallback_only');
-  const title = `${t('usage.field.logical_model')}: ${event.logicalModel}\n${t('usage.field.upstream_model')}: ${event.upstreamModel}`;
-  return <span className={styles.modelCell} title={title}>
+  // Drift markers only appear when the upstream-reported value adds
+  // information beyond the requested logical model / rewritten upstream model.
+  const responseModelDiffers = event.responseModel !== undefined
+    && event.responseModel !== event.logicalModel
+    && event.responseModel !== event.upstreamModel;
+  const responseEffortDiffers = event.requestedReasoningEffort !== undefined
+    && event.responseReasoningEffort !== undefined
+    && event.responseReasoningEffort !== event.requestedReasoningEffort;
+  const titleLines = [
+    `${t('usage.field.logical_model')}: ${event.logicalModel}`,
+    `${t('usage.field.upstream_model')}: ${event.upstreamModel}`,
+  ];
+  if (event.responseModel) titleLines.push(`${t('usage.field.response_model')}: ${event.responseModel}`);
+  if (event.requestedReasoningEffort) titleLines.push(`${t('usage.field.requested_reasoning_effort')}: ${event.requestedReasoningEffort}`);
+  if (event.responseReasoningEffort) titleLines.push(`${t('usage.field.response_reasoning_effort')}: ${event.responseReasoningEffort}`);
+  return <span className={styles.modelCell} title={titleLines.join('\n')}>
     <span className={styles.modelPrimary}>
       <strong>{event.logicalModel}</strong>
       {event.fallback && <span className={styles.fallbackMarker} role="img" title={fallbackLabel} aria-label={fallbackLabel}><IconRoute size={13} /></span>}
     </span>
     {event.logicalModel !== event.upstreamModel && <small className={styles.modelUpstream}>
       <IconArrowRight size={12} /><span>{event.upstreamModel}</span>
+    </small>}
+    {responseModelDiffers && <small className={styles.modelResponse} aria-label={`${t('usage.field.response_model')}: ${event.responseModel}`}>
+      <IconCornerDownRight size={12} /><span>{event.responseModel}</span>
+    </small>}
+    {event.requestedReasoningEffort && <small className={styles.modelEffort} aria-label={`${t('usage.field.requested_reasoning_effort')}: ${event.requestedReasoningEffort}`}>
+      <IconBrain size={12} /><span>{event.requestedReasoningEffort}</span>
+    </small>}
+    {responseEffortDiffers && <small className={styles.modelResponse} aria-label={`${t('usage.field.response_reasoning_effort')}: ${event.responseReasoningEffort}`}>
+      <IconCornerDownRight size={12} /><span>{event.responseReasoningEffort}</span>
     </small>}
   </span>;
 }

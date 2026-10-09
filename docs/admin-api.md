@@ -477,7 +477,7 @@ dry-run 只统计候选，不删除数据。正式清理按 attempt → logical 
 
 `POST /admin/control-plane/import` 接受导出 JSON，或 `{ "data": <export>, "replace": true, "requested_by": "..." }` 包装。非空目标必须显式 `replace=true`。导入按 FK 顺序恢复并重置 serial sequence；提交后重新构建 snapshot，只有 fingerprint 与导出一致才返回 `verified=true` 和新的 `snapshot_revision`。目标环境必须自行注入导出中列出的 Secret。
 
-`GET /admin/ops/schema`（`/admin/schema` 为同义入口）返回当前 `schema_version`、`migration_version`、应用版本和 UTC 更新时间。网关启动时会顺序应用仓库中的迁移；当前版本为 27，`migrations/0027_multimodal_model_capabilities.sql` 修正 DeepSeek Flash 与 Kimi Code 模型的多模态元数据和存量 `vision` 能力。迁移 0025 增加的逻辑模型总请求超时与重试设置仍包含在控制面导出中，runtime snapshot fingerprint 同时覆盖策略和请求设置。
+`GET /admin/ops/schema`（`/admin/schema` 为同义入口）返回当前 `schema_version`、`migration_version`、应用版本和 UTC 更新时间。网关启动时会顺序应用仓库中的迁移；当前版本为 28，`migrations/0028_usage_response_identity.sql` 为 `usage_events` 增加 `response_model`、`requested_reasoning_effort`、`response_reasoning_effort` 三列，记录上游响应报告的模型与思考强度及请求携带的思考强度，并随 `/admin/usage/events` 列表、详情与导出返回（Issue #250）。迁移 0025 增加的逻辑模型总请求超时与重试设置仍包含在控制面导出中，runtime snapshot fingerprint 同时覆盖策略和请求设置。
 
 完整的 PostgreSQL `pg_dump`、新库恢复、Docker Compose 和本地 CLI 步骤见 [`docs/operations.md`](./operations.md)。物理 dump 可能包含数据库内的加密凭据和全部历史，必须按高敏感备份保护；脱敏迁移请使用控制面 JSON 导出。
 

@@ -88,6 +88,15 @@ export function EventDetails({ event, onClose, client, initialAttempts }: { even
           <DetailList>
             <DetailItem label={t('usage.field.logical_model')}><Button size="sm" variant="ghost" onClick={() => { window.location.hash = modelRouteHash(event.logicalModel); }}>{event.logicalModel}</Button></DetailItem>
             <DetailItem label={t('usage.field.upstream_model')}><strong>{event.upstreamModel}</strong></DetailItem>
+            {event.responseModel && (
+              <DetailItem label={t('usage.field.response_model')}><strong>{event.responseModel}</strong></DetailItem>
+            )}
+            {event.requestedReasoningEffort && (
+              <DetailItem label={t('usage.field.requested_reasoning_effort')}><strong>{event.requestedReasoningEffort}</strong></DetailItem>
+            )}
+            {event.responseReasoningEffort && (
+              <DetailItem label={t('usage.field.response_reasoning_effort')}><strong>{event.responseReasoningEffort}</strong></DetailItem>
+            )}
             <DetailItem label={t('usage.field.provider')}><strong>{event.provider}</strong></DetailItem>
             <DetailItem label={t('usage.field.source_id')}><Button size="sm" variant="ghost" onClick={() => { window.location.hash = sourceRouteHash(event.sourceId); }}>{event.sourceId}</Button></DetailItem>
           </DetailList>

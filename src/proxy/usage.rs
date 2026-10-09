@@ -68,9 +68,80 @@ pub(crate) struct StreamObservation {
     pub(crate) capture_truncated: bool,
     pub(crate) parsed_usage: Option<UsageReport>,
     pub(crate) estimated_reasoning_tokens: Option<i64>,
+    pub(crate) response_model: Option<String>,
+    pub(crate) response_reasoning_effort: Option<String>,
     pub(crate) ttft_ms: Option<i64>,
     pub(crate) failed: bool,
     pub(crate) termination: StreamTermination,
+}
+
+/// Identity metadata reported by an upstream response body, when the provider
+/// includes it. Recorded as facts; the console decides whether drift versus
+/// the request is worth marking.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct ResponseIdentity {
+    pub(crate) model: Option<String>,
+    pub(crate) reasoning_effort: Option<String>,
+}
+
+impl ResponseIdentity {
+    /// Fold one parsed payload into the observation; the first reported value
+    /// per field wins so early authoritative frames (`message_start`,
+    /// `response.created`) are not overwritten by later chunks.
+    pub(crate) fn observe(&mut self, value: &Value) {
+        let identity = response_identity_from_json(value);
+        if self.model.is_none() {
+            self.model = identity.model;
+        }
+        if self.reasoning_effort.is_none() {
+            self.reasoning_effort = identity.reasoning_effort;
+        }
+    }
+}
+
+fn non_empty_string(value: Option<&Value>) -> Option<String> {
+    value
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(str::to_owned)
+}
+
+/// Extract the upstream-reported model / reasoning effort from one parsed
+/// payload, accepting the OpenAI Chat/Responses and Anthropic shapes:
+/// top-level `model` (chat chunks, JSON bodies), `response.model` (Responses
+/// events), `message.model` (Anthropic `message_start`), and the matching
+/// `reasoning_effort` / `reasoning.effort` / `response.reasoning.effort`.
+pub(crate) fn response_identity_from_json(value: &Value) -> ResponseIdentity {
+    let model = non_empty_string(value.get("model"))
+        .or_else(|| non_empty_string(value.get("response").and_then(|v| v.get("model"))))
+        .or_else(|| non_empty_string(value.get("message").and_then(|v| v.get("model"))));
+    let reasoning_effort = non_empty_string(value.get("reasoning_effort"))
+        .or_else(|| non_empty_string(value.get("reasoning").and_then(|v| v.get("effort"))))
+        .or_else(|| {
+            non_empty_string(
+                value
+                    .get("response")
+                    .and_then(|v| v.get("reasoning"))
+                    .and_then(|v| v.get("effort")),
+            )
+        });
+    ResponseIdentity {
+        model,
+        reasoning_effort,
+    }
+}
+
+/// Extract the reasoning effort carried by the client request body
+/// (`reasoning_effort` for chat, `reasoning.effort` for Responses, top-level
+/// `effort` for Anthropic-style requests). The gateway only rewrites the
+/// top-level `model` field, so this is identical for the client body and the
+/// body sent upstream.
+pub(crate) fn requested_reasoning_effort(request_body: &[u8]) -> Option<String> {
+    let value = serde_json::from_slice::<Value>(request_body).ok()?;
+    non_empty_string(value.get("reasoning_effort"))
+        .or_else(|| non_empty_string(value.get("reasoning").and_then(|v| v.get("effort"))))
+        .or_else(|| non_empty_string(value.get("effort")))
 }
 
 /// Keep at most one bounded reasoning block; completed blocks are tokenized
@@ -220,6 +291,8 @@ where
                 capture_truncated: self.capture_truncated,
                 parsed_usage: self.tracker.usage.report(),
                 estimated_reasoning_tokens: self.thinking.result(),
+                response_model: self.tracker.response_identity.model.clone(),
+                response_reasoning_effort: self.tracker.response_identity.reasoning_effort.clone(),
                 ttft_ms: self.ttft_ms,
                 failed: termination.is_failure(),
                 termination,
@@ -439,26 +512,28 @@ fn report_from_usage(usage: &Value) -> UsageReport {
     }
 }
 
-pub(crate) fn extract_json_bytes(bytes: &[u8]) -> Option<UsageReport> {
-    serde_json::from_slice::<Value>(bytes)
-        .ok()
-        .and_then(|value| extract_json(&value))
-}
-
-/// Resolve usage for a completed JSON response. Failed responses without
-/// provider-confirmed usage remain explicitly missing and are never estimated.
-pub(crate) fn usage_for_json_response(
+/// Resolve usage and upstream-reported identity for a completed JSON response
+/// with a single parse of the body.
+/// Failed responses without provider-confirmed usage remain explicitly
+/// missing and are never estimated.
+pub(crate) fn observe_json_response(
     success: bool,
     request: &[u8],
     response: &[u8],
-) -> UsageReport {
-    extract_json_bytes(response).unwrap_or_else(|| {
+) -> (UsageReport, ResponseIdentity) {
+    let parsed = serde_json::from_slice::<Value>(response).ok();
+    let report = parsed.as_ref().and_then(extract_json).unwrap_or_else(|| {
         if success {
             estimate(request, response)
         } else {
             UsageReport::missing()
         }
-    })
+    });
+    let identity = parsed
+        .as_ref()
+        .map(response_identity_from_json)
+        .unwrap_or_default();
+    (report, identity)
 }
 
 /// Merge explicitly reported counters before deriving totals. Missing fields
@@ -658,6 +733,8 @@ mod tests {
                 capture_truncated: true,
                 parsed_usage: None,
                 estimated_reasoning_tokens: Some(4),
+                response_model: None,
+                response_reasoning_effort: None,
                 ttft_ms: None,
                 failed: termination.is_failure(),
                 termination,
@@ -1144,11 +1221,12 @@ mod tests {
 
     #[test]
     fn failed_json_without_usage_is_missing_and_has_zero_tokens() {
-        let report = usage_for_json_response(
+        let report = observe_json_response(
             false,
             br#"{"model":"m","input":"must not be estimated"}"#,
             br#"{"error":{"message":"upstream rejected the request"}}"#,
-        );
+        )
+        .0;
         assert_eq!(report.source, "missing");
         assert_eq!(report, UsageReport::missing());
     }
@@ -1387,6 +1465,111 @@ data: {"response":{"error":{"code":"gateway_first_event_timeout"}}}
         let activity = tracker.feed(&frame);
         assert!(activity.error);
         assert_eq!(activity.terminal, Some(StreamTermination::TotalTimeout));
+    }
+
+    #[test]
+    fn response_identity_accepts_all_protocol_shapes() {
+        let chat = response_identity_from_json(&json!({
+            "id": "chatcmpl-1", "model": "gpt-5-2026-08-07", "choices": []
+        }));
+        assert_eq!(chat.model.as_deref(), Some("gpt-5-2026-08-07"));
+        assert_eq!(chat.reasoning_effort, None);
+
+        let responses = response_identity_from_json(&json!({
+            "type": "response.completed",
+            "response": {"id": "resp-1", "model": "kimi-for-coding-0905", "reasoning": {"effort": "medium"}}
+        }));
+        assert_eq!(responses.model.as_deref(), Some("kimi-for-coding-0905"));
+        assert_eq!(responses.reasoning_effort.as_deref(), Some("medium"));
+
+        let anthropic = response_identity_from_json(&json!({
+            "type": "message_start",
+            "message": {"id": "msg-1", "model": "claude-opus-4-6"}
+        }));
+        assert_eq!(anthropic.model.as_deref(), Some("claude-opus-4-6"));
+        assert_eq!(anthropic.reasoning_effort, None);
+
+        let chat_effort = response_identity_from_json(&json!({
+            "model": "deepseek-v4", "reasoning_effort": "high"
+        }));
+        assert_eq!(chat_effort.reasoning_effort.as_deref(), Some("high"));
+
+        let empty = response_identity_from_json(&json!({"model": "  ", "usage": {}}));
+        assert_eq!(empty, ResponseIdentity::default());
+    }
+
+    #[test]
+    fn response_identity_observation_keeps_the_first_reported_value() {
+        let mut identity = ResponseIdentity::default();
+        identity.observe(&json!({"model": "snapshot-a", "reasoning": {"effort": "high"}}));
+        identity.observe(&json!({"model": "snapshot-b", "reasoning": {"effort": "low"}}));
+        assert_eq!(identity.model.as_deref(), Some("snapshot-a"));
+        assert_eq!(identity.reasoning_effort.as_deref(), Some("high"));
+    }
+
+    #[test]
+    fn requested_reasoning_effort_reads_each_protocol_shape() {
+        assert_eq!(
+            requested_reasoning_effort(br#"{"model":"m","reasoning_effort":"high"}"#).as_deref(),
+            Some("high")
+        );
+        assert_eq!(
+            requested_reasoning_effort(
+                br#"{"model":"m","reasoning":{"effort":"low","summary":"auto"}}"#
+            )
+            .as_deref(),
+            Some("low")
+        );
+        assert_eq!(
+            requested_reasoning_effort(br#"{"model":"m","effort":"medium"}"#).as_deref(),
+            Some("medium")
+        );
+        assert_eq!(
+            requested_reasoning_effort(br#"{"model":"m","messages":[]}"#),
+            None
+        );
+        assert_eq!(requested_reasoning_effort(b"not json"), None);
+    }
+
+    #[test]
+    fn sse_tracker_captures_response_identity() {
+        let chat_text = "data: {\"id\":\"chatcmpl-1\",\"model\":\"gpt-5-2026-08-07\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"}}]}\n\ndata: {\"id\":\"chatcmpl-1\",\"model\":\"gpt-5-2026-08-07\",\"choices\":[{\"index\":0,\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n";
+        let mut tracker = SseEventTracker::default();
+        tracker.feed(chat_text.as_bytes());
+        tracker.finish_eof();
+        assert_eq!(
+            tracker.response_identity.model.as_deref(),
+            Some("gpt-5-2026-08-07")
+        );
+
+        let responses_text = "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp-1\",\"model\":\"kimi-k3-256k\",\"reasoning\":{\"effort\":\"medium\"},\"usage\":{\"input_tokens\":1,\"output_tokens\":2}}}\n\n";
+        let mut tracker = SseEventTracker::default();
+        tracker.feed(responses_text.as_bytes());
+        tracker.finish_eof();
+        assert_eq!(
+            tracker.response_identity.model.as_deref(),
+            Some("kimi-k3-256k")
+        );
+        assert_eq!(
+            tracker.response_identity.reasoning_effort.as_deref(),
+            Some("medium")
+        );
+    }
+
+    #[test]
+    fn observe_json_response_reports_identity_and_usage_from_one_parse() {
+        let (report, identity) = observe_json_response(
+            true,
+            br#"{"model":"logical-model","reasoning":{"effort":"high"}}"#,
+            br#"{"id":"resp-1","model":"snapshot-2026-09-01","reasoning":{"effort":"low"},"usage":{"input_tokens":3,"output_tokens":4}}"#,
+        );
+        assert_eq!(report.input_tokens, 3);
+        assert_eq!(report.output_tokens, 4);
+        assert_eq!(identity.model.as_deref(), Some("snapshot-2026-09-01"));
+        assert_eq!(identity.reasoning_effort.as_deref(), Some("low"));
+
+        let (_, identity) = observe_json_response(false, b"{}", b"upstream plain-text error");
+        assert_eq!(identity, ResponseIdentity::default());
     }
 
     #[tokio::test]

@@ -26,7 +26,7 @@ impl Database {
     ) -> Result<(), sqlx::Error> {
         let now: DateTime<Utc> = Utc::now();
         let mut tx = self.pool.begin().await?;
-        sqlx::query("INSERT INTO usage_events (request_id, virtual_key_id, provider_id, account_id, model, logical_model, upstream_model_id, source_id, client_source, protocol_in, protocol_upstream, mode, status_code, success, retry_count, latency_ms, ttft_ms, input_tokens, output_tokens, reasoning_tokens, cached_tokens, cache_read_tokens, cache_creation_tokens, total_tokens, usage_source, degraded, route_id, streamed, error_summary, fallback_reason, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31) ON CONFLICT (request_id) DO NOTHING")
+        sqlx::query("INSERT INTO usage_events (request_id, virtual_key_id, provider_id, account_id, model, logical_model, upstream_model_id, source_id, client_source, protocol_in, protocol_upstream, mode, status_code, success, retry_count, latency_ms, ttft_ms, input_tokens, output_tokens, reasoning_tokens, cached_tokens, cache_read_tokens, cache_creation_tokens, total_tokens, usage_source, degraded, route_id, streamed, error_summary, fallback_reason, response_model, requested_reasoning_effort, response_reasoning_effort, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34) ON CONFLICT (request_id) DO NOTHING")
             .bind(&event.request_id).bind(event.virtual_key_id).bind(&event.provider_id).bind(&event.account_id).bind(&event.model)
             .bind(&event.logical_model).bind(&event.upstream_model_id).bind(&event.source_id).bind(&event.client_source)
             .bind(&event.protocol_in).bind(&event.protocol_upstream).bind(&event.mode).bind(event.status_code)
@@ -34,7 +34,8 @@ impl Database {
             .bind(event.input_tokens).bind(event.output_tokens).bind(event.reasoning_tokens)
             .bind(event.cached_tokens).bind(event.cache_read_tokens).bind(event.cache_creation_tokens)
             .bind(event.total_tokens).bind(&event.usage_source).bind(event.degraded)
-            .bind(&event.route_id).bind(event.streamed).bind(&event.error_summary).bind(&event.fallback_reason).bind(now)
+            .bind(&event.route_id).bind(event.streamed).bind(&event.error_summary).bind(&event.fallback_reason)
+            .bind(&event.response_model).bind(&event.requested_reasoning_effort).bind(&event.response_reasoning_effort).bind(now)
             .execute(&mut *tx).await?;
         for attempt in attempts {
             sqlx::query("INSERT INTO usage_event_attempts (request_id,attempt_no,provider_id,source_id,account_id,upstream_model_id,status_code,success,latency_ms) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (request_id,attempt_no) DO NOTHING")
@@ -228,7 +229,7 @@ impl Database {
 }
 
 fn usage_event_select() -> &'static str {
-    "SELECT request_id,virtual_key_id,provider_id,account_id,logical_model,upstream_model_id,source_id,client_source,protocol_in,protocol_upstream,mode,status_code,success,retry_count,latency_ms,ttft_ms,input_tokens,output_tokens,reasoning_tokens,cached_tokens,cache_read_tokens,cache_creation_tokens,total_tokens,usage_source,degraded,route_id,streamed,error_summary,fallback_reason,created_at FROM usage_events"
+    "SELECT request_id,virtual_key_id,provider_id,account_id,logical_model,upstream_model_id,source_id,client_source,protocol_in,protocol_upstream,mode,status_code,success,retry_count,latency_ms,ttft_ms,input_tokens,output_tokens,reasoning_tokens,cached_tokens,cache_read_tokens,cache_creation_tokens,total_tokens,usage_source,degraded,route_id,streamed,error_summary,fallback_reason,response_model,requested_reasoning_effort,response_reasoning_effort,created_at FROM usage_events"
 }
 
 pub(super) fn filter_sql(filter: &UsageFilter) -> (String, Vec<FilterBind>) {

@@ -1,6 +1,6 @@
 use super::{
     stream::{self, StreamConfig, StreamTermination},
-    usage::{usage_for_json_response, UsageReport},
+    usage::{observe_json_response, ResponseIdentity, UsageReport},
 };
 use crate::{
     domain::{
@@ -223,7 +223,8 @@ pub(crate) async fn forward_url_with_config(
         } else {
             upstream.bytes().await.map_err(map_reqwest_error)?
         };
-        let report = usage_for_json_response(status.is_success(), &request_payload, &bytes);
+        let (report, identity) =
+            observe_json_response(status.is_success(), &request_payload, &bytes);
         let body = Body::from(bytes);
         let mut response = Response::new(body);
         *response.status_mut() = status;
@@ -236,6 +237,7 @@ pub(crate) async fn forward_url_with_config(
             }
         }
         response.extensions_mut().insert(report);
+        response.extensions_mut().insert(identity);
         return Ok(response);
     }
     let stream = upstream.bytes_stream();
@@ -302,6 +304,17 @@ fn earliest_send_timeout(
 /// Retrieve usage metadata attached by [`forward_url`].
 pub(crate) fn usage_from_response(response: &Response<Body>) -> Option<UsageReport> {
     response.extensions().get::<UsageReport>().cloned()
+}
+
+/// Retrieve the upstream-reported identity attached by [`forward_url`] for
+/// buffered (non-streaming) responses. Streaming responses report it through
+/// the stream observation instead.
+pub(crate) fn response_identity_from_response(response: &Response<Body>) -> ResponseIdentity {
+    response
+        .extensions()
+        .get::<ResponseIdentity>()
+        .cloned()
+        .unwrap_or_default()
 }
 
 fn map_reqwest_error(error: reqwest::Error) -> TransportError {
@@ -487,6 +500,43 @@ mod tests {
                 "upstream encoding negotiation belongs to the gateway",
             );
         }
+    }
+
+    #[tokio::test]
+    async fn non_streaming_response_attaches_upstream_reported_identity() {
+        let payload = serde_json::json!({
+            "id": "resp-1",
+            "model": "snapshot-2026-09-01",
+            "reasoning": {"effort": "low"},
+            "usage": {"input_tokens": 3, "output_tokens": 4},
+        })
+        .to_string();
+        let upstream = spawn_router(Router::new().fallback(move || {
+            let payload = payload.clone();
+            async move {
+                Response::builder()
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(payload))
+                    .unwrap()
+            }
+        }))
+        .await;
+        let response = forward_url(
+            &test_client().unwrap(),
+            &upstream,
+            &account(),
+            None,
+            Protocol::OpenAiResponses,
+            &HeaderMap::new(),
+            Bytes::from_static(br#"{"model":"m","stream":false}"#),
+        )
+        .await
+        .expect("forward non-streaming JSON");
+        let identity = response_identity_from_response(&response);
+        assert_eq!(identity.model.as_deref(), Some("snapshot-2026-09-01"));
+        assert_eq!(identity.reasoning_effort.as_deref(), Some("low"));
+        let report = usage_from_response(&response).unwrap();
+        assert_eq!(report.input_tokens, 3);
     }
 
     #[tokio::test]

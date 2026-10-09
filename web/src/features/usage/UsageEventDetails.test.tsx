@@ -70,6 +70,31 @@ describe('usage event details', () => {
     expect(dialog.textContent).toContain('source-tokyo');
   });
 
+  it('lists the upstream-reported model and reasoning effort only when recorded', async () => {
+    fetchImpl.mockResolvedValue(new Response(JSON.stringify({ attempts: [] })));
+    await render({
+      ...event,
+      responseModel: 'snapshot-2026-09-01',
+      requestedReasoningEffort: 'high',
+      responseReasoningEffort: 'low',
+    });
+    const dialog = document.querySelector('[role="dialog"]')!;
+    const values = Object.fromEntries([...dialog.querySelectorAll('dt')].map(term => [term.textContent, term.nextElementSibling?.textContent]));
+    expect(values['返回模型']).toBe('snapshot-2026-09-01');
+    expect(values['请求思考强度']).toBe('high');
+    expect(values['返回思考强度']).toBe('low');
+  });
+
+  it('omits upstream-reported identity rows when the provider did not report them', async () => {
+    fetchImpl.mockResolvedValue(new Response(JSON.stringify({ attempts: [] })));
+    await render(event);
+    const dialog = document.querySelector('[role="dialog"]')!;
+    const labels = [...dialog.querySelectorAll('dt')].map(term => term.textContent);
+    expect(labels).not.toContain('返回模型');
+    expect(labels).not.toContain('请求思考强度');
+    expect(labels).not.toContain('返回思考强度');
+  });
+
   it('explains missing token usage instead of displaying unexplained accounting zeros', async () => {
     fetchImpl.mockResolvedValue(new Response(JSON.stringify({ attempts: [] })));
     await render({ ...event, ...adaptUsageEventPage(gatewayUsageEventsFixture).events[1] });

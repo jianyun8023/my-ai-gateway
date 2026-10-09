@@ -278,8 +278,11 @@
   td small { display: block; overflow: hidden; color: var(--text-secondary); text-overflow: ellipsis; }
   td .eventDate { font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
   td .modelUpstream, td .protocolUpstream { display: flex; align-items: center; gap: 4px; }
-  .modelUpstream > svg, .protocolUpstream > svg { flex: 0 0 auto; }
-  .modelUpstream > span, .protocolUpstream > span { overflow: hidden; text-overflow: ellipsis; }
+  td .modelResponse, td .modelEffort { display: flex; align-items: center; gap: 4px; }
+  .modelUpstream > svg, .protocolUpstream > svg, .modelResponse > svg, .modelEffort > svg { flex: 0 0 auto; }
+  .modelUpstream > span, .protocolUpstream > span, .modelResponse > span, .modelEffort > span { overflow: hidden; text-overflow: ellipsis; }
+  // Upstream-reported drift lines stand out from the requested values above.
+  td .modelResponse { color: var(--warn); }
   &[data-failed='true']::before { content: ''; position: absolute; inset: 0 auto 0 0; width: 2px; background: var(--danger); pointer-events: none; }
   &[data-new='true'] > td { animation: eventArrival 1.5s ease-out; }
 }
