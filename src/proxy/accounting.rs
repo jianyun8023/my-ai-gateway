@@ -115,6 +115,8 @@ pub(crate) fn finalize_stream_usage(
     observation: usage::StreamObservation,
 ) {
     event.ttft_ms = observation.ttft_ms;
+    event.response_model = observation.response_model.clone();
+    event.response_reasoning_effort = observation.response_reasoning_effort.clone();
     let termination = if observation.failed && !observation.termination.is_failure() {
         stream::StreamTermination::UpstreamError
     } else {

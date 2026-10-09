@@ -94,6 +94,41 @@ describe('event metric cells', () => {
     expect(rows[2].querySelectorAll('td')[2].textContent).toBe('2');
   });
 
+  it('marks upstream-reported model and reasoning effort drift below the requested values', async () => {
+    const quiet = { fallback: false, fallbackReason: undefined, retryCount: 0 };
+    await renderTable([
+      // Provider reports a different model and a lower effort than requested.
+      { ...richEvent, ...quiet, id: 'drift', logicalModel: 'logical-a', upstreamModel: 'upstream-a', responseModel: 'snapshot-2026-09-01', requestedReasoningEffort: 'high', responseReasoningEffort: 'low' },
+      // Reported model matches the rewrite target: already shown, no extra line.
+      { ...richEvent, ...quiet, id: 'rewritten', logicalModel: 'logical-b', upstreamModel: 'upstream-b', responseModel: 'upstream-b' },
+      // Everything matches: no marker lines at all.
+      { ...richEvent, ...quiet, id: 'matched', logicalModel: 'same-c', upstreamModel: 'same-c', responseModel: 'same-c', requestedReasoningEffort: 'high', responseReasoningEffort: 'high' },
+      // No upstream report: nothing is marked.
+      { ...richEvent, ...quiet, id: 'silent', logicalModel: 'logical-d', upstreamModel: 'logical-d' },
+    ], ['model']);
+    const rows = container.querySelectorAll('tbody tr');
+    const modelCellOf = (row: Element) => row.querySelectorAll('td')[1];
+
+    const drift = modelCellOf(rows[0]);
+    expect(drift.textContent).toContain('logical-a');
+    expect(drift.textContent).toContain('upstream-a');
+    expect(drift.querySelector('[aria-label^="返回模型"]')?.textContent).toContain('snapshot-2026-09-01');
+    expect(drift.querySelector('[aria-label^="请求思考强度"]')?.textContent).toContain('high');
+    expect(drift.querySelector('[aria-label^="返回思考强度"]')?.textContent).toContain('low');
+
+    const rewritten = modelCellOf(rows[1]);
+    expect(rewritten.textContent?.match(/upstream-b/g)).toHaveLength(1);
+    expect(rewritten.querySelector('[aria-label^="返回模型"]')).toBeNull();
+
+    const matched = modelCellOf(rows[2]);
+    expect(matched.textContent?.match(/same-c/g)).toHaveLength(1);
+    expect(matched.querySelector('[aria-label^="请求思考强度"]')?.textContent).toContain('high');
+    expect(matched.querySelector('[aria-label^="返回思考强度"]')).toBeNull();
+
+    const silent = modelCellOf(rows[3]);
+    expect(silent.textContent).toBe('logical-d');
+  });
+
   it('labels known clients and preserves unknown client identities', async () => {
     await renderTable(['claude-code', 'codex', 'kimi_code', 'curl', 'custom-agent/v2'].map((clientSource) => ({
       ...richEvent, id: clientSource, clientSource,

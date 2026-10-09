@@ -215,6 +215,23 @@ WHERE logical_model = 'MiniMax-M3' AND fallback_reason IS NOT NULL
 ORDER BY created_at DESC LIMIT 20;
 ```
 
+## Usage 事件中的上游返回身份
+
+`usage_events.response_model`、`requested_reasoning_effort`、`response_reasoning_effort`（migration 0028，Issue #250）记录上游响应报告的模型名、客户端请求携带的思考强度和上游响应报告的思考强度；`NULL` 表示对应一侧未携带该信息。三者是数据面按协议形态提取的事实字段（`model` / `response.model` / `message.model` 与 `reasoning_effort` / `reasoning.effort` / `response.reasoning.effort`），不依赖网关改写逻辑。
+
+`logical_model` 是客户端请求的逻辑模型，`upstream_model_id` 是网关实际发往上游的模型（账号级模型重写后可能不同），`response_model` 是上游在响应里自报的模型。上游静默映射版本快照或内部换模型时，只有 `response_model` 能发现；Request Events 在它与逻辑模型/上游模型不一致时，于模型名下显示“↳ 返回模型”标记，思考强度不一致时同样以“↳ 返回思考强度”标记。
+
+查询上游自报模型与请求不一致的请求：
+
+```sql
+SELECT created_at, logical_model, upstream_model_id, response_model,
+       requested_reasoning_effort, response_reasoning_effort
+FROM usage_events
+WHERE response_model IS NOT NULL
+  AND response_model <> COALESCE(upstream_model_id, logical_model)
+ORDER BY created_at DESC LIMIT 20;
+```
+
 
 ### SSE 观察资源边界与诊断
 

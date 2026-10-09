@@ -232,6 +232,7 @@ pub(crate) struct SseEventTracker {
     line: Vec<u8>,
     frame_bytes: usize,
     pub(crate) usage: super::usage::SseUsageAccumulator,
+    pub(crate) response_identity: super::usage::ResponseIdentity,
     event_name: String,
     data_lines: Vec<String>,
     frame_non_comment: bool,
@@ -368,6 +369,9 @@ impl SseEventTracker {
         // later usage chunks and wait for every observed choice to finish.
         let parsed = serde_json::from_str::<Value>(&data);
         self.usage.observe(&data, parsed.as_ref().ok());
+        if let Ok(value) = &parsed {
+            self.response_identity.observe(value);
+        }
         if let Ok(value) = parsed {
             if let Some(choices) = value.get("choices").and_then(Value::as_array) {
                 for choice in choices {

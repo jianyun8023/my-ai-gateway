@@ -95,6 +95,14 @@ export interface UsageEventViewModel {
   createdAt: string;
   logicalModel: string;
   upstreamModel: string;
+  // Model string reported by the upstream response body; undefined when the
+  // provider did not report one. Drift markers compare it against the
+  // requested logical model and the rewritten upstream model.
+  responseModel?: string;
+  // Reasoning effort carried by the client request / reported by the upstream
+  // response; undefined when the corresponding side did not carry one.
+  requestedReasoningEffort?: string;
+  responseReasoningEffort?: string;
   provider: string;
   sourceId: string;
   clientSource: string;

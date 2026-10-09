@@ -420,7 +420,7 @@ pub(crate) async fn usage_export(
 }
 
 pub(crate) fn usage_events_csv(events: &[db::UsageEventRecord]) -> String {
-    let mut output = String::from("request_id,created_at,virtual_key_id,logical_model,upstream_model_id,provider_id,source_id,client_source,account_id,protocol_in,protocol_upstream,mode,status_code,success,retry_count,latency_ms,ttft_ms,input_tokens,output_tokens,reasoning_tokens,cached_tokens,cache_read_tokens,cache_creation_tokens,total_tokens,usage_source,degraded,route_id,streamed,error_summary,fallback_reason\n");
+    let mut output = String::from("request_id,created_at,virtual_key_id,logical_model,upstream_model_id,provider_id,source_id,client_source,account_id,protocol_in,protocol_upstream,mode,status_code,success,retry_count,latency_ms,ttft_ms,input_tokens,output_tokens,reasoning_tokens,cached_tokens,cache_read_tokens,cache_creation_tokens,total_tokens,usage_source,degraded,route_id,streamed,error_summary,fallback_reason,response_model,requested_reasoning_effort,response_reasoning_effort\n");
     for event in events {
         let values = [
             event.request_id.clone(),
@@ -459,6 +459,9 @@ pub(crate) fn usage_events_csv(events: &[db::UsageEventRecord]) -> String {
             event.streamed.to_string(),
             event.error_summary.clone().unwrap_or_default(),
             event.fallback_reason.clone().unwrap_or_default(),
+            event.response_model.clone().unwrap_or_default(),
+            event.requested_reasoning_effort.clone().unwrap_or_default(),
+            event.response_reasoning_effort.clone().unwrap_or_default(),
         ];
         let line = values
             .iter()

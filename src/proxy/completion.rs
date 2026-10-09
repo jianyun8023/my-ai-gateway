@@ -4,6 +4,7 @@ use super::fallback::FallbackCandidate;
 use super::service::finish_proxy;
 use super::settlement::SettlementPermit;
 use super::transport;
+use super::usage;
 use crate::domain::{protocol::Protocol, routing::ResolvedRoute};
 use crate::infra::db;
 use crate::state::AppState;
@@ -68,8 +69,10 @@ impl RequestCompletion<'_> {
         attempts: &[db::UsageAttempt],
         fallback_reason: Option<String>,
         error_summary: Option<String>,
+        request_body: &[u8],
     ) -> db::UsageEvent {
         let usage = transport::usage_from_response(response);
+        let identity = transport::response_identity_from_response(response);
         db::UsageEvent {
             request_id: self.request_id.to_owned(),
             virtual_key_id: self.virtual_key_id,
@@ -107,6 +110,9 @@ impl RequestCompletion<'_> {
                     .then(|| format!("HTTP {}", response.status().as_u16()))
             }),
             fallback_reason,
+            response_model: identity.model,
+            requested_reasoning_effort: usage::requested_reasoning_effort(request_body),
+            response_reasoning_effort: identity.reasoning_effort,
         }
     }
 
@@ -126,6 +132,7 @@ impl RequestCompletion<'_> {
                 &attempts,
                 fallback_reason,
                 error_summary,
+                &request_body,
             );
             if is_event_stream(&response) {
                 return wrap_stream_usage(

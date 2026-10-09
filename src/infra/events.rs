@@ -1547,6 +1547,9 @@ mod tests {
             streamed: true,
             error_summary: None,
             fallback_reason: None,
+            response_model: None,
+            requested_reasoning_effort: None,
+            response_reasoning_effort: None,
         };
         for component in [
             "auth.virtual_key",

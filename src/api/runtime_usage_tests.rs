@@ -594,6 +594,9 @@ fn usage_event() -> db::UsageEvent {
         streamed: true,
         error_summary: None,
         fallback_reason: None,
+        response_model: None,
+        requested_reasoning_effort: None,
+        response_reasoning_effort: None,
     }
 }
 
@@ -618,6 +621,8 @@ fn failed_stream_keeps_ttft_absent_and_never_estimates_tokens() {
             capture_truncated: false,
             parsed_usage: None,
             estimated_reasoning_tokens: None,
+            response_model: None,
+            response_reasoning_effort: None,
             captured: Vec::new(),
             ttft_ms: None,
             failed: true,
@@ -631,6 +636,39 @@ fn failed_stream_keeps_ttft_absent_and_never_estimates_tokens() {
     assert_eq!(event.total_tokens, 0);
     assert!(!attempts[0].success);
     assert_eq!(attempts[0].status_code, 599);
+}
+
+#[test]
+fn completed_stream_records_upstream_reported_model_and_effort() {
+    let mut event = usage_event();
+    let mut attempts = vec![db::UsageAttempt {
+        attempt_no: 0,
+        provider_id: "provider".into(),
+        source_id: "runtime-provider".into(),
+        account_id: "account".into(),
+        upstream_model_id: Some("upstream-model".into()),
+        status_code: 200,
+        success: true,
+        latency_ms: 1,
+    }];
+    finalize_stream_usage(
+        &mut event,
+        &mut attempts,
+        br#"{"model":"logical-model","reasoning":{"effort":"high"},"stream":true}"#,
+        usage::StreamObservation {
+            capture_truncated: false,
+            parsed_usage: None,
+            estimated_reasoning_tokens: None,
+            response_model: Some("snapshot-2026-09-01".into()),
+            response_reasoning_effort: Some("low".into()),
+            captured: Vec::new(),
+            ttft_ms: Some(12),
+            failed: false,
+            termination: StreamTermination::Completed,
+        },
+    );
+    assert_eq!(event.response_model.as_deref(), Some("snapshot-2026-09-01"));
+    assert_eq!(event.response_reasoning_effort.as_deref(), Some("low"));
 }
 
 #[test]
@@ -689,6 +727,8 @@ fn stream_termination_reasons_have_stable_usage_statuses_and_summaries() {
                 capture_truncated: false,
                 parsed_usage: None,
                 estimated_reasoning_tokens: None,
+                response_model: None,
+                response_reasoning_effort: None,
                 captured: Vec::new(),
                 ttft_ms: None,
                 failed: true,
