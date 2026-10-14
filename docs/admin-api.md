@@ -156,7 +156,7 @@ POST 和 PUT 均在一个 SERIALIZABLE 事务内保存模型和请求设置、�
 
 连接测试会产生一个最小的真实模型请求，可能消耗少量上游 Token。上游请求超时为 120 秒；账号健康探测复用该连接测试。此时限独立于数据面的 `GATEWAY_SSE_*` 配置。
 
-## 账号健康与主动探测
+## 账号健康与手动连接测试
 
 账号健康的当前状态以 PostgreSQL `accounts` 行为事实来源。每次状态变化同时写入
 `account_health_events`，但路由只读取账号当前行，不从事件历史推断状态。状态机如下：
@@ -181,7 +181,7 @@ POST 和 PUT 均在一个 SERIALIZABLE 事务内保存模型和请求设置、�
 剩余时间和最近探测信息；`GET /admin/health/:account_id` 返回单个账号的相同信息。
 两个接口都要求独立的 `GATEWAY_ADMIN_KEY`，不会返回凭据或请求/响应正文。
 
-主动探测复用同一 Source 的 ProviderPreset 最小连接测试，不调用模型 discovery：
+Admin 显式手动探测复用同一 Source 的 ProviderPreset 最小连接测试，不调用模型 discovery：
 
 ```http
 POST /admin/accounts/deepseek-main/probe
@@ -200,10 +200,9 @@ Content-Type: application/json
 `source_discovery_runs`，不会改变账号路由健康。探测请求只使用数据库中绑定的 Source
 endpoint，经过同一 URL allowlist、DNS、重定向和凭据策略，客户端不能提交任意上游 URL。
 
-后台探测默认启用，每个账号按 `GATEWAY_HEALTH_PROBE_INTERVAL_SECS` 周期执行；可用
-`GATEWAY_HEALTH_PROBE_ENABLED=false` 关闭，或用 `GATEWAY_HEALTH_PROBE_ON_STARTUP=true`
-在启动时立即执行一次。冷却期间仍按该周期执行半开探测，成功可提前关闭 cooldown；失败不会
-在同一 cooldown 内继续放大退避。无可用 fallback 且 429 携带不超过 2 秒的 `Retry-After`
+网关不支持后台周期性或启动时主动健康探测，不会自动发送上游模型请求。冷却到期后账号
+重新具备路由资格，下一次真实请求或显式手动连接测试成功才写回 `healthy`；手动测试成功
+可提前关闭 cooldown，失败不会在同一 cooldown 内继续放大退避。无可用 fallback 且 429 携带不超过 2 秒的 `Retry-After`
 时，同一账号最多重试一次；更长或非法的值不会让请求阻塞等待。固定首选仍保持优先。
 
 ## 模型发现与差异

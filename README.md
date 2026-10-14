@@ -8,7 +8,7 @@
 
 - **统一接入**：支持 OpenAI Chat Completions、OpenAI Responses 和 Anthropic Messages，原生转发 JSON 与 SSE。
 - **可视化管理**：来源接入、模型更新审核、协议能力检查、模型与路由配置。
-- **故障切换**：首选账号优先，失败后自动 fallback，支持健康探测与冷却。
+- **故障切换**：首选账号优先，失败后自动 fallback，真实请求驱动健康状态与冷却，支持显式手动连接测试；不支持后台主动健康探测。
 - **用量与运维**：Token 统计、请求归因、Virtual Key 管理、凭据加密、Prometheus 指标与可选 OpenTelemetry tracing。
 
 | 协议 | 接口 |
@@ -60,7 +60,7 @@ curl -N http://127.0.0.1:8787/v1/responses \
 
 ## 超时配置
 
-流式与非流式请求默认等待上游响应头 **120 秒**，由 `GATEWAY_SSE_CONNECTION_TIMEOUT_MS=120000` 控制。来源连接测试和健康探测也使用独立的 120 秒时限。
+流式与非流式请求默认等待上游响应头 **120 秒**，由 `GATEWAY_SSE_CONNECTION_TIMEOUT_MS=120000` 控制。来源连接测试和手动健康探测也使用独立的 120 秒时限。
 
 SSE 首事件、空闲和请求总时限分别为 30、60、300 秒，心跳间隔为 15 秒。完整参数见 [`.env.example`](.env.example)；反向代理需关闭流式缓冲并匹配超时设置。已有部署若设置了 `GATEWAY_SSE_CONNECTION_TIMEOUT_MS=10000`，需改为 `120000` 并重启。
 

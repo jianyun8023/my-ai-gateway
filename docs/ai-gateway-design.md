@@ -495,7 +495,7 @@ v1 响应 envelope 固定如下：summary 为 `{version, timezone, range, data}`
 
 `system_events` 固定字段为 UTC `occurred_at`、`category`、`event_type`、`level`、`subject_type/id`、`correlation_id`、短 `message` 和 metadata-only `details`。写入器与统一查询返回边界共用脱敏规则，限制长度、层级和字段数，递归移除 credential、token、Authorization、prompt/response、thinking/signature 等敏感内容。既有 audit actor、discovery requested_by 属于非必要且任意调用方可控的文本，在统一投影中无条件替换为 `[REDACTED]`，不能依赖供应商 Key 前缀识别。通用 Admin 请求可自带的 `X-Request-ID` 只保留为服务端筛选键：audit 的主体/关联输出和复用该值的配置类 system event 关联输出固定脱敏，避免普通事件响应反射外部关联值；专用运维任务的 `operation_id` 仍是可返回、可轮询的领域资源标识。事件落库失败只告警，不能把本来成功的网关操作改成失败。
 
-连接事件使用共享 SQLx 分类：I/O、TLS、连接池不可用/获取超时、SQLSTATE `08` 和 PostgreSQL 停机/尚未可连接状态会打开 incident；缺表、权限、约束、解析等查询错误保持原业务错误，不伪装成连接异常。用量读写（写入含 SSE 结算）、Virtual Key 鉴权、健康状态与探测 metadata 读写、普通 Admin 控制面读取、控制面事务/snapshot、Admin 审计和事件查询接入该记录器。运行期数据库对象的克隆共享按组件区分的 incident 集合：每个组件只保留首个未恢复 incident，并由该组件后续成功按原发生时间补写失败事件、写入同一 `correlation_id` 的恢复事件并独立关闭；其他组件的失败不会被吞掉，成功或仅发布内存 snapshot 也不会错误关闭它。失败路径只在短内存临界区登记，不同步重试已经不可用的连接池；恢复路径在不持有 incident 集合锁时补写。此记录不依赖周期探测开启。
+连接事件使用共享 SQLx 分类：I/O、TLS、连接池不可用/获取超时、SQLSTATE `08` 和 PostgreSQL 停机/尚未可连接状态会打开 incident；缺表、权限、约束、解析等查询错误保持原业务错误，不伪装成连接异常。用量读写（写入含 SSE 结算）、Virtual Key 鉴权、健康状态与手动探测 metadata 读写、普通 Admin 控制面读取、控制面事务/snapshot、Admin 审计和事件查询接入该记录器。运行期数据库对象的克隆共享按组件区分的 incident 集合：每个组件只保留首个未恢复 incident，并由该组件后续成功按原发生时间补写失败事件、写入同一 `correlation_id` 的恢复事件并独立关闭；其他组件的失败不会被吞掉，成功或仅发布内存 snapshot 也不会错误关闭它。失败路径只在短内存临界区登记，不同步重试已经不可用的连接池；恢复路径在不持有 incident 集合锁时补写。连接异常与恢复由实际数据库操作结果记录，不依赖后台主动探测。
 
 初始 PostgreSQL 连接/迁移尚未成功时无可用事件仓储；进程终止前仍未恢复的 incident 也无法持久化。这些失败仍由启动错误/日志报告，内存补写不提供跨重启可靠性。
 
@@ -505,7 +505,7 @@ v1 响应 envelope 固定如下：summary 为 `{version, timezone, range, data}`
 
 | 场景 | 谁继续 | 恢复/继续条件 | 观察方式 |
 | --- | --- | --- | --- |
-| 账号健康恢复 | 路由候选与健康状态机 | cooldown 到期只变为可尝试的 `unhealthy`；下一次真实请求或默认 60 秒周期探测成功后才写回 `healthy` | `accounts` 当前状态 + `account_health_events` |
+| 账号健康恢复 | 路由候选与健康状态机 | cooldown 到期只变为可尝试的 `unhealthy`；下一次真实请求或显式手动连接测试成功后才写回 `healthy` | `accounts` 当前状态 + `account_health_events` |
 | fallback 回主 | 下一次逻辑请求 | 主账号只有在上述成功将其恢复为 `healthy` 后才重新固定优先；既有 fallback 请求不会重放 | `usage_events.fallback_reason` + 健康事实 |
 | 后台任务完成/重试 | Admin 客户端或调度器 | 继续轮询任务 GET；需要关注跨表事实时以 `operation_id` + 上次时间作为 `/admin/events?since=...` 增量查询，取消/retry 仍调用任务专用端点 | 任务资源 + `audit_logs` 统一投影 |
 
@@ -555,7 +555,7 @@ PostgreSQL 回归测试只连接显式的 `TEST_DATABASE_URL`，不会复用运�
 
 ProviderPreset/模型发现回归使用真实 PostgreSQL 与 mock 上游，覆盖 DeepSeek、MiniMax、Kimi Code 的成功、失败、空列表、重复刷新、模型消失、confirmed/user 覆盖保留、批量确认、版本差异和日志脱敏。非流式 JSON 响应与流式 SSE 都必须把上游 usage 映射到统一 `UsageReport`；缺失 usage 才按既有 `estimated/missing` 规则处理。
 
-账号健康持久化、主动探测和无正文转换历史已由 #52 完成；统一 Admin 写操作审计日志（#48）已接入。#53 已补齐运维操作自身的审计记录，不把普通应用日志当作审计事实；#110 只为无既有事实表的系统事件补窄表，并在读侧聚合这些事实。
+账号健康持久化、手动连接测试和无正文转换历史已由 #52 完成；后台主动健康探测由 #252 移除，不再支持。统一 Admin 写操作审计日志（#48）已接入。#53 已补齐运维操作自身的审计记录，不把普通应用日志当作审计事实；#110 只为无既有事实表的系统事件补窄表，并在读侧聚合这些事实。
 
 ### 7.2.1 数据保留、清理、备份与恢复（#53）
 
@@ -588,11 +588,11 @@ Provider 与 Source 已使用独立运行时身份：Provider 按 Source 固化�
 - `stale`：`health_updated_at` 达到阈值，旧 cooldown 只作提示而不会永久屏蔽账号；
 - `disabled`：Account 或 Source 被人工停用。
 
-所有转换以 UTC 观测时间写入，行级锁保证并发失败计数不丢失。默认在 60 秒内累计 3 次可重试失败才开启冷却，第三次采用 base cooldown；活跃 cooldown 内完成的并发请求不会继续放大退避。成功会清零失败窗口、连续失败和 cooldown，新的 `HealthRegistry` 直接读取数据库恢复重启前状态。固定首选保持优先，只有冷却、不可用或人工停用才进入 fallback；无 fallback 时只对带短 `Retry-After` 的 429 做一次同账号重试。`POST /admin/accounts/:account_id/probe`、`POST /admin/health/probe` 和批量接口复用 ProviderPreset 最小连接测试，不调用 discovery；探测沿用 Source URL allowlist、DNS、重定向和凭据策略，并在 cooldown 内按正常周期作为半开恢复探测。周期任务默认每 60 秒运行，可由环境变量关闭或调整。
+所有转换以 UTC 观测时间写入，行级锁保证并发失败计数不丢失。默认在 60 秒内累计 3 次可重试失败才开启冷却，第三次采用 base cooldown；活跃 cooldown 内完成的并发请求不会继续放大退避。成功会清零失败窗口、连续失败和 cooldown，新的 `HealthRegistry` 直接读取数据库恢复重启前状态。固定首选保持优先，只有冷却、不可用或人工停用才进入 fallback；无 fallback 时只对带短 `Retry-After` 的 429 做一次同账号重试。`POST /admin/accounts/:account_id/probe`、`POST /admin/health/probe` 和批量接口仅供显式手动调用，复用 ProviderPreset 最小连接测试，不调用 discovery；手动测试沿用 Source URL allowlist、DNS、重定向和凭据策略，成功可提前结束 cooldown。网关不支持后台周期性或启动时主动健康探测；cooldown 到期后由下一次真实请求或显式手动连接测试成功恢复 `healthy`。
 
 生产化剩余范围均有独立 Issue：
 
-- 健康状态持久化与主动探测（#52）已完成；
+- 健康状态持久化与手动连接测试（#52）已完成；后台主动健康探测由 #252 移除；
 - SSE 心跳、取消和流式超时契约（#54）已完成：三协议原生透传共享可配置心跳、连接/首事件/空闲/总时限和取消清理；
 - Prometheus 指标采集与 `/metrics` 端点（#50，PR #77）已完成：`gateway_requests_total`、`gateway_upstream_attempts_total`、`gateway_tokens_total`、`gateway_request_duration_seconds`、`gateway_time_to_first_token_seconds`、`gateway_health_cooldowns_total`、`gateway_snapshot_revision`、`gateway_active_streams`；OpenTelemetry OTLP/gRPC tracing 已由 PR #80 完成；
 - Secret Resolver 与凭据信封加密（#47，PR #73）已完成：AES-256-GCM 信封加密、多版本 keyring、运行时凭据路径和 Admin 加密/轮换端点已集成；

@@ -7,6 +7,7 @@
 - Gateway 监听 `0.0.0.0:8787`，Service 使用 `ClusterIP` 暴露同一端口；
 - Deployment 默认 1 个副本、`Recreate` 更新策略，容器以 UID/GID `10001` 的非 root 用户运行；
 - `/healthz` 同时用于 startup、readiness 和 liveness probe；
+- 网关不支持向上游模型发起后台主动健康探测；账号健康由真实请求或显式手动连接测试更新，升级与旧环境变量清理见 [账号健康维护](operations.md#账号健康维护)；
 - PostgreSQL 是控制面事实来源，必须使用已有的 PostgreSQL 16 或托管实例；
 - Provider、模型、Binding 和 Fallback Route 由 PostgreSQL 控制面保存，不写入公开清单；
 - GHCR 镜像包为私有包时，Pod 通过 `imagePullSecrets` 拉取镜像。

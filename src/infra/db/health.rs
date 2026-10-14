@@ -118,8 +118,8 @@ impl Database {
         self.events.observe("health.read", result).await
     }
 
-    /// Return one deterministic enabled protocol per account for periodic
-    /// probes. The explicit Admin endpoint can choose another protocol.
+    /// Return one deterministic enabled protocol per account for explicit
+    /// Admin probes. The caller can choose another protocol.
     pub(crate) async fn health_probe_targets(
         &self,
     ) -> Result<Vec<(String, String, Protocol)>, sqlx::Error> {
@@ -365,7 +365,7 @@ impl Database {
             "disabled"
         };
         // 只有真正的恢复（此前不是 healthy）才写事件；健康账号上的例行成功
-        // （每次代理请求、每次周期探测）只刷新当前行，否则每次成功都会向
+        // （每次代理请求、每次手动连接测试）只刷新当前行，否则每次成功都会向
         // account_health_events 追加一条 "healthy" 记录，淹没事件中心。
         let recovered = current.health_status != status;
         sqlx::query(
