@@ -167,7 +167,6 @@ pub(crate) async fn run() -> Result<(), Box<dyn std::error::Error>> {
         prometheus_handle,
         settlements: crate::proxy::settlement::SettlementManager::default(),
     };
-    spawn_health_probe_loop(state.clone());
     let app = crate::app::application_with_body_limit(state.clone(), max_request_body_bytes);
     tracing::info!(
         max_request_body_bytes,
@@ -480,84 +479,4 @@ fn cli_option<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
 
 fn ops_cli_usage() -> &'static str {
     "usage: cargo run -- ops <retention-cleanup|retention-cancel|retention-retry|retention-policies|retention-policy-set|control-plane-export|control-plane-import>"
-}
-
-fn spawn_health_probe_loop(state: AppState) {
-    let enabled = std::env::var("GATEWAY_HEALTH_PROBE_ENABLED")
-        .ok()
-        .map(|value| !matches!(value.as_str(), "0" | "false" | "FALSE" | "no"))
-        .unwrap_or(true);
-    if !enabled || state.health.database().is_none() {
-        return;
-    }
-    let interval = state.health.config().probe_interval;
-    let on_startup = std::env::var("GATEWAY_HEALTH_PROBE_ON_STARTUP")
-        .ok()
-        .is_some_and(|value| !matches!(value.as_str(), "0" | "false" | "FALSE" | "no"));
-    tokio::spawn(async move {
-        if on_startup {
-            run_health_probes_once(&state).await;
-        }
-        loop {
-            tokio::time::sleep(interval).await;
-            run_health_probes_once(&state).await;
-        }
-    });
-}
-
-async fn run_health_probes_once(state: &AppState) {
-    let Some(database) = state.health.database() else {
-        return;
-    };
-    let targets = match database.health_probe_targets().await {
-        Ok(targets) => targets,
-        Err(error) => {
-            tracing::warn!(%error, "failed to enumerate periodic health probes");
-            return;
-        }
-    };
-    let now = state.health.now();
-    for (account_id, _source_id, protocol) in targets {
-        let current = state.health.get_health(&account_id).await;
-        let due = current.last_probe_at.is_none_or(|last| {
-            now.signed_duration_since(last)
-                .to_std()
-                .map(|elapsed| elapsed >= state.health.config().probe_interval)
-                .unwrap_or(true)
-        });
-        // Keep probing at the configured cadence while the account is cooling
-        // down. A successful half-open probe can restore a transiently limited
-        // account before a long exponential cooldown expires.
-        if !due {
-            continue;
-        }
-        match state
-            .health
-            .probe_account(
-                &state.http,
-                &account_id,
-                protocol,
-                None,
-                "periodic_health_probe",
-            )
-            .await
-        {
-            Ok(outcome) => {
-                tracing::info!(
-                    account_id = %outcome.account_id,
-                    %protocol,
-                    status = %outcome.connection_test.status,
-                    "periodic account health probe completed"
-                )
-            }
-            Err(error) => {
-                tracing::warn!(
-                    account_id = %account_id,
-                    %protocol,
-                    code = error.code(),
-                    "periodic account health probe failed"
-                )
-            }
-        }
-    }
 }

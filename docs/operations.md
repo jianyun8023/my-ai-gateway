@@ -2,6 +2,12 @@
 
 本文对应 Issue #53，适用于本地部署和 `docker compose` 部署。Compose 的启动、镜像更新和基础生命周期见 [`docs/deployment.md`](deployment.md)。所有控制面运维接口都要求独立的 `GATEWAY_ADMIN_KEY`；数据面 Virtual Key 和过渡静态 Key 都不能调用这些接口。
 
+## 账号健康维护
+
+网关不支持后台主动健康探测：不执行周期性探测或启动时自动连接测试，避免无人操作时发送真实模型请求并消耗上游额度。账号健康与冷却继续由真实请求结果更新；需要排障时可显式使用控制台或 [Admin 手动连接测试](admin-api.md#账号健康与手动连接测试)，该操作会发送最小真实模型请求并可能消耗 Token。冷却到期仅恢复账号的路由资格，下一次真实请求或手动测试成功才标记为 `healthy`。
+
+`GATEWAY_HEALTH_PROBE_ENABLED`、`GATEWAY_HEALTH_PROBE_ON_STARTUP`、`GATEWAY_HEALTH_PROBE_INTERVAL_SECS` 已移除，部署与本地环境配置应删除这些变量。旧镜像仍需保持 `GATEWAY_HEALTH_PROBE_ENABLED=false`，确认升级到包含移除代码的镜像后再清理该配置。Kubernetes `/healthz` 存活、就绪和启动检查继续支持。历史健康事件与连接测试记录按现有保留策略维护。
+
 ## 流式用量结算与停机
 
 带数据库的数据面请求在首次上游请求前预留流式结算名额，最多 64 个并发请求持有名额。非 SSE 响应结束时立即释放；SSE 响应从开始传输到用量与健康结算任务结束才释放。流式数据库写入最多 8 个并发，其余任务占用上述 64 个名额等待，不会生成无界队列。名额耗尽时网关在调用上游前返回 `503 settlement_capacity_exhausted` 并记录警告；调用方可稍后重试。流式用量写入失败最多重试两次，仍失败会记录带 `request_id` 的错误日志。用量事件和 attempts 沿用同一事务及 `request_id` 幂等约束。

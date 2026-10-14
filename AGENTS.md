@@ -23,7 +23,7 @@
 
 以下在 **2026-09-09、main `e3c9e24`（PR #183 合并提交）** 核对；用于避免重复实现，后续任务仍需检查自己的分支。
 
-- **数据面**：三协议 JSON/SSE 原生转发、首选账号与跨 Source/Provider fallback、健康冷却/主动探测、SSE 心跳/取消/超时、请求及 attempt 用量记录均已接入。
+- **数据面**：三协议 JSON/SSE 原生转发、首选账号与跨 Source/Provider fallback、健康冷却、SSE 心跳/取消/超时、请求及 attempt 用量记录均已接入。2026-10-14 按 #252 移除后台周期性与启动时主动健康探测，不再支持该功能；保留真实请求驱动的健康更新和 Admin 显式手动连接测试。
 - **控制面**：启动必须配置 PostgreSQL；Source / Account / LogicalModel / ModelBinding / Route CRUD、模型发现与确认、模型级协议能力声明、有效能力矩阵、runtime snapshot 更新已实现。
 - **鉴权与运维**：PostgreSQL-backed Virtual Key 已实现创建、查询、轮换、撤销、模型白名单及 Admin 显式读取加密保存的 Key；已有 Secret Resolver、凭据信封加密、Admin 写审计、保留清理、控制面导入/导出。`GATEWAY_API_KEY` 仍有过渡静态入口实现，不能再把 Virtual Key 写成未来功能。
 - **可观测性**：Prometheus `/metrics` 已接入；OpenTelemetry OTLP/gRPC tracing 已由 [PR #80](https://github.com/jianyun8023/my-ai-gateway/pull/80) 实现，通过 `OTEL_EXPORTER_OTLP_ENDPOINT` 启用，未设置时仅本地 tracing 日志。是否在生产配置、采集成功需另外验证。
@@ -78,7 +78,7 @@
 
 | 路径 | 职责 |
 | --- | --- |
-| `src/main.rs` → `src/lib.rs` → `src/runtime.rs` | 启动、DB-first 初始化、探测循环、ops CLI |
+| `src/main.rs` → `src/lib.rs` → `src/runtime.rs` | 启动、DB-first 初始化、ops CLI |
 | `src/app.rs`、`src/api/` | HTTP 路由、Admin 鉴权/审计中间件、协议与管理处理器 |
 | `src/state.rs`、`src/auth.rs` | 共享运行状态与快照发布；独立鉴权身份解析 |
 | `src/domain/` | 配置、协议、preset、模型目录、路由及能力矩阵 |

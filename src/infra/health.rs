@@ -18,7 +18,6 @@ use tokio::sync::{Mutex, OwnedMutexGuard};
 pub(crate) const DEFAULT_COOLDOWN: Duration = Duration::from_secs(30);
 pub(crate) const DEFAULT_MAX_COOLDOWN: Duration = Duration::from_secs(30 * 60);
 pub(crate) const DEFAULT_STALE_AFTER: Duration = Duration::from_secs(10 * 60);
-pub(crate) const DEFAULT_PROBE_INTERVAL: Duration = Duration::from_secs(60);
 pub(crate) const DEFAULT_FAILURE_THRESHOLD: u32 = 3;
 pub(crate) const DEFAULT_FAILURE_WINDOW: Duration = Duration::from_secs(60);
 
@@ -27,7 +26,6 @@ pub(crate) struct HealthConfig {
     pub(crate) cooldown: Duration,
     pub(crate) max_cooldown: Duration,
     pub(crate) stale_after: Duration,
-    pub(crate) probe_interval: Duration,
     pub(crate) failure_threshold: u32,
     pub(crate) failure_window: Duration,
 }
@@ -38,7 +36,6 @@ impl Default for HealthConfig {
             cooldown: DEFAULT_COOLDOWN,
             max_cooldown: DEFAULT_MAX_COOLDOWN,
             stale_after: DEFAULT_STALE_AFTER,
-            probe_interval: DEFAULT_PROBE_INTERVAL,
             failure_threshold: DEFAULT_FAILURE_THRESHOLD,
             failure_window: DEFAULT_FAILURE_WINDOW,
         }
@@ -52,10 +49,6 @@ impl HealthConfig {
             cooldown: env_duration_ms("GATEWAY_HEALTH_COOLDOWN_MS", defaults.cooldown),
             max_cooldown: env_duration_ms("GATEWAY_HEALTH_MAX_COOLDOWN_MS", defaults.max_cooldown),
             stale_after: env_duration_secs("GATEWAY_HEALTH_STALE_AFTER_SECS", defaults.stale_after),
-            probe_interval: env_duration_secs(
-                "GATEWAY_HEALTH_PROBE_INTERVAL_SECS",
-                defaults.probe_interval,
-            ),
             failure_threshold: env_u32(
                 "GATEWAY_HEALTH_FAILURE_THRESHOLD",
                 defaults.failure_threshold,
@@ -73,7 +66,6 @@ impl HealthConfig {
             cooldown,
             max_cooldown: self.max_cooldown.max(cooldown),
             stale_after: self.stale_after.max(Duration::from_millis(1)),
-            probe_interval: self.probe_interval.max(Duration::from_millis(1)),
             failure_threshold: self.failure_threshold.max(1),
             failure_window: self.failure_window.max(Duration::from_millis(1)),
         }
@@ -1070,7 +1062,6 @@ mod tests {
             cooldown: Duration::from_secs(1),
             max_cooldown: Duration::from_secs(8),
             stale_after: Duration::from_secs(3),
-            probe_interval: Duration::from_secs(60),
             failure_threshold: 3,
             failure_window: Duration::from_secs(60),
         };
